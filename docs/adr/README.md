@@ -24,6 +24,8 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 | [0010](0010-phase0-transport-set.md) | Phase 0 modern transport set + engine selection | **accepted** |
 | [0011](0011-carrier-agnostic-bridging.md) | Carrier-agnostic bridging and spore channels | proposed |
 | [0012](0012-go-primary-control-plane-language.md) | Go as the primary control-plane language (Rust for sealed organs) | **accepted** |
+| [0013](0013-mycelial-vocabulary-and-phase-discipline.md) | Mycelial vocabulary discipline + Phase 0-2 inert schemas | **accepted** |
+| [0014](0014-per-operator-node-credentials.md) | Per-operator node credentials — no shared fleet key material | **accepted** |
 
 > Reserved (produced by ADR-0003): 0004 no-logs/retention ·
 > 0005 classification as encryption item · 0006 legal wrapper for egress · 0007 role/jurisdiction
