@@ -47,10 +47,14 @@ _ignored() { git -C "$REPO_ROOT" check-ignore -q -- "$1" 2>/dev/null; }
 # Substring patterns (catch inflections like censorship / circumvention).
 FORBIDDEN_SUBSTR='censor|circumvent'
 
-# Country denylist — matched as whole words (case-insensitive). Deliberately small;
-# extend if a new name slips in. Adjectival forms are included where they are likely.
-# Includes node-host jurisdictions so a deploy location can never leak into the tree.
-COUNTRY_WORDS='China|Chinese|Russia|Russian|Iran|Iranian|Korea|Korean|Venezuela|Venezuelan|Cuba|Cuban|Belarus|Belarusian|Myanmar|Turkmenistan|Syria|Syrian|Kazakhstan|Kazakh|Germany|German|Poland|Ukraine|Ukrainian|Netherlands|Finland|Sweden|France|Latvia|Lithuania|Estonia|Romania|Bulgaria|Moldova|Georgia|Armenia|Azerbaijan'
+# Country denylist — matched as whole words (case-insensitive). Comprehensive: a deploy
+# jurisdiction or node location must never leak into the tree, so this covers UN member
+# states (common short names) plus the adjectival forms most likely to appear in prose.
+# A few country names that collide hard with ordinary English/identifiers are intentionally
+# omitted to avoid false positives (e.g. "Chad", "Jordan", "Georgia", "Chile", "Turkey"
+# as the bird, "Polish" the verb) — their abbreviated and adjectival leaks are still caught
+# by COUNTRY_WORDS adjectives and the LOCATION_CODES pattern below.
+COUNTRY_WORDS='Afghanistan|Albania|Algeria|Andorra|Angola|Argentina|Argentine|Armenia|Armenian|Australia|Australian|Austria|Austrian|Azerbaijan|Azerbaijani|Bahamas|Bahrain|Bangladesh|Barbados|Belarus|Belarusian|Belgium|Belgian|Belize|Benin|Bhutan|Bolivia|Bosnia|Botswana|Brazil|Brazilian|Brunei|Bulgaria|Bulgarian|Burkina|Burundi|Cambodia|Cameroon|Canada|Canadian|Cameroonian|China|Chinese|Colombia|Colombian|Comoros|Congo|Croatia|Croatian|Cuba|Cuban|Cyprus|Cypriot|Czechia|Czech|Denmark|Danish|Djibouti|Dominica|Ecuador|Ecuadorian|Egypt|Egyptian|Eritrea|Estonia|Estonian|Eswatini|Ethiopia|Ethiopian|Fiji|Finland|Finnish|France|French|Gabon|Gambia|Germany|German|Ghana|Ghanaian|Greece|Greek|Grenada|Guatemala|Guinea|Guyana|Haiti|Honduras|Hungary|Hungarian|Iceland|Icelandic|India|Indonesia|Indonesian|Iran|Iranian|Iraq|Iraqi|Ireland|Irish|Israel|Israeli|Italy|Italian|Jamaica|Japan|Japanese|Kazakhstan|Kazakh|Kenya|Kenyan|Kiribati|Korea|Korean|Kosovo|Kuwait|Kuwaiti|Kyrgyzstan|Kyrgyz|Laos|Latvia|Latvian|Lebanon|Lebanese|Lesotho|Liberia|Libya|Libyan|Liechtenstein|Lithuania|Lithuanian|Luxembourg|Madagascar|Malawi|Malaysia|Malaysian|Maldives|Malta|Maltese|Mauritania|Mauritius|Mexico|Mexican|Micronesia|Moldova|Moldovan|Monaco|Mongolia|Mongolian|Montenegro|Morocco|Moroccan|Mozambique|Myanmar|Namibia|Nauru|Nepal|Nepalese|Netherlands|Dutch|Nicaragua|Nigeria|Nigerian|Norway|Norwegian|Oman|Pakistan|Pakistani|Palau|Palestine|Palestinian|Panama|Papua|Paraguay|Peru|Peruvian|Philippines|Filipino|Poland|Portugal|Portuguese|Qatar|Qatari|Romania|Romanian|Russia|Russian|Rwanda|Samoa|Senegal|Senegalese|Serbia|Serbian|Seychelles|Singapore|Singaporean|Slovakia|Slovak|Slovenia|Slovenian|Somalia|Somali|Spain|Spaniard|Spanish|Sudan|Sudanese|Suriname|Sweden|Swedish|Switzerland|Swiss|Syria|Syrian|Taiwan|Taiwanese|Tajikistan|Tajik|Tanzania|Tanzanian|Thailand|Togo|Tonga|Tunisia|Tunisian|Turkish|Turkmenistan|Tuvalu|Uganda|Ukraine|Ukrainian|Uruguay|Uzbekistan|Uzbek|Vanuatu|Venezuela|Venezuelan|Vietnam|Vietnamese|Yemen|Yemeni|Zambia|Zambian|Zimbabwe|Soviet'
 
 # Parenthesised location-code lists, e.g. "(KZ, DE)" — two or more uppercase
 # two-letter codes inside parentheses. Matched case-sensitively (so it does not trip
