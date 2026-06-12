@@ -1,0 +1,20 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — Ansible inventory (EXAMPLE).
+# Author: mindicator & silicon bags quartet
+#
+# Copy to "inventory.ini" (which is gitignored) and fill in the real node reachability address.
+# The node must be a fresh Debian/Ubuntu VPS on a public IP.
+#
+#   cp inventory.ini.example inventory.ini
+#   $EDITOR inventory.ini
+#
+# Replace NODE_PUBLIC_IP with the node's public IPv4 (or IPv6, or a DNS name that resolves to it).
+# 'ansible_user=root' assumes a vanilla fresh VPS; switch to a sudo-capable user + become if your
+# provider ships a non-root default account.
+
+[mycelium_nodes]
+NODE_PUBLIC_IP ansible_user=root

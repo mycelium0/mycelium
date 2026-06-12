@@ -1,0 +1,98 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Cover site for a Phase 0 node — author: mindicator & silicon bags quartet.
+#
+# Purpose: a plain, neutral static landing page served to casual browser hits and to direct
+# requests against the node's IP/domain, so the machine looks like an ordinary web server.
+#
+# COMPOSITION NOTE (read the README for the full picture):
+#   In production the data-plane listener owns :443 (the REALITY handshake target is an
+#   EXTERNAL donor site). This Caddy instance therefore does NOT bind :443 itself; it serves the
+#   origin/fallback page on a LOOPBACK port that the data-plane forwards non-handshake traffic to,
+#   and (optionally) a public :80 for plain browser hits + ACME redirect on standalone hosts.
+#
+# Two supported deployment shapes (pick one — see README "How it composes"):
+#   A) Behind the data-plane (recommended): Caddy listens only on 127.0.0.1:8080 (HTTP origin).
+#      The data-plane forwards anything that is not a valid handshake to this origin. Caddy never
+#      terminates public TLS here.
+#   B) Standalone demo / staging host (no data-plane on the box): Caddy may own :80 and :443 and
+#      manage its own certificate. Use this only where the box is NOT also a data-plane listener.
+
+{
+	# Global options.
+	# Replace with a real operator address at deploy time (lands in a gitignored override).
+	# Sentinel placeholder — do NOT commit a real address.
+	email admin@example.com
+
+	# Be a quiet, ordinary server: do not advertise the server software in responses.
+	servers {
+		# Trust no proxy headers by default; this is an origin, not an edge.
+	}
+
+	# Uncomment on a standalone demo host to use Let's Encrypt staging while testing,
+	# so you do not burn rate limits. Leave commented for production-shaped deploys.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ---------------------------------------------------------------------------
+# Shape A — origin/fallback behind the data-plane (RECOMMENDED for production).
+# The data-plane (REALITY listener on :443) forwards non-handshake / fallback
+# traffic here over loopback. Caddy serves a benign page and nothing else.
+# ---------------------------------------------------------------------------
+http://127.0.0.1:8080 {
+	root * ./site
+	file_server
+
+	encode gzip zstd
+
+	# Remove the "Server" banner so responses do not name the web server.
+	header -Server
+
+	# Modest, ordinary caching for a static personal page.
+	header /*.css Cache-Control "public, max-age=3600"
+	header /*.js Cache-Control "public, max-age=3600"
+
+	# Plain text log to a local path; contains no client identity beyond standard access lines.
+	# Point this at a gitignored state path at deploy time.
+	log {
+		output file ./access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format console
+		level WARN
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Shape B — standalone demo / staging host ONLY (no data-plane on this box).
+# Owns :80 and :443 and manages its own certificate. Replace the site address
+# with a real hostname at deploy time; it lands in a gitignored override file.
+# Keep this block COMMENTED OUT on any box that also runs the data-plane,
+# because the data-plane owns :443 there.
+# ---------------------------------------------------------------------------
+# www.example.com, example.com {
+# 	root * ./site
+# 	file_server
+#
+# 	encode gzip zstd
+# 	header -Server
+#
+# 	# Ordinary security headers for a benign static site — nothing project-specific.
+# 	header {
+# 		Referrer-Policy "no-referrer-when-downgrade"
+# 		X-Content-Type-Options "nosniff"
+# 	}
+#
+# 	log {
+# 		output file ./access.log {
+# 			roll_size 10MiB
+# 			roll_keep 5
+# 		}
+# 		format console
+# 		level WARN
+# 	}
+# }

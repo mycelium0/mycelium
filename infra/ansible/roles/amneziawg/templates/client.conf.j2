@@ -1,0 +1,56 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium — AmneziaWG CLIENT config for "{{ _awg_client.name }}" (RENDERED — do not edit by hand).
+# Author: mindicator & silicon bags quartet
+#
+# Provisioning model A (Phase 0): the node generated this client's keypair (awg genkey | awg pubkey)
+# and optional pre-shared key (awg genpsk), then rendered this complete config from the shared
+# obfuscation knobs and the node's reachability address. The file is delivered to the client
+# out-of-band; it lands under the operator's gitignored ./out/ and is NEVER committed.
+#
+# NO CUSTOM CRYPTOGRAPHY (ADR-0002): every key here comes from the audited AmneziaWG built-ins
+# (awg genkey | awg pubkey ; awg genpsk) — never hand-rolled. The obfuscation knobs are NOT secret,
+# but they MUST be identical to the server's, or the handshake fails.
+#
+# This is the NON-TLS / UDP fallback path, complementary to the sing-box / Xray TLS+QUIC paths.
+# Import it into the AmneziaWG app or any AmneziaWG-aware client.
+
+[Interface]
+# This client's private key (from "awg genkey" on the node). Keep it on this device only.
+PrivateKey = {{ _awg_client.private_key }}
+# This client's assigned address(es) on the tunnel (unique per client).
+Address = {{ _awg_client.tunnel_v4 }}/32, {{ _awg_client.tunnel_v6 }}/128
+# Resolvers reached through the tunnel.
+DNS = {{ awg_client_dns | join(', ') }}
+
+# --- AmneziaWG obfuscation parameters (MUST match the server + every other peer exactly) --------
+# Jc/Jmin/Jmax : junk-packet count / min / max size — break the fixed first-packet fingerprint.
+# S1/S2        : init / response handshake junk size — break the fixed handshake-packet sizes.
+# H1..H4       : randomized message-type headers — remove the fixed 1-byte type fingerprint.
+Jc = {{ awg_obfs.Jc | int }}
+Jmin = {{ awg_obfs.Jmin | int }}
+Jmax = {{ awg_obfs.Jmax | int }}
+S1 = {{ awg_obfs.S1 | int }}
+S2 = {{ awg_obfs.S2 | int }}
+H1 = {{ awg_obfs.H1 | int }}
+H2 = {{ awg_obfs.H2 | int }}
+H3 = {{ awg_obfs.H3 | int }}
+H4 = {{ awg_obfs.H4 | int }}
+
+[Peer]
+# The node's PUBLIC key (from the node's "awg genkey | awg pubkey"); the node keeps the private key.
+PublicKey = {{ _awg_server_public_key }}
+{% if _awg_client.preshared_key is defined and _awg_client.preshared_key | length > 0 %}
+# Optional pre-shared key (from "awg genpsk") — an extra symmetric layer, shared with this client.
+PresharedKey = {{ _awg_client.preshared_key }}
+{% endif %}
+# Reachability address + UDP listen port of the node.
+Endpoint = {{ node_address }}:{{ awg_listen_port | int }}
+# Route all traffic through the tunnel (split-tunnel by narrowing this on the client if desired).
+AllowedIPs = {{ awg_client_allowed_ips | join(', ') }}
+# Keep NAT mappings warm so the path survives idle periods on UDP.
+PersistentKeepalive = {{ awg_persistent_keepalive | int }}

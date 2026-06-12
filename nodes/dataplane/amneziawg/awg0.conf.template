@@ -1,0 +1,93 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium — AmneziaWG server config TEMPLATE (awg0).
+# Author: mindicator & silicon bags quartet
+#
+# AmneziaWG is obfuscated WireGuard: it speaks the WireGuard data protocol but adds junk packets
+# and header randomization so the handshake does not match a fixed WireGuard fingerprint. This is
+# the project's NON-TLS / UDP fallback path, complementary to the sing-box / Xray TLS+QUIC
+# transports (see docs/ARCHITECTURE.md §Layer 1). UDP is excised entirely on some networks, so
+# this path is a fallback — never the only transport.
+#
+# This file ships with SENTINEL_* / placeholder values ONLY. It carries no real keys, addresses,
+# or ports. A deploy-time renderer (the amneziawg Ansible role, or an operator filling sentinels
+# by hand) produces a real, deploy-only awg0.conf that lands under a gitignored path — never
+# committed. The interface is brought up with "wg-quick up awg0" / "systemctl enable --now
+# wg-quick@awg0" using the AmneziaWG-flavoured wg-quick + awg tools.
+#
+# NO CUSTOM CRYPTOGRAPHY (ADR-0002): all key material comes from the audited AmneziaWG built-ins
+#   awg genkey | awg pubkey            (private/public keypair, X25519 — same primitive as WG)
+#   awg genpsk                          (optional pre-shared key, for an extra symmetric layer)
+# Never hand-roll key generation.
+
+[Interface]
+# Server private key, from "awg genkey". The matching public key ("... | awg pubkey") is what
+# each client puts in its [Peer] Endpoint config. The PRIVATE key never leaves the node.
+PrivateKey = SENTINEL_SERVER_PRIVATE_KEY
+
+# The server's address(es) on the tunnel (NOT the public IP). Clients are assigned addresses from
+# the same ranges. Use private ranges (RFC 1918 / RFC 4193 ULA).
+Address = SENTINEL_SERVER_TUNNEL_ADDR_V4, SENTINEL_SERVER_TUNNEL_ADDR_V6
+
+# UDP port the server listens on. Diversify per node (see ARCHITECTURE §Layer 1: vary ports/IPs/
+# ASes). The host firewall opens ONLY this UDP port for this path.
+ListenPort = SENTINEL_LISTEN_PORT
+
+# --- AmneziaWG obfuscation parameters (what AmneziaWG adds over plain WireGuard) ---------------
+# These knobs make the on-the-wire byte pattern of WireGuard non-constant, improving
+# indistinguishability on unreliable / high-interference UDP paths. EVERY peer (server + all of
+# its clients) MUST share the SAME values for Jc/Jmin/Jmax/S1/S2/H1..H4, or the handshake fails.
+# These are tunable values (Layer 2 may A/B-tune them per ARCHITECTURE), not secrets — but a node
+# and its clients form one "dialect" and must agree.
+#
+# Jc   — Junk packet Count: how many junk (random-length, random-content) packets the peer sends
+#        BEFORE the real WireGuard handshake. Breaks the "first packet is always a 148-byte
+#        handshake init" fingerprint. Typical range ~3..10.
+Jc = SENTINEL_JC
+# Jmin — Junk packet Min size (bytes): lower bound on each junk packet's random length.
+Jmin = SENTINEL_JMIN
+# Jmax — Junk packet Max size (bytes): upper bound on each junk packet's random length.
+#        Jmin < Jmax must hold; the wider the spread, the less length-uniform the junk looks.
+Jmax = SENTINEL_JMAX
+# S1   — init packet junk Size: extra random bytes prepended to the handshake INIT message, so the
+#        initiation packet's total length no longer matches the fixed WireGuard size.
+S1 = SENTINEL_S1
+# S2   — response packet junk Size: extra random bytes prepended to the handshake RESPONSE message
+#        (same idea, for the responder's reply). Constraint: S1 + 56 must not equal S2.
+S2 = SENTINEL_S2
+# H1..H4 — randomized packet-type Header values. Plain WireGuard uses fixed 1-byte message-type
+#          headers (1=init, 2=response, 3=cookie, 4=transport data). AmneziaWG replaces those four
+#          well-known constants with these four custom 32-bit values, removing the static header
+#          fingerprint. H1..H4 MUST be four DISTINCT values and must match across the server and
+#          all of its clients.
+H1 = SENTINEL_H1
+H2 = SENTINEL_H2
+H3 = SENTINEL_H3
+H4 = SENTINEL_H4
+
+# --- Routing / NAT for egress (the node forwards client traffic to the open internet) ----------
+# PostUp/PostDown enable IP forwarding and masquerade tunnel traffic out the node's WAN interface.
+# SENTINEL_WAN_IF is the node's public-facing interface (e.g. the value of "ip route show default
+# | awk '{print $5}'"). Adjust if your egress firewall is not iptables-based.
+PostUp   = sysctl -w net.ipv4.ip_forward=1; iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o SENTINEL_WAN_IF -j MASQUERADE
+PostDown = iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o SENTINEL_WAN_IF -j MASQUERADE
+
+# --- Peers (one [Peer] block per client identity) ---------------------------------------------
+# The control plane (Layer 2) issues/revokes peers WITHOUT rewriting the whole file by hand: it
+# appends/removes [Peer] blocks like the placeholder below and reloads the interface. The renderer
+# replaces this single placeholder block with one block per issued client.
+#
+# [Peer]
+# # Friendly label only (a comment; not part of the protocol). NOT a secret.
+# # name = SENTINEL_CLIENT_NAME
+# # Client's PUBLIC key, from the client's own "awg genkey | awg pubkey". The server only ever
+# # holds the client's PUBLIC key; the client keeps its private key.
+# PublicKey = SENTINEL_CLIENT_PUBLIC_KEY
+# # OPTIONAL pre-shared key ("awg genpsk") — an extra symmetric layer, shared with that one client.
+# PresharedKey = SENTINEL_CLIENT_PRESHARED_KEY
+# # The single tunnel address (/32 v4, /128 v6) the server routes to this client. Must be unique
+# # per peer and inside the server's Address range.
+# AllowedIPs = SENTINEL_CLIENT_TUNNEL_ADDR_V4/32, SENTINEL_CLIENT_TUNNEL_ADDR_V6/128

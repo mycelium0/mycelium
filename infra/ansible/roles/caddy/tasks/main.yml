@@ -1,0 +1,122 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — caddy role.
+# Author: mindicator & silicon bags quartet
+#
+# Installs Caddy (pinned) from the official APT repository and deploys a cover site on loopback.
+#
+# In the default (recommended) configuration REALITY borrows the handshake of a real EXTERNAL
+# donor (donor_host), so an active probe is answered by a site the operator does not control —
+# the strongest indistinguishability story (acceptance criterion: cover_site_probe). This Caddy
+# instance is therefore an OPTIONAL self-hosted donor: operators who prefer to serve their own
+# donor can set donor_host/donor_sni to this site and forward REALITY "dest" to caddy_cover_listen.
+# It is never exposed by the host firewall (loopback only) and is harmless when left unused.
+---
+- name: Install prerequisites for the Caddy APT repository
+  ansible.builtin.apt:
+    name:
+      - debian-archive-keyring
+      - apt-transport-https
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create APT keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Fetch and dearmor the Caddy signing key
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      curl -fsSL {{ caddy_apt_key_url | quote }}
+      | gpg --dearmor --yes -o /etc/apt/keyrings/caddy-stable.gpg
+    executable: /bin/bash
+  args:
+    creates: /etc/apt/keyrings/caddy-stable.gpg
+
+- name: Add the Caddy APT repository (signed-by the fetched key)
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/caddy-stable.gpg] {{ caddy_apt_repo_url }}"
+    filename: caddy-stable
+    state: present
+    update_cache: true
+
+- name: Install the pinned Caddy version
+  ansible.builtin.apt:
+    name: "caddy={{ caddy_version }}*"
+    state: present
+    allow_downgrade: true
+
+- name: Hold the Caddy package at the pinned version
+  ansible.builtin.dpkg_selections:
+    name: caddy
+    selection: hold
+
+- name: Create the cover site web root
+  ansible.builtin.file:
+    path: "{{ caddy_site_root }}"
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: "0755"
+
+- name: Detect whether the cover site content is present on the control host
+  ansible.builtin.stat:
+    path: "{{ caddy_site_src }}"
+  delegate_to: localhost
+  become: false
+  register: _cover_src
+
+- name: Deploy the cover site content
+  ansible.builtin.copy:
+    src: "{{ caddy_site_src }}"
+    dest: "{{ caddy_site_root }}/"
+    owner: caddy
+    group: caddy
+    mode: "0644"
+    directory_mode: "0755"
+  when: _cover_src.stat.exists
+  notify: Reload caddy
+
+- name: Provide a minimal placeholder cover page when no site content is bundled
+  ansible.builtin.copy:
+    dest: "{{ caddy_site_root }}/index.html"
+    owner: caddy
+    group: caddy
+    mode: "0644"
+    force: false
+    content: |
+      <!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>It works</title></head>
+      <body><h1>It works</h1><p>This server is online.</p></body></html>
+  when: not _cover_src.stat.exists
+
+- name: Deploy the cover Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: caddy
+    mode: "0640"
+  notify: Reload caddy
+
+- name: Validate the Caddyfile
+  ansible.builtin.command:
+    cmd: caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+  changed_when: false
+
+- name: Enable and start Caddy
+  ansible.builtin.systemd:
+    name: caddy
+    enabled: true
+    state: started

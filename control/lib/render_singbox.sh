@@ -1,0 +1,581 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# render_singbox.sh — render the multi-protocol sing-box SERVER config by jq path,
+# and emit per-client sing-box / Clash-Meta subscriptions for the enabled protocols.
+# Author: mindicator & silicon bags quartet.
+#
+# Sourced by myceliumctl. Depends on common.sh, jqlib.sh, identity.sh.
+#
+# sing-box is the PRIMARY engine for the Mycelium node: ONE server process speaks
+# many protocols (VLESS+REALITY with Vision/gRPC/XHTTP, Hysteria2, TUIC v5,
+# Shadowsocks-2022, ShadowTLS v3, Trojan). Each protocol is individually toggleable
+# via the params file so an operator exposes only a chosen subset. The legacy Xray
+# engine (render.sh) is left untouched and remains available via --engine xray.
+#
+# As with the Xray path, NO secret material is invented here. REALITY keys / shortIds
+# come from `sing-box generate reality-keypair` or `xray x25519` + `openssl rand`;
+# protocol passwords come from `sing-box generate rand` / `openssl rand`; UUIDs come
+# from `sing-box generate uuid` / `xray uuid`. This file only places those values by
+# jq path. See docs/adr/0002-no-custom-cryptography.md.
+#
+# Pinned engine: sing-box >= v1.11.x (record the exact deployed tag at deploy time).
+
+# ---------------------------------------------------------------------------
+# Protocol registry
+# ---------------------------------------------------------------------------
+#
+# The canonical, priority-ordered list of protocols this engine understands.
+# Priority order doubles as the failover preference for the client selector:
+# REALITY/TCP (most survivable) first, UDP/QUIC paths next, then SS/ShadowTLS,
+# Trojan last. Each token is matched against an inbound's `tag` in the template
+# and against a `<token>_enabled` flag in params.
+MYC_SB_PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp hysteria2 tuic shadowsocks shadowtls trojan"
+
+# myc_sb_proto_enabled PARAMS_JSON PROTO -> 0 if enabled, 1 otherwise.
+# A protocol is enabled when params.<proto>_enabled is exactly true. The dash in a
+# token maps to an underscore in the params flag name (jq keys avoid dashes here).
+myc_sb_proto_enabled() {
+	local json proto flag
+	json="$1"; proto="$2"
+	flag="$(printf '%s' "$proto" | tr '-' '_')_enabled"
+	[ "$(printf '%s' "$json" | jq -r --arg f "$flag" '.[$f] // false')" = "true" ]
+}
+
+# myc_sb_enabled_list PARAMS_JSON -> space-separated enabled protocols in priority order.
+myc_sb_enabled_list() {
+	local json out p
+	json="$1"; out=""
+	for p in $MYC_SB_PROTOS; do
+		if myc_sb_proto_enabled "$json" "$p"; then
+			out="$out $p"
+		fi
+	done
+	printf '%s' "${out# }"
+}
+
+# ---------------------------------------------------------------------------
+# render-server (sing-box engine)
+# ---------------------------------------------------------------------------
+#
+# Fills the sentinels in the sing-box template BY JQ PATH and keeps only the
+# inbounds whose protocol is enabled in params. Inbounds are located by their
+# `tag` (robust to ordering), never by numeric index. Every dynamic value flows
+# through --arg/--argjson — nothing is string-spliced into the filter.
+#
+# Sentinels filled (per matching inbound):
+#   tls.reality.private_key                <- reality_private_key
+#   tls.reality.short_id[]                  <- short_ids[]
+#   tls.reality.handshake.server           <- donor_host
+#   tls.server_name / tls.reality.server_name? -> server_name = donor_sni (reality)
+#   tls.server_name (h2/quic protocols)    <- tls_sni
+#   listen_port                             <- <proto>_port (per protocol)
+#   shadowsocks .password                   <- ss_password
+#   trojan users[].password                 <- trojan_password
+#   transport.service_name (grpc)           <- grpc_service_name
+#   transport.path (xhttp)                  <- xhttp_path
+#   shadowtls.handshake.server              <- shadowtls_handshake_server (default donor_host)
+#   users[]                                 <- from identity state, per-protocol shape
+#
+# myc_sb_render_server TEMPLATE PARAMS_FILE STATE OUT
+myc_sb_render_server() {
+	local template params_file state out
+	template="$1"; params_file="$2"; state="$3"; out="$4"
+
+	[ -n "$template" ]    || myc_die "render-server: --template is required"
+	[ -n "$params_file" ] || myc_die "render-server: --params is required"
+	[ -n "$state" ]       || myc_die "render-server: --state is required"
+	[ -n "$out" ]         || myc_die "render-server: --out is required"
+
+	myc_assert_json "$template" "sing-box template"
+
+	local params clients
+	params="$(myc_params_to_json "$params_file")"
+	myc_state_init "$state"
+	clients="$(myc_identity_clients_json "$state")"
+
+	if [ "$(printf '%s' "$clients" | jq 'length')" -eq 0 ]; then
+		myc_warn "render-server: identity state has zero clients; inbounds will accept no one"
+	fi
+
+	# Which protocols did the operator turn on?
+	local enabled
+	enabled="$(myc_sb_enabled_list "$params")"
+	[ -n "$enabled" ] || myc_die "render-server: no protocols enabled in params (set at least one <proto>_enabled: true)"
+	myc_log "render-server (singbox): enabled protocols: $enabled"
+
+	# REALITY material is required as soon as any vless-reality-* protocol is on.
+	local need_reality priv donor_sni donor_host short_ids_json
+	need_reality=0
+	case " $enabled " in *" vless-reality-"*) need_reality=1 ;; esac
+	priv=""; donor_sni=""; donor_host=""; short_ids_json="[]"
+	if [ "$need_reality" -eq 1 ]; then
+		priv="$(myc_params_get "$params" '.reality_private_key')"
+		donor_sni="$(myc_params_get "$params" '.donor_sni')"
+		donor_host="$(myc_params_get "$params" '.donor_host')"
+		short_ids_json="$(printf '%s' "$params" | jq -c '.short_ids // []')"
+		if [ "$(printf '%s' "$short_ids_json" | jq 'length')" -eq 0 ]; then
+			myc_die "render-server: params.short_ids must contain at least one shortId (a vless-reality-* protocol is enabled)"
+		fi
+	fi
+
+	# TLS-cert protocols (hysteria2/tuic/trojan) share a server certificate + SNI.
+	local tls_sni tls_cert tls_key
+	tls_sni="$(myc_params_get "$params" '.tls_sni' "${donor_sni:-localhost}")"
+	tls_cert="$(myc_params_get "$params" '.tls_certificate_path' '/etc/mycelium/tls/fullchain.pem')"
+	tls_key="$(myc_params_get "$params" '.tls_key_path' '/etc/mycelium/tls/privkey.pem')"
+
+	# Protocol secrets (placeholders in params; real values from sing-box/openssl).
+	# ShadowTLS wraps Shadowsocks, so its inner SS reuses ss_password; the ShadowTLS
+	# handshake password is distinct (shadowtls_password).
+	local ss_password trojan_password hysteria2_password shadowtls_password
+	ss_password="$(myc_params_get "$params" '.ss_password' '')"
+	trojan_password="$(myc_params_get "$params" '.trojan_password' '')"
+	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
+	shadowtls_password="$(myc_params_get "$params" '.shadowtls_password' '')"
+
+	# Transport-shaping values.
+	local grpc_service xhttp_path stls_handshake stls_handshake_port
+	grpc_service="$(myc_params_get "$params" '.grpc_service_name' 'grpc')"
+	xhttp_path="$(myc_params_get "$params" '.xhttp_path' '/')"
+	stls_handshake="$(myc_params_get "$params" '.shadowtls_handshake_server' "${donor_host:-www.microsoft.com}")"
+	stls_handshake_port="$(myc_params_get "$params" '.shadowtls_handshake_port' '443')"
+
+	# Per-protocol listen ports (defaults are sane, distinct values).
+	local p_vision p_grpc p_xhttp p_hy2 p_tuic p_ss p_stls p_trojan
+	p_vision="$(myc_params_get "$params" '.vless_reality_vision_port' '443')"
+	p_grpc="$(myc_params_get "$params"   '.vless_reality_grpc_port'   '8443')"
+	p_xhttp="$(myc_params_get "$params"  '.vless_reality_xhttp_port'  '2096')"
+	p_hy2="$(myc_params_get "$params"    '.hysteria2_port'            '8444')"
+	p_tuic="$(myc_params_get "$params"   '.tuic_port'                 '8445')"
+	p_ss="$(myc_params_get "$params"     '.shadowsocks_port'          '8388')"
+	p_stls="$(myc_params_get "$params"   '.shadowtls_port'            '8446')"
+	p_trojan="$(myc_params_get "$params" '.trojan_port'               '8447')"
+
+	# Build per-protocol users arrays from identity state (shape differs by protocol).
+	# - vless (vision): { name, uuid, flow:"xtls-rprx-vision" }
+	# - vless (grpc/xhttp): { name, uuid, flow:"" }  (Vision is TCP-only)
+	# - tuic: { name, uuid, password }   (password defaults to the uuid if absent)
+	# - hysteria2/trojan/shadowtls: { name, password }
+	# - shadowsocks-2022 multi-user: { name, password }
+	# A per-identity password override may be supplied via state .secret/.password;
+	# otherwise the shared per-protocol password from params is used.
+	local users_vision users_plain users_tuic users_hy2 users_trojan users_stls users_ss
+	users_vision="$(printf '%s' "$clients" | jq -c 'map({ name: .name, uuid: .id, flow: "xtls-rprx-vision" })')"
+	users_plain="$(printf '%s'  "$clients" | jq -c 'map({ name: .name, uuid: .id, flow: "" })')"
+	users_tuic="$(printf '%s'   "$clients" | jq -c 'map({ name: .name, uuid: .id, password: (.password // .id) })')"
+	# Password-based protocols: prefer a per-identity password, else the protocol secret.
+	users_hy2="$(printf '%s'    "$clients" | jq -c --arg pw "$hysteria2_password" 'map({ name: .name, password: (.password // $pw) })')"
+	users_trojan="$(printf '%s' "$clients" | jq -c --arg pw "$trojan_password" 'map({ name: .name, password: (.password // $pw) })')"
+	users_stls="$(printf '%s'   "$clients" | jq -c --arg pw "$shadowtls_password" 'map({ name: .name, password: (.password // $pw) })')"
+	users_ss="$(printf '%s'     "$clients" | jq -c --arg pw "$ss_password" 'map({ name: .name, password: (.password // $pw) })')"
+
+	# A jq map: protocol token -> the listen port chosen for it.
+	local ports_json
+	ports_json="$(jq -nc \
+		--argjson vision "$p_vision" --argjson grpc "$p_grpc" --argjson xhttp "$p_xhttp" \
+		--argjson hy2 "$p_hy2" --argjson tuic "$p_tuic" --argjson ss "$p_ss" \
+		--argjson stls "$p_stls" --argjson trojan "$p_trojan" \
+		'{
+			"vless-reality-vision": $vision,
+			"vless-reality-grpc":   $grpc,
+			"vless-reality-xhttp":  $xhttp,
+			"hysteria2":            $hy2,
+			"tuic":                 $tuic,
+			"shadowsocks":          $ss,
+			"shadowtls":            $stls,
+			"trojan":               $trojan
+		}')"
+
+	# A jq array of enabled tokens (so the filter can prune disabled inbounds).
+	local enabled_json
+	enabled_json="$(printf '%s\n' $enabled | jq -R . | jq -sc .)"
+
+	# Render. Inbounds are matched by tag. We:
+	#   1) set per-inbound dynamic values (keyed by tag),
+	#   2) drop inbounds whose tag is not enabled (keeping the hidden shadowtls
+	#      detour SS inbound whenever shadowtls is enabled),
+	#   3) leave outbounds/route as-is from the template.
+	local rendered
+	rendered="$(jq \
+		--arg priv "$priv" \
+		--argjson shortids "$short_ids_json" \
+		--arg dsni "$donor_sni" \
+		--arg dhost "$donor_host" \
+		--arg tsni "$tls_sni" \
+		--arg tcert "$tls_cert" \
+		--arg tkey "$tls_key" \
+		--arg sspw "$ss_password" \
+		--arg trpw "$trojan_password" \
+		--arg grpc "$grpc_service" \
+		--arg xpath "$xhttp_path" \
+		--arg stlshs "$stls_handshake" \
+		--argjson stlshp "$stls_handshake_port" \
+		--argjson ports "$ports_json" \
+		--argjson enabled "$enabled_json" \
+		--argjson uvision "$users_vision" \
+		--argjson uplain "$users_plain" \
+		--argjson utuic "$users_tuic" \
+		--argjson uhy2 "$users_hy2" \
+		--argjson utrojan "$users_trojan" \
+		--argjson ustls "$users_stls" \
+		--argjson uss "$users_ss" \
+		'
+		def setport($tag): if .tag == $tag and ($ports[$tag] != null) then .listen_port = $ports[$tag] else . end;
+		def reality_fill:
+			if (.tls? and .tls.reality? and .tls.reality.enabled == true) then
+				  .tls.server_name = $dsni
+				| .tls.reality.private_key = $priv
+				| .tls.reality.short_id = $shortids
+				| .tls.reality.handshake.server = $dhost
+			else . end;
+		def cert_fill:
+			if (.tls? and (.tls.reality? | not)) then
+				  .tls.server_name = $tsni
+				| .tls.certificate_path = $tcert
+				| .tls.key_path = $tkey
+			else . end;
+		.inbounds = (
+			.inbounds
+			# fill dynamic values on every inbound first
+			| map(
+				reality_fill
+				| cert_fill
+				| setport("vless-reality-vision")
+				| setport("vless-reality-grpc")
+				| setport("vless-reality-xhttp")
+				| setport("hysteria2")
+				| setport("tuic")
+				| setport("shadowsocks")
+				| setport("shadowtls")
+				| setport("trojan")
+				# per-protocol payloads, keyed by tag
+				| if .tag == "vless-reality-vision-in" then .users = $uvision else . end
+				| if .tag == "vless-reality-grpc-in"   then .users = $uplain  | .transport.service_name = $grpc else . end
+				| if .tag == "vless-reality-xhttp-in"  then .users = $uplain  | .transport.path = $xpath else . end
+				| if .tag == "hysteria2-in"            then .users = $uhy2 else . end
+				| if .tag == "tuic-in"                 then .users = $utuic else . end
+				| if .tag == "shadowsocks-in"          then .users = $uss | .password = $sspw else . end
+				| if .tag == "shadowtls-in"            then .users = $ustls | .handshake.server = $stlshs | .handshake.server_port = $stlshp else . end
+				| if .tag == "shadowtls-ss-in"         then .password = $sspw else . end
+				| if .tag == "trojan-in"               then .users = $utrojan else . end
+			)
+			# prune inbounds whose protocol is not enabled. The internal shadowtls
+			# detour SS inbound (tag "shadowtls-ss-in", no public listen_port) is
+			# kept iff shadowtls itself is enabled.
+			| map(select(
+				( .tag == "vless-reality-vision-in" and ($enabled | index("vless-reality-vision")) )
+				or ( .tag == "vless-reality-grpc-in"   and ($enabled | index("vless-reality-grpc")) )
+				or ( .tag == "vless-reality-xhttp-in"  and ($enabled | index("vless-reality-xhttp")) )
+				or ( .tag == "hysteria2-in"            and ($enabled | index("hysteria2")) )
+				or ( .tag == "tuic-in"                 and ($enabled | index("tuic")) )
+				or ( .tag == "shadowsocks-in"          and ($enabled | index("shadowsocks")) )
+				or ( .tag == "shadowtls-in"            and ($enabled | index("shadowtls")) )
+				or ( .tag == "shadowtls-ss-in"         and ($enabled | index("shadowtls")) )
+				or ( .tag == "trojan-in"               and ($enabled | index("trojan")) )
+			))
+		)
+		' "$template" 2>/dev/null)"
+
+	if [ -z "$rendered" ] || ! printf '%s' "$rendered" | jq -e . >/dev/null 2>&1; then
+		myc_die "render-server: sing-box rendering produced invalid JSON (check template shape)"
+	fi
+
+	printf '%s\n' "$rendered" | jq . | myc_atomic_write "$out"
+	myc_assert_json "$out" "rendered sing-box server config"
+	myc_log "wrote sing-box server config: $out ($(printf '%s' "$rendered" | jq '.inbounds | length') inbound(s))"
+}
+
+# ---------------------------------------------------------------------------
+# subscription (sing-box engine)
+# ---------------------------------------------------------------------------
+#
+# Per client, emit:
+#   <name>.singbox.json  — one outbound per ENABLED protocol + a `selector` and a
+#                          `urltest` outbound that prefer them in priority order.
+#   <name>.clash.yaml    — one proxy per Clash-supported enabled protocol + a
+#                          `select` and a `url-test` proxy-group.
+#
+# Only the REALITY *public* key reaches clients (never the private key).
+#
+# myc_sb_render_subscription PARAMS_FILE STATE OUT_DIR
+myc_sb_render_subscription() {
+	local params_file state out_dir
+	params_file="$1"; state="$2"; out_dir="$3"
+
+	[ -n "$params_file" ] || myc_die "subscription: --params is required"
+	[ -n "$state" ]       || myc_die "subscription: --state is required"
+	[ -n "$out_dir" ]     || myc_die "subscription: --out is required"
+
+	local params clients count
+	params="$(myc_params_to_json "$params_file")"
+	myc_state_init "$state"
+	clients="$(myc_identity_clients_json "$state")"
+	count="$(printf '%s' "$clients" | jq 'length')"
+	if [ "$count" -eq 0 ]; then
+		myc_warn "subscription: identity state has zero clients; nothing to emit"
+	fi
+
+	local enabled
+	enabled="$(myc_sb_enabled_list "$params")"
+	[ -n "$enabled" ] || myc_die "subscription: no protocols enabled in params"
+	myc_log "subscription (singbox): enabled protocols: $enabled"
+
+	# Shared connection parameters (clients dial node_address on each protocol port).
+	local node_addr donor_sni pub tls_sni short_first
+	node_addr="$(myc_params_get "$params" '.node_address')"
+	donor_sni="$(myc_params_get "$params" '.donor_sni' '')"
+	pub="$(myc_params_get "$params" '.reality_public_key' '')"
+	tls_sni="$(myc_params_get "$params" '.tls_sni' "${donor_sni:-localhost}")"
+	short_first="$(printf '%s' "$params" | jq -r '.short_ids[0] // empty')"
+
+	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path
+	ss_password="$(myc_params_get "$params" '.ss_password' '')"
+	trojan_password="$(myc_params_get "$params" '.trojan_password' '')"
+	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
+	shadowtls_password="$(myc_params_get "$params" '.shadowtls_password' '')"
+	grpc_service="$(myc_params_get "$params" '.grpc_service_name' 'grpc')"
+	xhttp_path="$(myc_params_get "$params" '.xhttp_path' '/')"
+
+	# Per-protocol ports (must match the server render defaults).
+	local ports_json
+	ports_json="$(jq -nc \
+		--argjson vision "$(myc_params_get "$params" '.vless_reality_vision_port' '443')" \
+		--argjson grpc   "$(myc_params_get "$params" '.vless_reality_grpc_port' '8443')" \
+		--argjson xhttp  "$(myc_params_get "$params" '.vless_reality_xhttp_port' '2096')" \
+		--argjson hy2    "$(myc_params_get "$params" '.hysteria2_port' '8444')" \
+		--argjson tuic   "$(myc_params_get "$params" '.tuic_port' '8445')" \
+		--argjson ss     "$(myc_params_get "$params" '.shadowsocks_port' '8388')" \
+		--argjson stls   "$(myc_params_get "$params" '.shadowtls_port' '8446')" \
+		--argjson trojan "$(myc_params_get "$params" '.trojan_port' '8447')" \
+		'{
+			"vless-reality-vision": $vision, "vless-reality-grpc": $grpc, "vless-reality-xhttp": $xhttp,
+			"hysteria2": $hy2, "tuic": $tuic, "shadowsocks": $ss, "shadowtls": $stls, "trojan": $trojan
+		}')"
+
+	local enabled_json
+	enabled_json="$(printf '%s\n' $enabled | jq -R . | jq -sc .)"
+
+	myc_mkdir_p "$out_dir"
+
+	# Iterate clients; build each file with a single jq -n invocation.
+	printf '%s' "$clients" | jq -r '.[] | [.name, .id, (.password // "")] | @tsv' \
+		| while IFS="$(printf '\t')" read -r name id ipw; do
+			[ -n "$name" ] || continue
+			local safe sb_path clash_path
+			safe="$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')"
+			sb_path="${out_dir}/${safe}.singbox.json"
+			clash_path="${out_dir}/${safe}.clash.yaml"
+
+			# Per-identity password falls back to the shared protocol secret.
+			local hy2_pw trojan_pw ss_pw stls_pw tuic_pw
+			hy2_pw="${ipw:-$hysteria2_password}"
+			ss_pw="${ipw:-$ss_password}"
+			stls_pw="${ipw:-$shadowtls_password}"
+			trojan_pw="${ipw:-$trojan_password}"
+			tuic_pw="${ipw:-$id}"
+
+			# --- sing-box CLIENT config ---
+			# Build the candidate outbound for each protocol, then keep only enabled
+			# ones, then append a urltest + selector that reference them by tag.
+			jq -n \
+				--arg name "$name" \
+				--arg server "$node_addr" \
+				--arg uuid "$id" \
+				--arg dsni "$donor_sni" \
+				--arg pub "$pub" \
+				--arg sid "$short_first" \
+				--arg tsni "$tls_sni" \
+				--arg sspw "$ss_pw" \
+				--arg hy2pw "$hy2_pw" \
+				--arg trpw "$trojan_pw" \
+				--arg stlspw "$stls_pw" \
+				--arg tuicpw "$tuic_pw" \
+				--arg grpc "$grpc_service" \
+				--arg xpath "$xhttp_path" \
+				--argjson ports "$ports_json" \
+				--argjson enabled "$enabled_json" \
+				'
+				def reality_tls: { enabled: true, server_name: $dsni, utls: { enabled: true, fingerprint: "chrome" }, reality: { enabled: true, public_key: $pub, short_id: $sid } };
+				def plain_tls($alpn): { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: "chrome" }, alpn: $alpn };
+				# tag -> candidate outbound
+				{
+					"vless-reality-vision": { type: "vless", tag: "vless-reality-vision", server: $server, server_port: $ports["vless-reality-vision"], uuid: $uuid, flow: "xtls-rprx-vision", packet_encoding: "xudp", tls: reality_tls },
+					"vless-reality-grpc":   { type: "vless", tag: "vless-reality-grpc",   server: $server, server_port: $ports["vless-reality-grpc"],   uuid: $uuid, flow: "", packet_encoding: "xudp", tls: reality_tls, transport: { type: "grpc", service_name: $grpc } },
+					"vless-reality-xhttp":  { type: "vless", tag: "vless-reality-xhttp",  server: $server, server_port: $ports["vless-reality-xhttp"],  uuid: $uuid, flow: "", packet_encoding: "xudp", tls: reality_tls, transport: { type: "xhttp", path: $xpath } },
+					"hysteria2":            { type: "hysteria2", tag: "hysteria2",        server: $server, server_port: $ports["hysteria2"], password: $hy2pw, tls: plain_tls(["h3"]) },
+					"tuic":                 { type: "tuic", tag: "tuic",                  server: $server, server_port: $ports["tuic"], uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: plain_tls(["h3"]) },
+					"shadowsocks":          { type: "shadowsocks", tag: "shadowsocks",    server: $server, server_port: $ports["shadowsocks"], method: "2022-blake3-aes-256-gcm", password: $sspw },
+					"shadowtls":            { type: "shadowsocks", tag: "shadowtls",        method: "2022-blake3-aes-256-gcm", password: $sspw, detour: "shadowtls-handshake" },
+					"trojan":               { type: "trojan", tag: "trojan",              server: $server, server_port: $ports["trojan"], password: $trpw, tls: plain_tls(["h2","http/1.1"]) }
+				} as $cand
+				| ($enabled | map($cand[.])) as $proxies
+				# ShadowTLS routes Shadowsocks over a TLS handshake: the routable
+				# outbound (tag "shadowtls") is Shadowsocks with a detour to the
+				# hidden "shadowtls-handshake" outbound that performs the v3 handshake.
+				| (if ($enabled | index("shadowtls")) then
+						[ { type: "shadowtls", tag: "shadowtls-handshake", server: $server, server_port: $ports["shadowtls"], version: 3, password: $stlspw, tls: { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: "chrome" } } } ]
+					else [] end) as $detours
+				| ($enabled | map($cand[.].tag)) as $tags
+				| {
+					outbounds: (
+						$proxies
+						+ $detours
+						+ [
+							{ type: "urltest", tag: "auto", outbounds: $tags, url: "https://www.gstatic.com/generate_204", interval: "3m", tolerance: 50 },
+							{ type: "selector", tag: "mycelium", outbounds: (["auto"] + $tags), default: "auto" },
+							{ type: "direct", tag: "direct" },
+							{ type: "block", tag: "block" }
+						]
+					)
+				}
+				' | myc_atomic_write "$sb_path"
+			myc_assert_json "$sb_path" "sing-box client config for $name"
+
+			# --- Clash-Meta config (only the protocols Clash-Meta supports) ---
+			myc_sb_emit_clash \
+				"$clash_path" "$name" "$node_addr" "$id" \
+				"$donor_sni" "$pub" "$short_first" "$tls_sni" \
+				"$ss_pw" "$hy2_pw" "$trojan_pw" "$grpc_service" "$xhttp_path" \
+				"$ports_json" "$enabled"
+
+			myc_log "wrote sing-box subscription for '$name': $sb_path, $clash_path"
+		done
+}
+
+# myc_sb_emit_clash PATH NAME SERVER UUID DSNI PUB SID TSNI SSPW HY2PW TRPW GRPC XPATH PORTS_JSON ENABLED
+# Hand-emit a Clash-Meta YAML doc: a `proxies:` list (one entry per Clash-supported
+# enabled protocol) plus a `proxy-groups:` block with a `select` and a `url-test`
+# group. jq has no YAML output, so we emit by printf; every value is quoted so any
+# special characters are inert. Clash-Meta does NOT support ShadowTLS or XHTTP, so
+# those protocols are intentionally skipped here (they remain in the sing-box file).
+myc_sb_emit_clash() {
+	local path name server uuid dsni pub sid tsni sspw hy2pw trpw grpc xpath ports enabled
+	path="$1"; name="$2"; server="$3"; uuid="$4"; dsni="$5"; pub="$6"; sid="$7"; tsni="$8"
+	sspw="$9"; hy2pw="${10}"; trpw="${11}"; grpc="${12}"; xpath="${13}"; ports="${14}"; enabled="${15}"
+
+	local port_of names p
+	port_of() { printf '%s' "$ports" | jq -r --arg t "$1" '.[$t]'; }
+
+	{
+		printf '# Copyright © 2026 mindicator & silicon bags quartet.\n'
+		printf '# SPDX-License-Identifier: AGPL-3.0-or-later\n'
+		printf '# This file is part of Mycelium, licensed under the GNU Affero General Public\n'
+		printf '# License v3.0 or later. See the LICENSE file in the repository root.\n'
+		printf '#\n'
+		printf '# Clash-Meta proxies + groups for client "%s". Generated by myceliumctl (engine: singbox).\n' "$name"
+		printf '# Merge "proxies" and "proxy-groups" into your Clash-Meta config. ShadowTLS and XHTTP\n'
+		printf '# are not represented here (Clash-Meta lacks support); use the sing-box config for those.\n'
+		printf 'proxies:\n'
+
+		names=""
+		for p in $enabled; do
+			case "$p" in
+				vless-reality-vision)
+					printf '  - name: "mycelium-%s-vision"\n' "$name"
+					printf '    type: vless\n'
+					printf '    server: "%s"\n' "$server"
+					printf '    port: %s\n' "$(port_of vless-reality-vision)"
+					printf '    uuid: "%s"\n' "$uuid"
+					printf '    network: tcp\n'
+					printf '    udp: true\n'
+					printf '    flow: xtls-rprx-vision\n'
+					printf '    tls: true\n'
+					printf '    servername: "%s"\n' "$dsni"
+					printf '    client-fingerprint: chrome\n'
+					printf '    reality-opts:\n'
+					printf '      public-key: "%s"\n' "$pub"
+					printf '      short-id: "%s"\n' "$sid"
+					names="${names}, \"mycelium-$name-vision\""
+					;;
+				vless-reality-grpc)
+					printf '  - name: "mycelium-%s-grpc"\n' "$name"
+					printf '    type: vless\n'
+					printf '    server: "%s"\n' "$server"
+					printf '    port: %s\n' "$(port_of vless-reality-grpc)"
+					printf '    uuid: "%s"\n' "$uuid"
+					printf '    network: grpc\n'
+					printf '    udp: true\n'
+					printf '    tls: true\n'
+					printf '    servername: "%s"\n' "$dsni"
+					printf '    client-fingerprint: chrome\n'
+					printf '    grpc-opts:\n'
+					printf '      grpc-service-name: "%s"\n' "$grpc"
+					printf '    reality-opts:\n'
+					printf '      public-key: "%s"\n' "$pub"
+					printf '      short-id: "%s"\n' "$sid"
+					names="${names}, \"mycelium-$name-grpc\""
+					;;
+				hysteria2)
+					printf '  - name: "mycelium-%s-hysteria2"\n' "$name"
+					printf '    type: hysteria2\n'
+					printf '    server: "%s"\n' "$server"
+					printf '    port: %s\n' "$(port_of hysteria2)"
+					printf '    password: "%s"\n' "$hy2pw"
+					printf '    sni: "%s"\n' "$tsni"
+					printf '    alpn:\n'
+					printf '      - h3\n'
+					names="${names}, \"mycelium-$name-hysteria2\""
+					;;
+				tuic)
+					printf '  - name: "mycelium-%s-tuic"\n' "$name"
+					printf '    type: tuic\n'
+					printf '    server: "%s"\n' "$server"
+					printf '    port: %s\n' "$(port_of tuic)"
+					printf '    uuid: "%s"\n' "$uuid"
+					printf '    password: "%s"\n' "$uuid"
+					printf '    sni: "%s"\n' "$tsni"
+					printf '    congestion-controller: bbr\n'
+					printf '    alpn:\n'
+					printf '      - h3\n'
+					names="${names}, \"mycelium-$name-tuic\""
+					;;
+				shadowsocks)
+					printf '  - name: "mycelium-%s-ss2022"\n' "$name"
+					printf '    type: ss\n'
+					printf '    server: "%s"\n' "$server"
+					printf '    port: %s\n' "$(port_of shadowsocks)"
+					printf '    cipher: 2022-blake3-aes-256-gcm\n'
+					printf '    password: "%s"\n' "$sspw"
+					printf '    udp: true\n'
+					names="${names}, \"mycelium-$name-ss2022\""
+					;;
+				trojan)
+					printf '  - name: "mycelium-%s-trojan"\n' "$name"
+					printf '    type: trojan\n'
+					printf '    server: "%s"\n' "$server"
+					printf '    port: %s\n' "$(port_of trojan)"
+					printf '    password: "%s"\n' "$trpw"
+					printf '    sni: "%s"\n' "$tsni"
+					printf '    client-fingerprint: chrome\n'
+					printf '    alpn:\n'
+					printf '      - h2\n'
+					printf '      - http/1.1\n'
+					names="${names}, \"mycelium-$name-trojan\""
+					;;
+				*)
+					# shadowtls / xhttp: not represented in Clash-Meta (see header note).
+					;;
+			esac
+		done
+
+		# Proxy groups: a url-test (auto) over all emitted proxies, and a manual select.
+		# $names is a leading-comma list (", \"a\", \"b\""); strip the leading ", ".
+		if [ -n "$names" ]; then
+			local names_clean
+			names_clean="${names#, }"
+			printf 'proxy-groups:\n'
+			printf '  - name: "mycelium-auto"\n'
+			printf '    type: url-test\n'
+			printf '    url: "https://www.gstatic.com/generate_204"\n'
+			printf '    interval: 180\n'
+			printf '    tolerance: 50\n'
+			printf '    proxies: [ %s ]\n' "$names_clean"
+			printf '  - name: "mycelium"\n'
+			printf '    type: select\n'
+			printf '    proxies: [ "mycelium-auto", %s ]\n' "$names_clean"
+		fi
+	} | myc_atomic_write "$path"
+}

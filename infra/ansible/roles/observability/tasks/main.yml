@@ -1,0 +1,109 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — observability role.
+# Author: mindicator & silicon bags quartet
+#
+# Installs a PINNED, checksum-verified node_exporter, runs it as an unprivileged user, and binds
+# it to loopback only. Metrics never leave the node over the public interface (the host firewall
+# does not open the exporter port). This feeds node health to the adaptation layer (Layer 2).
+---
+- name: Assert architecture is supported by a node_exporter asset
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in node_exporter_arch_key
+    fail_msg: >-
+      No node_exporter mapping for architecture '{{ ansible_facts['architecture'] }}'.
+
+- name: Resolve per-architecture node_exporter asset + checksum
+  ansible.builtin.set_fact:
+    _ne_arch: "{{ node_exporter_arch_key[ansible_facts['architecture']] }}"
+    _ne_tarball: "node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch_key[ansible_facts['architecture']] }}.tar.gz"
+    _ne_sha256: "{{ node_exporter_sha256[node_exporter_arch_key[ansible_facts['architecture']]] }}"
+
+- name: Assert the node_exporter checksum has been recorded (fail closed on placeholders)
+  ansible.builtin.assert:
+    that:
+      - _ne_sha256 is match('^[0-9a-fA-F]{64}$')
+    fail_msg: >-
+      node_exporter_sha256.{{ _ne_arch }} is not a 64-char SHA256. Record the real checksum from
+      the {{ node_exporter_version }} 'sha256sums.txt' before deploying.
+
+- name: Create the node_exporter system group
+  ansible.builtin.group:
+    name: "{{ node_exporter_group }}"
+    system: true
+
+- name: Create the node_exporter system user (no shell)
+  ansible.builtin.user:
+    name: "{{ node_exporter_user }}"
+    group: "{{ node_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Check the currently installed node_exporter version (if any)
+  ansible.builtin.command:
+    cmd: "{{ node_exporter_bin_path }} --version"
+  register: _ne_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install the pinned node_exporter
+  when: node_exporter_version not in (_ne_installed.stdout | default('')) and node_exporter_version not in (_ne_installed.stderr | default(''))
+  block:
+    - name: Create a temporary download workspace
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: ne-dl
+      register: _ne_tmp
+
+    - name: Download the pinned node_exporter tarball (checksum-verified)
+      ansible.builtin.get_url:
+        url: "{{ node_exporter_download_base }}/v{{ node_exporter_version }}/{{ _ne_tarball }}"
+        dest: "{{ _ne_tmp.path }}/{{ _ne_tarball }}"
+        checksum: "sha256:{{ _ne_sha256 }}"
+        mode: "0640"
+
+    - name: Unpack the node_exporter tarball
+      ansible.builtin.unarchive:
+        src: "{{ _ne_tmp.path }}/{{ _ne_tarball }}"
+        dest: "{{ _ne_tmp.path }}"
+        remote_src: true
+
+    - name: Install the node_exporter binary
+      ansible.builtin.copy:
+        src: "{{ _ne_tmp.path }}/node_exporter-{{ node_exporter_version }}.linux-{{ _ne_arch }}/node_exporter"
+        dest: "{{ node_exporter_bin_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart node_exporter
+
+  always:
+    - name: Remove the temporary download workspace
+      ansible.builtin.file:
+        path: "{{ _ne_tmp.path }}"
+        state: absent
+      when: _ne_tmp.path is defined
+
+- name: Install the node_exporter systemd unit
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart node_exporter
+
+- name: Enable and start node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    enabled: true
+    state: started
+    daemon_reload: true

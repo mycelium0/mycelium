@@ -1,0 +1,11 @@
+[
+  {
+    "labels": {
+      "node": "node-01.example",
+      "role": "ingress-egress"
+    },
+    "targets": [
+      "127.0.0.1:19100"
+    ]
+  }
+]

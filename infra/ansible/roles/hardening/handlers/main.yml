@@ -1,0 +1,18 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — hardening role handlers.
+# Author: mindicator & silicon bags quartet
+---
+- name: Restart unattended-upgrades
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    state: restarted
+    enabled: true
+
+- name: Restart fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: restarted

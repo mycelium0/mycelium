@@ -1,0 +1,54 @@
+{
+  "engine": "singbox",
+  "node_address": "node.example.invalid",
+
+  "donor_host": "donor.example.invalid",
+  "donor_sni": "donor.example.invalid",
+  "dest": "donor.example.invalid:443",
+  "reality_private_key": "REPLACE_WITH_REALITY_PRIVATE_KEY",
+  "reality_public_key": "REPLACE_WITH_REALITY_PUBLIC_KEY",
+  "short_ids": [
+    "REPLACE_WITH_SHORT_ID_HEX"
+  ],
+
+  "tls_sni": "tls.example.invalid",
+  "tls_certificate_path": "/etc/mycelium/tls/fullchain.pem",
+  "tls_key_path": "/etc/mycelium/tls/privkey.pem",
+
+  "grpc_service_name": "REPLACE_WITH_GRPC_SERVICE_NAME",
+  "xhttp_path": "/REPLACE_WITH_XHTTP_PATH",
+
+  "shadowtls_handshake_server": "donor.example.invalid",
+  "shadowtls_handshake_port": 443,
+
+  "ss_password": "REPLACE_WITH_SS_2022_PASSWORD_BASE64",
+  "trojan_password": "REPLACE_WITH_TROJAN_PASSWORD",
+  "hysteria2_password": "REPLACE_WITH_HYSTERIA2_PASSWORD",
+  "shadowtls_password": "REPLACE_WITH_SHADOWTLS_PASSWORD",
+
+  "listen_port": 443,
+
+  "vless_reality_vision_enabled": true,
+  "vless_reality_vision_port": 443,
+
+  "vless_reality_grpc_enabled": true,
+  "vless_reality_grpc_port": 8443,
+
+  "vless_reality_xhttp_enabled": true,
+  "vless_reality_xhttp_port": 2096,
+
+  "hysteria2_enabled": true,
+  "hysteria2_port": 8444,
+
+  "tuic_enabled": true,
+  "tuic_port": 8445,
+
+  "shadowsocks_enabled": true,
+  "shadowsocks_port": 8446,
+
+  "shadowtls_enabled": true,
+  "shadowtls_port": 8447,
+
+  "trojan_enabled": false,
+  "trojan_port": 8448
+}

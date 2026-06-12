@@ -1,0 +1,193 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — group variables (EXAMPLE).
+# Author: mindicator & silicon bags quartet
+#
+# Copy to "group_vars/all.yml" (which is gitignored) and fill in real values:
+#   cp group_vars/all.yml.example group_vars/all.yml
+#   $EDITOR group_vars/all.yml
+#
+# NONE of these are secrets. REALITY keys, client UUIDs, and per-protocol passwords are generated
+# ON the node at deploy time — by the PRIMARY engine via "sing-box generate reality-keypair" /
+# "sing-box generate uuid" / "openssl rand -base64", or by the optional xray engine via
+# "xray x25519" / "xray uuid" — and never committed. Only the REALITY *public* key and the rendered
+# client subscriptions are fetched back to the operator's ./out/ directory.
+---
+
+# ---------------------------------------------------------------------------
+# Engine selection + per-protocol toggles (PRIMARY = sing-box)
+# ---------------------------------------------------------------------------
+
+# Which TLS data-plane engine to run:
+#   "singbox" — PRIMARY. One sing-box server speaks many transports in parallel; each is toggled
+#               individually below. This is the default and recommended engine.
+#   "xray"    — OPTIONAL alternative (Xray-core), VLESS + XTLS-Vision + REALITY only. Pick this if
+#               you specifically prefer the Xray stack; the singbox toggles below are then ignored.
+# Exactly one engine runs. AmneziaWG (further down) is a separate, orthogonal UDP path.
+engine: "singbox"
+
+# Per-protocol toggles for the sing-box (PRIMARY) engine. The operator exposes ONLY the chosen
+# subset: an inbound is created — and its port opened in the firewall — only for protocols set true.
+# VLESS+REALITY+XTLS-Vision is the primary transport (on by default); everything else is off until
+# you opt in. VMess, plain (pre-2022) Shadowsocks, plain WireGuard, OpenVPN, L2TP/IPsec, etc. are
+# intentionally NOT offered (legacy / easily fingerprinted).
+enable_vless_reality_vision: true    # (1) VLESS + REALITY + XTLS-Vision  (TCP)  — primary
+enable_vless_reality_grpc: false     # (2) VLESS + REALITY + gRPC         (TCP)
+enable_vless_reality_xhttp: false    # (3) VLESS + REALITY + XHTTP        (TCP)
+enable_hysteria2: false              # (4) Hysteria2                      (QUIC/UDP)
+enable_tuic: false                   # (5) TUIC v5                        (QUIC/UDP)
+enable_ss2022: false                 # (6) Shadowsocks-2022 AEAD          (TCP)
+enable_shadowtls: false              # (7) ShadowTLS v3 wrapping Shadowsocks (TCP)
+enable_trojan: false                 # (8) Trojan over TLS                (TCP, optional)
+
+# Per-protocol listen ports (sing-box engine). Each enabled protocol binds its own port so it can
+# be toggled and probed independently; only the enabled ports are opened in the host firewall.
+# vless-vision shares the primary listen_port (443) by default for maximal HTTPS indistinguishability.
+singbox_port_vless_vision: 443       # TCP — keep equal to listen_port (the port hardening opens)
+singbox_port_vless_grpc: 8443        # TCP
+singbox_port_vless_xhttp: 2096       # TCP
+singbox_port_hysteria2: 8444         # UDP
+singbox_port_tuic: 8445              # UDP
+singbox_port_ss2022: 8388            # TCP
+singbox_port_shadowtls: 8446         # TCP
+singbox_port_trojan: 8447            # TCP
+
+# Shadowsocks-2022 AEAD cipher (used by both the ss2022 and shadowtls inbounds). Must be a 2022
+# AEAD method; clients must match it. NOT legacy plain Shadowsocks.
+singbox_ss2022_method: "2022-blake3-aes-256-gcm"
+
+# ---------------------------------------------------------------------------
+# Data-plane / REALITY donor selection (Layer 1)
+# ---------------------------------------------------------------------------
+
+# Donor host: a real, popular, always-on TLS site whose handshake the node borrows.
+# It MUST support TLS 1.3 + HTTP/2 and be reachable from the node. Pick a high-traffic
+# third-party site you do not control. Diversify this across nodes (see ARCHITECTURE §Layer 1).
+donor_host: "donor.example.com"
+
+# SNI presented on the wire. Normally equals donor_host. The REALITY "serverNames" list is
+# derived from this value.
+donor_sni: "donor.example.com"
+
+# Reachability address clients use to reach THIS node. Usually the node's public IP, but may be a
+# dedicated A/AAAA record. Used only to render client subscriptions — it is not a secret.
+node_address: "NODE_PUBLIC_IP"
+
+# Port the node listens on for the primary VLESS+REALITY transport. 443 maximises
+# indistinguishability from ordinary HTTPS. The hardening role only opens this port.
+listen_port: 443
+
+# ---------------------------------------------------------------------------
+# Pinned versions (see docs/dependency-policy.md — pin by version AND by hash)
+# ---------------------------------------------------------------------------
+
+# sing-box release tag (PRIMARY engine). MUST be >= 1.11.x. Pin a concrete stable tag and record
+# its checksums below. Updating this pin is a separate, verified change. Asset names follow
+# sing-box-<version-without-v>-linux-<arch>.tar.gz (see roles/singbox for the exact mapping).
+singbox_version: "v1.11.15"
+
+# Per-architecture SHA256 of the sing-box release tarball. Leave the placeholders below as-is to
+# make the singbox role FAIL CLOSED until you record the real checksums from the upstream release's
+# attached checksum manifest. Never deploy unverified.
+singbox_sha256:
+  amd64: "REPLACE_WITH_SHA256_OF_sing-box-1.11.15-linux-amd64.tar.gz"
+  arm64: "REPLACE_WITH_SHA256_OF_sing-box-1.11.15-linux-arm64.tar.gz"
+
+# Xray-core release tag (OPTIONAL alternative engine; used only when engine == "xray"). MUST be
+# >= v26.2.4. Updating this pin is a separate, verified change.
+xray_version: "v26.2.4"
+
+# Per-architecture SHA256 of the Xray release zip. Leave the placeholders below as-is to make the
+# xray role FAIL CLOSED until you record the real checksums from the upstream release's
+# attached checksum manifest (see roles/xray for the exact asset names). Never deploy unverified.
+xray_sha256:
+  amd64: "REPLACE_WITH_SHA256_OF_Xray-linux-64.zip"
+  arm64: "REPLACE_WITH_SHA256_OF_Xray-linux-arm64-v8a.zip"
+
+# node_exporter release (observability role). Pinned by version and SHA256. Record the real
+# SHA256 from the upstream "sha256sums.txt" before deploying — the role fails closed on the
+# REPLACE placeholders below so an unverified artefact is never installed.
+node_exporter_version: "1.8.2"
+node_exporter_sha256:
+  amd64: "REPLACE_WITH_SHA256_OF_node_exporter-1.8.2.linux-amd64.tar.gz"
+  arm64: "REPLACE_WITH_SHA256_OF_node_exporter-1.8.2.linux-arm64.tar.gz"
+
+# Caddy version (cover-site web server). Installed from the official Caddy APT repository,
+# pinned to this version.
+caddy_version: "2.8.4"
+
+# ---------------------------------------------------------------------------
+# Identity (Layer 2 — issuance/revocation handled on the node)
+# ---------------------------------------------------------------------------
+
+# Operator client identities. One VLESS UUID + subscription is generated per name on the node.
+# To ADD a client: append a name and re-run. To REVOKE: remove the name and re-run (the node
+# regenerates config.json without that client; the rendered subscription is no longer served).
+# These are friendly labels only — NOT secrets, NOT the UUIDs themselves.
+client_names:
+  - alice
+  - bob
+
+# Number of REALITY shortIds to generate (via "openssl rand -hex 8"). Clients may use any one.
+shortid_count: 3
+
+# ---------------------------------------------------------------------------
+# Hardening role toggles
+# ---------------------------------------------------------------------------
+
+# Enable fail2ban (optional; off by default — UFW + key-only SSH already cover the baseline).
+hardening_enable_fail2ban: false
+
+# ---------------------------------------------------------------------------
+# AmneziaWG fallback path (Layer 1 — NON-TLS / UDP, obfuscated WireGuard)
+# ---------------------------------------------------------------------------
+
+# Provision the AmneziaWG (obfuscated WireGuard) fallback path. OFF by default: this is a
+# complementary, non-TLS UDP path alongside the primary VLESS+REALITY transport (UDP is excised on
+# some networks, so it is never the only route). When true, the amneziawg role generates keys on
+# the node, renders awg0.conf, enables awg-quick@awg0, and opens its UDP port in the firewall.
+enable_amneziawg: false
+
+# UDP port for the AmneziaWG path. Diversify per node. Only opened (as UDP) when enable_amneziawg.
+awg_listen_port: 51820
+
+# Install method: "module" (kernel module + tools from the official Amnezia PPA) or "userspace"
+# (the amneziawg-go Go implementation, pinned + checksum-verified below).
+awg_install_method: "module"
+
+# Pinned amneziawg-go version (only used when awg_install_method == "userspace"). Like the Xray
+# checksums, the SHA256 placeholders below make the role FAIL CLOSED until you record the real
+# values from the upstream release. NOT secrets — supply-chain pinning (pin by version AND hash).
+awg_go_version: "v0.2.12"
+awg_go_sha256:
+  amd64: "REPLACE_WITH_SHA256_OF_amneziawg-go-linux-amd64.tar.gz"
+  arm64: "REPLACE_WITH_SHA256_OF_amneziawg-go-linux-arm64.tar.gz"
+
+# Obfuscation knobs SHARED by the server and every client (must be identical on all peers, or the
+# handshake fails). These are tunable values (Layer 2 may A/B-tune them), NOT secrets. Constraints:
+# Jmin < Jmax ; H1..H4 distinct ; (S1 + 56) != S2. See nodes/dataplane/amneziawg/README.md.
+awg_obfs:
+  Jc: 4          # junk packet count
+  Jmin: 40       # junk packet min size (bytes)
+  Jmax: 70       # junk packet max size (bytes)
+  S1: 51         # init-packet junk size
+  S2: 102        # response-packet junk size
+  H1: 1148403838 # randomized header for message type 1 (init)
+  H2: 1351874800 # randomized header for message type 2 (response)
+  H3: 1936608092 # randomized header for message type 3 (cookie)
+  H4: 1830553362 # randomized header for message type 4 (transport data)
+
+# The AmneziaWG path reuses the same client_names roster as the VLESS+REALITY path above; one
+# keypair (and optional pre-shared key) is generated per name on the node.
+
+# ---------------------------------------------------------------------------
+# Cover site (Layer 1 — anti-probing)
+# ---------------------------------------------------------------------------
+
+# Hostname for the OPTIONAL local cover site Caddy serves on loopback. By default REALITY forwards
+# probes to the real external donor (donor_host), NOT here — this site is only used if you choose
+# to self-host your own donor and repoint REALITY "dest" at it (see roles/caddy).
+cover_site_hostname: "localhost"

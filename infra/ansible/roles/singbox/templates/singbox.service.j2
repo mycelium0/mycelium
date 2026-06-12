@@ -1,0 +1,72 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — hardened systemd unit for the sing-box (PRIMARY) data plane.
+# Author: mindicator & silicon bags quartet
+#
+# Rendered by the singbox role. Runs as an unprivileged system user. CAP_NET_BIND_SERVICE is the
+# only ambient capability granted, so the process can bind privileged ports (e.g. :443) without
+# root. The set of listening ports is determined by the enabled protocols (TCP and/or UDP).
+[Unit]
+Description=Mycelium sing-box data plane (multi-protocol; PRIMARY engine)
+Documentation=https://sing-box.sagernet.org
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ singbox_run_user }}
+Group={{ singbox_run_group }}
+
+# "sing-box run -c config.json -D <workdir>" — -D sets the working directory for any runtime cache
+# (kept inside the writable state path below; nothing is written to the read-only config dir).
+ExecStartPre={{ singbox_bin_path }} check -c {{ singbox_config_path }}
+ExecStart={{ singbox_bin_path }} run -c {{ singbox_config_path }} -D {{ singbox_state_dir }}/run
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+
+# --- Privilege containment -------------------------------------------------
+# Allow binding privileged listen ports without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+
+# --- Filesystem protection -------------------------------------------------
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Config is read-only to the service; a single writable path holds the runtime working directory.
+ReadOnlyPaths={{ singbox_etc_dir }}
+ReadWritePaths={{ singbox_state_dir }}/run
+
+# --- Kernel / device / namespace isolation --------------------------------
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+PrivateDevices=true
+DevicePolicy=closed
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+KeyringMode=private
+UMask=0077
+
+# --- Network / syscall surface --------------------------------------------
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+
+[Install]
+WantedBy=multi-user.target

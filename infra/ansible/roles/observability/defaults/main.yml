@@ -1,0 +1,24 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — observability role defaults.
+# Author: mindicator & silicon bags quartet
+---
+# Upstream download base for node_exporter.
+node_exporter_download_base: "https://github.com/prometheus/node_exporter/releases/download"
+
+# Map ansible_facts.architecture -> the key used in node_exporter_sha256 (group_vars) and the
+# upstream tarball arch token.
+node_exporter_arch_key:
+  x86_64: "amd64"
+  aarch64: "arm64"
+
+# node_exporter binds to loopback only — metrics are scraped over an SSH tunnel / mesh, never
+# exposed on the public interface (the host firewall does not open this port either).
+node_exporter_listen: "127.0.0.1:9100"
+
+node_exporter_bin_path: "/usr/local/bin/node_exporter"
+node_exporter_user: "node_exporter"
+node_exporter_group: "node_exporter"

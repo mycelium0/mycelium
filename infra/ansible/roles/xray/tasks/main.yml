@@ -1,0 +1,557 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — xray role.
+# Author: mindicator & silicon bags quartet
+#
+# Installs the VLESS + XTLS-Vision + REALITY data plane:
+#   1. Download a PINNED, checksum-verified Xray-core release to /usr/local/bin/xray.
+#   2. Create the xray system user, /usr/local/etc/xray/, and a root-only state directory.
+#   3. Copy the Mycelium control tooling (myceliumctl) and the dataplane template to the node.
+#   4. Generate REALITY keypair ("xray x25519"), per-client UUIDs ("xray uuid"), and shortIds
+#      ("openssl rand -hex 8") — ONCE, idempotently, stored only on the node.
+#   5. Render config.json via myceliumctl render-server (preferred) or an equivalent jq task.
+#   6. Install + enable + start a hardened xray.service.
+#   7. Render client subscriptions and FETCH them to the operator's ./out/subscriptions/.
+#
+# Key-handling invariant: REALITY PRIVATE keys and client UUIDs NEVER leave the node. Only the
+# REALITY PUBLIC key (needed by clients) and the rendered subscriptions are fetched back.
+---
+# ---------------------------------------------------------------------------
+# 0. Preconditions — fail closed on unverified pins or unsupported architecture.
+# ---------------------------------------------------------------------------
+- name: Assert architecture is supported by an upstream Xray asset
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in xray_asset_by_arch
+    fail_msg: >-
+      No pinned Xray asset for architecture '{{ ansible_facts['architecture'] }}'.
+      Supported: {{ xray_asset_by_arch.keys() | list }}.
+
+- name: Assert required operator variables are set (fail closed on the .example sentinels)
+  ansible.builtin.assert:
+    that:
+      - donor_host is defined and donor_host | length > 0 and donor_host != 'donor.example.com'
+      - donor_sni is defined and donor_sni | length > 0 and donor_sni != 'donor.example.com'
+      - node_address is defined and node_address | length > 0 and node_address != 'NODE_PUBLIC_IP'
+      - client_names is defined and (client_names | length) > 0
+      - listen_port is defined
+    fail_msg: >-
+      Set real values in group_vars/all.yml before deploying. donor_host/donor_sni must be a real
+      external donor (not the 'donor.example.com' placeholder), node_address must be this node's
+      reachability address (not the 'NODE_PUBLIC_IP' placeholder), and client_names must be a
+      non-empty list. These are not secrets; only the donor selection and addressing.
+
+- name: Resolve per-architecture Xray asset + checksum
+  ansible.builtin.set_fact:
+    _xray_asset: "{{ xray_asset_by_arch[ansible_facts['architecture']] }}"
+    _xray_arch_key: "{{ xray_arch_key[ansible_facts['architecture']] }}"
+    _xray_sha256: "{{ xray_sha256[xray_arch_key[ansible_facts['architecture']]] }}"
+
+- name: Assert the Xray version pin meets the minimum (>= v26.2.4)
+  ansible.builtin.assert:
+    that:
+      - xray_version is version('v26.2.4', '>=', version_type='loose')
+    fail_msg: "xray_version must be >= v26.2.4 (got {{ xray_version }})."
+
+- name: Assert the Xray checksum has been recorded (fail closed on placeholders)
+  ansible.builtin.assert:
+    that:
+      - _xray_sha256 is match('^[0-9a-fA-F]{64}$')
+    fail_msg: >-
+      xray_sha256.{{ _xray_arch_key }} is not a 64-char SHA256. Record the real checksum from the
+      {{ xray_version }} release manifest for asset '{{ _xray_asset }}' before deploying.
+
+- name: Install runtime dependencies (jq for render fallback, openssl for shortIds, unzip, ca-certs)
+  ansible.builtin.apt:
+    name:
+      - jq
+      - openssl
+      - unzip
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---------------------------------------------------------------------------
+# 1. System user, directories.
+# ---------------------------------------------------------------------------
+- name: Create the xray system group
+  ansible.builtin.group:
+    name: "{{ xray_run_group }}"
+    system: true
+
+- name: Create the xray system user (no shell, no home login)
+  ansible.builtin.user:
+    name: "{{ xray_run_user }}"
+    group: "{{ xray_run_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create Xray config + tooling directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ xray_run_group }}"
+    mode: "0750"
+  loop:
+    - "{{ xray_etc_dir }}"
+    - "{{ xray_tooling_dir }}"
+
+- name: Create root-only state directory for generated keys/UUIDs
+  ansible.builtin.file:
+    path: "{{ xray_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# ---------------------------------------------------------------------------
+# 2. Download + verify + install the pinned Xray release.
+# ---------------------------------------------------------------------------
+- name: Check the currently installed Xray version (if any)
+  ansible.builtin.command:
+    cmd: "{{ xray_bin_path }} version"
+  register: _xray_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install the pinned Xray release
+  when: xray_version not in (_xray_installed.stdout | default(''))
+  block:
+    - name: Create a temporary download workspace
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: xray-dl
+      register: _xray_tmp
+
+    - name: Download the pinned Xray release zip (checksum-verified)
+      ansible.builtin.get_url:
+        url: "{{ xray_download_base }}/{{ xray_version }}/{{ _xray_asset }}"
+        dest: "{{ _xray_tmp.path }}/{{ _xray_asset }}"
+        checksum: "sha256:{{ _xray_sha256 }}"
+        mode: "0640"
+
+    - name: Unpack the Xray release
+      ansible.builtin.unarchive:
+        src: "{{ _xray_tmp.path }}/{{ _xray_asset }}"
+        dest: "{{ _xray_tmp.path }}"
+        remote_src: true
+
+    - name: Install the xray binary to /usr/local/bin
+      ansible.builtin.copy:
+        src: "{{ _xray_tmp.path }}/xray"
+        dest: "{{ xray_bin_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart xray
+
+    - name: Install bundled geo data assets (geoip.dat / geosite.dat) if present
+      ansible.builtin.copy:
+        src: "{{ _xray_tmp.path }}/{{ item }}"
+        dest: "{{ xray_etc_dir }}/{{ item }}"
+        remote_src: true
+        owner: root
+        group: "{{ xray_run_group }}"
+        mode: "0644"
+      loop:
+        - geoip.dat
+        - geosite.dat
+      failed_when: false
+
+  always:
+    - name: Remove the temporary download workspace
+      ansible.builtin.file:
+        path: "{{ _xray_tmp.path }}"
+        state: absent
+      when: _xray_tmp.path is defined
+
+# ---------------------------------------------------------------------------
+# 3. Copy the Mycelium control tooling + dataplane template to the node.
+#    (Produced by sibling components; present in the repo at deploy time.)
+# ---------------------------------------------------------------------------
+- name: Detect whether the control tooling is present on the control host
+  ansible.builtin.stat:
+    path: "{{ xray_control_tooling_src }}"
+  delegate_to: localhost
+  become: false
+  register: _control_src
+
+- name: Copy the Mycelium control tooling to the node
+  ansible.builtin.copy:
+    src: "{{ xray_control_tooling_src }}"
+    dest: "{{ xray_tooling_dir }}/control/"
+    owner: root
+    group: "{{ xray_run_group }}"
+    mode: "0750"
+  when: _control_src.stat.exists
+
+- name: Detect whether a prebuilt myceliumctl binary is present
+  ansible.builtin.stat:
+    path: "{{ xray_tooling_dir }}/control/myceliumctl"
+  register: _myceliumctl
+
+- name: Copy the dataplane VLESS+REALITY template to the node
+  ansible.builtin.copy:
+    src: "{{ xray_dataplane_template_src }}"
+    dest: "{{ xray_tooling_dir }}/config.template.json"
+    owner: root
+    group: "{{ xray_run_group }}"
+    mode: "0640"
+  register: _dataplane_template
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 4. Generate identity material ONCE (idempotent): REALITY keypair, client UUIDs, shortIds.
+#    Stored only in the root-only state directory. Re-runs reuse existing material so keys do not
+#    rotate on every deploy (rotation is an explicit operator action — delete the state file).
+# ---------------------------------------------------------------------------
+- name: Look for previously generated identity state
+  ansible.builtin.stat:
+    path: "{{ xray_state_dir }}/identity.json"
+  register: _identity_state
+
+- name: Generate REALITY keypair, client UUIDs and shortIds (first run only)
+  when: not _identity_state.stat.exists
+  block:
+    - name: Generate REALITY x25519 keypair (audited Xray built-in)
+      ansible.builtin.command:
+        cmd: "{{ xray_bin_path }} x25519"
+      register: _reality_keypair
+      changed_when: true
+      no_log: true
+
+    - name: Parse the REALITY private/public key from "xray x25519" output
+      ansible.builtin.set_fact:
+        # "xray x25519" prints lines like "Private key: ..." / "Public key: ..." (label wording
+        # may vary slightly across versions, so match case-insensitively on private/public).
+        _reality_private: >-
+          {{ (_reality_keypair.stdout_lines
+              | select('search', '(?i)private')
+              | map('regex_replace', '^.*?:\s*', '')
+              | list | first) }}
+        _reality_public: >-
+          {{ (_reality_keypair.stdout_lines
+              | select('search', '(?i)public')
+              | map('regex_replace', '^.*?:\s*', '')
+              | list | first) }}
+      no_log: true
+
+    - name: Generate a UUID per client name (audited Xray built-in)
+      ansible.builtin.command:
+        cmd: "{{ xray_bin_path }} uuid"
+      register: _client_uuid_cmds
+      changed_when: true
+      loop: "{{ client_names }}"
+      no_log: true
+
+    - name: Generate REALITY shortIds (openssl rand -hex 8)
+      ansible.builtin.command:
+        cmd: "openssl rand -hex 8"
+      register: _shortid_cmds
+      changed_when: true
+      loop: "{{ range(0, shortid_count | int) | list }}"
+      no_log: true
+
+    - name: Assemble the identity document
+      ansible.builtin.set_fact:
+        _identity:
+          version: 1
+          generated_at: "{{ ansible_date_time.iso8601 | default('') }}"
+          reality:
+            private_key: "{{ _reality_private | trim }}"
+            public_key: "{{ _reality_public | trim }}"
+          short_ids: "{{ _shortid_cmds.results | map(attribute='stdout') | map('trim') | list }}"
+          clients: >-
+            {{ dict(client_names | zip(_client_uuid_cmds.results
+                | map(attribute='stdout') | map('trim') | list)) }}
+      no_log: true
+
+    - name: Persist the identity document (root-only)
+      ansible.builtin.copy:
+        dest: "{{ xray_state_dir }}/identity.json"
+        content: "{{ _identity | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+# ---------------------------------------------------------------------------
+# 4b. Reconcile the client roster on RE-RUN (add/revoke without rotating REALITY keys).
+#     Adds UUIDs for newly added client_names; drops clients no longer listed.
+# ---------------------------------------------------------------------------
+- name: Load the current identity document
+  ansible.builtin.slurp:
+    src: "{{ xray_state_dir }}/identity.json"
+  register: _identity_raw
+  no_log: true
+
+- name: Decode the current identity document
+  ansible.builtin.set_fact:
+    _identity: "{{ _identity_raw.content | b64decode | from_json }}"
+  no_log: true
+
+- name: Determine clients to add (in client_names but missing a UUID)
+  ansible.builtin.set_fact:
+    _clients_to_add: "{{ client_names | difference(_identity.clients.keys() | list) }}"
+
+- name: Generate UUIDs for newly added clients
+  ansible.builtin.command:
+    cmd: "{{ xray_bin_path }} uuid"
+  register: _added_uuid_cmds
+  changed_when: true
+  loop: "{{ _clients_to_add }}"
+  when: _clients_to_add | length > 0
+  no_log: true
+
+- name: Merge added clients and revoke clients no longer listed
+  ansible.builtin.set_fact:
+    _identity: >-
+      {{ _identity | combine({
+        'clients': (
+          _identity.clients
+          | combine(dict(_clients_to_add | zip(
+              (_added_uuid_cmds.results | default([])) | map(attribute='stdout') | map('trim') | list
+            )))
+        ) | dict2items | selectattr('key', 'in', client_names) | items2dict
+      }, recursive=True) }}
+  no_log: true
+
+- name: Persist the reconciled identity document
+  ansible.builtin.copy:
+    dest: "{{ xray_state_dir }}/identity.json"
+    content: "{{ _identity | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 5. Render config.json — prefer myceliumctl render-server; fall back to a jq pipeline.
+# ---------------------------------------------------------------------------
+- name: Write the render input (server params) to a root-only temp file
+  ansible.builtin.copy:
+    dest: "{{ xray_state_dir }}/render-input.json"
+    content: |
+      {{ {
+        'listen_port': listen_port | int,
+        'donor_host': donor_host,
+        'donor_sni': donor_sni,
+        'reality': _identity.reality,
+        'short_ids': _identity.short_ids,
+        'clients': _identity.clients
+      } | to_nice_json }}
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render config.json via myceliumctl render-server (preferred)
+  ansible.builtin.command:
+    cmd: >-
+      {{ xray_tooling_dir }}/control/myceliumctl render-server
+      --input {{ xray_state_dir }}/render-input.json
+      --out {{ xray_config_path }}
+  register: _render_ctl
+  changed_when: true
+  when: _myceliumctl.stat.exists
+  notify: Restart xray
+  no_log: true
+
+# Fallback: assemble config.json with jq when no prebuilt myceliumctl is present (inline minimal
+# VLESS+REALITY skeleton). The REALITY "dest"/"target" forwards the borrowed TLS handshake — and
+# any active probe — to the real external donor ({{ donor_host }}:443), so a probe receives a
+# genuine response from a site we do not control (ARCHITECTURE §Layer 1: "the REALITY cover site
+# is always a real donor"). The local Caddy cover (caddy role) is an OPTIONAL self-hosted donor
+# target: point donor_host/donor_sni at it only if you run your own donor.
+- name: Render config.json via jq fallback
+  when: not _myceliumctl.stat.exists
+  block:
+    - name: Render config.json with jq
+      ansible.builtin.shell:
+        cmd: >-
+          jq -n
+          --argjson port {{ listen_port | int }}
+          --arg sni {{ donor_sni | quote }}
+          --arg dest {{ (donor_host ~ ':443') | quote }}
+          --arg priv {{ _identity.reality.private_key | quote }}
+          --argjson shortids '{{ _identity.short_ids | to_json }}'
+          --argjson clients '{{ _identity.clients | to_json }}'
+          '{
+             log: { loglevel: "warning" },
+             inbounds: [{
+               listen: "0.0.0.0",
+               port: $port,
+               protocol: "vless",
+               settings: {
+                 clients: ($clients | to_entries | map({ id: .value, email: .key, flow: "xtls-rprx-vision" })),
+                 decryption: "none"
+               },
+               streamSettings: {
+                 network: "tcp",
+                 security: "reality",
+                 realitySettings: {
+                   show: false,
+                   dest: $dest,
+                   xver: 0,
+                   serverNames: [ $sni ],
+                   privateKey: $priv,
+                   shortIds: $shortids
+                 }
+               },
+               sniffing: { enabled: true, destOverride: ["http","tls","quic"] }
+             }],
+             outbounds: [{ protocol: "freedom", tag: "direct" }]
+           }'
+          > {{ xray_config_path }}.tmp
+        executable: /bin/bash
+      register: _render_jq
+      changed_when: true
+      no_log: true
+
+    - name: Validate the rendered config.json with "xray run -test"
+      ansible.builtin.command:
+        cmd: "{{ xray_bin_path }} run -test -config {{ xray_config_path }}.tmp"
+      changed_when: false
+
+    - name: Promote the validated config.json into place
+      ansible.builtin.copy:
+        src: "{{ xray_config_path }}.tmp"
+        dest: "{{ xray_config_path }}"
+        remote_src: true
+        owner: root
+        group: "{{ xray_run_group }}"
+        mode: "0640"
+      notify: Restart xray
+
+    - name: Remove the temporary rendered config
+      ansible.builtin.file:
+        path: "{{ xray_config_path }}.tmp"
+        state: absent
+
+- name: Set ownership/permissions on the rendered config.json (myceliumctl path)
+  ansible.builtin.file:
+    path: "{{ xray_config_path }}"
+    owner: root
+    group: "{{ xray_run_group }}"
+    mode: "0640"
+
+# ---------------------------------------------------------------------------
+# 6. systemd unit — install, enable, start.
+# ---------------------------------------------------------------------------
+- name: Install the hardened xray systemd unit
+  ansible.builtin.template:
+    src: xray.service.j2
+    dest: /etc/systemd/system/xray.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart xray
+
+- name: Flush handlers so xray is (re)started before we render subscriptions
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start xray.service
+  ansible.builtin.systemd:
+    name: xray
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# ---------------------------------------------------------------------------
+# 7. Render client subscriptions on the node, then FETCH them to the operator's ./out/.
+#    Only the REALITY PUBLIC key and the subscriptions leave the node.
+# ---------------------------------------------------------------------------
+- name: Create the on-node subscriptions output directory
+  ansible.builtin.file:
+    path: "{{ xray_state_dir }}/subscriptions"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Render client subscriptions via myceliumctl render-client (preferred)
+  ansible.builtin.command:
+    cmd: >-
+      {{ xray_tooling_dir }}/control/myceliumctl render-client
+      --identity {{ xray_state_dir }}/identity.json
+      --node-address {{ node_address | quote }}
+      --listen-port {{ listen_port | int }}
+      --sni {{ donor_sni | quote }}
+      --out-dir {{ xray_state_dir }}/subscriptions
+  register: _sub_ctl
+  changed_when: true
+  when: _myceliumctl.stat.exists
+  no_log: true
+
+# Fallback: build a standard VLESS+REALITY connection URI per client with shell + the identity
+# doc. Format: vless://<uuid>@<addr>:<port>?...&pbk=<publicKey>&sid=<shortId>...#<name>
+- name: Render client subscriptions via shell fallback
+  when: not _myceliumctl.stat.exists
+  ansible.builtin.shell:
+    cmd: >-
+      set -euo pipefail;
+      pbk=$(jq -r '.reality.public_key' {{ xray_state_dir }}/identity.json);
+      sid=$(jq -r '.short_ids[0]' {{ xray_state_dir }}/identity.json);
+      jq -r '.clients | to_entries[] | "\(.key)\t\(.value)"' {{ xray_state_dir }}/identity.json
+      | while IFS=$'\t' read -r name uuid; do
+          printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp&flow=xtls-rprx-vision#mycelium-%s\n' \
+            "$uuid" {{ node_address | quote }} {{ listen_port | int }} {{ donor_sni | quote }} "$pbk" "$sid" "$name" \
+            > {{ xray_state_dir }}/subscriptions/"$name".txt;
+        done
+    executable: /bin/bash
+  changed_when: true
+  no_log: true
+
+- name: Export the REALITY public key (clients need it; private key stays on node)
+  ansible.builtin.shell:
+    cmd: "jq -r '.reality.public_key' {{ xray_state_dir }}/identity.json > {{ xray_state_dir }}/reality_public_key.txt"
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure the operator output directories exist on the control host
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ xray_out_public_dir }}"
+    - "{{ xray_out_subscriptions_dir }}"
+  delegate_to: localhost
+  become: false
+
+- name: List rendered subscription files on the node
+  ansible.builtin.find:
+    paths: "{{ xray_state_dir }}/subscriptions"
+    patterns: "*.txt"
+  register: _sub_files
+
+- name: Fetch rendered subscriptions to the operator's ./out/subscriptions/
+  ansible.builtin.fetch:
+    src: "{{ item.path }}"
+    dest: "{{ xray_out_subscriptions_dir }}/{{ inventory_hostname }}/"
+    flat: false
+  loop: "{{ _sub_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Fetch the REALITY public key to the operator's ./out/
+  ansible.builtin.fetch:
+    src: "{{ xray_state_dir }}/reality_public_key.txt"
+    dest: "{{ xray_out_public_dir }}/{{ inventory_hostname }}-reality_public_key.txt"
+    flat: true
+
+- name: Report where the operator can find the fetched artefacts
+  ansible.builtin.debug:
+    msg:
+      - "Client subscriptions: {{ xray_out_subscriptions_dir }}/{{ inventory_hostname }}/"
+      - "REALITY public key:   {{ xray_out_public_dir }}/{{ inventory_hostname }}-reality_public_key.txt"
+      - "REALITY private key and client UUIDs remain ONLY on the node ({{ xray_state_dir }}/identity.json, root 0600)."

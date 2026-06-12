@@ -1,0 +1,185 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-reality-vision-in",
+      "listen": "0.0.0.0",
+      "listen_port": 443,
+      "users": [],
+      "tls": {
+        "enabled": true,
+        "server_name": "SENTINEL_DONOR_SNI",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "SENTINEL_DONOR_HOST",
+            "server_port": 443
+          },
+          "private_key": "SENTINEL_REALITY_PRIVATE_KEY",
+          "short_id": [
+            "SENTINEL_SHORTID"
+          ]
+        }
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-reality-grpc-in",
+      "listen": "0.0.0.0",
+      "listen_port": 8443,
+      "users": [],
+      "tls": {
+        "enabled": true,
+        "server_name": "SENTINEL_DONOR_SNI",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "SENTINEL_DONOR_HOST",
+            "server_port": 443
+          },
+          "private_key": "SENTINEL_REALITY_PRIVATE_KEY",
+          "short_id": [
+            "SENTINEL_SHORTID"
+          ]
+        }
+      },
+      "transport": {
+        "type": "grpc",
+        "service_name": "SENTINEL_GRPC_SERVICE_NAME"
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-reality-xhttp-in",
+      "listen": "0.0.0.0",
+      "listen_port": 2096,
+      "users": [],
+      "tls": {
+        "enabled": true,
+        "server_name": "SENTINEL_DONOR_SNI",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "SENTINEL_DONOR_HOST",
+            "server_port": 443
+          },
+          "private_key": "SENTINEL_REALITY_PRIVATE_KEY",
+          "short_id": [
+            "SENTINEL_SHORTID"
+          ]
+        }
+      },
+      "transport": {
+        "type": "xhttp",
+        "path": "SENTINEL_XHTTP_PATH"
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-in",
+      "listen": "0.0.0.0",
+      "listen_port": 8444,
+      "users": [],
+      "tls": {
+        "enabled": true,
+        "server_name": "SENTINEL_TLS_SNI",
+        "alpn": [
+          "h3"
+        ],
+        "certificate_path": "SENTINEL_TLS_CERT_PATH",
+        "key_path": "SENTINEL_TLS_KEY_PATH"
+      }
+    },
+    {
+      "type": "tuic",
+      "tag": "tuic-in",
+      "listen": "0.0.0.0",
+      "listen_port": 8445,
+      "users": [],
+      "congestion_control": "bbr",
+      "tls": {
+        "enabled": true,
+        "server_name": "SENTINEL_TLS_SNI",
+        "alpn": [
+          "h3"
+        ],
+        "certificate_path": "SENTINEL_TLS_CERT_PATH",
+        "key_path": "SENTINEL_TLS_KEY_PATH"
+      }
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "shadowsocks-in",
+      "listen": "0.0.0.0",
+      "listen_port": 8388,
+      "method": "2022-blake3-aes-256-gcm",
+      "password": "SENTINEL_SS_PASSWORD",
+      "users": []
+    },
+    {
+      "type": "shadowtls",
+      "tag": "shadowtls-in",
+      "listen": "0.0.0.0",
+      "listen_port": 8446,
+      "version": 3,
+      "users": [],
+      "handshake": {
+        "server": "SENTINEL_DONOR_HOST",
+        "server_port": 443
+      },
+      "detour": "shadowtls-ss-in"
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "shadowtls-ss-in",
+      "listen": "127.0.0.1",
+      "network": "tcp",
+      "method": "2022-blake3-aes-256-gcm",
+      "password": "SENTINEL_SS_PASSWORD"
+    },
+    {
+      "type": "trojan",
+      "tag": "trojan-in",
+      "listen": "0.0.0.0",
+      "listen_port": 8447,
+      "users": [],
+      "tls": {
+        "enabled": true,
+        "server_name": "SENTINEL_TLS_SNI",
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "certificate_path": "SENTINEL_TLS_CERT_PATH",
+        "key_path": "SENTINEL_TLS_KEY_PATH"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "ip_is_private": true,
+        "outbound": "block"
+      },
+      {
+        "protocol": "bittorrent",
+        "outbound": "block"
+      }
+    ],
+    "final": "direct"
+  }
+}

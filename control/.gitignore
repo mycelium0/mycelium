@@ -1,0 +1,18 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Generated artifacts and secret-bearing state produced by myceliumctl must never be committed.
+# Only placeholders, *.example, and *.template files are tracked.
+
+# Identity state and the rendered dataplane server config (contain UUIDs / REALITY keys).
+state/
+server.json
+
+# Per-client subscription configs (contain connection parameters and the public key).
+out/
+
+# Operator-local params filled in with real keys/IPs/domains at deploy time.
+params.local.json
+*.local

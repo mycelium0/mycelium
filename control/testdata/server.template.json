@@ -1,0 +1,51 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "vless-reality-in",
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "DONOR_HOST_PLACEHOLDER:443",
+          "xver": 0,
+          "serverNames": [
+            "DONOR_SNI_PLACEHOLDER"
+          ],
+          "privateKey": "REALITY_PRIVATE_KEY_PLACEHOLDER",
+          "shortIds": [
+            "SHORT_ID_PLACEHOLDER"
+          ]
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ]
+}
