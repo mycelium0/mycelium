@@ -209,7 +209,7 @@ without modification.
 | Fronting / last resort | **Cloudflare** (CDN-front, WARP) | Best survivability in combination with REALITY |
 | Infrastructure / deploy | **Terraform + Ansible** | Reproducibility; fast IP/AS migration |
 | Observability / measurement | **Prometheus/Alertmanager** + **OONI** methodology | Feeds the adaptation layer with real data |
-| Control agents | **Go** or **Rust** | Single binary; strong libp2p/sing-box ecosystem |
+| Control agents | **Go** (primary; Rust for sealed organs — ADR-0012) | Single binary; strong libp2p/sing-box ecosystem |
 
 The project's innovation is **not** a new transport or new cryptography (those are left alone —
 that is the canon of [ADR-0002](adr/0002-no-custom-cryptography.md): only standard audited
