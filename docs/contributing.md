@@ -168,9 +168,10 @@ Preferred model: one agent writes, a second reviews (particular attention to `no
 
 ### 4.1. Code
 
-- **Language for control agents** — Go or Rust (single binary, libp2p/sing-box ecosystem).
-  Any consumption-interface layer (out of scope — standard off-the-shelf clients connect to
-  standard endpoints) would use TypeScript/React, strict.
+- **Language for control agents** — Go ([ADR-0012](adr/0012-go-primary-control-plane-language.md)):
+  a single static binary in the libp2p/sing-box ecosystem. Rust is reserved for sealed
+  high-assurance components behind a shared spec. Any consumption-interface layer (out of scope —
+  standard off-the-shelf clients connect to standard endpoints) would use TypeScript/React, strict.
 - **Standards** — linter/formatter/typing per [development.md §1](development.md); public surface
   with types and docstrings; no magic strings/numbers, no hardcoded network identifiers, no
   unnecessary `Any`.

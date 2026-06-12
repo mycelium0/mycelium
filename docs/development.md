@@ -74,12 +74,19 @@ even if the code "works"):
 
 ## 1. Code Standards
 
-### 1.1. Control agents and node software (Go / Rust)
+### 1.1. Control agents and node software (Go primary; Rust for sealed organs)
 
 The primary language for control agents, the coordinator, node software, and mesh software is
-**Go or Rust** (single binary; libp2p / sing-box / Xray ecosystems). The language chosen for
-a specific service is recorded in an ADR; mixing Go and Rust within a single binary requires
-explicit justification.
+**Go** ([ADR-0012](adr/0012-go-primary-control-plane-language.md)): the upstream stack is Go
+(sing-box, Xray, `amneziawg-go`, `go-libp2p`, Caddy), so the control plane embeds/drives it and
+ships a single static binary. Shell+jq is retained only for deploy glue, one-shot config rendering,
+and the CI conformance gates — *shell renders and deploys; the Go binary decides and adapts.*
+
+**Rust** is reserved for **sealed, high-assurance organs** introduced later behind a shared
+specification and test vectors (e.g. a spore-envelope validator, a hostile-input carrier parser, a
+route-state model checker, or a future standalone hardened mesh node) — never as the entry point,
+and only once its `spec/` + `test-vectors/` exist. Mixing Go and Rust within a single binary
+requires explicit justification; the language for any new service is recorded in an ADR.
 
 **Go:**
 - **Code style:** `gofmt` + `goimports` (mandatory; enforced in CI).
