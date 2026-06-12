@@ -49,7 +49,13 @@ FORBIDDEN_SUBSTR='censor|circumvent'
 
 # Country denylist — matched as whole words (case-insensitive). Deliberately small;
 # extend if a new name slips in. Adjectival forms are included where they are likely.
-COUNTRY_WORDS='China|Chinese|Russia|Russian|Iran|Iranian|Korea|Korean|Venezuela|Venezuelan|Cuba|Cuban|Belarus|Belarusian|Myanmar|Turkmenistan|Syria|Syrian'
+# Includes node-host jurisdictions so a deploy location can never leak into the tree.
+COUNTRY_WORDS='China|Chinese|Russia|Russian|Iran|Iranian|Korea|Korean|Venezuela|Venezuelan|Cuba|Cuban|Belarus|Belarusian|Myanmar|Turkmenistan|Syria|Syrian|Kazakhstan|Kazakh|Germany|German|Poland|Ukraine|Ukrainian|Netherlands|Finland|Sweden|France|Latvia|Lithuania|Estonia|Romania|Bulgaria|Moldova|Georgia|Armenia|Azerbaijan'
+
+# Parenthesised location-code lists, e.g. "(KZ, DE)" — two or more uppercase
+# two-letter codes inside parentheses. Matched case-sensitively (so it does not trip
+# on ordinary lowercase prose). Catches abbreviated node-location leaks.
+LOCATION_CODES='\([A-Z]{2}(, ?[A-Z]{2})+\)'
 
 fail=0
 report() {
@@ -89,6 +95,12 @@ while IFS= read -r -d '' f; do
 		[ -n "${lineno:-}" ] || continue
 		report "$rel" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
 	done < <(grep -IinwE "$COUNTRY_WORDS" "$f" 2>/dev/null || true)
+
+	# 3) Parenthesised location-code lists (case-sensitive), e.g. "(KZ, DE)".
+	while IFS=: read -r lineno text; do
+		[ -n "${lineno:-}" ] || continue
+		report "$rel" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
+	done < <(grep -InE "$LOCATION_CODES" "$f" 2>/dev/null || true)
 
 done < <(find "$REPO_ROOT" -type f -print0)
 
