@@ -1,0 +1,16 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — hardening role defaults.
+# Author: mindicator & silicon bags quartet
+---
+# fail2ban is optional and OFF by default — UFW (rate-limited SSH) plus key-only SSH already
+# cover the baseline. Set hardening_enable_fail2ban: true in group_vars to enable the sshd jail.
+hardening_enable_fail2ban: false
+
+# Node listen port for the primary VLESS+REALITY transport — the only inbound port UFW opens
+# besides SSH. Safe default (443 maximises indistinguishability from ordinary HTTPS) so the
+# firewall still opens the right port if group_vars omits it; the .example pins it explicitly.
+listen_port: 443

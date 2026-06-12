@@ -1,0 +1,31 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — provisioning .gitignore.
+# Author: mindicator & silicon bags quartet
+#
+# Keeps deploy-time material out of version control. NONE of the *.example / *.j2 / role files are
+# secrets; the files below are the real, per-deploy artefacts that an operator creates or that the
+# playbook fetches back, and they MUST NOT be committed.
+
+# Real inventory (copied from inventory.ini.example) — contains the node's reachability address.
+inventory.ini
+
+# Real group variables (copied from group_vars/all.yml.example) — contains donor selection,
+# node_address, pinned checksums. Keep the .example tracked, ignore the real file.
+group_vars/all.yml
+
+# Operator output fetched from the node: rendered client subscriptions (contain client UUIDs in
+# standard VLESS URIs) and the REALITY public key. Treat as sensitive; never commit.
+out/
+
+# Defensive: any local-only state, secrets, or sentinel-bearing files that may land here.
+state/
+secrets/
+server.json
+# Rendered AmneziaWG interface config (real keys) — only the .template is tracked.
+awg0.conf
+*.local
+*.retry

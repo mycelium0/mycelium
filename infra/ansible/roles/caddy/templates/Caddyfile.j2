@@ -1,0 +1,36 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — cover-site Caddyfile (rendered by the caddy role).
+# Author: mindicator & silicon bags quartet
+#
+# The cover site listens on loopback only ({{ caddy_cover_listen }}) and is never exposed by the
+# host firewall. By default REALITY forwards probes to a real EXTERNAL donor (donor_host), not
+# here; this site is an OPTIONAL self-hosted donor target — set REALITY "dest" to
+# {{ caddy_cover_listen }} only if you choose to serve your own donor instead of an external one.
+{
+	admin off
+	auto_https off
+	# Local-only TLS so REALITY's forwarded probe terminates against a real TLS site.
+	local_certs
+}
+
+{{ caddy_cover_listen }} {
+	root * {{ caddy_site_root }}
+	encode zstd gzip
+	file_server
+
+	header {
+		# Conservative, ordinary-looking security headers.
+		-Server
+		Referrer-Policy "no-referrer-when-downgrade"
+		X-Content-Type-Options "nosniff"
+	}
+
+	log {
+		# Do not retain client PII (THREAT-MODEL: user safety #1).
+		output discard
+	}
+}

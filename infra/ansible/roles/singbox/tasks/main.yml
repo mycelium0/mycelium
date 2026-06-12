@@ -1,0 +1,754 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — singbox role (PRIMARY engine).
+# Author: mindicator & silicon bags quartet
+#
+# Brings up the multi-protocol sing-box data plane:
+#   1. Download a PINNED, checksum-verified sing-box release to /usr/local/bin/sing-box.
+#   2. Create the sing-box system user, /usr/local/etc/sing-box/, and a root-only state directory.
+#   3. Copy the Mycelium control tooling (myceliumctl) and the sing-box config template to the node.
+#   4. Generate identity material — ONCE, idempotently — for the ENABLED protocols only:
+#        REALITY keypair ("sing-box generate reality-keypair"), client UUIDs
+#        ("sing-box generate uuid"), shortIds ("openssl rand -hex 8"), and SS/Trojan/ShadowTLS/
+#        TUIC/Hysteria2 passwords ("openssl rand -base64"). Self-signed TLS pairs for the QUIC/TLS
+#        protocols come from "openssl req" (no custom crypto). Stored only in the root-only state dir.
+#   5. Render config.json via the copied myceliumctl (engine singbox) when present; else a Jinja
+#      fallback. Validate with "sing-box check" before promoting it.
+#   6. Install + enable + start a hardened sing-box.service; open ONLY the enabled protocols' ports.
+#   7. Render client subscriptions and FETCH them to the operator's ./out/subscriptions/.
+#
+# Key-handling invariant: REALITY PRIVATE keys, client UUIDs, and all server-side passwords NEVER
+# leave the node. Only the REALITY PUBLIC key and the rendered per-client subscriptions are fetched.
+---
+# ---------------------------------------------------------------------------
+# 0. Preconditions — fail closed on unverified pins, unsupported arch, or placeholders.
+# ---------------------------------------------------------------------------
+- name: Assert architecture is supported by an upstream sing-box asset
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in singbox_arch_key
+    fail_msg: >-
+      No pinned sing-box asset for architecture '{{ ansible_facts['architecture'] }}'.
+      Supported: {{ singbox_arch_key.keys() | list }}.
+
+- name: Assert required operator variables are set (fail closed on the .example sentinels)
+  ansible.builtin.assert:
+    that:
+      - donor_host is defined and donor_host | length > 0 and donor_host != 'donor.example.com'
+      - donor_sni is defined and donor_sni | length > 0 and donor_sni != 'donor.example.com'
+      - node_address is defined and node_address | length > 0 and node_address != 'NODE_PUBLIC_IP'
+      - client_names is defined and (client_names | length) > 0
+    fail_msg: >-
+      Set real values in group_vars/all.yml before deploying. donor_host/donor_sni must be a real
+      external donor (not the 'donor.example.com' placeholder), node_address must be this node's
+      reachability address (not the 'NODE_PUBLIC_IP' placeholder), and client_names must be a
+      non-empty list. These are not secrets; only the donor selection and addressing.
+
+- name: Assert at least one sing-box protocol is enabled
+  ansible.builtin.assert:
+    that:
+      - >-
+        (enable_vless_reality_vision | bool) or (enable_vless_reality_grpc | bool)
+        or (enable_vless_reality_xhttp | bool) or (enable_hysteria2 | bool)
+        or (enable_tuic | bool) or (enable_ss2022 | bool) or (enable_shadowtls | bool)
+        or (enable_trojan | bool)
+    fail_msg: >-
+      No sing-box protocol is enabled. Set at least one enable_* toggle (the default is
+      enable_vless_reality_vision: true). AmneziaWG is a separate, non-sing-box path.
+
+- name: Resolve per-architecture sing-box asset + checksum
+  ansible.builtin.set_fact:
+    _sb_arch: "{{ singbox_arch_key[ansible_facts['architecture']] }}"
+    _sb_dir: "sing-box-{{ singbox_version | regex_replace('^v', '') }}-linux-{{ singbox_arch_key[ansible_facts['architecture']] }}"
+    _sb_asset: "sing-box-{{ singbox_version | regex_replace('^v', '') }}-linux-{{ singbox_arch_key[ansible_facts['architecture']] }}.tar.gz"
+    _sb_sha256: "{{ singbox_sha256[singbox_arch_key[ansible_facts['architecture']]] }}"
+
+- name: Assert the sing-box version pin meets the minimum (>= 1.11.x)
+  ansible.builtin.assert:
+    that:
+      - (singbox_version | regex_replace('^v', '')) is version('1.11.0', '>=', version_type='loose')
+    fail_msg: "singbox_version must be >= 1.11.x (got {{ singbox_version }})."
+
+- name: Assert the sing-box checksum has been recorded (fail closed on placeholders)
+  ansible.builtin.assert:
+    that:
+      - _sb_sha256 is match('^[0-9a-fA-F]{64}$')
+    fail_msg: >-
+      singbox_sha256.{{ _sb_arch }} is not a 64-char SHA256. Record the real checksum from the
+      {{ singbox_version }} release for asset '{{ _sb_asset }}' before deploying.
+
+- name: Install runtime dependencies (jq for render fallback, openssl for keys/passwords/certs, tar, ca-certs)
+  ansible.builtin.apt:
+    name:
+      - jq
+      - openssl
+      - tar
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---------------------------------------------------------------------------
+# 1. System user, directories.
+# ---------------------------------------------------------------------------
+- name: Create the sing-box system group
+  ansible.builtin.group:
+    name: "{{ singbox_run_group }}"
+    system: true
+
+- name: Create the sing-box system user (no shell, no home login)
+  ansible.builtin.user:
+    name: "{{ singbox_run_user }}"
+    group: "{{ singbox_run_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create sing-box config + tooling directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0750"
+  loop:
+    - "{{ singbox_etc_dir }}"
+    - "{{ singbox_tooling_dir }}"
+
+# The state dir holds the root-only identity.json AND a few service-readable subdirs (tls/, run/).
+# Mode 0710 (root:sing-box) lets the service GROUP traverse into known sub-paths (it cannot list the
+# directory or read identity.json, which stays 0600 root:root). This keeps every per-node secret in
+# one place while still letting the unprivileged service reach its certs and working directory.
+- name: Create the state directory (root-owned; group-traversable for the service)
+  ansible.builtin.file:
+    path: "{{ singbox_state_dir }}"
+    state: directory
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0710"
+
+- name: Create the writable runtime working directory (service-owned)
+  ansible.builtin.file:
+    path: "{{ singbox_state_dir }}/run"
+    state: directory
+    owner: "{{ singbox_run_user }}"
+    group: "{{ singbox_run_group }}"
+    mode: "0750"
+
+# ---------------------------------------------------------------------------
+# 2. Download + verify + install the pinned sing-box release.
+# ---------------------------------------------------------------------------
+- name: Check the currently installed sing-box version (if any)
+  ansible.builtin.command:
+    cmd: "{{ singbox_bin_path }} version"
+  register: _sb_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install the pinned sing-box release
+  when: (singbox_version | regex_replace('^v', '')) not in (_sb_installed.stdout | default(''))
+  block:
+    - name: Create a temporary download workspace
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: singbox-dl
+      register: _sb_tmp
+
+    - name: Download the pinned sing-box release tarball (checksum-verified)
+      ansible.builtin.get_url:
+        url: "{{ singbox_download_base }}/{{ singbox_version }}/{{ _sb_asset }}"
+        dest: "{{ _sb_tmp.path }}/{{ _sb_asset }}"
+        checksum: "sha256:{{ _sb_sha256 }}"
+        mode: "0640"
+
+    - name: Unpack the sing-box release
+      ansible.builtin.unarchive:
+        src: "{{ _sb_tmp.path }}/{{ _sb_asset }}"
+        dest: "{{ _sb_tmp.path }}"
+        remote_src: true
+
+    - name: Install the sing-box binary to /usr/local/bin
+      ansible.builtin.copy:
+        src: "{{ _sb_tmp.path }}/{{ _sb_dir }}/sing-box"
+        dest: "{{ singbox_bin_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart sing-box
+
+  always:
+    - name: Remove the temporary download workspace
+      ansible.builtin.file:
+        path: "{{ _sb_tmp.path }}"
+        state: absent
+      when: _sb_tmp.path is defined
+
+# ---------------------------------------------------------------------------
+# 3. Copy the Mycelium control tooling + sing-box config template to the node.
+# ---------------------------------------------------------------------------
+- name: Detect whether the control tooling is present on the control host
+  ansible.builtin.stat:
+    path: "{{ singbox_control_tooling_src }}"
+  delegate_to: localhost
+  become: false
+  register: _control_src
+
+- name: Copy the Mycelium control tooling to the node
+  ansible.builtin.copy:
+    src: "{{ singbox_control_tooling_src }}"
+    dest: "{{ singbox_tooling_dir }}/control/"
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0750"
+  when: _control_src.stat.exists
+
+- name: Detect whether a prebuilt myceliumctl supporting the singbox engine is present
+  ansible.builtin.stat:
+    path: "{{ singbox_tooling_dir }}/control/myceliumctl"
+  register: _myceliumctl
+
+- name: Render the sing-box config template to the node (used by the myceliumctl engine path)
+  ansible.builtin.template:
+    src: config.template.json
+    dest: "{{ singbox_tooling_dir }}/{{ singbox_config_template_name }}"
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0640"
+  vars:
+    # The template references _identity; on this copy step it is not yet assembled. Provide an empty
+    # skeleton so the template renders as a structural reference (the real values are injected at
+    # step 5). This copy is a convenience artefact for the future myceliumctl --engine singbox path.
+    _identity:
+      reality: { private_key: "SENTINEL", public_key: "SENTINEL" }
+      short_ids: ["SENTINEL"]
+      clients: {}
+      passwords:
+        hysteria2: {}
+        tuic: {}
+        ss2022: {}
+        ss2022_server: "SENTINEL"
+        shadowtls: {}
+        shadowtls_ss_server: "SENTINEL"
+        trojan: {}
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 4. Generate identity material ONCE (idempotent), for the ENABLED protocols only.
+#    Stored in the root-only state dir. Re-runs reuse existing material so keys/passwords do not
+#    rotate on every deploy (rotation is an explicit operator action — delete the state file).
+# ---------------------------------------------------------------------------
+- name: Look for previously generated identity state
+  ansible.builtin.stat:
+    path: "{{ singbox_state_dir }}/identity.json"
+  register: _identity_state
+
+- name: Generate REALITY keypair, client UUIDs, shortIds and per-protocol passwords (first run only)
+  when: not _identity_state.stat.exists
+  block:
+    - name: Generate the REALITY x25519 keypair (audited sing-box built-in)
+      ansible.builtin.command:
+        cmd: "{{ singbox_bin_path }} generate reality-keypair"
+      register: _reality_keypair
+      changed_when: true
+      no_log: true
+
+    - name: Parse the REALITY private/public key from "sing-box generate reality-keypair" output
+      ansible.builtin.set_fact:
+        # Output is two lines: "PrivateKey: ..." / "PublicKey: ..." (match case-insensitively).
+        _reality_private: >-
+          {{ (_reality_keypair.stdout_lines
+              | select('search', '(?i)private')
+              | map('regex_replace', '^.*?:\s*', '')
+              | list | first) }}
+        _reality_public: >-
+          {{ (_reality_keypair.stdout_lines
+              | select('search', '(?i)public')
+              | map('regex_replace', '^.*?:\s*', '')
+              | list | first) }}
+      no_log: true
+
+    - name: Generate a UUID per client name (audited sing-box built-in)
+      ansible.builtin.command:
+        cmd: "{{ singbox_bin_path }} generate uuid"
+      register: _client_uuid_cmds
+      changed_when: true
+      loop: "{{ client_names }}"
+      no_log: true
+
+    - name: Generate REALITY shortIds (openssl rand -hex 8)
+      ansible.builtin.command:
+        cmd: "openssl rand -hex 8"
+      register: _shortid_cmds
+      changed_when: true
+      loop: "{{ range(0, shortid_count | int) | list }}"
+      no_log: true
+
+    # One base64 password per (client x password-using protocol), plus two server-wide SS-2022
+    # PSKs. openssl rand -base64 32 yields a 256-bit secret suitable as a password. No custom crypto.
+    - name: Generate per-client protocol passwords (openssl rand -base64 32)
+      ansible.builtin.command:
+        cmd: "openssl rand -base64 32"
+      register: _pw_cmds
+      changed_when: true
+      loop: "{{ client_names | product(_pw_protocols) | list }}"
+      loop_control:
+        label: "{{ item[1] }}:{{ item[0] }}"
+      vars:
+        _pw_protocols: ["hysteria2", "tuic", "ss2022", "shadowtls", "trojan"]
+      no_log: true
+
+    - name: Generate the two server-wide Shadowsocks-2022 PSKs (openssl rand -base64 32)
+      ansible.builtin.command:
+        cmd: "openssl rand -base64 32"
+      register: _server_pw_cmds
+      changed_when: true
+      loop: ["ss2022_server", "shadowtls_ss_server"]
+      no_log: true
+
+    - name: "Assemble the per-client password map (protocol then client to password)"
+      ansible.builtin.set_fact:
+        _pw_by_proto: >-
+          {{ dict(["hysteria2", "tuic", "ss2022", "shadowtls", "trojan"] | zip(
+               [
+                 dict(_pw_cmds.results | selectattr('item.1', 'eq', 'hysteria2') | map(attribute='item.0') | list
+                      | zip(_pw_cmds.results | selectattr('item.1', 'eq', 'hysteria2') | map(attribute='stdout') | map('trim') | list)),
+                 dict(_pw_cmds.results | selectattr('item.1', 'eq', 'tuic') | map(attribute='item.0') | list
+                      | zip(_pw_cmds.results | selectattr('item.1', 'eq', 'tuic') | map(attribute='stdout') | map('trim') | list)),
+                 dict(_pw_cmds.results | selectattr('item.1', 'eq', 'ss2022') | map(attribute='item.0') | list
+                      | zip(_pw_cmds.results | selectattr('item.1', 'eq', 'ss2022') | map(attribute='stdout') | map('trim') | list)),
+                 dict(_pw_cmds.results | selectattr('item.1', 'eq', 'shadowtls') | map(attribute='item.0') | list
+                      | zip(_pw_cmds.results | selectattr('item.1', 'eq', 'shadowtls') | map(attribute='stdout') | map('trim') | list)),
+                 dict(_pw_cmds.results | selectattr('item.1', 'eq', 'trojan') | map(attribute='item.0') | list
+                      | zip(_pw_cmds.results | selectattr('item.1', 'eq', 'trojan') | map(attribute='stdout') | map('trim') | list))
+               ]
+             )) }}
+      no_log: true
+
+    - name: Assemble the identity document
+      ansible.builtin.set_fact:
+        _identity:
+          version: 1
+          generated_at: "{{ ansible_date_time.iso8601 | default('') }}"
+          reality:
+            private_key: "{{ _reality_private | trim }}"
+            public_key: "{{ _reality_public | trim }}"
+          short_ids: "{{ _shortid_cmds.results | map(attribute='stdout') | map('trim') | list }}"
+          clients: >-
+            {{ dict(client_names | zip(_client_uuid_cmds.results
+                | map(attribute='stdout') | map('trim') | list)) }}
+          passwords: >-
+            {{ _pw_by_proto | combine({
+                 'ss2022_server': (_server_pw_cmds.results | selectattr('item', 'eq', 'ss2022_server') | map(attribute='stdout') | map('trim') | list | first),
+                 'shadowtls_ss_server': (_server_pw_cmds.results | selectattr('item', 'eq', 'shadowtls_ss_server') | map(attribute='stdout') | map('trim') | list | first)
+               }) }}
+      no_log: true
+
+    - name: Persist the identity document (root-only)
+      ansible.builtin.copy:
+        dest: "{{ singbox_state_dir }}/identity.json"
+        content: "{{ _identity | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+# ---------------------------------------------------------------------------
+# 4b. Reconcile the client roster on RE-RUN (add/revoke without rotating REALITY keys).
+#     Adds UUIDs + passwords for newly added client_names; drops clients no longer listed.
+# ---------------------------------------------------------------------------
+- name: Load the current identity document
+  ansible.builtin.slurp:
+    src: "{{ singbox_state_dir }}/identity.json"
+  register: _identity_raw
+  no_log: true
+
+- name: Decode the current identity document
+  ansible.builtin.set_fact:
+    _identity: "{{ _identity_raw.content | b64decode | from_json }}"
+  no_log: true
+
+- name: Determine clients to add (in client_names but missing a UUID)
+  ansible.builtin.set_fact:
+    _clients_to_add: "{{ client_names | difference(_identity.clients.keys() | list) }}"
+
+- name: Generate UUIDs for newly added clients
+  ansible.builtin.command:
+    cmd: "{{ singbox_bin_path }} generate uuid"
+  register: _added_uuid_cmds
+  changed_when: true
+  loop: "{{ _clients_to_add }}"
+  when: _clients_to_add | length > 0
+  no_log: true
+
+- name: Generate passwords for newly added clients (openssl rand -base64 32)
+  ansible.builtin.command:
+    cmd: "openssl rand -base64 32"
+  register: _added_pw_cmds
+  changed_when: true
+  loop: "{{ _clients_to_add | product(['hysteria2', 'tuic', 'ss2022', 'shadowtls', 'trojan']) | list }}"
+  loop_control:
+    label: "{{ item[1] }}:{{ item[0] }}"
+  when: _clients_to_add | length > 0
+  no_log: true
+
+- name: Merge added clients (UUIDs) and revoke clients no longer listed
+  ansible.builtin.set_fact:
+    _identity: >-
+      {{ _identity | combine({
+        'clients': (
+          _identity.clients
+          | combine(dict(_clients_to_add | zip(
+              (_added_uuid_cmds.results | default([])) | map(attribute='stdout') | map('trim') | list
+            )))
+        ) | dict2items | selectattr('key', 'in', client_names) | items2dict
+      }, recursive=True) }}
+  no_log: true
+
+- name: Merge added clients' passwords and revoke removed clients per protocol
+  ansible.builtin.set_fact:
+    _identity: >-
+      {{ _identity | combine({
+        'passwords': ((_identity.passwords | default({})) | combine(
+          dict(['hysteria2', 'tuic', 'ss2022', 'shadowtls', 'trojan'] | zip([
+            ((_identity.passwords.hysteria2 | default({})) | combine(dict(_clients_to_add | zip((_added_pw_cmds.results | default([])) | selectattr('item.1', 'eq', 'hysteria2') | map(attribute='stdout') | map('trim') | list)))) | dict2items | selectattr('key', 'in', client_names) | items2dict,
+            ((_identity.passwords.tuic      | default({})) | combine(dict(_clients_to_add | zip((_added_pw_cmds.results | default([])) | selectattr('item.1', 'eq', 'tuic')      | map(attribute='stdout') | map('trim') | list)))) | dict2items | selectattr('key', 'in', client_names) | items2dict,
+            ((_identity.passwords.ss2022    | default({})) | combine(dict(_clients_to_add | zip((_added_pw_cmds.results | default([])) | selectattr('item.1', 'eq', 'ss2022')    | map(attribute='stdout') | map('trim') | list)))) | dict2items | selectattr('key', 'in', client_names) | items2dict,
+            ((_identity.passwords.shadowtls | default({})) | combine(dict(_clients_to_add | zip((_added_pw_cmds.results | default([])) | selectattr('item.1', 'eq', 'shadowtls') | map(attribute='stdout') | map('trim') | list)))) | dict2items | selectattr('key', 'in', client_names) | items2dict,
+            ((_identity.passwords.trojan    | default({})) | combine(dict(_clients_to_add | zip((_added_pw_cmds.results | default([])) | selectattr('item.1', 'eq', 'trojan')    | map(attribute='stdout') | map('trim') | list)))) | dict2items | selectattr('key', 'in', client_names) | items2dict
+          ]))
+        ))
+      }, recursive=True) }}
+  no_log: true
+
+- name: Persist the reconciled identity document
+  ansible.builtin.copy:
+    dest: "{{ singbox_state_dir }}/identity.json"
+    content: "{{ _identity | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 4c. Self-signed TLS pairs for the protocols that terminate TLS with a real cert
+#     (Hysteria2, TUIC, Trojan). REALITY-based VLESS does NOT use these — it borrows the donor
+#     handshake. Generated via "openssl req" (audited; no custom crypto), once, root-only.
+# ---------------------------------------------------------------------------
+- name: Create the on-node TLS material directory (service-readable)
+  ansible.builtin.file:
+    path: "{{ singbox_state_dir }}/tls"
+    state: directory
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0750"
+
+- name: Generate a self-signed TLS pair per TLS-terminating enabled protocol
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes
+      -keyout {{ singbox_state_dir }}/tls/{{ item }}.key
+      -out {{ singbox_state_dir }}/tls/{{ item }}.crt
+      -days 3650 -subj "/CN={{ donor_sni }}"
+    creates: "{{ singbox_state_dir }}/tls/{{ item }}.crt"
+  loop: "{{ ['hysteria2', 'tuic', 'trojan'] | select('in', _tls_enabled_protocols) | list }}"
+  vars:
+    _tls_enabled_protocols: >-
+      {{ (['hysteria2'] if enable_hysteria2 | bool else [])
+       + (['tuic'] if enable_tuic | bool else [])
+       + (['trojan'] if enable_trojan | bool else []) }}
+  no_log: true
+
+- name: Set ownership/permissions on the generated TLS material (service-readable, not writable)
+  ansible.builtin.file:
+    path: "{{ singbox_state_dir }}/tls"
+    state: directory
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0750"
+    recurse: true
+
+# ---------------------------------------------------------------------------
+# 5. Render config.json — prefer myceliumctl (engine singbox); else a Jinja fallback.
+# ---------------------------------------------------------------------------
+- name: Write the render input (server params + enabled-protocol map) to a root-only temp file
+  ansible.builtin.copy:
+    dest: "{{ singbox_state_dir }}/render-input.json"
+    content: |
+      {{ {
+        'engine': 'singbox',
+        'donor_host': donor_host,
+        'donor_sni': donor_sni,
+        'reality': _identity.reality,
+        'short_ids': _identity.short_ids,
+        'clients': _identity.clients,
+        'passwords': _identity.passwords,
+        'protocols': {
+          'vless_reality_vision': { 'enabled': enable_vless_reality_vision | bool, 'port': singbox_port_vless_vision | int },
+          'vless_reality_grpc':   { 'enabled': enable_vless_reality_grpc   | bool, 'port': singbox_port_vless_grpc   | int },
+          'vless_reality_xhttp':  { 'enabled': enable_vless_reality_xhttp  | bool, 'port': singbox_port_vless_xhttp  | int },
+          'hysteria2':            { 'enabled': enable_hysteria2            | bool, 'port': singbox_port_hysteria2    | int },
+          'tuic':                 { 'enabled': enable_tuic                 | bool, 'port': singbox_port_tuic         | int },
+          'ss2022':               { 'enabled': enable_ss2022              | bool, 'port': singbox_port_ss2022       | int, 'method': singbox_ss2022_method },
+          'shadowtls':            { 'enabled': enable_shadowtls            | bool, 'port': singbox_port_shadowtls    | int },
+          'trojan':               { 'enabled': enable_trojan              | bool, 'port': singbox_port_trojan       | int }
+        }
+      } | to_nice_json }}
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render config.json via myceliumctl (engine singbox) — preferred
+  ansible.builtin.command:
+    cmd: >-
+      {{ singbox_tooling_dir }}/control/myceliumctl render-server
+      --engine singbox
+      --input {{ singbox_state_dir }}/render-input.json
+      --out {{ singbox_config_path }}.tmp
+  register: _render_ctl
+  changed_when: true
+  failed_when: false
+  when: _myceliumctl.stat.exists
+  no_log: true
+
+# Jinja fallback: render the bundled sing-box template directly with the assembled identity. Used
+# whenever no myceliumctl is present OR the myceliumctl path did not produce the file (e.g. the
+# prebuilt tool predates the singbox engine).
+- name: Detect whether the myceliumctl render produced a config
+  ansible.builtin.stat:
+    path: "{{ singbox_config_path }}.tmp"
+  register: _ctl_render_out
+
+- name: Render config.json via the Jinja fallback (template -> tmp)
+  ansible.builtin.template:
+    src: config.template.json
+    dest: "{{ singbox_config_path }}.tmp"
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0640"
+  when: not (_ctl_render_out.stat.exists | default(false))
+  no_log: true
+
+- name: Validate the rendered config.json with "sing-box check"
+  ansible.builtin.command:
+    cmd: "{{ singbox_bin_path }} check -c {{ singbox_config_path }}.tmp"
+  changed_when: false
+
+- name: Promote the validated config.json into place
+  ansible.builtin.copy:
+    src: "{{ singbox_config_path }}.tmp"
+    dest: "{{ singbox_config_path }}"
+    remote_src: true
+    owner: root
+    group: "{{ singbox_run_group }}"
+    mode: "0640"
+  notify: Restart sing-box
+
+- name: Remove the temporary rendered config
+  ansible.builtin.file:
+    path: "{{ singbox_config_path }}.tmp"
+    state: absent
+
+# ---------------------------------------------------------------------------
+# 6. systemd unit — install, enable, start.
+# ---------------------------------------------------------------------------
+- name: Install the hardened sing-box systemd unit
+  ansible.builtin.template:
+    src: singbox.service.j2
+    dest: /etc/systemd/system/sing-box.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart sing-box
+
+# Open ONLY the ports of the enabled protocols (TCP and/or UDP). The hardening role opens SSH and
+# the primary VLESS+REALITY+Vision port (listen_port == singbox_port_vless_vision by default); this
+# task adds the remaining enabled protocols so the firewall surface matches exactly what is exposed.
+- name: Open the firewall for each enabled TCP protocol
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: tcp
+    comment: "mycelium sing-box {{ item.name }}"
+  loop: "{{ _singbox_tcp_ports }}"
+  loop_control:
+    label: "{{ item.name }}:{{ item.port }}/tcp"
+  vars:
+    _singbox_tcp_ports: >-
+      {{ ([{'name': 'vless-vision', 'port': singbox_port_vless_vision}] if enable_vless_reality_vision | bool else [])
+       + ([{'name': 'vless-grpc',   'port': singbox_port_vless_grpc}]   if enable_vless_reality_grpc   | bool else [])
+       + ([{'name': 'vless-xhttp',  'port': singbox_port_vless_xhttp}]  if enable_vless_reality_xhttp  | bool else [])
+       + ([{'name': 'ss2022',       'port': singbox_port_ss2022}]       if enable_ss2022              | bool else [])
+       + ([{'name': 'shadowtls',    'port': singbox_port_shadowtls}]    if enable_shadowtls            | bool else [])
+       + ([{'name': 'trojan',       'port': singbox_port_trojan}]       if enable_trojan              | bool else []) }}
+
+- name: Open the firewall for each enabled UDP protocol (QUIC)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: udp
+    comment: "mycelium sing-box {{ item.name }}"
+  loop: "{{ _singbox_udp_ports }}"
+  loop_control:
+    label: "{{ item.name }}:{{ item.port }}/udp"
+  vars:
+    _singbox_udp_ports: >-
+      {{ ([{'name': 'hysteria2', 'port': singbox_port_hysteria2}] if enable_hysteria2 | bool else [])
+       + ([{'name': 'tuic',      'port': singbox_port_tuic}]      if enable_tuic      | bool else [])
+       + ([{'name': 'ss2022',    'port': singbox_port_ss2022}]    if enable_ss2022    | bool else []) }}
+
+- name: Flush handlers so sing-box is (re)started before we render subscriptions
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start sing-box.service
+  ansible.builtin.systemd:
+    name: sing-box
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# ---------------------------------------------------------------------------
+# 7. Render client subscriptions on the node, then FETCH them to the operator's ./out/.
+#    Only the REALITY PUBLIC key and the per-client subscriptions leave the node.
+# ---------------------------------------------------------------------------
+- name: Create the on-node subscriptions output directory
+  ansible.builtin.file:
+    path: "{{ singbox_state_dir }}/subscriptions"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Render client subscriptions via myceliumctl (engine singbox) — preferred
+  ansible.builtin.command:
+    cmd: >-
+      {{ singbox_tooling_dir }}/control/myceliumctl render-client
+      --engine singbox
+      --input {{ singbox_state_dir }}/render-input.json
+      --identity {{ singbox_state_dir }}/identity.json
+      --node-address {{ node_address | quote }}
+      --out-dir {{ singbox_state_dir }}/subscriptions
+  register: _sub_ctl
+  changed_when: true
+  failed_when: false
+  when: _myceliumctl.stat.exists
+  no_log: true
+
+# Fallback: build a standard sing-box outbound JSON per client for each ENABLED protocol, with jq
+# reading the identity doc. One file per client aggregates that client's enabled-protocol outbounds.
+- name: Detect whether myceliumctl produced subscription files
+  ansible.builtin.find:
+    paths: "{{ singbox_state_dir }}/subscriptions"
+    patterns: "*.json,*.txt"
+  register: _sub_existing
+
+- name: Render per-client sing-box subscriptions via jq fallback
+  when: (_sub_existing.matched | default(0)) == 0
+  ansible.builtin.shell:
+    cmd: >-
+      set -euo pipefail;
+      ID={{ singbox_state_dir }}/identity.json;
+      ADDR={{ node_address | quote }};
+      SNI={{ donor_sni | quote }};
+      PBK=$(jq -r '.reality.public_key' "$ID");
+      SID=$(jq -r '.short_ids[0]' "$ID");
+      jq -r '.clients | to_entries[] | "\(.key)\t\(.value)"' "$ID"
+      | while IFS=$'\t' read -r name uuid; do
+          out={{ singbox_state_dir }}/subscriptions/"$name".singbox.json;
+          h2pw=$(jq -r --arg n "$name" '.passwords.hysteria2[$n] // empty' "$ID");
+          tuicpw=$(jq -r --arg n "$name" '.passwords.tuic[$n] // empty' "$ID");
+          sspw=$(jq -r --arg n "$name" '.passwords.ss2022[$n] // empty' "$ID");
+          stpw=$(jq -r --arg n "$name" '.passwords.shadowtls[$n] // empty' "$ID");
+          trpw=$(jq -r --arg n "$name" '.passwords.trojan[$n] // empty' "$ID");
+          ssserver=$(jq -r '.passwords.ss2022_server // empty' "$ID");
+          jq -n
+            --arg addr "$ADDR" --arg sni "$SNI" --arg pbk "$PBK" --arg sid "$SID"
+            --arg uuid "$uuid" --arg name "$name"
+            --arg h2pw "$h2pw" --arg tuicpw "$tuicpw" --arg sspw "$sspw"
+            --arg stpw "$stpw" --arg trpw "$trpw" --arg ssserver "$ssserver"
+            --argjson en_vision {{ (enable_vless_reality_vision | bool) | to_json }}
+            --argjson en_grpc {{ (enable_vless_reality_grpc | bool) | to_json }}
+            --argjson en_xhttp {{ (enable_vless_reality_xhttp | bool) | to_json }}
+            --argjson en_h2 {{ (enable_hysteria2 | bool) | to_json }}
+            --argjson en_tuic {{ (enable_tuic | bool) | to_json }}
+            --argjson en_ss {{ (enable_ss2022 | bool) | to_json }}
+            --argjson en_st {{ (enable_shadowtls | bool) | to_json }}
+            --argjson en_tr {{ (enable_trojan | bool) | to_json }}
+            --argjson p_vision {{ singbox_port_vless_vision | int }}
+            --argjson p_grpc {{ singbox_port_vless_grpc | int }}
+            --argjson p_xhttp {{ singbox_port_vless_xhttp | int }}
+            --argjson p_h2 {{ singbox_port_hysteria2 | int }}
+            --argjson p_tuic {{ singbox_port_tuic | int }}
+            --argjson p_ss {{ singbox_port_ss2022 | int }}
+            --argjson p_st {{ singbox_port_shadowtls | int }}
+            --argjson p_tr {{ singbox_port_trojan | int }}
+            --arg ssmethod {{ singbox_ss2022_method | quote }}
+            --arg sthandshake {{ singbox_shadowtls_handshake_server | quote }}
+            '
+            def reality_tls: { enabled: true, server_name: $sni, utls: { enabled: true, fingerprint: "chrome" }, reality: { enabled: true, public_key: $pbk, short_id: $sid } };
+            { outbounds: (
+                (if $en_vision then [ { type: "vless", tag: ("vless-vision-" + $name), server: $addr, server_port: $p_vision, uuid: $uuid, flow: "xtls-rprx-vision", tls: reality_tls } ] else [] end)
+              + (if $en_grpc   then [ { type: "vless", tag: ("vless-grpc-" + $name),   server: $addr, server_port: $p_grpc,   uuid: $uuid, tls: reality_tls, transport: { type: "grpc", service_name: "grpc" } } ] else [] end)
+              + (if $en_xhttp  then [ { type: "vless", tag: ("vless-xhttp-" + $name),  server: $addr, server_port: $p_xhttp,  uuid: $uuid, tls: reality_tls, transport: { type: "xhttp", path: "/xhttp" } } ] else [] end)
+              + (if $en_h2     then [ { type: "hysteria2", tag: ("hysteria2-" + $name), server: $addr, server_port: $p_h2, password: $h2pw, tls: { enabled: true, server_name: $sni, alpn: ["h3"], insecure: true } } ] else [] end)
+              + (if $en_tuic   then [ { type: "tuic", tag: ("tuic-" + $name), server: $addr, server_port: $p_tuic, uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: { enabled: true, server_name: $sni, alpn: ["h3"], insecure: true } } ] else [] end)
+              + (if $en_ss     then [ { type: "shadowsocks", tag: ("ss2022-" + $name), server: $addr, server_port: $p_ss, method: $ssmethod, password: ($ssserver + ":" + $sspw) } ] else [] end)
+              + (if $en_st     then [ { type: "shadowsocks", tag: ("shadowtls-" + $name), method: $ssmethod, password: $sspw, detour: ("shadowtls-out-" + $name) }, { type: "shadowtls", tag: ("shadowtls-out-" + $name), server: $addr, server_port: $p_st, version: 3, password: $stpw, tls: { enabled: true, server_name: $sthandshake, utls: { enabled: true, fingerprint: "chrome" } } } ] else [] end)
+              + (if $en_tr     then [ { type: "trojan", tag: ("trojan-" + $name), server: $addr, server_port: $p_tr, password: $trpw, tls: { enabled: true, server_name: $sni, insecure: true } } ] else [] end)
+              ) }
+            ' > "$out";
+        done
+    executable: /bin/bash
+  changed_when: true
+  no_log: true
+
+- name: Export the REALITY public key (clients need it; private key stays on node)
+  ansible.builtin.shell:
+    cmd: "jq -r '.reality.public_key' {{ singbox_state_dir }}/identity.json > {{ singbox_state_dir }}/reality_public_key.txt"
+    executable: /bin/bash
+  changed_when: false
+
+- name: Ensure the operator output directories exist on the control host
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ singbox_out_public_dir }}"
+    - "{{ singbox_out_subscriptions_dir }}"
+  delegate_to: localhost
+  become: false
+
+- name: List rendered subscription files on the node
+  ansible.builtin.find:
+    paths: "{{ singbox_state_dir }}/subscriptions"
+    patterns: "*.json,*.txt"
+  register: _sub_files
+
+- name: Fetch rendered subscriptions to the operator's ./out/subscriptions/
+  ansible.builtin.fetch:
+    src: "{{ item.path }}"
+    dest: "{{ singbox_out_subscriptions_dir }}/{{ inventory_hostname }}/"
+    flat: false
+  loop: "{{ _sub_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Fetch the REALITY public key to the operator's ./out/
+  ansible.builtin.fetch:
+    src: "{{ singbox_state_dir }}/reality_public_key.txt"
+    dest: "{{ singbox_out_public_dir }}/{{ inventory_hostname }}-reality_public_key.txt"
+    flat: true
+
+- name: Report where the operator can find the fetched artefacts
+  ansible.builtin.debug:
+    msg:
+      - "Client subscriptions: {{ singbox_out_subscriptions_dir }}/{{ inventory_hostname }}/"
+      - "REALITY public key:   {{ singbox_out_public_dir }}/{{ inventory_hostname }}-reality_public_key.txt"
+      - "REALITY private key, client UUIDs, and all server passwords remain ONLY on the node ({{ singbox_state_dir }}/identity.json, root 0600)."

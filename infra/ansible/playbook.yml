@@ -1,0 +1,79 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — node provisioning playbook.
+# Author: mindicator & silicon bags quartet
+#
+# Brings up a single persistent-private-network ingress node on a fresh Debian/Ubuntu VPS:
+#   1. hardening      — host firewall, automatic security updates, sysctl, optional fail2ban
+#   2. singbox        — PRIMARY engine: multi-protocol data plane (pinned, checksum-verified).
+#                       One server, many individually TOGGLEABLE transports — VLESS+REALITY in
+#                       three flavours (Vision/gRPC/XHTTP), Hysteria2, TUIC, Shadowsocks-2022,
+#                       ShadowTLS, Trojan. Runs when engine == "singbox" (the default).
+#   3. xray           — OPTIONAL alternative engine: VLESS + XTLS-Vision + REALITY (Xray-core).
+#                       Runs only when engine == "xray". Kept for operators who prefer that stack.
+#   4. amneziawg      — OPTIONAL separate NON-TLS / UDP path (obfuscated WireGuard). Independent of
+#                       whichever TLS engine is selected; self-gated by enable_amneziawg.
+#   5. caddy          — cover site that returns a genuine donor response to active probing
+#   6. observability  — node_exporter bound to localhost for node health
+#
+# Engine selection (group_vars `engine`): "singbox" (default, PRIMARY) or "xray" (alternative).
+# Exactly one TLS engine role runs; AmneziaWG is orthogonal and gated by its own toggle.
+#
+# Primary deploy path: "bring your own fresh Debian/Ubuntu VPS".
+#
+# Usage:
+#   ansible-playbook -i inventory.ini playbook.yml
+---
+- name: Provision Mycelium Phase 0 node
+  hosts: mycelium_nodes
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Assert this is a supported Debian-family distribution
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == 'Debian'
+        fail_msg: >-
+          This playbook targets Debian/Ubuntu (the 'bring your own fresh Debian/Ubuntu VPS'
+          path). Detected os_family={{ ansible_facts['os_family'] }}.
+        success_msg: "Detected supported distribution: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+
+    - name: Assert the selected engine is recognised
+      ansible.builtin.assert:
+        that:
+          - (engine | default('singbox')) in ['singbox', 'xray']
+        fail_msg: "engine must be 'singbox' (default, PRIMARY) or 'xray' (alternative); got '{{ engine | default('singbox') }}'."
+
+    - name: Refresh APT package index (cache valid for one hour)
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+  roles:
+    - role: hardening
+      tags: [hardening]
+
+    # PRIMARY engine (default). Runs when engine == 'singbox'.
+    - role: singbox
+      tags: [singbox, dataplane]
+      when: (engine | default('singbox')) == 'singbox'
+
+    # OPTIONAL alternative engine. Runs only when engine == 'xray'.
+    - role: xray
+      tags: [xray, dataplane]
+      when: (engine | default('singbox')) == 'xray'
+
+    # OPTIONAL separate non-TLS/UDP path (obfuscated WireGuard). Self-gated by enable_amneziawg;
+    # the explicit when keeps the role out of the run plan entirely when it is disabled.
+    - role: amneziawg
+      tags: [amneziawg, dataplane]
+      when: enable_amneziawg | default(false) | bool
+
+    - role: caddy
+      tags: [caddy]
+    - role: observability
+      tags: [observability]

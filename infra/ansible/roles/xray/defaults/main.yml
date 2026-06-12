@@ -1,0 +1,45 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — xray role defaults.
+# Author: mindicator & silicon bags quartet
+#
+# These map Ansible's architecture facts to upstream Xray release asset names and provide on-node
+# paths. Override via group_vars only if you know what you are doing.
+---
+# Upstream download base. The release tag (xray_version) is filled in by the role.
+xray_download_base: "https://github.com/XTLS/Xray-core/releases/download"
+
+# Map ansible_facts.architecture -> upstream Xray asset name. Xray ships per-arch zips.
+xray_asset_by_arch:
+  x86_64: "Xray-linux-64.zip"
+  aarch64: "Xray-linux-arm64-v8a.zip"
+
+# Map ansible_facts.architecture -> the key used in the xray_sha256 dict (group_vars).
+xray_arch_key:
+  x86_64: "amd64"
+  aarch64: "arm64"
+
+# On-node filesystem layout.
+xray_bin_path: "/usr/local/bin/xray"
+xray_etc_dir: "/usr/local/etc/xray"
+xray_config_path: "/usr/local/etc/xray/config.json"
+xray_state_dir: "/var/lib/mycelium"          # holds generated keys/uuids (root-only, 0700)
+xray_tooling_dir: "/usr/local/lib/mycelium"  # holds copied control/ tooling + dataplane template
+xray_run_user: "xray"
+xray_run_group: "xray"
+
+# Where the dataplane template and control tooling live in the repo (relative to playbook dir).
+# These are produced by sibling Mycelium components and copied to the node at deploy time.
+xray_dataplane_template_src: "../../nodes/dataplane/vless-reality/config.template.json"
+xray_control_tooling_src: "../../control/"
+
+# Operator output: rendered client subscriptions are fetched here on the control host.
+xray_out_subscriptions_dir: "./out/subscriptions"
+xray_out_public_dir: "./out"
+
+# Number of REALITY shortIds to generate (via "openssl rand -hex 8"); clients may use any one.
+# Safe role default so the role still runs if group_vars omits it (the .example sets 3).
+shortid_count: 3

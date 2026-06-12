@@ -1,0 +1,240 @@
+{#-
+Copyright © 2026 mindicator & silicon bags quartet.
+SPDX-License-Identifier: AGPL-3.0-or-later
+This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+later. See the LICENSE file in the repository root.
+
+Mycelium Phase 0 — sing-box (PRIMARY engine) server config template.
+Author: mindicator & silicon bags quartet
+
+This Jinja2 template renders a PURE sing-box JSON config (Jinja comment blocks like this one are
+stripped at render time — the output is valid JSON, no comments leak through). It is BOTH (a) copied
+to the node so a future "myceliumctl --engine singbox" can render against it, AND (b) the source
+rendered directly by this role's Jinja fallback today.
+
+Only the ENABLED protocols (enable_* toggles) produce an inbound. Every cryptographic value comes
+from audited built-ins, generated on the node and injected via the _identity fact:
+  * REALITY keypair + shortIds  -> "sing-box generate reality-keypair" + "openssl rand -hex"
+  * client UUIDs                -> "sing-box generate uuid"
+  * SS-2022 / Trojan / ShadowTLS / TUIC / Hysteria2 passwords -> "openssl rand -base64"
+No custom cryptography (ADR-0002); private key material never leaves the node.
+
+The REALITY `handshake`/`reality.handshake.server` forwards a borrowed TLS handshake (and any
+active probe) to the real EXTERNAL donor (donor_host:443), so a probe receives a genuine response
+from a site the operator does not control (ARCHITECTURE §Layer 1).
+-#}
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "inbounds": [
+{%- set ns = namespace(first=true) -%}
+
+{%- macro sep() -%}
+{%- if ns.first -%}{%- set ns.first = false -%}{%- else -%},{%- endif -%}
+{%- endmacro -%}
+
+{%- set reality_clients = _identity.clients | dict2items -%}
+
+{# (1) VLESS + REALITY + XTLS-Vision (TCP) — primary transport #}
+{%- if enable_vless_reality_vision | bool %}{{ sep() }}
+    {
+      "type": "vless",
+      "tag": "vless-vision-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_vless_vision | int }},
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "uuid": {{ c.value | to_json }}, "flow": "xtls-rprx-vision" }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": {{ donor_sni | to_json }},
+        "reality": {
+          "enabled": true,
+          "handshake": { "server": {{ donor_host | to_json }}, "server_port": 443 },
+          "private_key": {{ _identity.reality.private_key | to_json }},
+          "short_id": {{ _identity.short_ids | to_json }}
+        }
+      }
+    }
+{%- endif %}
+
+{# (2) VLESS + REALITY + gRPC #}
+{%- if enable_vless_reality_grpc | bool %}{{ sep() }}
+    {
+      "type": "vless",
+      "tag": "vless-grpc-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_vless_grpc | int }},
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "uuid": {{ c.value | to_json }} }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": {{ donor_sni | to_json }},
+        "reality": {
+          "enabled": true,
+          "handshake": { "server": {{ donor_host | to_json }}, "server_port": 443 },
+          "private_key": {{ _identity.reality.private_key | to_json }},
+          "short_id": {{ _identity.short_ids | to_json }}
+        }
+      },
+      "transport": { "type": "grpc", "service_name": "grpc" }
+    }
+{%- endif %}
+
+{# (3) VLESS + REALITY + XHTTP #}
+{%- if enable_vless_reality_xhttp | bool %}{{ sep() }}
+    {
+      "type": "vless",
+      "tag": "vless-xhttp-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_vless_xhttp | int }},
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "uuid": {{ c.value | to_json }} }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": {{ donor_sni | to_json }},
+        "reality": {
+          "enabled": true,
+          "handshake": { "server": {{ donor_host | to_json }}, "server_port": 443 },
+          "private_key": {{ _identity.reality.private_key | to_json }},
+          "short_id": {{ _identity.short_ids | to_json }}
+        }
+      },
+      "transport": { "type": "xhttp", "path": "/xhttp" }
+    }
+{%- endif %}
+
+{# (4) Hysteria2 (QUIC/UDP) — needs a TLS cert; uses the node's self-signed pair generated on host #}
+{%- if enable_hysteria2 | bool %}{{ sep() }}
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_hysteria2 | int }},
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "password": {{ _identity.passwords.hysteria2[c.key] | to_json }} }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ],
+      "tls": {
+        "enabled": true,
+        "alpn": [ "h3" ],
+        "certificate_path": "{{ singbox_state_dir }}/tls/hysteria2.crt",
+        "key_path": "{{ singbox_state_dir }}/tls/hysteria2.key"
+      }
+    }
+{%- endif %}
+
+{# (5) TUIC v5 (QUIC/UDP) #}
+{%- if enable_tuic | bool %}{{ sep() }}
+    {
+      "type": "tuic",
+      "tag": "tuic-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_tuic | int }},
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "uuid": {{ c.value | to_json }}, "password": {{ _identity.passwords.tuic[c.key] | to_json }} }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ],
+      "congestion_control": "bbr",
+      "tls": {
+        "enabled": true,
+        "alpn": [ "h3" ],
+        "certificate_path": "{{ singbox_state_dir }}/tls/tuic.crt",
+        "key_path": "{{ singbox_state_dir }}/tls/tuic.key"
+      }
+    }
+{%- endif %}
+
+{# (6) Shadowsocks-2022 AEAD — a single multi-user inbound (NOT legacy plain Shadowsocks) #}
+{%- if enable_ss2022 | bool %}{{ sep() }}
+    {
+      "type": "shadowsocks",
+      "tag": "ss2022-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_ss2022 | int }},
+      "method": {{ singbox_ss2022_method | to_json }},
+      "password": {{ _identity.passwords.ss2022_server | to_json }},
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "password": {{ _identity.passwords.ss2022[c.key] | to_json }} }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ]
+    }
+{%- endif %}
+
+{# (7) ShadowTLS v3 wrapping Shadowsocks. ShadowTLS terminates the outer TLS layer and forwards the
+      inner stream to a detached Shadowsocks-2022 inbound bound to loopback. #}
+{%- if enable_shadowtls | bool %}{{ sep() }}
+    {
+      "type": "shadowtls",
+      "tag": "shadowtls-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_shadowtls | int }},
+      "version": 3,
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "password": {{ _identity.passwords.shadowtls[c.key] | to_json }} }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ],
+      "handshake": {
+        "server": {{ singbox_shadowtls_handshake_server | to_json }},
+        "server_port": {{ singbox_shadowtls_handshake_port | int }}
+      },
+      "strict_mode": true,
+      "detour": "shadowtls-ss-in"
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "shadowtls-ss-in",
+      "listen": "127.0.0.1",
+      "network": "tcp",
+      "method": {{ singbox_ss2022_method | to_json }},
+      "password": {{ _identity.passwords.shadowtls_ss_server | to_json }}
+    }
+{%- endif %}
+
+{# (8) Trojan over TLS (optional) #}
+{%- if enable_trojan | bool %}{{ sep() }}
+    {
+      "type": "trojan",
+      "tag": "trojan-in",
+      "listen": "::",
+      "listen_port": {{ singbox_port_trojan | int }},
+      "users": [
+{%- for c in reality_clients %}
+        { "name": {{ c.key | to_json }}, "password": {{ _identity.passwords.trojan[c.key] | to_json }} }{{ "," if not loop.last else "" }}
+{%- endfor %}
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": {{ donor_sni | to_json }},
+        "certificate_path": "{{ singbox_state_dir }}/tls/trojan.crt",
+        "key_path": "{{ singbox_state_dir }}/tls/trojan.key"
+      }
+    }
+{%- endif %}
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      { "ip_is_private": true, "outbound": "block" },
+      { "protocol": "bittorrent", "outbound": "block" }
+    ],
+    "final": "direct"
+  }
+}

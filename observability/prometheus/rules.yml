@@ -1,0 +1,204 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — Prometheus alerting rules.
+# Author: mindicator & silicon bags quartet
+#
+# Neutral wording only: these alerts describe REACHABILITY and HANDSHAKE HEALTH, never anything
+# country-specific. A sustained drop in handshake success is treated as POSSIBLE NETWORK
+# INTERFERENCE and points the operator at the rotate-ip-as runbook. In Phase 0 the response is
+# manual; the same signals are the inputs the Phase-2 adaptation layer will consume to automate
+# transport / port / SNI / IP / AS rotation (see docs/ARCHITECTURE.md Layer 2).
+
+groups:
+  # ===========================================================================
+  # Liveness — is the node and its data-plane process answering at all.
+  # ===========================================================================
+  - name: mycelium.liveness
+    rules:
+      - alert: NodeDown
+        # node_exporter target is unreachable: either the host is down, or its loopback
+        # exporter / SSH tunnel to the control host has dropped.
+        expr: up{job="node_exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: node
+        annotations:
+          summary: "Node {{ $labels.instance }} is not reporting host metrics"
+          description: >-
+            node_exporter for {{ $labels.instance }} has been unreachable for over 2 minutes.
+            The host may be down, or the loopback metrics tunnel to the control host has dropped.
+            Confirm the node is alive before assuming network interference.
+          runbook: "docs/runbooks/deploy-node.md"
+
+      - alert: DataPlaneDown
+        # Engine-agnostic data-plane liveness. The dataplane-stats exporter is the proxy for
+        # "is the data-plane process answering". It reads the PRIMARY engine's local stats surface
+        # (sing-box clash_api on 127.0.0.1:9090) — or, behind the OPTIONAL engine, the Xray stats
+        # API — and re-exposes counters on a loopback port (127.0.0.1:9550) scraped via the tunnel.
+        # If this exporter is unreachable while node_exporter for the same node is UP, the host is
+        # alive but the data-plane service (or its local stats surface) is not — a process-level
+        # fault, not a network event. The `engine` label (singbox|xray) records which engine runs.
+        expr: up{job="dataplane_stats"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: dataplane
+        annotations:
+          summary: "Data plane on {{ $labels.instance }} is not answering"
+          description: >-
+            The dataplane-stats exporter for {{ $labels.instance }} (engine
+            {{ $labels.engine }}) has been unreachable for over 2 minutes. If NodeDown is NOT also
+            firing for this node, the host is up but the data-plane process or its local stats
+            surface is down — restart and inspect the service rather than rotating IP/AS.
+          runbook: "docs/runbooks/deploy-node.md"
+
+      - alert: SingBoxDown
+        # Direct liveness for the PRIMARY engine via its node-side systemd-textfile health metric.
+        # node_exporter's textfile collector exports a per-unit `mycelium_dataplane_unit_active`
+        # gauge from the host (1 = the sing-box.service unit is active, 0 = not). This catches a
+        # crashed/stopped service even if the stats exporter is itself unhealthy. Only meaningful
+        # for nodes running the primary engine (engine="singbox").
+        expr: mycelium_dataplane_unit_active{engine="singbox"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: dataplane
+          engine: singbox
+        annotations:
+          summary: "sing-box (primary engine) on {{ $labels.instance }} is not active"
+          description: >-
+            The sing-box.service unit on {{ $labels.instance }} is reporting not-active via the
+            node-side systemd-textfile health metric. If NodeDown is NOT also firing, the host is
+            up but the primary data-plane service has stopped or crashed — restart and inspect
+            sing-box.service rather than rotating IP/AS.
+          runbook: "docs/runbooks/deploy-node.md"
+
+      # OPTIONAL ENGINE — only meaningful on nodes that run the OPTIONAL Xray alternative instead
+      # of the primary engine. Leave commented unless a node is deployed with engine="xray"; the
+      # engine-agnostic DataPlaneDown above already covers data-plane liveness for either engine.
+      # - alert: XrayDown
+      #   expr: mycelium_dataplane_unit_active{engine="xray"} == 0
+      #   for: 2m
+      #   labels:
+      #     severity: critical
+      #     component: dataplane
+      #     engine: xray
+      #   annotations:
+      #     summary: "Xray (optional engine) on {{ $labels.instance }} is not active"
+      #     description: >-
+      #       The xray.service unit on {{ $labels.instance }} is reporting not-active via the
+      #       node-side systemd-textfile health metric. If NodeDown is NOT also firing, the host is
+      #       up but the optional Xray service has stopped — restart and inspect it rather than
+      #       rotating IP/AS.
+      #     runbook: "docs/runbooks/deploy-node.md"
+
+  # ===========================================================================
+  # Reachability & handshake health — the primary network-interference signal.
+  # ===========================================================================
+  - name: mycelium.reachability
+    rules:
+      - alert: HighHandshakeFailureRate
+        # Fraction of successful TLS-handshake probes to the node's public :443 over the last
+        # 10 minutes. A sustained drop below 50% means clients increasingly cannot complete the
+        # REALITY handshake — i.e. POSSIBLE NETWORK INTERFERENCE (DPI / active probing / RST
+        # injection) rather than a host fault. Treated as the trigger for IP/AS rotation.
+        expr: avg_over_time(probe_success{job="blackbox_handshake"}[10m]) < 0.5
+        for: 10m
+        labels:
+          severity: critical
+          component: reachability
+          signal: possible_network_interference
+        annotations:
+          summary: "Handshake success to {{ $labels.instance }} is degraded"
+          description: >-
+            Over the last 10 minutes fewer than half of the TLS-handshake probes to
+            {{ $labels.instance }} succeeded (10m mean
+            {{ printf "%.2f" $value }}). This is a possible network-interference event:
+            the handshake to the donor is no longer completing reliably from the probe vantage
+            point. Compare with the bare-TCP probe — if TCP still connects but TLS fails, the
+            interference is at the handshake layer; if TCP also fails, suspect AS-level blocking.
+            Per the rotate-ip-as runbook, prepare to rotate IP/AS (and, if needed, port / SNI /
+            donor). In Phase 0 this is manual; the Phase-2 adaptation layer will act on this same
+            signal automatically.
+          runbook: "docs/runbooks/rotate-ip-as.md"
+
+      - alert: NodeTCPUnreachable
+        # Bare TCP connect to :443 fails while TLS-handshake probes are also failing: the most
+        # likely shape of AS-level black-holing (the route to the node's autonomous system is cut
+        # wholesale — the packets never arrive). Distinct from a handshake-layer event so the
+        # operator can pick the right rotate-ip-as path.
+        expr: avg_over_time(probe_success{job="blackbox_tcp"}[10m]) < 0.5
+        for: 10m
+        labels:
+          severity: critical
+          component: reachability
+          signal: possible_as_level_blocking
+        annotations:
+          summary: "TCP reachability to {{ $labels.instance }}:443 is degraded"
+          description: >-
+            Over the last 10 minutes fewer than half of the bare-TCP connect probes to
+            {{ $labels.instance }} succeeded (10m mean {{ printf "%.2f" $value }}). If NodeDown is
+            NOT firing, the host is up but its IP/AS is likely being black-holed at the network
+            level. This points at IP/AS rotation rather than a service restart.
+          runbook: "docs/runbooks/rotate-ip-as.md"
+
+  # ===========================================================================
+  # Cover-site TLS certificate health — the donor handshake the node relays must stay valid.
+  # ===========================================================================
+  - name: mycelium.tls
+    rules:
+      - alert: TLSCertExpirySoon
+        # blackbox records the leaf-cert NotAfter as probe_ssl_earliest_cert_expiry (unix secs).
+        # Fire when under 14 days remain so the donor/cover certificate is renewed before clients
+        # start seeing handshake failures. Threshold is generous to leave room for a calm rotation.
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox_handshake"} - time()) < (14 * 24 * 3600)
+        for: 1h
+        labels:
+          severity: warning
+          component: tls
+        annotations:
+          summary: "TLS certificate seen at {{ $labels.instance }} expires soon"
+          description: >-
+            The TLS certificate observed at {{ $labels.instance }} expires in
+            {{ $value | humanizeDuration }}. An expired certificate breaks the handshake the node
+            relays and makes the endpoint trivially distinguishable. Renew (or rotate the
+            donor/cover) before expiry.
+          runbook: "docs/runbooks/deploy-node.md"
+
+      - alert: TLSCertExpired
+        # Already expired (or invalid NotAfter): hard failure, escalate.
+        expr: (probe_ssl_earliest_cert_expiry{job="blackbox_handshake"} - time()) <= 0
+        for: 5m
+        labels:
+          severity: critical
+          component: tls
+        annotations:
+          summary: "TLS certificate seen at {{ $labels.instance }} has expired"
+          description: >-
+            The TLS certificate observed at {{ $labels.instance }} has expired. The relayed
+            handshake is now broken and the endpoint is distinguishable. Renew or rotate the
+            donor/cover immediately.
+          runbook: "docs/runbooks/deploy-node.md"
+
+  # ===========================================================================
+  # Collector self-health — keep the operator from trusting a blind dashboard.
+  # ===========================================================================
+  - name: mycelium.monitoring
+    rules:
+      - alert: BlackboxExporterDown
+        expr: up{job="prometheus"} == 1 and absent(up{job="blackbox_handshake"})
+        for: 5m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: "No blackbox handshake probes are being collected"
+          description: >-
+            Prometheus is up but no blackbox handshake probe results are present. The
+            reachability signal (the main network-interference detector for Phase 0) is blind.
+            Check blackbox_exporter on the control host and targets/blackbox_handshake.json.
+          runbook: "observability/README.md"

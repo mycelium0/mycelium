@@ -1,0 +1,62 @@
+# ============================================================================
+# Mycelium commit message template.
+#
+# Activate locally:   git config commit.template docs/commit-template.txt
+#
+# Lines starting with '#' are comments and are stripped by git — delete the
+# skeleton below and fill in the real subject/body. The comment block itself
+# is not committed.
+#
+# FORMAT (development.md §6.2):
+#   The subject is ALWAYS a Conventional-Commits type-prefix line:
+#       type: short imperative subject
+#   Types: feat: fix: docs: refactor: test: chore: perf: ci:
+#   Example: "docs: clarify netem scenarios in netsim §7.3"
+#   The subject does NOT start with the project name and does NOT start with an
+#   RP/ADR id — the RP/ADR linkage goes in a TRAILER (below), never the subject,
+#   so a commit is never confused with the document it implements.
+#
+# RULES (development.md §1.3, §6.2 / contributing.md §1.2, §3):
+#   * EVERY architecturally-significant change is recorded in an RP or an ADR,
+#     and the implementing commit links to it with a trailer at the foot:
+#         Refs: RP-NNNN          (work that implements a Refactoring Proposal)
+#         Implements: ADR-NNNN   (the commit that lands an Architectural Decision)
+#     A change with no RP/ADR behind it is either trivial (type-prefix subject,
+#     no trailer) or it is missing its proposal — write the RP/ADR first.
+#   * Small, verifiable commits. One coherent step per commit; do NOT bundle
+#     several architectural shifts into one un-reviewable diff (§11.3 forbids
+#     it). Splitting beats squashing.
+#   * Author is always the operator, mindicator. Set the identity ONCE per clone
+#     so a plain `git commit` carries it (no --author flag, no email in docs):
+#         git config user.name  "mindicator"
+#         git config user.email "<your-operator-email>"
+#   * NO AI/tool/model attribution in commit messages or trailers.
+#     Do NOT include Co-authored-by lines for any AI, model, or code-generation
+#     tool. Documentation credit is carried at the doc level
+#     (mindicator & silicon bags quartet); it does not appear in git history.
+#     An AI-attribution footer is an audit-trail violation, not a style nit.
+#   * version-hygiene (§1.2): if this commit bumps a component __version__ /
+#     version constant, the SAME commit must update that component's README
+#     header and its CHANGELOG entry.
+#
+# Verification: write the ACTUAL command(s) you ran and what you observed —
+# not "tests pass" in the abstract. Good examples:
+#   * make test-antidpi  → cover-site probe returns donor site, ClientHello in range
+#   * make netsim SCENARIO=rst_injection  → detector flips, recovery < 2m
+#   * conformance: no_pii + no_custom_crypto + no_hardcoded_secrets_endpoints green
+#   * go test ./control/...  (unit + contract)
+# If a check needs real sockets/netem/Docker and the sandbox blocked it, say so
+# and note you ran it in the local dev environment (development.md §7.5).
+# ============================================================================
+
+type: short imperative subject
+
+Summary:
+- <what changed>
+- <why this is one coherent step (no scope expansion)>
+
+Verification:
+- <local command or CI check + what was observed>
+
+Refs: RP-XXXX
+# or: Implements: ADR-XXXX   — delete the trailer entirely for a trivial change
