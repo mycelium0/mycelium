@@ -10,6 +10,15 @@
 # cover the baseline. Set hardening_enable_fail2ban: true in group_vars to enable the sshd jail.
 hardening_enable_fail2ban: false
 
+# SSH: disable password authentication (key-only). A pre-flight guard refuses to apply this
+# if the connecting user has no authorized_keys, to prevent a lockout. Set false only if you
+# must keep password login (not recommended for an exposed node).
+hardening_disable_password_auth: true
+
+# No-logs posture: keep systemd-journald in volatile (RAM-only) storage so logs never hit
+# disk (SECURITY.md §4.2). Set false only for short-lived local debugging.
+hardening_journald_volatile: true
+
 # Node listen port for the primary VLESS+REALITY transport — the only inbound port UFW opens
 # besides SSH. Safe default (443 maximises indistinguishability from ordinary HTTPS) so the
 # firewall still opens the right port if group_vars omits it; the .example pins it explicitly.

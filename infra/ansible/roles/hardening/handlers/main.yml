@@ -16,3 +16,14 @@
   ansible.builtin.systemd:
     name: fail2ban
     state: restarted
+
+# Reload (not restart) so the live SSH session is not dropped if the new config is bad.
+- name: Reload sshd
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded
+
+- name: Restart systemd-journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted

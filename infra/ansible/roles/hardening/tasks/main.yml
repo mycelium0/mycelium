@@ -26,6 +26,83 @@
     update_cache: true
     cache_valid_time: 3600
 
+- name: Ensure config drop-in directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/ssh/sshd_config.d
+    - /etc/systemd/journald.conf.d
+
+# ---------------------------------------------------------------------------
+# SSH: key-only authentication (managed drop-in).
+# Disabling password auth on a root inventory is a lockout risk, so we refuse to
+# do it unless the connecting user already has an authorized key, validate the
+# config with `sshd -t` BEFORE installing it, and RELOAD (not restart) so the live
+# session survives.
+# ---------------------------------------------------------------------------
+- name: Hardening — check for an authorized SSH key before locking down password auth
+  when: hardening_disable_password_auth | bool
+  ansible.builtin.command:
+    cmd: "test -s {{ (ansible_user_dir | default('/root')) ~ '/.ssh/authorized_keys' }}"
+  register: myc_authkeys
+  changed_when: false
+  failed_when: false
+
+- name: Hardening — refuse to disable password auth with no key present (anti-lockout)
+  when:
+    - hardening_disable_password_auth | bool
+    - myc_authkeys.rc != 0
+  ansible.builtin.fail:
+    msg: >-
+      Refusing to disable SSH password authentication: no authorized_keys found for the
+      connecting user. Install a public key first (ssh-copy-id), or set
+      hardening_disable_password_auth=false. This guard prevents locking yourself out.
+
+- name: Hardening — managed sshd drop-in (key-only, no root password login)
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/60-mycelium.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "sshd -t -f %s"
+    content: |
+      # Managed by Mycelium hardening role. Do not edit by hand.
+      PubkeyAuthentication yes
+      PasswordAuthentication {{ 'no' if hardening_disable_password_auth | bool else 'yes' }}
+      KbdInteractiveAuthentication no
+      ChallengeResponseAuthentication no
+      PermitRootLogin prohibit-password
+      PermitEmptyPasswords no
+      MaxAuthTries 3
+      LoginGraceTime 30
+      X11Forwarding no
+      AllowAgentForwarding no
+  notify: Reload sshd
+
+# ---------------------------------------------------------------------------
+# No-logs posture: systemd-journald in volatile (RAM-only) storage — logs never
+# hit disk (SECURITY.md §4.2). What is not written cannot be seized or compelled.
+# ---------------------------------------------------------------------------
+- name: Hardening — journald volatile (RAM-only) storage drop-in
+  when: hardening_journald_volatile | bool
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/60-mycelium-volatile.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Mycelium hardening role. Do not edit by hand.
+      # RAM-only logs: nothing is persisted to disk (no-logs posture, SECURITY.md §4.2).
+      [Journal]
+      Storage=volatile
+      RuntimeMaxUse=64M
+      ForwardToSyslog=no
+  notify: Restart systemd-journald
+
 # ---------------------------------------------------------------------------
 # Host firewall (UFW) — default deny inbound, allow SSH + listen_port only.
 # ---------------------------------------------------------------------------
