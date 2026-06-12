@@ -69,9 +69,10 @@ and [research/](research/).
 
 - **Snowflake** — a Tor transport: broker + ephemeral WebRTC proxies contributed by volunteers;
   a reference model for distributed relay meshes.
-- **DHT** (Kademlia) — a distributed hash table for peer discovery without a central server.
+- **DHT** (Kademlia) — a distributed hash table for peer discovery without a central server
+  (Phase 3-4; not run in Phase 0-2).
 - **Gossip / GossipSub** — epidemic propagation of messages (reachability, blocking intelligence)
-  across the mesh.
+  across the mesh (Phase 3-4; not run in Phase 0-2).
 - **NAT traversal / hole-punching** — establishing a direct connection through NAT
   (ICE/STUN/TURN) so that a non-public machine can become a node.
 - **Multi-hop / onion routing** — a path ingress→intermediate→egress where no single hop knows
@@ -82,6 +83,98 @@ and [research/](research/).
 - **Rerouting** — redirecting traffic around a failed or blocked link or node; the core
   resilience mechanism of the mesh.
 - **Egress node** — a node with a reachable exit to the open internet.
+
+## Mycelial doctrine
+
+These are the load-bearing metaphors of the fabric (VIS-0002). A mycelial term is used only where
+it defines a real contract — a schema, a state machine, a policy rule, or a measurable behavior.
+
+- **Spore** — a signed, TTL-bounded portable artifact carried across any bridge. Compact,
+  replay-bounded, and carrier-agnostic. May carry bootstrap hints, route capsules, trust
+  invitations, revocation notices, signed update manifests, stress summaries, cache manifests,
+  delayed messages, or emergency-coordination messages. Must never carry raw traffic, full
+  topology maps, complete peer lists, user identities, private content, or persistent behavioral
+  profiles (VIS-0002 §3).
+- **Cord** — a promoted path or path-set with measured usefulness and reversible demotion. A cord
+  is reinforced because measurement shows it is useful, and it is demoted back when usefulness
+  decays; promotion is never autonomous before measurement (Phase 7).
+- **Hyphal probe** — a bounded, cheap exploration probe. The metabolically inexpensive unit of
+  "explore cheaply": a single low-cost reach attempt with strict bounds, not an open-ended scan.
+- **Gradient** — a measured bias affecting exploration or routing. A directional field derived
+  from measurement (e.g. toward under-served scopes) that biases where growth, caching, and route
+  exploration go; it never carries identity and is never a global map.
+- **Stress memory** — redacted, scoped failure history with retention and decay. Remembers that a
+  scope was stressed without leaking who, what, or raw suspicion; bounded by retention and decay
+  policy, and never promoted to a global signal (see Compartment wound response).
+- **Topology fragment** — a TTL-bounded, scoped partial local topology — never a full map. A
+  bounded slice of the local neighbourhood picture, expiring on its TTL; no node and no
+  coordinator ever holds the global topology (VIS-0003 §2).
+- **Anastomosis** — the fusion of two exploring paths into a shared, useful connection ("fuse
+  where useful"); the contract-level event behind candidate edges becoming active.
+- **Decay** — ordinary, measured aging of an edge or artifact toward demotion (route-flap-damping
+  style: exponential decay with hysteresis), distinct from active pruning.
+- **Pruning (metabolism)** — active reduction of over-dense topology to improve convergence, lower
+  enumeration surface, and increase useful dispersion — not merely stale cleanup.
+- **Bridge / carrier** — any carrier that can move authenticated bytes; the carrier constrains the
+  flow class but does not define Mycelium (VIS-0002 §2).
+- **Flow class / flow-class degradation ladder** — the measured quality tier a carrier supports,
+  and the graceful downgrade sequence from interactive/real-time flows down to a single bootstrap
+  spore as conditions degrade.
+- **Island** — a separated fabric fragment that is not dead: it keeps local discovery, messaging,
+  cache, service registry, emergency coordination, and delayed sync (VIS-0002 §4).
+- **Island merge** — reconnection of two islands through any bridge by exchanging signed scoped
+  summaries first, requesting only missing in-scope artifacts, never full maps.
+
+## Distributed awareness
+
+- **Distributed awareness** — the local, trust-scoped, replicated neighbourhood picture; no node
+  and no coordinator ever holds the global topology (VIS-0003 §2). Phase 3-4 territory.
+- **Import-inert-until-validated** — the rule that any imported artifact (spore, fragment, summary)
+  has no effect on local state until it passes validation; receipt alone never mutates the fabric.
+- **Anti-entropy (repair)** — periodic reconciliation that lets a node self-heal scoped state from
+  neighbour caches; the replication path, distinct from lookup, and a cumulative-enumeration
+  surface that uses graduated disclosure and trust-scoped reconciliation.
+- **Coordinator** — a Phase-3 temporary, scoped centre that dissolves into the Phase-4 DHT;
+  present but inert in Phase 0 (VIS-0003). Never a permanent centre.
+
+## Mycelial schemas (`internal/spec`)
+
+Typed control-plane schemas formalising the doctrine above. Each is a data model with `Validate()`
+only — no running behavior. All are inert in Phase 0-2 (VIS-0003 §4 phase discipline); signature
+references use standard primitives via a key-id string plus signature bytes, never a custom scheme
+(ADR-0002).
+
+- **SporeEnvelope** — the signed, TTL-bounded wrapper around a spore payload: type, scope, issue
+  and expiry timestamps, replay bound, and key-id/signature reference (typed schema; inert in
+  Phase 0-2).
+- **StressSignal** — a redacted, scoped failure observation backing stress memory: scope, signal
+  speed class, and decay-bounded retention; carries no identity or raw suspicion (typed schema;
+  inert in Phase 0-2).
+- **TopologyFragment** — a TTL-bounded, scoped partial topology slice; never a full map (typed
+  schema; inert in Phase 0-2).
+- **TransportHealth** — fast, volatile per-edge health used for routing input (e.g. link state,
+  measured quality); the fastest signal speed class (typed schema; inert in Phase 0-2).
+- **GradientSignal** — a measured bias field toward under-served scopes that influences
+  exploration and routing; carries no identity (typed schema; inert in Phase 0-2).
+- **EdgeState** — the edge lifecycle state value:
+  `candidate → probed → active → reinforced → cord → degraded → (dormant | scarred) → decayed → pruned`,
+  where `dormant` (inactive but cheaply re-testable) and `scarred` (dangerous/suspicious, needs
+  stronger evidence before reuse) are first-class lifecycle members carrying the failure semantics of
+  concept 6 (typed schema; inert in Phase 0-2).
+- **CordPromotion** — the record promoting a path or path-set to a cord on measured usefulness,
+  with the demotion condition that makes it reversible (typed schema; inert in Phase 0-2).
+- **DecayPolicy** — the retention-and-decay parameters governing how edges, artifacts, and stress
+  memory age toward demotion or pruning (exponential decay with hysteresis) (typed schema; inert
+  in Phase 0-2).
+- **TrustScope** — the bounded scope within which an artifact, signal, or priority applies;
+  contribution may raise local scoped priority but never global reputation or tokenomics (typed
+  schema; inert in Phase 0-2).
+- **SignalSpeedClass** — the speed/corroboration tier of a signal: fast volatile health → routing;
+  medium aggregated stress summaries → exploration bias; slow corroborated → trust;
+  threshold-signed hard → revocation/quarantine (typed schema; inert in Phase 0-2).
+- **NodeRole** — a temporary niche a node may occupy (frontier probe, stable anchor, cache
+  custodian, bridge carrier, relay candidate, cord endpoint); a niche, not a permanent class
+  (typed schema; inert in Phase 0-2).
 
 ## Security and anonymity
 
