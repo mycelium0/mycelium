@@ -144,8 +144,26 @@ the node). No per-connection identity logging is performed anywhere in this conf
   from being used to reach internal hosts; `final` is `direct` for normal egress, with a `block`
   outbound available.
 
+## Templates in this directory (licensing)
+
+Both templates are **pure JSON** (no comment syntax), so they carry **no inline license header**;
+their license is the repository AGPL-3.0-or-later, documented here per the project convention.
+
+- `server.template.json` — the historical canonical template. **Note:** its inbound `tag`s use the
+  long forms (`tuic-v5-in`, `shadowsocks-2022-in`, `shadowtls-v3-in`, `shadowtls-shadowsocks-in`,
+  `trojan-tls-in`), which **do not match** the tag set the `myceliumctl` renderer fills/keeps
+  (`tuic-in`, `shadowsocks-in`, `shadowtls-in`, `shadowtls-ss-in`, `trojan-in`). Rendering this
+  template with the current renderer would silently drop TUIC/Shadowsocks/ShadowTLS/Trojan. This is
+  a known divergence to reconcile into one source.
+- `server.template.renderer.json` — a **renderer-compatible** template (uses the renderer's `-in`
+  tag set, listens on `::` for dual-stack) shipped so the on-node
+  [`scripts/node-bootstrap.sh`](../../../scripts/node-bootstrap.sh) can render the canonical config
+  through the existing pipeline today. Port values match [`../PORTS.md`](../PORTS.md). Until the two
+  templates above are unified, the bootstrap points `--template` at this one.
+
 ## Validate
 
 ```sh
-jq . server.template.json   # must parse cleanly (no secrets, only SENTINEL_* values)
+jq . server.template.json            # must parse cleanly (no secrets, only SENTINEL_* values)
+jq . server.template.renderer.json   # renderer-compatible variant; same rule
 ```

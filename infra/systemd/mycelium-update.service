@@ -1,0 +1,41 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# mycelium-update.service — oneshot that runs the semi-auto fleet-update path.
+# Author: mindicator & silicon bags quartet.
+#
+# Driven by mycelium-update.timer. Runs the canonical updater in its DEFAULT mode:
+#   re-exec from an immutable copy -> fetch + VERIFY the operator signature on the pinned ref
+#   -> re-render from LOCAL identity -> "sing-box check" -> apply (an explicit restart) on success,
+#   ROLL BACK on any failure (fail-closed). A byte-identical candidate is NOT applied (no restart).
+#   It never regenerates keys and never touches the running service unless a validated config is ready.
+#
+# REQUIRED: the operator's out-of-band signing key must be referenced so fetched code is
+# authenticated before it ever runs as root. Append "--allowed-signers /path/to/allowed_signers"
+# (and pin "--repo-ref <signed-tag>") to ExecStart below. Without it the updater fails closed.
+#
+# To switch a node to the stricter stage-and-wait cadence, append "--staged" to ExecStart and
+# promote with "node-bootstrap.sh --ack" once the operator has reviewed the staged candidate.
+#
+# The script verifies provenance, self-validates, and rolls back, so a bad push to the public repo
+# can neither own nor brick the fleet: nothing unsigned runs, and the live config and service are
+# only replaced by a config that already passed check.
+[Unit]
+Description=Mycelium semi-auto node update (fetch + re-render + validate + apply-with-rollback)
+After=network-online.target sing-box.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Adjust the path if the canonical checkout lives elsewhere (default: /opt/mycelium).
+ExecStart=/opt/mycelium/scripts/node-bootstrap.sh --update
+# Fail-closed: a non-zero exit means the updater either declined to apply or rolled back. The
+# timer keeps the node on the last known-good config until the next successful run.
+TimeoutStartSec=600
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

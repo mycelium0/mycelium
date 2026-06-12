@@ -1,0 +1,25 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# mycelium-update.timer — drives mycelium-update.service on a short cadence.
+# Author: mindicator & silicon bags quartet.
+#
+# Every node runs this, so an operator's single git push fans out to the whole fleet within a few
+# minutes: each node pulls, re-renders from its LOCAL identity, validates with "sing-box check",
+# and applies-or-rolls-back (fail-closed). RandomizedDelaySec spreads the fleet's fetches so they
+# do not all hit the artifact source at the same instant (thundering-herd avoidance).
+[Unit]
+Description=Run the Mycelium semi-auto node update periodically
+
+[Timer]
+# First run shortly after boot, then every few minutes.
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=90
+Persistent=true
+Unit=mycelium-update.service
+
+[Install]
+WantedBy=timers.target
