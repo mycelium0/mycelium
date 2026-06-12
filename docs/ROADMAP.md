@@ -161,7 +161,7 @@ core of the adaptation layer.
 - **A/B obfuscation self-tuning.** AmneziaWG junk-packet parameters, ClientHello padding
   (Reality-Vision), packet sizes and timings — tuned by survivability feedback.
 
-**Stack.** Lightweight control agent on the node (Go/Rust); telemetry queue; signal store;
+**Stack.** Lightweight control agent on the node (Go — ADR-0012); telemetry queue; signal store;
 optional online classifier; IP provider integration for fast address rotation.
 
 **Definition of Done.**
@@ -233,7 +233,7 @@ as full participants.
   ingress point; ingress points are numerous and short-lived enough that enumerating and blocking
   them is not cost-effective.
 
-**Stack.** libp2p (Go/Rust): Kademlia DHT, GossipSub, AutoNAT, Circuit-Relay, hole-punching;
+**Stack.** libp2p (go-libp2p; a Rust daemon is an allowed backend — ADR-0012): Kademlia DHT, GossipSub, AutoNAT, Circuit-Relay, hole-punching;
 WebRTC for browser-based ingress; invitation/trust scheme; onion routing over Noise channels.
 
 **Definition of Done.**

@@ -13,7 +13,7 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 - **Template:** [../templates/adr.md](../templates/adr.md)
 - **When to write / policy:** [../development.md](../development.md), [../refactoring.md](../refactoring.md)
 - **Numbering:** `NNNN-<slug>.md`, slug kebab-case, `NNNN` zero-padded and monotonically increasing (separate sequence from RP/Audit/Vision).
-- **How to add:** copy the template → next free `NNNN` → fill in → Status `proposed`; commit with subject `ADR-NNNN ...`.
+- **How to add:** copy the template → next free `NNNN` → fill in → Status `proposed`; commit with a type-prefix subject (`docs: …`) and an `Implements: ADR-NNNN` trailer — never the ADR id in the subject (see [../development.md](../development.md) §6.2).
 
 ## Current records
 | ID | Decision | Status |
@@ -23,6 +23,7 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 | [0003](0003-licensing-and-jurisdiction.md) | Licence and jurisdiction | **accepted** |
 | [0010](0010-phase0-transport-set.md) | Phase 0 modern transport set + engine selection | **accepted** |
 | [0011](0011-carrier-agnostic-bridging.md) | Carrier-agnostic bridging and spore channels | proposed |
+| [0012](0012-go-primary-control-plane-language.md) | Go as the primary control-plane language (Rust for sealed organs) | **accepted** |
 
 > Reserved (produced by ADR-0003): 0004 no-logs/retention ·
 > 0005 classification as encryption item · 0006 legal wrapper for egress · 0007 role/jurisdiction

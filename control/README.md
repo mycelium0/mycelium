@@ -49,8 +49,9 @@ See [`docs/adr/0002-no-custom-cryptography.md`](../docs/adr/0002-no-custom-crypt
 
 The runtime **control-agent** — network-state detection, auto-rotation of transport/port/SNI/keys,
 telemetry and policy — is intentionally **not** part of this tool. It is a **Phase-2 deliverable in
-Go or Rust** (see [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) Layer 2 and the Phase-0
-proposal). `myceliumctl` covers only the manual, operator-driven Phase-0 surface.
+Go** ([`docs/adr/0012-go-primary-control-plane-language.md`](../docs/adr/0012-go-primary-control-plane-language.md);
+see also [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) Layer 2 and the Phase-0 proposal).
+`myceliumctl` covers only the manual, operator-driven Phase-0 surface.
 
 ## Requirements
 
@@ -254,7 +255,7 @@ single-transport path pass `--engine xray`.
 
 The runtime **control-agent** (network-state detection, **auto-rotation** of
 transport/port/SNI/keys, telemetry) is intentionally **not** part of this tool — it is a **Phase-2
-deliverable in Go or Rust** (see [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) Layer 2).
+deliverable in Go** (ADR-0012; see [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) Layer 2).
 `myceliumctl` covers only the manual, operator-driven render/issue/revoke surface.
 
 ## What is gitignored
