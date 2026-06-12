@@ -23,3 +23,12 @@ config.json
 # Stray nested Obsidian vault if one is ever (re)created inside the repo
 /mycelium/
 Добро пожаловать.md
+
+# Internal audit / review reports — kept locally, never published
+docs/audits/
+
+# Stray scratch / tool output — never commit
+.checkout.txt
+/.scan_tmp/
+/.scan-tmp.*/
+*.out.txt
