@@ -20,6 +20,23 @@ config.json
 /out/
 /state/
 
+# On-node bootstrap/updater local-only artifacts (per-node identity + rendered configs).
+# These live under /var/lib/mycelium and /opt/mycelium on a real node; the patterns below are a
+# defensive net in case anything is ever generated INSIDE the repo working tree during testing.
+# NEVER commit per-node identity, secrets, params, or rendered configs.
+params.json
+identity.json
+identities.json
+config.candidate.json
+config.staged.json
+config.lastgood.json
+config.staged.ack
+cert.sha256.txt
+awg.port
+# If the canonical checkout is ever cloned under the repo (prefer /opt/mycelium outside it):
+/opt/
+/var/
+
 # Stray nested Obsidian vault if one is ever (re)created inside the repo
 /mycelium/
 Добро пожаловать.md
