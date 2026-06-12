@@ -1,0 +1,46 @@
+<!--
+Copyright © 2026 mindicator & silicon bags quartet.
+SPDX-License-Identifier: AGPL-3.0-or-later
+This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+later. See the LICENSE file in the repository root.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600" viewBox="0 0 1600 1600" role="img" aria-label="Mycelium final centered logo">
+  <title>Mycelium final centered logo</title>
+  <defs>
+    <style>
+      .bg { fill: #050705; }
+      .line { fill: none; stroke: #F4F1E8; stroke-width: 28; stroke-linecap: round; stroke-linejoin: round; }
+      .node-white { fill: #F4F1E8; stroke: #050705; stroke-width: 8; }
+      .node-green { fill: #84FF00; stroke: #050705; stroke-width: 10; }
+      .hypha { fill: none; stroke: #84FF00; stroke-width: 34; stroke-linecap: round; stroke-linejoin: round; }
+      .wordmark { fill: #F4F1E8; font-family: Inter, Manrope, "Avenir Next", Helvetica, Arial, sans-serif; font-size: 104px; font-weight: 760; letter-spacing: 38px; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1600" fill="none"/>
+
+  <g transform="translate(13, -80)">
+    <path class="line" d="M410 590 L410 900"/>
+    <path class="line" d="M410 590 L705 410"/>
+    <path class="line" d="M410 590 L705 765"/>
+    <path class="line" d="M410 900 L705 765"/>
+    <path class="line" d="M410 900 L705 1080"/>
+    <path class="line" d="M705 410 L705 765"/>
+    <path class="line" d="M705 765 L705 1080"/>
+    <path class="line" d="M705 410 L1005 590"/>
+
+    <path class="hypha" d="M1005 590 C1128 668 1198 822 1178 955 C1166 1042 1092 1057 1044 998 C968 906 856 790 705 765"/>
+    <path class="hypha" d="M705 765 C848 785 962 868 1042 998"/>
+
+    <circle class="node-white" cx="410" cy="590" r="34"/>
+    <circle class="node-white" cx="705" cy="410" r="34"/>
+    <circle class="node-white" cx="410" cy="900" r="34"/>
+    <circle class="node-white" cx="705" cy="1080" r="34"/>
+
+    <circle class="node-green" cx="705" cy="765" r="43"/>
+    <circle class="node-green" cx="1005" cy="590" r="34"/>
+    <circle class="node-green" cx="1042" cy="998" r="34"/>
+  </g>
+
+  <text class="wordmark" x="800" y="1368" text-anchor="middle">MYCELIUM</text>
+</svg>

@@ -5,6 +5,10 @@ This file is part of Mycelium, licensed under the GNU Affero General Public Lice
 later. See the LICENSE file in the repository root.
 -->
 
+<p align="center">
+  <img src="logo.svg" alt="Mycelium" width="320">
+</p>
+
 # Mycelium
 
 > 🇬🇧 Resilient private connectivity over unreliable networks. Server software. <br>
