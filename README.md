@@ -11,20 +11,7 @@ later. See the LICENSE file in the repository root.
 
 # Mycelium
 
-> 🇬🇧 Resilient private connectivity over unreliable networks. Server software. <br>
-> 🇨🇳 在不可靠网络上提供有韧性的私有连接。服务器软件。 <br>
-> 🇮🇳 अविश्वसनीय नेटवर्कों पर सुदृढ़ निजी कनेक्टिविटी। सर्वर सॉफ़्टवेयर। <br>
-> 🇪🇸 Conectividad privada y resiliente sobre redes poco fiables. Software de servidor. <br>
-> 🇸🇦 اتصال خاص ومرن عبر الشبكات غير الموثوقة. برمجية خادم. <br>
-> 🇫🇷 Connectivité privée et résiliente sur des réseaux peu fiables. Logiciel serveur. <br>
-> 🇷🇺 Устойчивая приватная связь поверх ненадёжных сетей. Серверное ПО. <br>
-> 🇵🇹 Conectividade privada e resiliente sobre redes não confiáveis. Software de servidor. <br>
-> 🇮🇩 Konektivitas privat yang tangguh di jaringan tak andal. Perangkat lunak server. <br>
-> 🇩🇪 Robuste private Konnektivität über unzuverlässige Netze. Serversoftware. <br>
-> 🇯🇵 不安定なネットワーク上での回復力あるプライベート接続。サーバーソフトウェア。 <br>
-> 🇹🇷 Güvenilmez ağlar üzerinde dayanıklı, özel bağlantı. Sunucu yazılımı. <br>
-> 🇰🇷 불안정한 네트워크에서도 견고한 프라이빗 연결. 서버 소프트웨어. <br>
-> 🇮🇷 اتصال خصوصیِ پایدار روی شبکه‌های نامطمئن. نرم‌افزار سرور.
+> 🇬🇧 Resilient private connectivity over unreliable networks. · 🇨🇳 在不可靠网络上提供有韧性的私有连接。 · 🇮🇳 अविश्वसनीय नेटवर्कों पर सुदृढ़ निजी कनेक्टिविटी। · 🇪🇸 Conectividad privada y resiliente sobre redes poco fiables. · 🇸🇦 اتصال خاص ومرن عبر الشبكات غير الموثوقة. · 🇫🇷 Connectivité privée et résiliente sur des réseaux peu fiables. · 🇷🇺 Устойчивая приватная связь поверх ненадёжных сетей. · 🇵🇹 Conectividade privada e resiliente sobre redes não confiáveis. · 🇮🇩 Konektivitas privat yang tangguh di jaringan tak andal. · 🇩🇪 Robuste private Konnektivität über unzuverlässige Netze. · 🇯🇵 不安定なネットワーク上での回復力あるプライベート接続。 · 🇹🇷 Güvenilmez ağlar üzerinde dayanıklı, özel bağlantı. · 🇰🇷 불안정한 네트워크에서도 견고한 프라이빗 연결. · 🇮🇷 اتصال خصوصیِ پایدار روی شبکه‌های نامطمئن.
 
 > [!IMPORTANT]
 > **Use restriction.** Mycelium is licensed for educational, research, humanitarian, and civil use
