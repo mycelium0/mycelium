@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "note": "Curated REALITY donor-SNI candidates. PUBLIC hostnames only. The node bootstrap picks ONE at random per node and verifies it at runtime (openssl s_client -groups x25519 -tls1_3 must negotiate TLSv1.3) before committing it. No secrets, IPs, or locations live here. License is documented in nodes/dataplane/README.md (pure JSON carries no header).",
+  "selection": {
+    "verify_with": "openssl s_client -groups x25519 -tls1_3 -servername <host> -connect <host>:443",
+    "require": "TLSv1.3 negotiated AND X25519 group AND HTTP/2 (h2) ALPN where offered",
+    "reselect_on_failure": true
+  },
+  "candidates": [
+    "www.microsoft.com",
+    "update.microsoft.com",
+    "www.bing.com",
+    "www.office.com",
+    "www.apple.com",
+    "www.icloud.com",
+    "gateway.icloud.com",
+    "dl.google.com",
+    "update.googleapis.com",
+    "www.cloudflare.com",
+    "speed.cloudflare.com",
+    "cdn.jsdelivr.net",
+    "aws.amazon.com",
+    "s0.awsstatic.com",
+    "www.python.org",
+    "www.intel.com",
+    "www.nvidia.com",
+    "www.adobe.com",
+    "www.samsung.com",
+    "player.vimeo.com"
+  ]
+}
