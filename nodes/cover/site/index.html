@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<!--
+Copyright © 2026 mindicator & silicon bags quartet.
+SPDX-License-Identifier: AGPL-3.0-or-later
+This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+later. See the LICENSE file in the repository root.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jordan Avery</title>
+    <meta name="description" content="Personal homepage of Jordan Avery." />
+    <style>
+      :root {
+        --bg: #fbfbf9;
+        --fg: #2b2b2b;
+        --muted: #6b6b6b;
+        --accent: #3a6ea5;
+        --line: #e4e4df;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 4rem 1.25rem 3rem;
+      }
+      header h1 {
+        font-size: 1.9rem;
+        margin: 0 0 0.25rem;
+        letter-spacing: -0.01em;
+      }
+      header p.tagline {
+        margin: 0 0 2rem;
+        color: var(--muted);
+        font-size: 1.05rem;
+      }
+      section { margin: 0 0 2rem; }
+      section h2 {
+        font-size: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 0.4rem;
+        margin: 0 0 0.8rem;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      ul.links {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      ul.links li { margin: 0 0 0.4rem; }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <header>
+        <h1>Jordan Avery</h1>
+        <p class="tagline">Writer, photographer, and occasional gardener.</p>
+      </header>
+
+      <section>
+        <h2>About</h2>
+        <p>
+          Hello, and welcome. This is a small corner of the web where I keep notes on the
+          things I am reading, a few photographs from walks around the neighbourhood, and the
+          odd thought worth writing down. Nothing fancy &mdash; just a quiet personal page that
+          I update when I have a spare afternoon.
+        </p>
+        <p>
+          I grew up near the coast and still spend most weekends outdoors with a camera. When I
+          am not out walking, I am usually re-reading old paperbacks or tending a stubborn
+          tomato plant on the balcony.
+        </p>
+      </section>
+
+      <section>
+        <h2>Elsewhere</h2>
+        <ul class="links">
+          <li><a href="/notes/">Reading notes</a></li>
+          <li><a href="/photos/">Photographs</a></li>
+          <li><a href="mailto:hello@example.com">Say hello</a></li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>&copy; 2026 Jordan Avery. Thanks for stopping by.</p>
+      </footer>
+    </main>
+  </body>
+</html>

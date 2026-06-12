@@ -1,0 +1,21 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — caddy role defaults.
+# Author: mindicator & silicon bags quartet
+---
+# Where Caddy serves the cover site from.
+caddy_site_root: "/var/www/mycelium-cover"
+
+# Loopback port the cover site listens on. Xray's REALITY "dest" forwards active probes here so a
+# probe receives a genuine page. NOT exposed by the host firewall (UFW only opens listen_port).
+caddy_cover_listen: "127.0.0.1:8443"
+
+# Source of the cover site content in the repo (produced by a sibling component).
+caddy_site_src: "../../nodes/cover/site/"
+
+# Official Caddy APT repository (stable channel).
+caddy_apt_key_url: "https://dl.cloudsmith.io/public/caddy/stable/gpg.key"
+caddy_apt_repo_url: "https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"

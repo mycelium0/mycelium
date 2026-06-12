@@ -1,0 +1,72 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — blackbox_exporter module definitions.
+# Author: mindicator & silicon bags quartet
+#
+# blackbox_exporter runs on the OPERATOR's control host and probes each node's PUBLIC :443 from
+# outside. Two modules let Prometheus separate two failure shapes:
+#   * mycelium_tcp_connect  — can a TCP connection to :443 even be established? A drop here looks
+#     like AS-level black-holing (route to the node's autonomous system cut wholesale).
+#   * mycelium_tls_handshake — does a TLS 1.3 handshake complete? A drop here while TCP still
+#     connects looks like handshake-layer interference (DPI / active probing / RST injection).
+# Comparing the two is how Phase 0 distinguishes "host/route gone" from "handshake interfered
+# with" — the inputs the Phase-2 adaptation layer will use to pick a rotation strategy.
+#
+# These probes measure REACHABILITY ONLY. They do NOT carry the REALITY shortId and are NOT
+# authorised clients, so they never establish a tunnel — exactly like an active prober, they only
+# observe the genuine donor handshake the node relays. No secrets are required or stored here.
+
+modules:
+  # ---------------------------------------------------------------------------
+  # Bare TCP reachability to :443. Fastest, most basic "is the port answering" check.
+  # ---------------------------------------------------------------------------
+  mycelium_tcp_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      ip_protocol_fallback: true   # try IPv6 then IPv4 (or vice-versa) rather than hard-failing.
+      tls: false                   # connect only; do not start TLS (that is the other module).
+
+  # ---------------------------------------------------------------------------
+  # TLS 1.3 handshake health to :443. This is the primary handshake-success signal.
+  # The node relays the donor's genuine TLS 1.3 handshake, so a normal probe completes the
+  # handshake against a real, valid certificate — exactly what an unauthorised prober sees.
+  # ---------------------------------------------------------------------------
+  mycelium_tls_handshake:
+    prober: tcp
+    timeout: 10s
+    tcp:
+      ip_protocol_fallback: true
+      tls: true
+      tls_config:
+        # Pin the floor to TLS 1.3 — REALITY mirrors a TLS 1.3 handshake, so anything lower
+        # would itself be a tell. min and max both 1.3 keeps the probe representative.
+        min_version: "TLS13"
+        max_version: "TLS13"
+        # The probe does NOT control the donor's certificate chain and we are not authenticating
+        # the donor here — we are measuring handshake completion and reading the cert's expiry
+        # (probe_ssl_earliest_cert_expiry, used by the TLSCertExpirySoon alert). Skip chain
+        # verification so a hostname/chain mismatch does not mask the reachability signal.
+        insecure_skip_verify: true
+
+  # ---------------------------------------------------------------------------
+  # Optional: HTTPS GET against the cover/donor over TLS 1.3. Useful when probing the cover site
+  # directly (e.g. a separate hostname) rather than the bare REALITY endpoint. Kept defined but
+  # not wired into a default scrape job — enable by adding a module:[mycelium_https_get] job.
+  # ---------------------------------------------------------------------------
+  mycelium_https_get:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      ip_protocol_fallback: true
+      preferred_ip_protocol: "ip4"
+      fail_if_not_ssl: true
+      tls_config:
+        min_version: "TLS13"
+        max_version: "TLS13"
+        insecure_skip_verify: true
+      valid_status_codes: []        # empty = any 2xx/3xx counts as success.

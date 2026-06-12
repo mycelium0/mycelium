@@ -1,0 +1,25 @@
+# OS / editor
+.DS_Store
+*.swp
+*~
+
+# Obsidian (the vault is kept OUTSIDE this repo; ignore defensively)
+.obsidian/
+
+# Secrets / local environment
+*.local
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# Rendered runtime configs (contain real keys/identities — never commit)
+server.json
+config.json
+/out/
+/state/
+
+# Stray nested Obsidian vault if one is ever (re)created inside the repo
+/mycelium/
+Добро пожаловать.md

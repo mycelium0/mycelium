@@ -1,0 +1,164 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — Prometheus scrape configuration.
+# Author: mindicator & silicon bags quartet
+#
+# Prometheus runs on the OPERATOR's control host, NOT on the node. Node-side exporters
+# (node_exporter, the engine-agnostic dataplane-stats exporter) bind to loopback only and are
+# reached over an SSH tunnel or the mesh — the node's host firewall never opens an exporter port
+# (see infra/ansible/roles/observability). The targets below are therefore LOCAL forwarded
+# addresses (127.0.0.1:<forwarded-port>) on the control host, resolved through file_sd so a
+# node can be added/removed without editing this file. blackbox probes, by contrast, run from
+# the control host outward against each node's PUBLIC :443 to measure real reachability.
+#
+# The data-plane stats are ENGINE-AGNOSTIC: sing-box is the PRIMARY engine, so on a default node
+# the exporter reads the sing-box clash_api on NODE 127.0.0.1:9090; on an OPTIONAL-engine node it
+# reads the Xray stats API instead. Either way it re-exposes counters on NODE 127.0.0.1:9550 and
+# carries an `engine` (singbox|xray) file_sd label so alerts can tell the engines apart.
+#
+# Wiring summary:
+#   node_exporter   NODE 127.0.0.1:9100   --ssh-tunnel-->  control 127.0.0.1:<port>   (file_sd)
+#   dataplane-stats NODE 127.0.0.1:9550   --ssh-tunnel-->  control 127.0.0.1:<port>   (file_sd)
+#                   (reads sing-box clash_api 127.0.0.1:9090 — primary; or Xray API — optional)
+#   blackbox probe  control --> blackbox_exporter --> NODE_PUBLIC:443                 (file_sd)
+
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    project: mycelium
+    phase: "0"
+
+# Alerting rules live in a sibling file; reload Prometheus after editing either.
+rule_files:
+  - rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        # Alertmanager on the control host (loopback). Replace if Alertmanager runs elsewhere.
+        - targets:
+            - "127.0.0.1:9093"
+
+scrape_configs:
+  # ---------------------------------------------------------------------------
+  # 1. node_exporter — host metrics (CPU, memory, disk, network, load).
+  #    The exporter binds to NODE 127.0.0.1:9100; reach it via an SSH tunnel that maps it to a
+  #    loopback port on this control host. List those forwarded addresses in
+  #    targets/node_exporter.json (file_sd). A node going dark trips the NodeDown alert.
+  # ---------------------------------------------------------------------------
+  - job_name: node_exporter
+    scheme: http
+    file_sd_configs:
+      - files:
+          - "targets/node_exporter.json"
+        refresh_interval: 1m
+    relabel_configs:
+      # Preserve the logical node name (carried in the file_sd "node" label) as the instance.
+      - source_labels: [node]
+        target_label: instance
+
+  # ---------------------------------------------------------------------------
+  # 2. Data-plane stats — engine-agnostic inbound byte counters and uptime.
+  #    PRIMARY ENGINE (sing-box): the node exposes experimental.clash_api on NODE 127.0.0.1:9090,
+  #    which serves connection/traffic counters over HTTP/JSON, NOT the Prometheus text format,
+  #    so Prometheus cannot scrape it directly. A small read-only exporter on the node reads that
+  #    loopback clash_api and re-exposes the aggregate counters as Prometheus metrics on NODE
+  #    127.0.0.1:9550. OPTIONAL ENGINE (xray): the same exporter slot instead reads the Xray stats
+  #    API and re-exposes on the same 127.0.0.1:9550 — so this scrape job is unchanged either way.
+  #    We scrape that exporter over the same SSH tunnel as node_exporter. (See README "Data-plane
+  #    stats: chosen approach" for the rationale.) Only INBOUND/aggregate-level counters are
+  #    exported — never per-user stats — to avoid attributing traffic to individual identities
+  #    (privacy / threat-model requirement). The file_sd `engine` label (singbox|xray) is carried
+  #    through so DataPlaneDown / SingBoxDown can tell which engine a node runs.
+  # ---------------------------------------------------------------------------
+  - job_name: dataplane_stats
+    scheme: http
+    metrics_path: /metrics
+    file_sd_configs:
+      - files:
+          - "targets/dataplane_stats.json"
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [node]
+        target_label: instance
+      # Carry the engine identity (singbox=primary | xray=optional) from file_sd into the metrics.
+      - source_labels: [engine]
+        target_label: engine
+
+  # ---------------------------------------------------------------------------
+  # 2b. OPTIONAL engine override (commented). The dataplane_stats job above already covers BOTH
+  #     engines via one exporter on 127.0.0.1:9550, so a separate Xray-only job is normally not
+  #     needed. Uncomment ONLY if you run a dedicated native Xray-to-Prometheus exporter on a
+  #     distinct loopback port for an optional-engine node; mark its targets engine="xray".
+  # ---------------------------------------------------------------------------
+  # - job_name: xray_stats
+  #   scheme: http
+  #   metrics_path: /metrics
+  #   file_sd_configs:
+  #     - files:
+  #         - "targets/xray_stats.json"
+  #       refresh_interval: 1m
+  #   relabel_configs:
+  #     - source_labels: [node]
+  #       target_label: instance
+  #     - source_labels: [engine]
+  #       target_label: engine
+
+  # ---------------------------------------------------------------------------
+  # 3. Blackbox handshake probes — TLS 1.3 reachability against each node's PUBLIC :443.
+  #    These run from the control host THROUGH blackbox_exporter and measure whether the REALITY
+  #    handshake to the donor still completes end to end. A sustained drop in probe_success is
+  #    the primary network-interference signal in Phase 0 (see HighHandshakeFailureRate). The
+  #    probe module ("mycelium_tls_handshake") is defined in blackbox/blackbox.yml.
+  # ---------------------------------------------------------------------------
+  - job_name: blackbox_handshake
+    metrics_path: /probe
+    params:
+      module: [mycelium_tls_handshake]
+    file_sd_configs:
+      - files:
+          - "targets/blackbox_handshake.json"
+        refresh_interval: 1m
+    relabel_configs:
+      # The file_sd target is the node's public host:port to probe; hand it to blackbox as ?target=.
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      # Point the scrape at the blackbox_exporter, not at the probed node.
+      - target_label: __address__
+        replacement: "127.0.0.1:9115"
+
+  # ---------------------------------------------------------------------------
+  # 4. Blackbox TCP reachability — bare :443 connect, separates "AS-level black-holing"
+  #    (TCP fails) from "handshake interference" (TCP connects, TLS fails). Same targets,
+  #    different module so the two signals can be compared in the HighHandshakeFailureRate logic.
+  # ---------------------------------------------------------------------------
+  - job_name: blackbox_tcp
+    metrics_path: /probe
+    params:
+      module: [mycelium_tcp_connect]
+    file_sd_configs:
+      - files:
+          - "targets/blackbox_handshake.json"
+        refresh_interval: 1m
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: "127.0.0.1:9115"
+
+  # ---------------------------------------------------------------------------
+  # 5. Prometheus self-monitoring — confirms the control host's own collector is healthy.
+  # ---------------------------------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - "127.0.0.1:9090"

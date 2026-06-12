@@ -1,0 +1,517 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium — amneziawg role.
+# Author: mindicator & silicon bags quartet
+#
+# Provisions the NON-TLS / UDP fallback path: an AmneziaWG (obfuscated WireGuard) interface.
+#   1. Toggle + preconditions (fail closed on bad obfuscation knobs / unverified pins).
+#   2. Install AmneziaWG — kernel module + tools (PPA) OR the userspace amneziawg-go (pinned,
+#      checksum-verified). NO custom crypto: keys come only from "awg genkey | awg pubkey".
+#   3. Generate the server keypair + one keypair (and optional PSK) per client, ONCE, idempotently,
+#      stored only on the node (root-only state).
+#   4. Render <iface>.conf via the awg0.conf.j2 template (sentinels become real values on-node).
+#   5. Enable + (re)start awg-quick@<iface>.
+#   6. Open ONLY the listen port (UDP) in the host firewall (ufw).
+#   7. Render a COMPLETE client config per identity and FETCH each to the operator's ./out/
+#      (gitignored), mirroring how the sing-box role produces + fetches per-client subscriptions.
+#
+# Provisioning model A (Phase 0, simpler): the node generates each client's keypair and renders a
+# self-contained client config (Interface key/address + obfuscation knobs; Peer = server public key
+# + endpoint + AllowedIPs + optional PSK). The SERVER private key never leaves the node. Because the
+# node generates the client keypair, each client's private key is inside its rendered config and is
+# fetched into the gitignored ./out/ for out-of-band delivery — so ./out/ is sensitive. Model B
+# (client-generated keypairs; only the public key registered with the node) is a future hardening
+# option (see nodes/dataplane/amneziawg/README.md).
+#
+# The whole role is a no-op unless enable_amneziawg is true.
+---
+- name: AmneziaWG fallback path
+  when: enable_amneziawg | bool
+  block:
+
+    # -----------------------------------------------------------------------
+    # 1. Preconditions — fail closed on invalid obfuscation knobs / addressing.
+    # -----------------------------------------------------------------------
+    - name: Assert architecture is supported
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['architecture'] in awg_go_asset_by_arch
+        fail_msg: >-
+          No AmneziaWG asset mapping for architecture '{{ ansible_facts['architecture'] }}'.
+          Supported: {{ awg_go_asset_by_arch.keys() | list }}.
+
+    - name: Assert the obfuscation knobs satisfy AmneziaWG constraints
+      ansible.builtin.assert:
+        that:
+          - (awg_obfs.Jmin | int) < (awg_obfs.Jmax | int)
+          - ([awg_obfs.H1, awg_obfs.H2, awg_obfs.H3, awg_obfs.H4] | map('int') | list | unique | length) == 4
+          - ((awg_obfs.S1 | int) + 56) != (awg_obfs.S2 | int)
+        fail_msg: >-
+          Invalid AmneziaWG obfuscation knobs (awg_obfs). Require: Jmin < Jmax; H1..H4 distinct;
+          (S1 + 56) != S2. These values must also be IDENTICAL on every client, or the handshake
+          fails. Got Jmin={{ awg_obfs.Jmin }} Jmax={{ awg_obfs.Jmax }} S1={{ awg_obfs.S1 }}
+          S2={{ awg_obfs.S2 }} H1..H4={{ [awg_obfs.H1, awg_obfs.H2, awg_obfs.H3, awg_obfs.H4] }}.
+
+    - name: Assert at least one client identity is configured
+      ansible.builtin.assert:
+        that:
+          - awg_client_names is defined
+          - (awg_client_names | length) > 0
+        fail_msg: >-
+          awg_client_names is empty. Set client_names in group_vars/all.yml (the AmneziaWG path
+          reuses the same friendly-name roster as the VLESS+REALITY path) before enabling this role.
+
+    - name: Validate the install method
+      ansible.builtin.assert:
+        that:
+          - awg_install_method in ['module', 'userspace']
+        fail_msg: "awg_install_method must be 'module' or 'userspace' (got '{{ awg_install_method }}')."
+
+    - name: Assert a reachability address is set (rendered client configs need a real Endpoint)
+      ansible.builtin.assert:
+        that:
+          - node_address is defined
+          - node_address | length > 0
+          - node_address != 'NODE_PUBLIC_IP'
+        fail_msg: >-
+          node_address is unset or still the 'NODE_PUBLIC_IP' placeholder. Set it in
+          group_vars/all.yml to this node's reachability address (same value the sing-box path
+          uses); model A renders each client's [Peer] Endpoint from node_address:awg_listen_port.
+
+    - name: Install runtime dependencies (awg key tooling needs openssl-class entropy; jq for export)
+      ansible.builtin.apt:
+        name:
+          - jq
+          - iptables
+          - ca-certificates
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # -----------------------------------------------------------------------
+    # 2a. Install AmneziaWG — kernel module + tools via the official PPA.
+    # -----------------------------------------------------------------------
+    - name: Install AmneziaWG (kernel module + tools)
+      when: awg_install_method == 'module'
+      block:
+        - name: Add the official Amnezia PPA
+          ansible.builtin.apt_repository:
+            repo: "{{ awg_ppa_repo }}"
+            state: present
+            update_cache: true
+
+        - name: Install amneziawg kernel module (DKMS) and userspace tools
+          ansible.builtin.apt:
+            name: "{{ awg_module_packages }}"
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
+
+    # -----------------------------------------------------------------------
+    # 2b. Install AmneziaWG — userspace amneziawg-go (pinned, checksum-verified).
+    # -----------------------------------------------------------------------
+    - name: Install AmneziaWG (userspace amneziawg-go)
+      when: awg_install_method == 'userspace'
+      block:
+        - name: Install the userspace tools package (provides awg / awg-quick / awg genkey)
+          ansible.builtin.apt:
+            name: amneziawg-tools
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
+          register: _awg_tools_pkg
+          failed_when: false
+
+        - name: Resolve the amneziawg-go asset + checksum for this architecture
+          ansible.builtin.set_fact:
+            _awg_go_asset: "{{ awg_go_asset_by_arch[ansible_facts['architecture']] }}"
+            _awg_go_arch_key: "{{ awg_go_arch_key[ansible_facts['architecture']] }}"
+            _awg_go_sha256: "{{ awg_go_sha256[awg_go_arch_key[ansible_facts['architecture']]] }}"
+
+        - name: Assert the amneziawg-go checksum has been recorded (fail closed on placeholders)
+          ansible.builtin.assert:
+            that:
+              - _awg_go_sha256 is match('^[0-9a-fA-F]{64}$')
+            fail_msg: >-
+              awg_go_sha256.{{ _awg_go_arch_key }} is not a 64-char SHA256. Record the real checksum
+              from the amneziawg-go {{ awg_go_version }} release for asset '{{ _awg_go_asset }}'
+              before deploying. Never install an unverified artefact.
+
+        - name: Create a temporary download workspace
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: awg-go-dl
+          register: _awg_go_tmp
+
+        - name: Download the pinned amneziawg-go release (checksum-verified)
+          ansible.builtin.get_url:
+            url: "{{ awg_go_download_base }}/{{ awg_go_version }}/{{ _awg_go_asset }}"
+            dest: "{{ _awg_go_tmp.path }}/{{ _awg_go_asset }}"
+            checksum: "sha256:{{ _awg_go_sha256 }}"
+            mode: "0640"
+
+        - name: Unpack amneziawg-go
+          ansible.builtin.unarchive:
+            src: "{{ _awg_go_tmp.path }}/{{ _awg_go_asset }}"
+            dest: "{{ _awg_go_tmp.path }}"
+            remote_src: true
+
+        - name: Install the amneziawg-go binary
+          ansible.builtin.copy:
+            src: "{{ _awg_go_tmp.path }}/amneziawg-go"
+            dest: "{{ awg_bin_dir }}/amneziawg-go"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0755"
+          notify: Restart amneziawg
+
+        - name: Remove the temporary download workspace
+          ansible.builtin.file:
+            path: "{{ _awg_go_tmp.path }}"
+            state: absent
+          when: _awg_go_tmp.path is defined
+
+    # -----------------------------------------------------------------------
+    # 3. Directories + identity material (generated ONCE, idempotent, root-only).
+    # -----------------------------------------------------------------------
+    - name: Create the AmneziaWG config directory
+      ansible.builtin.file:
+        path: "{{ awg_conf_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Create the root-only state directory for generated keys
+      ansible.builtin.file:
+        path: "{{ awg_state_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Look for previously generated AmneziaWG identity state
+      ansible.builtin.stat:
+        path: "{{ awg_state_dir }}/identity.json"
+      register: _awg_identity_state
+
+    - name: Generate the server keypair and per-client keys (first run only)
+      when: not _awg_identity_state.stat.exists
+      block:
+        - name: Generate the server private key (audited "awg genkey")
+          ansible.builtin.command:
+            cmd: "awg genkey"
+          register: _awg_server_priv_cmd
+          changed_when: true
+          no_log: true
+
+        - name: Derive the server public key (audited "awg pubkey")
+          ansible.builtin.shell:
+            cmd: "printf '%s' {{ _awg_server_priv_cmd.stdout | trim | quote }} | awg pubkey"
+          register: _awg_server_pub_cmd
+          changed_when: true
+          no_log: true
+
+        - name: Generate a private key per client (audited "awg genkey")
+          ansible.builtin.command:
+            cmd: "awg genkey"
+          register: _awg_client_priv_cmds
+          changed_when: true
+          loop: "{{ awg_client_names }}"
+          no_log: true
+
+        - name: Derive the public key per client (audited "awg pubkey")
+          ansible.builtin.shell:
+            cmd: "printf '%s' {{ item.stdout | trim | quote }} | awg pubkey"
+          register: _awg_client_pub_cmds
+          changed_when: true
+          loop: "{{ _awg_client_priv_cmds.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          no_log: true
+
+        - name: Generate an optional pre-shared key per client (audited "awg genpsk")
+          ansible.builtin.command:
+            cmd: "awg genpsk"
+          register: _awg_client_psk_cmds
+          changed_when: true
+          loop: "{{ awg_client_names }}"
+          when: awg_use_preshared_keys | bool
+          no_log: true
+
+        - name: Assemble the AmneziaWG identity document
+          ansible.builtin.set_fact:
+            _awg_identity:
+              version: 1
+              generated_at: "{{ ansible_date_time.iso8601 | default('') }}"
+              server:
+                private_key: "{{ _awg_server_priv_cmd.stdout | trim }}"
+                public_key: "{{ _awg_server_pub_cmd.stdout | trim }}"
+              clients: >-
+                {{ dict(awg_client_names | zip(
+                     range(0, awg_client_names | length) | map('extract', [
+                       _awg_client_priv_cmds.results | map(attribute='stdout') | map('trim') | list,
+                       _awg_client_pub_cmds.results | map(attribute='stdout') | map('trim') | list,
+                       (_awg_client_psk_cmds.results | default([])) | map(attribute='stdout') | map('trim') | list
+                     ]) | list )) }}
+          no_log: true
+
+        - name: Persist the AmneziaWG identity document (root-only)
+          ansible.builtin.copy:
+            dest: "{{ awg_state_dir }}/identity.json"
+            content: "{{ _awg_identity | to_nice_json }}\n"
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+
+    # -----------------------------------------------------------------------
+    # 3b. Reconcile the roster on RE-RUN: add keys for new clients, drop revoked ones,
+    #     WITHOUT rotating the server key or existing client keys.
+    # -----------------------------------------------------------------------
+    - name: Load the current AmneziaWG identity document
+      ansible.builtin.slurp:
+        src: "{{ awg_state_dir }}/identity.json"
+      register: _awg_identity_raw
+      no_log: true
+
+    - name: Decode the current AmneziaWG identity document
+      ansible.builtin.set_fact:
+        _awg_identity: "{{ _awg_identity_raw.content | b64decode | from_json }}"
+      no_log: true
+
+    - name: Determine clients to add (listed but missing keys)
+      ansible.builtin.set_fact:
+        _awg_clients_to_add: "{{ awg_client_names | difference(_awg_identity.clients.keys() | list) }}"
+
+    - name: Generate keys for newly added clients
+      when: _awg_clients_to_add | length > 0
+      block:
+        - name: Generate a private key per new client
+          ansible.builtin.command:
+            cmd: "awg genkey"
+          register: _awg_add_priv_cmds
+          changed_when: true
+          loop: "{{ _awg_clients_to_add }}"
+          no_log: true
+
+        - name: Derive the public key per new client
+          ansible.builtin.shell:
+            cmd: "printf '%s' {{ item.stdout | trim | quote }} | awg pubkey"
+          register: _awg_add_pub_cmds
+          changed_when: true
+          loop: "{{ _awg_add_priv_cmds.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          no_log: true
+
+        - name: Generate an optional PSK per new client
+          ansible.builtin.command:
+            cmd: "awg genpsk"
+          register: _awg_add_psk_cmds
+          changed_when: true
+          loop: "{{ _awg_clients_to_add }}"
+          when: awg_use_preshared_keys | bool
+          no_log: true
+
+        - name: Merge newly added clients into the identity document
+          ansible.builtin.set_fact:
+            _awg_identity: >-
+              {{ _awg_identity | combine({
+                'clients': (_awg_identity.clients | combine(dict(_awg_clients_to_add | zip(
+                  range(0, _awg_clients_to_add | length) | map('extract', [
+                    _awg_add_priv_cmds.results | map(attribute='stdout') | map('trim') | list,
+                    _awg_add_pub_cmds.results | map(attribute='stdout') | map('trim') | list,
+                    (_awg_add_psk_cmds.results | default([])) | map(attribute='stdout') | map('trim') | list
+                  ]) | list )))
+              }, recursive=True) }}
+          no_log: true
+
+    - name: Revoke clients no longer listed in awg_client_names
+      ansible.builtin.set_fact:
+        _awg_identity: >-
+          {{ _awg_identity | combine({
+            'clients': (_awg_identity.clients | dict2items
+              | selectattr('key', 'in', awg_client_names) | items2dict)
+          }, recursive=True) }}
+      no_log: true
+
+    - name: Persist the reconciled AmneziaWG identity document
+      ansible.builtin.copy:
+        dest: "{{ awg_state_dir }}/identity.json"
+        content: "{{ _awg_identity | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    # -----------------------------------------------------------------------
+    # 4. Build the peer list (assign a unique tunnel address per client) and render the conf.
+    # -----------------------------------------------------------------------
+    - name: Discover the WAN interface from the default route (when set to auto)
+      ansible.builtin.command:
+        cmd: "ip route show default"
+      register: _awg_default_route
+      changed_when: false
+      when: awg_wan_interface == 'auto'
+
+    - name: Resolve the effective WAN interface
+      ansible.builtin.set_fact:
+        _awg_wan_if: >-
+          {{ (_awg_default_route.stdout.split('dev')[1].split()[0])
+             if (awg_wan_interface == 'auto' and _awg_default_route.stdout | default('') | length > 0)
+             else awg_wan_interface }}
+
+    - name: Assert a WAN interface was resolved
+      ansible.builtin.assert:
+        that:
+          - _awg_wan_if is defined
+          - _awg_wan_if | length > 0
+          - _awg_wan_if != 'auto'
+        fail_msg: >-
+          Could not determine the WAN interface for egress masquerade. Set awg_wan_interface
+          explicitly in group_vars/all.yml.
+
+    - name: Build the ordered peer list (stable per-client tunnel addresses)
+      ansible.builtin.set_fact:
+        _awg_peers: >-
+          {{ _awg_peers | default([]) + [{
+            'name': item,
+            'private_key': _awg_identity.clients[item][0],
+            'public_key': _awg_identity.clients[item][1],
+            'preshared_key': (_awg_identity.clients[item][2] | default('')),
+            'tunnel_v4': (awg_peer_base_v4 ~ '.' ~ (idx + 2)),
+            'tunnel_v6': (awg_peer_base_v6 ~ (idx + 2))
+          }] }}
+      loop: "{{ awg_client_names }}"
+      loop_control:
+        index_var: idx
+      no_log: true
+
+    - name: Expose the server private key to the template (root-only render)
+      ansible.builtin.set_fact:
+        _awg_server_private_key: "{{ _awg_identity.server.private_key }}"
+      no_log: true
+
+    - name: Expose the server public key to the client template (clients configure it as [Peer])
+      ansible.builtin.set_fact:
+        _awg_server_public_key: "{{ _awg_identity.server.public_key }}"
+      no_log: true
+
+    - name: Render the AmneziaWG interface config from the template
+      ansible.builtin.template:
+        src: awg0.conf.j2
+        dest: "{{ awg_conf_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      notify: Restart amneziawg
+      no_log: true
+
+    # -----------------------------------------------------------------------
+    # 5. systemd: enable + start awg-quick@<iface>.
+    # -----------------------------------------------------------------------
+    - name: Flush handlers so the interface is (re)started before the firewall step
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start awg-quick@{{ awg_interface }}
+      ansible.builtin.systemd:
+        name: "awg-quick@{{ awg_interface }}"
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # -----------------------------------------------------------------------
+    # 6. Host firewall: open ONLY the AmneziaWG listen port, as UDP.
+    # -----------------------------------------------------------------------
+    - name: Open the AmneziaWG listen port (UDP) in the host firewall
+      community.general.ufw:
+        rule: allow
+        port: "{{ awg_listen_port | string }}"
+        proto: udp
+        comment: "mycelium amneziawg fallback (UDP)"
+
+    # -----------------------------------------------------------------------
+    # 7. Provisioning model A: render a COMPLETE client config per identity on the node, then FETCH
+    #    each one to the operator's gitignored ./out/ — mirroring how the sing-box role produces and
+    #    fetches per-client subscriptions. Each rendered client config is a self-contained
+    #    [Interface] + [Peer]: the node-generated client private key + assigned tunnel address + the
+    #    shared obfuscation knobs (Interface), and the SERVER public key + Endpoint + AllowedIPs
+    #    (+ optional PSK) (Peer). The operator hands the file to that client out-of-band.
+    #
+    #    Model A note: because the node generates the client keypair, the client's private key is
+    #    inside its rendered config and therefore leaves the node (root-only, 0600 on the node and
+    #    fetched into the gitignored ./out/). Switching to model B (client-generated keypairs, only
+    #    the public key registered with the node) is a documented future hardening option — see
+    #    nodes/dataplane/amneziawg/README.md.
+    # -----------------------------------------------------------------------
+    - name: Create the on-node client-config output directory (root-only)
+      ansible.builtin.file:
+        path: "{{ awg_state_dir }}/clients"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Render a complete client config per identity (model A)
+      ansible.builtin.template:
+        src: client.conf.j2
+        dest: "{{ awg_state_dir }}/clients/{{ item.name }}.conf"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ _awg_peers }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        _awg_client: "{{ item }}"
+      no_log: true
+
+    - name: Export the server public key (clients need it; private key stays on node)
+      ansible.builtin.shell:
+        cmd: "jq -r '.server.public_key' {{ awg_state_dir }}/identity.json > {{ awg_state_dir }}/server_public_key.txt"
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Ensure the operator output directory exists on the control host
+      ansible.builtin.file:
+        path: "{{ awg_out_clients_dir }}/{{ inventory_hostname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: List the rendered client configs on the node
+      ansible.builtin.find:
+        paths: "{{ awg_state_dir }}/clients"
+        patterns: "*.conf"
+      register: _awg_client_files
+
+    - name: Fetch each rendered client config to the operator's ./out/
+      ansible.builtin.fetch:
+        src: "{{ item.path }}"
+        dest: "{{ awg_out_clients_dir }}/{{ inventory_hostname }}/{{ item.path | basename }}"
+        flat: true
+      loop: "{{ _awg_client_files.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: Fetch the server public key to the operator's ./out/
+      ansible.builtin.fetch:
+        src: "{{ awg_state_dir }}/server_public_key.txt"
+        dest: "{{ awg_out_public_dir }}/{{ inventory_hostname }}/server_public_key.txt"
+        flat: true
+
+    - name: Report where the operator can find the fetched artefacts
+      ansible.builtin.debug:
+        msg:
+          - "AmneziaWG client configs (model A): {{ awg_out_clients_dir }}/{{ inventory_hostname }}/<name>.conf"
+          - "AmneziaWG server public key: {{ awg_out_public_dir }}/{{ inventory_hostname }}/server_public_key.txt"
+          - "Listen port (UDP): {{ awg_listen_port }} ; interface: {{ awg_interface }} ; endpoint: {{ node_address }}:{{ awg_listen_port }}"
+          - "Server PRIVATE key remains ONLY on the node ({{ awg_state_dir }}/identity.json, root 0600)."
+          - "Model A: the node generated each client keypair, so a client's private key is inside its fetched .conf — deliver out-of-band and treat ./out/ as sensitive (gitignored). Model B (client-generated keys) is a future hardening option."
+          - "Every peer shares the SAME obfuscation knobs as this server: {{ awg_obfs }}"

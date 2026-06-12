@@ -1,0 +1,108 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium — amneziawg role defaults.
+# Author: mindicator & silicon bags quartet
+#
+# AmneziaWG = obfuscated WireGuard, the NON-TLS / UDP fallback path. Toggled OFF by default; set
+# "enable_amneziawg: true" in group_vars/all.yml to provision it. Override the values below in
+# group_vars only with intent — and remember every peer (server + clients) must share the same
+# obfuscation knobs (Jc/Jmin/Jmax/S1/S2/H1..H4).
+---
+# Master toggle. The role is a no-op unless this is true (set via group_vars).
+enable_amneziawg: false
+
+# --- Interface identity / addressing ----------------------------------------------------------
+awg_interface: "awg0"
+
+# UDP port the server listens on for this path. Diversify per node (ARCHITECTURE §Layer 1). This
+# is the ONLY port the role opens in the host firewall, and it is opened as UDP.
+awg_listen_port: 51820
+
+# Server's in-tunnel addresses (NOT the public IP). Private ranges only (RFC 1918 / RFC 4193 ULA).
+awg_server_tunnel_addr_v4: "10.13.13.1/24"
+awg_server_tunnel_addr_v6: "fd13:13:13::1/64"
+
+# Base networks used to auto-assign a unique tunnel address to each peer. The role hands out
+# .2, .3, … (v4) and ::2, ::3, … (v6) from these bases, in client_names order.
+awg_peer_base_v4: "10.13.13"
+awg_peer_base_v6: "fd13:13:13::"
+
+# WAN interface for egress masquerade. "auto" -> discovered from the default route on the node.
+awg_wan_interface: "auto"
+
+# Issue an optional pre-shared key ("awg genpsk") per peer for an extra symmetric layer.
+awg_use_preshared_keys: true
+
+# --- Client config rendering (provisioning model A: node-generated client configs) -------------
+# The role renders a COMPLETE client config per identity and fetches it to the operator's ./out/.
+# These shape the client's [Interface]/[Peer] and are NOT secrets.
+# Resolvers the client reaches through the tunnel.
+awg_client_dns:
+  - "1.1.1.1"
+  - "2606:4700:4700::1111"
+# AllowedIPs on the client side: default routes all traffic through the tunnel. Narrow these in
+# group_vars for a split-tunnel client (e.g. only the tunnel ranges).
+awg_client_allowed_ips:
+  - "0.0.0.0/0"
+  - "::/0"
+# Seconds between keepalive packets so NAT mappings survive idle periods on UDP.
+awg_persistent_keepalive: 25
+
+# --- Obfuscation knobs (SHARED by server + all clients; tunable by Layer 2, not secret) -------
+# Constraints the role asserts: Jmin < Jmax; H1..H4 distinct; (S1 + 56) != S2.
+awg_obfs:
+  Jc: 4          # junk packet count before the real handshake
+  Jmin: 40       # junk packet minimum size (bytes)
+  Jmax: 70       # junk packet maximum size (bytes)
+  S1: 51         # init-packet junk size (bytes)
+  S2: 102        # response-packet junk size (bytes)  (51 + 56 = 107 != 102, OK)
+  H1: 1148403838 # randomized header value for message type 1 (init)
+  H2: 1351874800 # randomized header value for message type 2 (response)
+  H3: 1936608092 # randomized header value for message type 3 (cookie)
+  H4: 1830553362 # randomized header value for message type 4 (transport data)
+
+# --- Install strategy -------------------------------------------------------------------------
+# "module"   : kernel module + tools from the official Amnezia PPA (preferred on Debian/Ubuntu).
+# "userspace": the Go userspace implementation amneziawg-go (no kernel module needed).
+awg_install_method: "module"
+
+# Official Amnezia PPA (kernel-module path). Pinned channel; the package manager pins the version.
+awg_ppa_repo: "ppa:amnezia/ppa"
+awg_module_packages:
+  - amneziawg-dkms
+  - amneziawg-tools
+
+# Userspace pin (used when awg_install_method == "userspace"). amneziawg-go release tag + SHA256.
+# Leave the SHA256 as the REPLACE placeholder in group_vars so the role FAILS CLOSED until the
+# real checksum from the upstream release is recorded (never install an unverified artefact).
+awg_go_version: "v0.2.12"
+awg_go_download_base: "https://github.com/amnezia-vpn/amneziawg-go/releases/download"
+awg_go_asset_by_arch:
+  x86_64: "amneziawg-go-linux-amd64.tar.gz"
+  aarch64: "amneziawg-go-linux-arm64.tar.gz"
+awg_go_arch_key:
+  x86_64: "amd64"
+  aarch64: "arm64"
+# Per-architecture SHA256 of the amneziawg-go release tarball (set the real values in group_vars).
+awg_go_sha256:
+  amd64: "REPLACE_WITH_SHA256_OF_amneziawg-go-linux-amd64.tar.gz"
+  arm64: "REPLACE_WITH_SHA256_OF_amneziawg-go-linux-arm64.tar.gz"
+
+# --- On-node filesystem layout ----------------------------------------------------------------
+awg_conf_dir: "/etc/amnezia/amneziawg"             # awg-quick reads <iface>.conf from here
+awg_conf_path: "/etc/amnezia/amneziawg/awg0.conf"
+awg_state_dir: "/var/lib/mycelium/amneziawg"       # generated keys (root-only, 0700)
+awg_bin_dir: "/usr/local/bin"                       # userspace amneziawg-go lands here
+
+# --- Operator output (control host; gitignored ./out/) ----------------------------------------
+# Rendered client configs and the server public key are fetched here, mirroring how the sing-box
+# role fetches per-client subscriptions. ./out/ is gitignored — these artefacts are NEVER committed.
+awg_out_clients_dir: "./out/amneziawg"             # per-client .conf bundles land here
+awg_out_public_dir: "./out/amneziawg"              # server public key lands here
+
+# Operator client identities for this path. Reuses the same friendly-name roster pattern as the
+# xray role; one keypair + peer slot is generated per name ON the node.
+awg_client_names: "{{ client_names | default([]) }}"

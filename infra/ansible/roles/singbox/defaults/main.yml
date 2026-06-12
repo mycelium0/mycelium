@@ -1,0 +1,88 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — singbox role defaults (PRIMARY engine).
+# Author: mindicator & silicon bags quartet
+#
+# sing-box is the PRIMARY engine: one server process speaks many transport "dialects" in parallel
+# (VLESS+REALITY in three flavours, Hysteria2, TUIC, Shadowsocks-2022, ShadowTLS, Trojan). Each
+# protocol is individually TOGGLEABLE via the enable_* vars (see group_vars/all.yml.example) so an
+# operator exposes only a chosen subset. These defaults map architecture facts to upstream release
+# assets and provide on-node paths. Override pins/toggles via group_vars, not here.
+---
+# Upstream download base. The release tag (singbox_version) is supplied from group_vars.
+singbox_download_base: "https://github.com/SagerNet/sing-box/releases/download"
+
+# Map ansible_facts.architecture -> the arch token sing-box uses in its release asset names.
+# sing-box ships per-arch tarballs named sing-box-<ver>-linux-<arch>.tar.gz.
+singbox_arch_key:
+  x86_64: "amd64"
+  aarch64: "arm64"
+
+# On-node filesystem layout. Mirrors the xray role so the two engines can coexist cleanly.
+singbox_bin_path: "/usr/local/bin/sing-box"
+singbox_etc_dir: "/usr/local/etc/sing-box"
+singbox_config_path: "/usr/local/etc/sing-box/config.json"
+singbox_state_dir: "/var/lib/mycelium"          # generated keys/uuids/passwords (root-only, 0700)
+singbox_tooling_dir: "/usr/local/lib/mycelium"  # copied control/ tooling + config template
+singbox_run_user: "sing-box"
+singbox_run_group: "sing-box"
+
+# Where the control tooling and the sing-box config template live in the repo (relative to the
+# playbook dir). The control tooling is produced by the sibling `control` component; the template
+# is shipped by this role under templates/.
+singbox_control_tooling_src: "../../control/"
+singbox_config_template_name: "config.template.json"
+
+# Operator output: rendered client subscriptions are fetched here on the control host.
+singbox_out_subscriptions_dir: "./out/subscriptions"
+singbox_out_public_dir: "./out"
+
+# Number of REALITY shortIds to generate (via "openssl rand -hex 8"); clients may use any one.
+# Safe role default so the role still runs if group_vars omits it (the .example sets 3).
+shortid_count: 3
+
+# ---------------------------------------------------------------------------
+# Per-protocol toggles — SAFE ROLE DEFAULTS.
+# group_vars/all.yml.example is the operator-facing source of truth; these defaults exist only so
+# the role runs if a toggle is omitted. VLESS+REALITY+Vision is the primary transport (on); every
+# other protocol is OFF by default and exposed only when the operator opts in.
+# ---------------------------------------------------------------------------
+enable_vless_reality_vision: true
+enable_vless_reality_grpc: false
+enable_vless_reality_xhttp: false
+enable_hysteria2: false
+enable_tuic: false
+enable_ss2022: false
+enable_shadowtls: false
+enable_trojan: false
+
+# AmneziaWG is a SEPARATE, non-TLS/UDP path handled by its own role, NOT by sing-box. The toggle
+# lives here so a single switch governs the whole stack; the amneziawg role reads it.
+enable_amneziawg: false
+
+# ---------------------------------------------------------------------------
+# Per-protocol listen ports — SAFE ROLE DEFAULTS.
+# REALITY flavours can share one TCP port via sing-box's multiplex only when distinguished by
+# transport; to keep them independently toggleable and probeable we give each its own port. UDP
+# protocols (Hysteria2, TUIC) bind UDP ports. Override in group_vars.
+# ---------------------------------------------------------------------------
+singbox_port_vless_vision: 443     # TCP — primary VLESS+REALITY+XTLS-Vision
+singbox_port_vless_grpc: 8443      # TCP — VLESS+REALITY+gRPC
+singbox_port_vless_xhttp: 2096     # TCP — VLESS+REALITY+XHTTP
+singbox_port_hysteria2: 8444       # UDP — Hysteria2 (QUIC)
+singbox_port_tuic: 8445            # UDP — TUIC v5 (QUIC)
+singbox_port_ss2022: 8388         # TCP — Shadowsocks-2022 AEAD
+singbox_port_shadowtls: 8446       # TCP — ShadowTLS v3 (wraps the Shadowsocks server)
+singbox_port_trojan: 8447          # TCP — Trojan over TLS
+
+# Shadowsocks-2022 AEAD method. Audited AEAD cipher; clients must match it. blake3 variants are
+# the 2022 family (NOT legacy plain Shadowsocks, which is excluded).
+singbox_ss2022_method: "2022-blake3-aes-256-gcm"
+
+# ShadowTLS v3 handshake target: a real external TLS site whose handshake ShadowTLS borrows for
+# its outer layer (analogous to a REALITY donor). Defaults to the REALITY donor for convenience.
+singbox_shadowtls_handshake_server: "{{ donor_host }}"
+singbox_shadowtls_handshake_port: 443

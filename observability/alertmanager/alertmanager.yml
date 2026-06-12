@@ -1,0 +1,68 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — Alertmanager routing skeleton.
+# Author: mindicator & silicon bags quartet
+#
+# Minimal, secret-free routing skeleton. It declares HOW alerts are grouped and which receiver
+# they land in, but ships with a NULL (black-hole) default receiver and a PLACEHOLDER webhook so
+# nothing is wired to a real destination in the repo. To deliver alerts somewhere, point the
+# webhook URL at your own relay (a script, a chat bridge, an on-call adapter) at deploy time —
+# keep that real URL OUT of the repo (use a *.local override or a secrets/ path). Do NOT put bot
+# tokens, chat URLs, SMTP credentials, or API keys here.
+#
+# NOTE on the control plane: per docs/ARCHITECTURE.md, management traffic should travel over the
+# same resilient channels as data. The notification relay you choose should be reachable from the
+# operator's vantage point without depending on infrastructure that can be cut alongside the node.
+
+global:
+  # How long to keep sending notifications for an alert that has stopped firing before resolving.
+  resolve_timeout: 5m
+
+# Inhibition: if a node is fully down, suppress the noisier reachability/handshake alerts for the
+# SAME instance — NodeDown already tells the operator the host is gone. This keeps an outage from
+# fanning out into a wall of redundant pages.
+inhibit_rules:
+  - source_matchers:
+      - 'alertname = "NodeDown"'
+    target_matchers:
+      - 'component =~ "reachability|dataplane|tls"'
+    equal:
+      - instance
+
+route:
+  # Group related alerts so one network event is one notification, not dozens.
+  group_by:
+    - alertname
+    - instance
+  group_wait: 30s        # buffer initial alerts in a group so they batch into one notification.
+  group_interval: 5m     # wait before adding new alerts of an existing group to the next batch.
+  repeat_interval: 4h    # re-notify for still-firing alerts at most this often.
+
+  # Default: send nowhere until the operator configures a real relay (see receivers below).
+  receiver: "null"
+
+  routes:
+    # Critical reachability / liveness events are the ones that may demand a fast rotate-ip-as
+    # response — route them to the (placeholder) operator webhook with a tighter repeat interval.
+    - matchers:
+        - 'severity = "critical"'
+      receiver: "operator-webhook-placeholder"
+      repeat_interval: 1h
+      continue: false
+
+receivers:
+  # Black-hole receiver: explicitly drops everything. Safe default so a misconfigured route never
+  # silently fails to deliver to a real target.
+  - name: "null"
+
+  # PLACEHOLDER webhook. Replace the URL at deploy time with your own notification relay and keep
+  # the real value out of the repo (e.g. an alertmanager.yml.local override or a secrets/ mount).
+  # The sentinel host below is non-routable on purpose so an unconfigured deploy fails loudly
+  # rather than leaking alerts somewhere unintended.
+  - name: "operator-webhook-placeholder"
+    webhook_configs:
+      - url: "http://127.0.0.1:5001/REPLACE_WITH_OPERATOR_WEBHOOK"
+        send_resolved: true

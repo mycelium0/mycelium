@@ -1,0 +1,18 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — Ansible Galaxy collection requirements (pinned).
+# Author: mindicator & silicon bags quartet
+#
+# Install with:
+#   ansible-galaxy collection install -r requirements.yml
+---
+collections:
+  # ufw, dpkg_selections, apt_repository helpers.
+  - name: community.general
+    version: "9.4.0"
+  # sysctl module.
+  - name: ansible.posix
+    version: "1.5.4"

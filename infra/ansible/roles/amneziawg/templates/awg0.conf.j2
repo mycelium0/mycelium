@@ -1,0 +1,49 @@
+#jinja2: trim_blocks: True, lstrip_blocks: True
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium — AmneziaWG server config for {{ awg_interface }} (RENDERED — do not edit by hand).
+# Author: mindicator & silicon bags quartet
+#
+# Rendered by the amneziawg Ansible role from this node's generated keys (awg genkey | awg pubkey)
+# and the shared obfuscation knobs. Real keys live ONLY on the node (this file is root-only 0600
+# and gitignored). See nodes/dataplane/amneziawg/awg0.conf.template for the documented template.
+# This is the NON-TLS / UDP fallback path, complementary to the sing-box / Xray TLS+QUIC paths.
+
+[Interface]
+# Server private key (from "awg genkey"); the matching public key is what clients configure.
+PrivateKey = {{ _awg_server_private_key }}
+Address = {{ awg_server_tunnel_addr_v4 }}, {{ awg_server_tunnel_addr_v6 }}
+ListenPort = {{ awg_listen_port | int }}
+
+# --- AmneziaWG obfuscation parameters (shared by server + ALL clients; must match exactly) -----
+# Jc/Jmin/Jmax : junk-packet count / min / max size — break the fixed first-packet fingerprint.
+# S1/S2        : init / response handshake junk size — break the fixed handshake-packet sizes.
+# H1..H4       : randomized message-type headers — remove the fixed 1-byte type fingerprint.
+Jc = {{ awg_obfs.Jc | int }}
+Jmin = {{ awg_obfs.Jmin | int }}
+Jmax = {{ awg_obfs.Jmax | int }}
+S1 = {{ awg_obfs.S1 | int }}
+S2 = {{ awg_obfs.S2 | int }}
+H1 = {{ awg_obfs.H1 | int }}
+H2 = {{ awg_obfs.H2 | int }}
+H3 = {{ awg_obfs.H3 | int }}
+H4 = {{ awg_obfs.H4 | int }}
+
+# --- Egress: enable forwarding + masquerade tunnel traffic out the node's WAN interface ---------
+PostUp   = sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv6.conf.all.forwarding=1; iptables -A FORWARD -i {{ awg_interface }} -j ACCEPT; iptables -A FORWARD -o {{ awg_interface }} -j ACCEPT; iptables -t nat -A POSTROUTING -o {{ _awg_wan_if }} -j MASQUERADE; ip6tables -t nat -A POSTROUTING -o {{ _awg_wan_if }} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {{ awg_interface }} -j ACCEPT; iptables -D FORWARD -o {{ awg_interface }} -j ACCEPT; iptables -t nat -D POSTROUTING -o {{ _awg_wan_if }} -j MASQUERADE; ip6tables -t nat -D POSTROUTING -o {{ _awg_wan_if }} -j MASQUERADE
+
+# --- Peers (one block per issued client; revocation = remove a block and reload) ----------------
+{% for peer in _awg_peers %}
+
+[Peer]
+# name = {{ peer.name }}
+PublicKey = {{ peer.public_key }}
+{% if peer.preshared_key is defined and peer.preshared_key | length > 0 %}
+PresharedKey = {{ peer.preshared_key }}
+{% endif %}
+AllowedIPs = {{ peer.tunnel_v4 }}/32, {{ peer.tunnel_v6 }}/128
+{% endfor %}

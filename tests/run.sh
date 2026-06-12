@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# run.sh — run all OFFLINE conformance checks and report a summary.
+# Author: mindicator & silicon bags quartet.
+#
+# Runs the gates that need NO live node and NO network:
+#   * check_headers.sh        — every commentable file carries the AGPL SPDX header
+#   * check_ppn_wording.sh    — neutral PPN vocabulary only (no loaded framing)
+#   * no_contact_leak.sh      — no personal email / contact details in tracked files
+#   * no_custom_crypto.sh     — no hand-rolled cryptography (ADR-0002)
+#   * validate_configs.sh     — JSON valid (jq); YAML/xray checks run if their tools are present
+#   * no_legacy_transport.sh  — disabled-legacy transports are never configured as inbounds
+#   * per_protocol_toggle.sh  — every protocol is enable_*-gated; only vless_reality_vision default-on
+#   * phase0_port_canon.sh    — the canonical per-protocol port map is consistent everywhere
+#   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
+#
+# DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
+# node, so it is not part of the offline suite. Run it by hand against a deployed node:
+#   tests/conformance/cover_site_probe.sh --node NODE --donor DONOR
+#
+# Exit: 0 = every offline gate passed, 1 = at least one gate failed.
+
+set -uo pipefail
+
+HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -P "$HERE/.." && pwd)"
+
+# Ordered list of offline gates. Each entry is a path relative to the repo root, so gates that live
+# outside tests/conformance/ (e.g. control/selftest.sh) run from their real location.
+GATES=(
+	"tests/conformance/check_headers.sh"
+	"tests/conformance/check_ppn_wording.sh"
+	"tests/conformance/no_contact_leak.sh"
+	"tests/conformance/no_custom_crypto.sh"
+	"tests/conformance/validate_configs.sh"
+	"tests/conformance/no_legacy_transport.sh"
+	"tests/conformance/per_protocol_toggle.sh"
+	"tests/conformance/phase0_port_canon.sh"
+	"control/selftest.sh"
+)
+
+pass=0
+fail=0
+declare -a RESULTS=()
+
+printf '########################################\n'
+printf '# Mycelium offline conformance suite\n'
+printf '########################################\n'
+
+for g in "${GATES[@]}"; do
+	gate="$REPO_ROOT/$g"
+	printf '\n========================================\n'
+	printf '>> %s\n' "$g"
+	printf '========================================\n'
+	if [ ! -f "$gate" ]; then
+		printf 'run.sh: gate not found: %s\n' "$gate" >&2
+		RESULTS+=("MISSING  $g")
+		fail=$((fail + 1))
+		continue
+	fi
+	# Run via bash so an un-chmod'd gate still executes.
+	if bash "$gate"; then
+		RESULTS+=("PASS     $g")
+		pass=$((pass + 1))
+	else
+		RESULTS+=("FAIL     $g")
+		fail=$((fail + 1))
+	fi
+done
+
+printf '\n########################################\n'
+printf '# Summary\n'
+printf '########################################\n'
+for r in "${RESULTS[@]}"; do
+	printf '  %s\n' "$r"
+done
+printf '\n  total: %d   passed: %d   failed: %d\n' "$((pass + fail))" "$pass" "$fail"
+
+if [ "$fail" -ne 0 ]; then
+	printf '\nrun.sh: OFFLINE SUITE FAILED (%d gate(s)).\n' "$fail" >&2
+	exit 1
+fi
+printf '\nrun.sh: all offline gates passed.\n'
+exit 0

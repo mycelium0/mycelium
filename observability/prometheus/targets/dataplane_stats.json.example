@@ -1,0 +1,12 @@
+[
+  {
+    "labels": {
+      "node": "node-01.example",
+      "role": "ingress-egress",
+      "engine": "singbox"
+    },
+    "targets": [
+      "127.0.0.1:19550"
+    ]
+  }
+]

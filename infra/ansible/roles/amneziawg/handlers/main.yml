@@ -1,0 +1,20 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium — amneziawg role handlers.
+# Author: mindicator & silicon bags quartet
+#
+# awg-quick is shipped as a systemd template unit "awg-quick@<iface>" by amneziawg-tools, mirroring
+# wg-quick@. Restarting it tears the interface down and brings it back up from the rendered conf.
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart amneziawg
+  ansible.builtin.systemd:
+    name: "awg-quick@{{ awg_interface }}"
+    state: restarted
+    enabled: true

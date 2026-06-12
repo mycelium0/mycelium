@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# myceliumctl — Phase 0/1 control tooling for a persistent private network node.
+# Author: mindicator & silicon bags quartet.
+#
+# A POSIX/bash + jq CLI. It is the rendering engine for the node's data plane:
+#   * generate REALITY keypairs and shortIds (via xray/sing-box + openssl — no custom crypto),
+#   * issue / revoke / list client identities in a JSON state file,
+#   * render a server config by jq path for one of two engines:
+#       - sing-box (PRIMARY): one server, many toggleable protocols
+#         (VLESS+REALITY Vision/gRPC/XHTTP, Hysteria2, TUIC v5, Shadowsocks-2022,
+#          ShadowTLS v3, Trojan),
+#       - xray (OPTIONAL alternative): the legacy VLESS+REALITY+Vision path,
+#   * emit per-client sing-box and Clash-Meta subscription configs.
+#
+# The runtime control-agent (network-interference detection, auto-rotation, telemetry)
+# is a Phase-2 deliverable in Go/Rust and is intentionally NOT part of this tool.
+
+set -euo pipefail
+
+# Resolve our own directory so libs and the default template/state are found
+# regardless of the caller's working directory.
+MYC_SELF="${BASH_SOURCE[0]}"
+# Resolve symlinks to the real script location (portable, no readlink -f on macOS).
+while [ -h "$MYC_SELF" ]; do
+	dir="$(cd -P "$(dirname "$MYC_SELF")" && pwd)"
+	MYC_SELF="$(readlink "$MYC_SELF")"
+	case "$MYC_SELF" in
+		/*) ;;
+		*) MYC_SELF="$dir/$MYC_SELF" ;;
+	esac
+done
+MYC_ROOT="$(cd -P "$(dirname "$MYC_SELF")" && pwd)"
+MYC_LIB="$MYC_ROOT/lib"
+
+# Default locations (overridable per-subcommand).
+MYC_DEFAULT_STATE="$MYC_ROOT/state/identities.json"
+# Engine-specific default templates. sing-box is the PRIMARY engine; xray is the
+# optional legacy alternative.
+MYC_DEFAULT_TEMPLATE_XRAY="$MYC_ROOT/../nodes/dataplane/vless-reality/server.template.json"
+MYC_DEFAULT_TEMPLATE_SINGBOX="$MYC_ROOT/../nodes/dataplane/singbox/server.template.json"
+MYC_DEFAULT_ENGINE="singbox"   # project canon: sing-box is PRIMARY (default). xray stays optional via --engine xray.
+MYC_DEFAULT_OUT_SERVER="$MYC_ROOT/state/server.json"
+MYC_DEFAULT_OUT_SUBS="$MYC_ROOT/out"
+
+# shellcheck source=lib/common.sh
+. "$MYC_LIB/common.sh"
+# shellcheck source=lib/jqlib.sh
+. "$MYC_LIB/jqlib.sh"
+# shellcheck source=lib/identity.sh
+. "$MYC_LIB/identity.sh"
+# shellcheck source=lib/render.sh
+. "$MYC_LIB/render.sh"
+# shellcheck source=lib/render_singbox.sh
+. "$MYC_LIB/render_singbox.sh"
+
+# ---------------------------------------------------------------------------
+# Usage
+# ---------------------------------------------------------------------------
+
+usage() {
+	cat <<'USAGE'
+myceliumctl — Mycelium Phase 0 control tooling (bash + jq).
+
+Usage:
+  myceliumctl <command> [options]
+
+Commands:
+  reality-keys [--shortids N] [--shortid-bytes B]
+        Generate a REALITY X25519 keypair via `xray x25519` and N shortIds via
+        `openssl rand -hex B`. Requires xray and openssl on PATH (no custom crypto).
+        Output is KEY=VALUE lines on stdout.
+
+  identity add    --name NAME [--state FILE]
+        Issue a client: append {name, id:(xray uuid), created} to the state file.
+  identity revoke NAME|ID   [--state FILE]
+        Revoke a client by name or UUID.
+  identity list             [--state FILE]
+        List clients as a table.
+        Default state file: control/state/identities.json
+
+  render-server [--engine singbox|xray] [--template FILE] --params FILE [--state FILE] [--out FILE]
+        Render a server config by jq path using the params file and identity state.
+        Output is valid JSON (default: state/server.json).
+          --engine singbox  PRIMARY (DEFAULT): one sing-box server with every ENABLED
+                            protocol (VLESS+REALITY Vision/gRPC/XHTTP, Hysteria2,
+                            TUIC v5, Shadowsocks-2022, ShadowTLS v3, Trojan).
+                            Per-protocol <proto>_enabled flags in params decide what
+                            is exposed.
+          --engine xray     OPTIONAL alternative: VLESS+REALITY+Vision only. The
+                            default template is engine-specific.
+
+  subscription  [--engine singbox|xray] --params FILE [--state FILE] [--out DIR]
+        Emit per-client sing-box JSON and Clash-Meta YAML subscription configs
+        (default out dir: control/out).
+          --engine singbox  DEFAULT: one client outbound per ENABLED protocol plus
+                            selector + urltest (sing-box) / select + url-test group
+                            (Clash-Meta), preferring protocols in priority order.
+          --engine xray     optional single VLESS+REALITY+Vision outbound.
+
+  help | -h | --help
+        Show this help.
+
+Engines: sing-box is the PRIMARY engine (one server, many toggleable protocols) and is
+now the DEFAULT (project canon); xray is an OPTIONAL alternative (VLESS+REALITY+Vision),
+selected with '--engine xray'.
+
+Params file: JSON (always supported) or YAML (requires `yq`). See
+control/params.example.json for the schema. Secrets/outputs land in gitignored
+paths (state/, out/, *.local, server.json). The runtime control-agent
+(auto-rotation, telemetry) is a Phase-2 Go/Rust deliverable, not part of this tool.
+USAGE
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: reality-keys
+# ---------------------------------------------------------------------------
+
+cmd_reality_keys() {
+	local n_short bytes
+	n_short=1
+	bytes=8
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--shortids) n_short="${2:?--shortids needs a value}"; shift 2 ;;
+			--shortid-bytes) bytes="${2:?--shortid-bytes needs a value}"; shift 2 ;;
+			-h|--help) usage; return 0 ;;
+			*) myc_die "reality-keys: unknown argument: $1" ;;
+		esac
+	done
+
+	case "$n_short" in (*[!0-9]*|'') myc_die "reality-keys: --shortids must be a non-negative integer" ;; esac
+	case "$bytes"   in (*[!0-9]*|'') myc_die "reality-keys: --shortid-bytes must be a positive integer" ;; esac
+	[ "$bytes" -ge 1 ] || myc_die "reality-keys: --shortid-bytes must be >= 1"
+
+	# REALITY keypair from xray. Output of `xray x25519` looks like:
+	#   Private key: <base64url>
+	#   Public key:  <base64url>
+	# (older builds print "Password:" for the public key). We parse both forms.
+	myc_require_xray
+	local raw priv pub
+	raw="$(xray x25519 2>/dev/null)" || myc_die "'xray x25519' failed"
+	priv="$(printf '%s\n' "$raw" | sed -n 's/^[Pp]rivate [Kk]ey:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
+	pub="$(printf '%s\n' "$raw"  | sed -n 's/^[Pp]ublic [Kk]ey:[[:space:]]*//p'  | head -n1 | tr -d '[:space:]')"
+	if [ -z "$pub" ]; then
+		# Some builds label the public value "Password".
+		pub="$(printf '%s\n' "$raw" | sed -n 's/^[Pp]assword:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
+	fi
+	[ -n "$priv" ] || myc_die "could not parse private key from 'xray x25519' output"
+	[ -n "$pub" ]  || myc_die "could not parse public key from 'xray x25519' output"
+
+	printf 'REALITY_PRIVATE_KEY=%s\n' "$priv"
+	printf 'REALITY_PUBLIC_KEY=%s\n' "$pub"
+
+	local k
+	k=1
+	while [ "$k" -le "$n_short" ]; do
+		printf 'REALITY_SHORT_ID_%s=%s\n' "$k" "$(myc_shortid "$bytes")"
+		k=$((k + 1))
+	done
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: identity
+# ---------------------------------------------------------------------------
+
+cmd_identity() {
+	local sub
+	sub="${1:-}"
+	[ -n "$sub" ] || myc_die "identity: expected a subcommand (add|revoke|list)"
+	shift
+
+	local state name selector
+	state="$MYC_DEFAULT_STATE"
+	name=""
+	selector=""
+
+	case "$sub" in
+		add)
+			while [ "$#" -gt 0 ]; do
+				case "$1" in
+					--name) name="${2:?--name needs a value}"; shift 2 ;;
+					--state) state="${2:?--state needs a value}"; shift 2 ;;
+					-h|--help) usage; return 0 ;;
+					*) myc_die "identity add: unknown argument: $1" ;;
+				esac
+			done
+			[ -n "$name" ] || myc_die "identity add: --name is required"
+			myc_identity_add "$state" "$name"
+			;;
+		revoke)
+			while [ "$#" -gt 0 ]; do
+				case "$1" in
+					--state) state="${2:?--state needs a value}"; shift 2 ;;
+					-h|--help) usage; return 0 ;;
+					--*) myc_die "identity revoke: unknown argument: $1" ;;
+					*)
+						if [ -z "$selector" ]; then
+							selector="$1"; shift
+						else
+							myc_die "identity revoke: unexpected extra argument: $1"
+						fi
+						;;
+				esac
+			done
+			[ -n "$selector" ] || myc_die "identity revoke: a NAME or ID is required"
+			myc_identity_revoke "$state" "$selector"
+			;;
+		list)
+			while [ "$#" -gt 0 ]; do
+				case "$1" in
+					--state) state="${2:?--state needs a value}"; shift 2 ;;
+					-h|--help) usage; return 0 ;;
+					*) myc_die "identity list: unknown argument: $1" ;;
+				esac
+			done
+			myc_identity_list "$state"
+			;;
+		*)
+			myc_die "identity: unknown subcommand: $sub (expected add|revoke|list)"
+			;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: render-server
+# ---------------------------------------------------------------------------
+
+cmd_render_server() {
+	local engine engine_explicit template params state out
+	engine="$MYC_DEFAULT_ENGINE"
+	engine_explicit=0
+	template=""   # empty => pick the engine-specific default after parsing
+	params=""
+	state="$MYC_DEFAULT_STATE"
+	out="$MYC_DEFAULT_OUT_SERVER"
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--engine)   engine="${2:?--engine needs a value}"; engine_explicit=1; shift 2 ;;
+			--template) template="${2:?--template needs a value}"; shift 2 ;;
+			--params)   params="${2:?--params needs a value}"; shift 2 ;;
+			--state)    state="${2:?--state needs a value}"; shift 2 ;;
+			--out)      out="${2:?--out needs a value}"; shift 2 ;;
+			-h|--help)  usage; return 0 ;;
+			*) myc_die "render-server: unknown argument: $1" ;;
+		esac
+	done
+	[ -n "$params" ] || myc_die "render-server: --params is required"
+	# The default engine is now sing-box (project canon). Note this once for any caller
+	# that relied on the historical xray default and did not pass --engine.
+	if [ "$engine_explicit" -eq 0 ]; then
+		myc_log "render-server: no --engine given; using the default engine 'singbox' (project canon). Pass '--engine xray' for the optional alternative."
+	fi
+	case "$engine" in
+		singbox)
+			[ -n "$template" ] || template="$MYC_DEFAULT_TEMPLATE_SINGBOX"
+			myc_sb_render_server "$template" "$params" "$state" "$out"
+			;;
+		xray)
+			[ -n "$template" ] || template="$MYC_DEFAULT_TEMPLATE_XRAY"
+			myc_render_server "$template" "$params" "$state" "$out"
+			;;
+		*) myc_die "render-server: unknown --engine '$engine' (expected singbox|xray)" ;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: subscription
+# ---------------------------------------------------------------------------
+
+cmd_subscription() {
+	local engine engine_explicit params state out
+	engine="$MYC_DEFAULT_ENGINE"
+	engine_explicit=0
+	params=""
+	state="$MYC_DEFAULT_STATE"
+	out="$MYC_DEFAULT_OUT_SUBS"
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--engine) engine="${2:?--engine needs a value}"; engine_explicit=1; shift 2 ;;
+			--params) params="${2:?--params needs a value}"; shift 2 ;;
+			--state)  state="${2:?--state needs a value}"; shift 2 ;;
+			--out)    out="${2:?--out needs a value}"; shift 2 ;;
+			-h|--help) usage; return 0 ;;
+			*) myc_die "subscription: unknown argument: $1" ;;
+		esac
+	done
+	[ -n "$params" ] || myc_die "subscription: --params is required"
+	# The default engine is now sing-box (project canon). Note this once for any caller
+	# that relied on the historical xray default and did not pass --engine.
+	if [ "$engine_explicit" -eq 0 ]; then
+		myc_log "subscription: no --engine given; using the default engine 'singbox' (project canon). Pass '--engine xray' for the optional alternative."
+	fi
+	case "$engine" in
+		singbox) myc_sb_render_subscription "$params" "$state" "$out" ;;
+		xray)    myc_render_subscription "$params" "$state" "$out" ;;
+		*) myc_die "subscription: unknown --engine '$engine' (expected singbox|xray)" ;;
+	esac
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+
+main() {
+	local cmd
+	cmd="${1:-}"
+	[ -n "$cmd" ] || { usage; exit 2; }
+	shift
+
+	# jq is the rendering engine and is required by every command path.
+	myc_require_jq
+
+	case "$cmd" in
+		reality-keys)   cmd_reality_keys "$@" ;;
+		identity)       cmd_identity "$@" ;;
+		render-server)  cmd_render_server "$@" ;;
+		subscription)   cmd_subscription "$@" ;;
+		help|-h|--help) usage ;;
+		*) myc_die "unknown command: $cmd (run 'myceliumctl help')" 2 ;;
+	esac
+}
+
+main "$@"

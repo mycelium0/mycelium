@@ -1,0 +1,142 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Mycelium Phase 0 — hardening role.
+# Author: mindicator & silicon bags quartet
+#
+# Baseline host hardening for a fresh Debian/Ubuntu node:
+#   - UFW host firewall: allow OpenSSH + the node listen port (443/tcp); deny everything else.
+#   - unattended-upgrades: automatic security patches (supply chain / patch cadence).
+#   - sysctl: conservative network defaults.
+#   - fail2ban: optional, flagged off by default.
+#
+# The firewall is deliberately minimal: the only externally reachable surfaces are SSH (operator
+# management) and the single VLESS+REALITY listen port. node_exporter and the cover site bind to
+# loopback and are never exposed.
+---
+- name: Install baseline hardening packages
+  ansible.builtin.apt:
+    name:
+      - ufw
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---------------------------------------------------------------------------
+# Host firewall (UFW) — default deny inbound, allow SSH + listen_port only.
+# ---------------------------------------------------------------------------
+- name: Set UFW default policy — deny inbound
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Set UFW default policy — allow outbound
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Allow inbound OpenSSH (rate-limited to blunt brute-force)
+  community.general.ufw:
+    rule: limit
+    name: OpenSSH
+
+- name: Allow inbound node listen port (primary VLESS+REALITY transport)
+  community.general.ufw:
+    rule: allow
+    port: "{{ listen_port | string }}"
+    proto: tcp
+    comment: "mycelium vless-reality data plane"
+
+- name: Enable UFW and turn on logging
+  community.general.ufw:
+    state: enabled
+    logging: "on"
+
+# ---------------------------------------------------------------------------
+# Automatic security updates.
+# ---------------------------------------------------------------------------
+- name: Enable unattended-upgrades (periodic apt config)
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Managed by Mycelium hardening role. Do not edit by hand.
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+
+- name: Ensure the security origin is selected for unattended-upgrades
+  ansible.builtin.lineinfile:
+    path: /etc/apt/apt.conf.d/50unattended-upgrades
+    regexp: '^\s*//?\s*"\$\{distro_id\}:\$\{distro_codename\}-security";'
+    line: '        "${distro_id}:${distro_codename}-security";'
+    insertafter: 'Unattended-Upgrade::Allowed-Origins'
+    state: present
+  notify: Restart unattended-upgrades
+
+# ---------------------------------------------------------------------------
+# Conservative network sysctl.
+# ---------------------------------------------------------------------------
+- name: Apply baseline network sysctl
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/60-mycelium-hardening.conf
+    sysctl_set: true
+    reload: true
+    state: present
+  loop:
+    # Ignore ICMP redirects and source-routed packets (spoofing resistance).
+    - { name: "net.ipv4.conf.all.accept_redirects", value: "0" }
+    - { name: "net.ipv4.conf.all.send_redirects", value: "0" }
+    - { name: "net.ipv4.conf.all.accept_source_route", value: "0" }
+    - { name: "net.ipv6.conf.all.accept_redirects", value: "0" }
+    - { name: "net.ipv6.conf.all.accept_source_route", value: "0" }
+    # Reverse-path filtering and SYN-flood protection.
+    - { name: "net.ipv4.conf.all.rp_filter", value: "1" }
+    - { name: "net.ipv4.tcp_syncookies", value: "1" }
+    # Log martians for visibility.
+    - { name: "net.ipv4.conf.all.log_martians", value: "1" }
+    # BBR + fq give the data plane better behaviour on lossy/throttled links.
+    - { name: "net.core.default_qdisc", value: "fq" }
+    - { name: "net.ipv4.tcp_congestion_control", value: "bbr" }
+
+# ---------------------------------------------------------------------------
+# fail2ban (optional, flagged).
+# ---------------------------------------------------------------------------
+- name: Configure fail2ban (optional)
+  when: hardening_enable_fail2ban | bool
+  block:
+    - name: Install fail2ban
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+
+    - name: Deploy fail2ban sshd jail
+      ansible.builtin.copy:
+        dest: /etc/fail2ban/jail.d/mycelium-sshd.local
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by Mycelium hardening role.
+          [sshd]
+          enabled = true
+          backend = systemd
+          maxretry = 5
+          findtime = 600
+          bantime = 3600
+      notify: Restart fail2ban
+
+    - name: Enable and start fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        enabled: true
+        state: started
