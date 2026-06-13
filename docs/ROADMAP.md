@@ -76,6 +76,11 @@ everything else depends on.
   public always-on endpoint, which is itself a scan/fingerprint surface; the matured distribution
   endpoint is Phase 1 — see [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
 - Basic observability: node liveness, per-transport handshake success rate, utilisation, alerts.
+  (Node-side producers — liveness + utilisation — are deployed loopback-only; per-transport
+  handshake-success and **alerting** are reconciled to the **decentralized** model — the per-operator
+  monitor / Phase-2 edge reporting, with **no central cross-operator collector in any phase** — see
+  [ADR-0021](adr/0021-decentralized-observability-not-a-central-collector.md) and
+  [vision/0006](vision/0006-decentralized-observability.md).)
 - Reproducible deployment: one script/Ansible/Terraform playbook stands up a node from scratch.
   (`node-bootstrap.sh` + the Ansible path are the Phase-0 deploy paths; the Terraform path is
   deferred/optional until separately validated — see [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
