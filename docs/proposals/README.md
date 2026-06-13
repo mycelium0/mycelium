@@ -21,4 +21,4 @@ migrate the system). The decision "why this way" is recorded in an ADR — see [
 |---|---|---|---|
 | [0001](0001-bootstrap-phase-0-node.md) | Bootstrap node Phase 0 (VLESS+REALITY + cover) | draft | Phase 0 |
 | [0002](0002-phase0-live-verified-hardened-node.md) | Phase 0: scaffold → live, verified, hardened single node | draft | Phase 0 |
-| [0003](0003-fleet-rollout-signed-self-updating.md) | Fleet rollout: canonical bootstrap → signed, self-updating fleet | draft | cross-cutting deploy/bootstrap |
+| [0003](0003-network-rollout-signed-self-updating.md) | Network rollout: canonical bootstrap → signed, self-updating network | draft | cross-cutting deploy/bootstrap |

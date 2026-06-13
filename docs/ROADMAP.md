@@ -16,7 +16,7 @@ deferred to "later".
 
 ```
 Phase 0      Phase 1        Phase 2          Phase 3          Phase 4          Phase 5
-Foundation → Distribution → Adaptation    → Fleet with    → Decentrali-   → Autonomous
+Foundation → Distribution → Adaptation    → Network with    → Decentrali-   → Autonomous
 + multi-     + health +     layer           centralised      sation:          self-healing
 protocol     failover       (self-tuning)   coordination     mesh             mesh
 data plane   maturity                                                          (incl. under
@@ -91,7 +91,7 @@ endpoint. Engine and protocol versions pinned to concrete tags (see
   PPTP, SSTP, IKEv2) is present on the node ([ADR-0010](adr/0010-phase0-transport-set.md)).
 
 **Risks / notes.** A single node is still a single point of blockage at the IP/AS level — multiple
-transports do not change that; node migration (phase 2) and a fleet (phase 3) address it. Avoid IP
+transports do not change that; node migration (phase 2) and a network (phase 3) address it. Avoid IP
 ranges with a known-tainted reputation; keep 1–2 fresh IPs in different ASes in reserve. Keeping
 the exposed surface minimal (per-protocol toggling) is the operator's lever against the larger
 attack surface that breadth introduces.
@@ -177,31 +177,31 @@ does not replace them: heuristics must work without ML.
 
 ---
 
-## Phase 3 — Node fleet with centralised coordination (≈ 8–12 weeks)
+## Phase 3 — Node network with centralised coordination (≈ 8–12 weeks)
 
-**Goal.** Many **owned** nodes under unified management. True cross-node rerouting and shared
-block-intelligence emerge. This is a "proto-mesh" with a centre — an intentionally simple step
-before decentralisation.
+**Goal.** Many nodes an operator runs, coordinated through a single coordinator they control.
+True cross-node rerouting and shared block-intelligence emerge. This is a "proto-mesh" with a
+centre — an intentionally simple step before decentralisation.
 
 **Scope.**
 - **Coordinator** (Headscale / Nebula-lighthouse pattern): node registry, config distribution,
   block-intelligence aggregation, serving the best ingress to a client by geography/health.
-- **Fleet-level rerouting:** if egress A is unreachable from region R, clients in R are
+- **Network-level rerouting:** if egress A is unreachable from region R, clients in R are
   automatically redirected to egress B; ingress and egress can be different nodes (ingress is
   nearby, egress has a clean reputation).
-- **Shared block-intelligence layer** from phase 2, aggregated across the fleet: "in region R
+- **Shared block-intelligence layer** from phase 2, aggregated across the network: "in region R
   today REALITY on donor D and CDN-front are alive; AmneziaWG is degraded".
 - **The coordinator must itself be persistent and resilient:** domain-fronting, multiple anycast
   fronts, CDN distribution, P2P fallback if the coordinator's primary addresses are blocked.
   Otherwise the coordinator becomes a single point of failure.
-- Auto-onboarding: a new VPS joins the fleet with one command and receives its role and config.
+- Auto-onboarding: a new VPS joins the network with one command and receives its role and config.
 
 **Stack.** Headscale or a custom WireGuard/Noise control plane; block-intelligence gossip;
 anycast/CDN fronts for the coordinator itself; service discovery.
 
 **Definition of Done.**
-- Nodes join and leave the fleet on the fly; clients rebalance automatically.
-- An AS-level block of an egress node triggers **fleet-level route migration**, not just
+- Nodes join and leave the network on the fly; clients rebalance automatically.
+- An AS-level block of an egress node triggers **network-level route migration**, not just
   single-node recovery.
 - The coordinator remains reachable when its primary domain is blocked (via fallback channels).
 

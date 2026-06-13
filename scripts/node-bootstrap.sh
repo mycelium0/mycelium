@@ -4,14 +4,14 @@
 # This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
 # later. See the LICENSE file in the repository root.
 #
-# node-bootstrap.sh — canonical ON-NODE bootstrap + semi-auto fleet updater.
+# node-bootstrap.sh — canonical ON-NODE bootstrap + semi-auto network updater.
 # Author: mindicator & silicon bags quartet.
 #
 # WHAT THIS IS
 #   A single, idempotent script that runs ON a node (NOT a control host — that is the Ansible
 #   path in scripts/bootstrap.sh, left intact and complementary). It makes every node in the
-#   fleet identical and IS the delivery mechanism: an operator pushes once to the public repo
-#   and every node pulls + re-renders + validates + applies (fail-closed), so the whole fleet is
+#   network identical and IS the delivery mechanism: an operator pushes once to the public repo
+#   and every node pulls + re-renders + validates + applies (fail-closed), so the whole network is
 #   testable together with no per-node hand-work.
 #
 # TWO MODES
@@ -22,7 +22,7 @@
 #                           myceliumctl pipeline, runs "sing-box check", installs + (re)starts
 #                           the service, sets up the userspace AmneziaWG path, verifies listeners.
 #                           Re-running converges (idempotent).
-#   --update                Semi-auto fleet update. Fetches the latest canonical artifacts (the
+#   --update                Semi-auto network update. Fetches the latest canonical artifacts (the
 #                           fetch step is abstracted behind myc_fetch_artifacts — defaults to a
 #                           pinned pull of the public repo, swappable to a signed release tarball),
 #                           re-renders FROM THE LOCAL identity, runs "sing-box check", and on
@@ -33,7 +33,7 @@
 #   --ack                   Promote a previously staged candidate (the operator's explicit "go").
 #
 # SEMI-AUTO = the human approval IS the git push. Nodes pull and apply automatically BUT
-# fail-closed: a bad push can never brick the fleet because the candidate is validated and
+# fail-closed: a bad push can never brick the network because the candidate is validated and
 # rolled back before it can replace the live config.
 #
 # FAIL-CLOSED EVERYWHERE. No secrets, IPs, hostnames, jurisdictions, or contact details are ever
@@ -324,7 +324,7 @@ pick_donor() {
 	# Two-pass selection that keeps the JSON's "h2 ALPN where offered" promise honest WITHOUT
 	# over-promising: TLSv1.3+x25519 is the HARD gate (donor_verify); h2 is a soft PREFERENCE. Pass 1
 	# returns the first candidate that passes the hard gate AND offers h2; if none does, pass 2 falls
-	# back to the first candidate that merely passes the hard gate. So a fleet with only non-h2 donors
+	# back to the first candidate that merely passes the hard gate. So a network with only non-h2 donors
 	# still bootstraps (no false failure), but an h2 donor wins when one exists.
 	local first_hard_ok=""
 	while IFS= read -r host; do
@@ -350,7 +350,7 @@ EOF
 # ---------------------------------------------------------------------------
 # Authenticity gate for fetched artifacts (SUPPLY-CHAIN). Fast-forward-only stops history
 # rewrites but does NOT stop a brand-new malicious commit reaching every node: a single bad push
-# to a PUBLIC repo would otherwise be applied fleet-wide by a root timer, and "sing-box check"
+# to a PUBLIC repo would otherwise be applied network-wide by a root timer, and "sing-box check"
 # only validates config SCHEMA, never PROVENANCE. So we require the canonical ref to carry a
 # signature from an OUT-OF-BAND operator key (never committed) and verify it BEFORE any fetched
 # code is merged/installed/executed. The verified signature IS the real "semi-auto human
@@ -363,7 +363,7 @@ verify_signed_ref() {
 	local rev="$1"
 	if [ "$INSECURE_NO_VERIFY" -eq 1 ]; then
 		warn "SIGNATURE VERIFICATION DISABLED via --insecure-no-verify — fetched code is UNAUTHENTICATED."
-		warn "This is acceptable ONLY for local testing. NEVER run the fleet timer with this flag."
+		warn "This is acceptable ONLY for local testing. NEVER run the network timer with this flag."
 		return 0
 	fi
 	[ -n "$ALLOWED_SIGNERS" ] \

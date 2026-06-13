@@ -34,8 +34,8 @@ and outputs **`server_ipv4`**.
 
 Do **not** concentrate nodes in one provider, region, or autonomous system. **AS-level blocking**
 cuts traffic to an entire autonomous system wholesale (the handshake completes; the data silently
-dies), so a fleet packed into one AS shares a **single blocking point**. Use this module for **one
-node** and deliberately spread the fleet across **different providers and ASes**, keeping **1–2
+dies), so a network packed into one AS shares a **single blocking point**. Use this module for **one
+node** and deliberately spread the network across **different providers and ASes**, keeping **1–2
 fresh IPs in reserve in other ASes** for the [`rotate-ip-as`](../../docs/runbooks/rotate-ip-as.md)
 procedure. The `location` variable and the `server_location` output exist to keep this top of mind
 — picking a Hetzner location is **not** the same as guaranteeing AS diversity across providers.

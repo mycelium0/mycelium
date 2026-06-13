@@ -6,9 +6,9 @@
 # mycelium-update.timer — drives mycelium-update.service on a short cadence.
 # Author: mindicator & silicon bags quartet.
 #
-# Every node runs this, so an operator's single git push fans out to the whole fleet within a few
+# Every node runs this, so an operator's single git push fans out to the whole network within a few
 # minutes: each node pulls, re-renders from its LOCAL identity, validates with "sing-box check",
-# and applies-or-rolls-back (fail-closed). RandomizedDelaySec spreads the fleet's fetches so they
+# and applies-or-rolls-back (fail-closed). RandomizedDelaySec spreads the network's fetches so they
 # do not all hit the artifact source at the same instant (thundering-herd avoidance).
 [Unit]
 Description=Run the Mycelium semi-auto node update periodically

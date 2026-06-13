@@ -24,7 +24,7 @@ It is a curated list of **public** REALITY donor-SNI candidate hostnames. The on
 [`scripts/node-bootstrap.sh`](../../scripts/node-bootstrap.sh) picks **one at random per node** and
 verifies it at runtime — `openssl s_client -groups x25519 -tls1_3` must negotiate TLSv1.3 — before
 committing it to that node's local config. Picking randomly per node diversifies the donor across
-the fleet so nodes do not share one fingerprintable handshake target.
+the network so nodes do not share one fingerprintable handshake target.
 
 Rules for entries: **public hostnames only**. No secrets, no IPs, no locations, no jurisdiction
 names. Add or prune candidates as upstreams change; each must be a real, reachable host that

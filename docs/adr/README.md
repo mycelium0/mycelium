@@ -25,8 +25,8 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 | [0011](0011-carrier-agnostic-bridging.md) | Carrier-agnostic bridging and spore channels | proposed |
 | [0012](0012-go-primary-control-plane-language.md) | Go as the primary control-plane language (Rust for sealed organs) | **accepted** |
 | [0013](0013-mycelial-vocabulary-and-phase-discipline.md) | Mycelial vocabulary discipline + Phase 0-2 inert schemas | **accepted** |
-| [0014](0014-per-operator-node-credentials.md) | Per-operator node credentials — no shared fleet key material | **accepted** |
-| [0015](0015-fleet-artifact-delivery-and-node-update.md) | Fleet artifact-delivery and node-update model (signature-gated pull, fail-closed apply) | **accepted** |
+| [0014](0014-per-operator-node-credentials.md) | Per-operator node credentials — no shared network key material | **accepted** |
+| [0015](0015-network-artifact-delivery-and-node-update.md) | Network artifact-delivery and node-update model (signature-gated pull, fail-closed apply) | **accepted** |
 | [0016](0016-software-releases-not-an-operated-network.md) | Software releases, not an operated network; community-consensus governance | **accepted** |
 
 > Reserved (produced by ADR-0003): 0004 no-logs/retention ·

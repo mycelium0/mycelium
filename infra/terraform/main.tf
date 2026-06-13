@@ -14,7 +14,7 @@
 # infra/ansible/inventory.ini and run scripts/bootstrap.sh (see docs/runbooks/deploy-node.md).
 #
 # AS-DIVERSITY CAVEAT: do not concentrate nodes in one provider/region/AS. A single AS is a single
-# AS-level blocking point. Use this for ONE node and diversify the fleet across providers/ASes.
+# AS-level blocking point. Use this for ONE node and diversify the network across providers/ASes.
 
 terraform {
   # Pin Terraform and the provider so applies are reproducible (dependency-policy.md).

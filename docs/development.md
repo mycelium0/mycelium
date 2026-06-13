@@ -677,7 +677,7 @@ netsim scenario set (via tc/netem, proxy faults, test DPI emulator):
 - **Loss/jitter** (UDP-unfriendly network) → graceful degradation to a TCP/TLS path, not
   failure;
 - **Full shutdown of the selected transport** → client recovers on a working endpoint
-  within the node/fleet within the SLO;
+  within the node/network within the SLO;
 - **Anti-flapping**: an oscillating link (alternately alive and dead) → the loop does
   **not** enter an infinite rotation cycle; hysteresis/backoff is present.
 

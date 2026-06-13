@@ -58,7 +58,7 @@ network).
 ## 4. Scope
 
 ### In scope
-- Multi-protocol self-tuning node → fleet → decentralized mesh (phases 0–5).
+- Multi-protocol self-tuning node → network → decentralized mesh (phases 0–5).
 - Adaptation layer ("online adaptation"): network interference detection + auto-rotation + measurement.
 - Home nodes behind NAT joining the mesh; ephemeral ingress; multi-hop.
 - Standard protocol endpoints served by the node and consumed by off-the-shelf clients.
@@ -132,7 +132,7 @@ adaptation is blind.
 ## 11. What Becomes Possible Next
 
 Each phase leaves users with access and serves as the foundation for the next: single node →
-fleet → mesh → autonomous self-healing network. The mesh is built **on top of** what is already
+network → mesh → autonomous self-healing network. The mesh is built **on top of** what is already
 working, not as a replacement.
 
 ## 12. Next Steps
