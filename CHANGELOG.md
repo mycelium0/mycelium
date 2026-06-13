@@ -30,4 +30,4 @@ truth for the version is `internal/spec.Version`.
 
 ### Notes
 - First slice of RP-0002 W7 ("spine early, glue stays shell"). Build & verify with
-  `go build ./... && go test -race ./...`; the offline shell conformance suite remains 9/9.
+  `go build ./... && go test -race ./...`; the offline shell conformance suite remains all green.
