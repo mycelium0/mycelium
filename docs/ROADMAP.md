@@ -132,6 +132,25 @@ clients failover automatically, and block visibility emerges: *what exactly* is 
 - **Config distribution endpoint** (server-side) matured: delivers the client a bundle of all
   enabled endpoints with **priorities and metadata** (transport, region, health). Updates reach
   clients without reinstalling anything; a newly enabled endpoint propagates automatically.
+- **Self-replenishing subscription (the "one link" operator/user experience).** A standard client
+  imports a node's subscription **once** and thereafter **self-updates**: rotated parameters
+  (port / SNI / shortId / a newly enabled transport) reach the already-imported client on its next
+  refresh, with no manual re-import. This is the matured, always-reachable form of the Phase-0
+  out-of-band, hand-rendered subscription (which is deliberately *not* self-updating — see
+  [ADR-0020](adr/0020-phase0-scope-reconciliations.md)); the subscription channel itself must be at
+  least as block-resistant as the data plane it advertises ([refactoring.md](refactoring.md) §15.2).
+- **Operator single-profile aggregation across their own nodes.** A cluster operator can carry
+  **all** their nodes' endpoints as one profile in a standard client (sing-box / Clash-Meta / Happ),
+  with auto-failover across nodes, and have it **self-replenish** as nodes rotate or new nodes come
+  online. This is achieved by **client-side aggregation of per-node subscriptions** — each node
+  serves only its **own** bundle and the client merges them — **not** by a central endpoint that
+  enumerates every node. A single endpoint listing the whole cluster is a coordinator-shaped index
+  of all ingress + a one-shot enumeration/coercion target
+  (`SINGLE_POINT_OF_BLOCK` / `FORBIDDEN_TOPOLOGY_CENTRALIZATION`, [refactoring.md](refactoring.md) §7,
+  §15.2, §15.6) and is prohibited here. The **signed, TTL-bounded, cross-node** form of the same
+  convenience is the Inoculum bundle (deferred Phase-2 design,
+  [RP-0005](proposals/0005-inoculum-bundle-and-toolkit.md)); Phase 1 ships only the
+  standard-subscription self-update plus client-side merge.
 - **Per-transport health and failover:** per-endpoint metrics (handshake success rate,
   time-to-first-byte, connection resets) feed the bundle's health metadata so standard clients
   fail over between the Phase 0 transports cleanly.
@@ -150,6 +169,10 @@ collection feeding the bundle.
 - The dashboard shows per-transport state, e.g. "VLESS-TCP degraded in region X, AmneziaWG alive".
 - A new endpoint enabled server-side propagates to clients through the config distribution
   endpoint without manual intervention, with correct priority and health metadata.
+- A cluster operator imports **one** profile spanning all their nodes (client-side merge of the
+  per-node subscriptions) and, when a node rotates parameters or a new node/endpoint is enabled, the
+  already-imported client picks up the change on its next refresh **without** a manual re-import —
+  and no single artifact enumerates the whole cluster.
 
 **Risks / notes.** Still a single node/IP — if it is blocked by IP or AS, the fix is node
 migration (phase 2). UDP paths are provisioned but not relied upon as the primary route.
