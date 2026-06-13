@@ -19,6 +19,8 @@
 #   * no_operated_network_claim.sh — no AFFIRMATIVE "operates a public network" claim; the negated
 #                               separation statement ("does not operate a public network") is allowed
 #   * per_protocol_toggle.sh  — every protocol is enable_*-gated; only vless_reality_vision default-on
+#   * transport_family_independence.sh — >=2 INDEPENDENT transport families are available + wired so
+#                               the Phase-0 D2 bar is achievable (ADR-0020 §5); every toggle classified
 #   * phase0_port_canon.sh    — the canonical per-protocol port map is consistent everywhere
 #   * node_update_artifact_root.sh — the --update re-exec path resolves canonical artifacts from the
 #                                    real checkout (CHECKOUT_DIR/ARTIFACT_ROOT), not the tmp re-exec dir
@@ -47,6 +49,7 @@ GATES=(
 	"tests/conformance/no_insecure_tls.sh"
 	"tests/conformance/no_operated_network_claim.sh"
 	"tests/conformance/per_protocol_toggle.sh"
+	"tests/conformance/transport_family_independence.sh"
 	"tests/conformance/phase0_port_canon.sh"
 	"tests/conformance/node_update_artifact_root.sh"
 	"control/selftest.sh"
