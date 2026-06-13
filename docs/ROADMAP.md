@@ -63,13 +63,22 @@ everything else depends on.
 - **Xray-core (≥ v26.2.4)** retained as an **optional alternative engine** for the
   VLESS+XTLS-Vision+REALITY shape (the existing `nodes/dataplane/vless-reality/` path is kept).
 - REALITY (and ShadowTLS) shapes point at a real TLS donor site; behind the node a genuine cover
-  site on Caddy/nginx returns legitimate content to active probing.
-- Key and identity management: UUID issuance/revocation, rotation of REALITY parameters.
+  site on Caddy/nginx returns legitimate content to active probing. (For a REALITY-only node the
+  external donor *is* the genuine cover under active probing; a self-hosted Caddy/nginx cover site is
+  optional defense-in-depth — see [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
+- Key and identity management: UUID issuance/revocation, rotation of REALITY parameters. (REALITY-
+  parameter rotation is a **manual** Phase-0 operator procedure
+  ([runbooks/reality-rotation.md](runbooks/reality-rotation.md)); automated/triggered rotation is
+  Phase 2 — see [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
 - Config distribution endpoint: a single URL/file delivers the node's endpoint bundle (all enabled
   transports) to any compatible off-the-shelf client (sing-box / Clash-Meta format). Bespoke
-  client software is out of scope.
+  client software is out of scope. (Phase 0 uses **local generation + out-of-band hand-off**, not a
+  public always-on endpoint, which is itself a scan/fingerprint surface; the matured distribution
+  endpoint is Phase 1 — see [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
 - Basic observability: node liveness, per-transport handshake success rate, utilisation, alerts.
 - Reproducible deployment: one script/Ansible/Terraform playbook stands up a node from scratch.
+  (`node-bootstrap.sh` + the Ansible path are the Phase-0 deploy paths; the Terraform path is
+  deferred/optional until separately validated — see [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
 - Hosting selection with attention to **AS-level blocking** (do not concentrate everything in
   one tainted AS).
 
@@ -83,7 +92,10 @@ endpoint. Engine and protocol versions pinned to concrete tags (see
 - A user with a restrictive network connection retrieves the config endpoint and reaches the
   open internet over an enabled transport.
 - At least two independent transport shapes are reachable at once; disabling one in `group_vars`
-  removes only that inbound and leaves the others working.
+  removes only that inbound and leaves the others working. ("Independent shapes" = independent
+  transport **families**: REALITY/TLS-over-TCP is one family regardless of Vision/gRPC/XHTTP framing;
+  the canonical Phase-0 second family is **AmneziaWG/UDP** on every node — see
+  [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
 - Active probing of the server returns a genuine donor-site response, not a suspicious one.
 - Node is deployed from zero with a single command; a client credential is revoked without
   reinstalling the node.
