@@ -60,7 +60,10 @@ KeyringMode=private
 UMask=0077
 
 # --- Network / syscall surface --------------------------------------------
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK is REQUIRED: xray subscribes to route/interface updates via rtnetlink at startup;
+# without it the process FATALs at startup and the service crash-loops. Keep in lockstep with the
+# sing-box unit and scripts/node-bootstrap.sh (enforced by tests/conformance/unit_netlink_parity.sh).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @obsolete

@@ -26,6 +26,8 @@
 #   * phase0_port_canon.sh    — the canonical per-protocol port map is consistent everywhere
 #   * node_update_artifact_root.sh — the --update re-exec path resolves canonical artifacts from the
 #                                    real checkout (CHECKOUT_DIR/ARTIFACT_ROOT), not the tmp re-exec dir
+#   * unit_netlink_parity.sh  — every sing-box/xray unit-producing source (bash bootstrap + Ansible
+#                               templates) grants AF_NETLINK so no deploy path crash-loops (Audit-0004 F-001)
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -55,6 +57,7 @@ GATES=(
 	"tests/conformance/no_dataplane_pii.sh"
 	"tests/conformance/phase0_port_canon.sh"
 	"tests/conformance/node_update_artifact_root.sh"
+	"tests/conformance/unit_netlink_parity.sh"
 	"control/selftest.sh"
 )
 
