@@ -141,6 +141,19 @@ SINGBOX_DL_BASE="https://github.com/SagerNet/sing-box/releases/download"
 AWG_GO_REPO="https://github.com/amnezia-vpn/amneziawg-go"
 AWG_TOOLS_REPO="https://github.com/amnezia-vpn/amneziawg-tools"
 
+# AmneziaWG canonical "dialect": the in-tunnel addressing + obfuscation knobs shared fleet-wide. Every
+# peer (server + all its clients) MUST share Jc/Jmin/Jmax/S1/S2/H1..H4 or the handshake fails. These
+# are TUNABLE, NOT secret — and are the SAME values as infra/ansible/roles/amneziawg/defaults/main.yml
+# (a node + its clients are one dialect). The render below uses them ONLY when first creating a node's
+# awg0.conf; an existing awg0.conf is never overwritten.
+AWG_TUNNEL_V4="10.13.13.1/24"      # server in-tunnel v4 (RFC1918); peers get .2, .3, …
+AWG_TUNNEL_V6="fd13:13:13::1/64"   # server in-tunnel v6 (RFC4193 ULA); used only if the node has global v6
+AWG_PEER_BASE_V4="10.13.13"
+AWG_PEER_BASE_V6="fd13:13:13::"
+AWG_MTU="1280"
+AWG_JC="4"; AWG_JMIN="40"; AWG_JMAX="70"; AWG_S1="51"; AWG_S2="102"
+AWG_H1="1148403838"; AWG_H2="1351874800"; AWG_H3="1936608092"; AWG_H4="1830553362"
+
 usage() { sed -n '2,/^set -euo pipefail$/p' "$NB_SELF" | sed 's/^# \{0,1\}//; s/^#$//'; }
 
 # ---------------------------------------------------------------------------
@@ -969,6 +982,88 @@ restart_singbox() { need_root; run systemctl enable --now sing-box 2>/dev/null |
 # distinguish a failed restart from a failed post-check.
 apply_singbox()   { need_root; run systemctl enable sing-box 2>/dev/null || true; run systemctl restart sing-box; }
 
+# render_awg0 — FIRST-TIME render of the AmneziaWG server config (awg0.conf) + one [Peer] per client,
+# plus a ready-to-import client config per identity. Mirrors the audited amneziawg Ansible role
+# (templates/awg0.conf.j2 + defaults). The CALLER invokes this ONLY when awg0.conf is ABSENT, so a
+# live/hand-tuned config (a node already in service) is NEVER clobbered. Per-client awg keypairs are
+# generated once (0600) and reused. The node is v4-only unless it has a global IPv6 address, in which
+# case it is dual-stack with NAT66 — matching the live fleet. No custom crypto: keys come only from
+# awg genkey|pubkey|genpsk (ADR-0002).
+render_awg0() {
+	local out="$1"
+	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would render $out + per-client AmneziaWG configs"; return 0; fi
+	local awg_state="$STATE_DIR/awg" clients_dir
+	clients_dir="$awg_state/clients"
+	run install -d -m 0700 "$clients_dir"
+	local spriv spub port wan has_v6 addr postup postdown
+	spriv="$(cat "$awg_state/private.key")"
+	spub="$(cat "$awg_state/public.key")"
+	port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || echo 51820)"
+	wan="$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+	[ -n "$wan" ] || { warn "could not detect the WAN interface; using 'eth0' in awg0.conf — verify it."; wan="eth0"; }
+	has_v6=0; ip -6 addr show scope global 2>/dev/null | grep -q 'inet6' && has_v6=1
+	if [ "$has_v6" -eq 1 ]; then
+		addr="$AWG_TUNNEL_V4, $AWG_TUNNEL_V6"
+		postup="sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv6.conf.all.forwarding=1; iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $wan -j MASQUERADE; ip6tables -t nat -A POSTROUTING -o $wan -j MASQUERADE"
+		postdown="iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $wan -j MASQUERADE; ip6tables -t nat -D POSTROUTING -o $wan -j MASQUERADE"
+	else
+		addr="$AWG_TUNNEL_V4"
+		postup="sysctl -w net.ipv4.ip_forward=1; iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $wan -j MASQUERADE"
+		postdown="iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $wan -j MASQUERADE"
+	fi
+	( umask 077; {
+		printf '[Interface]\n'
+		printf 'PrivateKey = %s\n' "$spriv"
+		printf 'Address = %s\n' "$addr"
+		printf 'ListenPort = %s\n' "$port"
+		printf 'MTU = %s\n' "$AWG_MTU"
+		printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
+		printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
+		printf 'PostUp = %s\n' "$postup"
+		printf 'PostDown = %s\n' "$postdown"
+	} > "$out" )
+	# One [Peer] per client; generate the client's keypair+psk once and emit a ready client config.
+	local node_addr; node_addr="$(resolve_node_address 2>/dev/null || printf '%s' "$NODE_ADDRESS_PLACEHOLDER")"
+	local n=2 name cpub cpriv cpsk cv6 client_allowed client_dns
+	for name in $CLIENT_NAMES; do
+		[ -f "$clients_dir/$name.private" ] || ( umask 077; awg genkey >"$clients_dir/$name.private" )
+		cpriv="$(cat "$clients_dir/$name.private")"
+		cpub="$(awg pubkey <"$clients_dir/$name.private")"
+		[ -f "$clients_dir/$name.psk" ] || ( umask 077; awg genpsk >"$clients_dir/$name.psk" )
+		cpsk="$(cat "$clients_dir/$name.psk")"
+		if [ "$has_v6" -eq 1 ]; then
+			cv6=", ${AWG_PEER_BASE_V6}${n}/128"; client_allowed="0.0.0.0/0, ::/0"; client_dns="1.1.1.1, 2606:4700:4700::1111"
+		else
+			cv6=""; client_allowed="0.0.0.0/0"; client_dns="1.1.1.1"
+		fi
+		{
+			printf '\n[Peer]\n# name = %s\n' "$name"
+			printf 'PublicKey = %s\n' "$cpub"
+			printf 'PresharedKey = %s\n' "$cpsk"
+			printf 'AllowedIPs = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
+		} >> "$out"
+		( umask 077; {
+			printf '[Interface]\n'
+			printf 'PrivateKey = %s\n' "$cpriv"
+			printf 'Address = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
+			printf 'DNS = %s\n' "$client_dns"
+			printf 'MTU = %s\n' "$AWG_MTU"
+			printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
+			printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
+			printf '\n[Peer]\n'
+			printf 'PublicKey = %s\n' "$spub"
+			printf 'PresharedKey = %s\n' "$cpsk"
+			printf 'Endpoint = %s:%s\n' "$node_addr" "$port"
+			printf 'AllowedIPs = %s\n' "$client_allowed"
+			printf 'PersistentKeepalive = 25\n'
+		} > "$clients_dir/$name.conf" )
+		run chmod 0600 "$clients_dir/$name.conf"
+		n=$((n + 1))
+	done
+	run chmod 0600 "$out"
+	log "rendered $out + $(set -- $CLIENT_NAMES; printf '%s' "$#") AmneziaWG client config(s) under $clients_dir (0600, local — hand off out-of-band, like subscriptions)."
+}
+
 # ---------------------------------------------------------------------------
 # AmneziaWG userspace path (amneziawg-go, kernel-independent). Built from source; brought up via
 # awg-quick@ forcing the userspace implementation. Keys from awg genkey|pubkey|genpsk (ADR-0002).
@@ -998,9 +1093,23 @@ setup_amneziawg() {
 	# The actual listen port is an operator/runtime value (PORTS.md canon is 51820/udp). We record it
 	# locally so the firewall step can open it; we do not hardcode a port into any committed file.
 	[ -f "$STATE_DIR/awg.port" ] || { [ "$DRY_RUN" -eq 0 ] && printf '51820\n' >"$STATE_DIR/awg.port"; }
-	# A real awg0.conf is rendered from nodes/dataplane/amneziawg/awg0.conf.template into a gitignored
-	# path by the operator/role; we only enable the service template here (idempotent).
-	run systemctl enable awg-quick@awg0 2>/dev/null || warn "awg-quick@awg0 not enabled (config not yet rendered)."
+	# Render awg0.conf ONLY if absent — a live/hand-tuned config is never clobbered. The timer-driven
+	# --update path (flow_update) NEVER calls setup_amneziawg (only flow_bootstrap does), so this render
+	# cannot fire on an auto-pull; it runs only on an explicit bootstrap of a node whose awg0.conf does
+	# not yet exist. Rotation/edits of an existing config are a deliberate manual action.
+	local awg_conf_dir="/etc/amnezia/amneziawg" awg_conf
+	awg_conf="$awg_conf_dir/awg0.conf"
+	run install -d -m 0700 "$awg_conf_dir"
+	if [ -f "$awg_conf" ]; then
+		log "awg0.conf already present — leaving it untouched (idempotent; never clobber a live config)."
+	else
+		render_awg0 "$awg_conf"
+	fi
+	run systemctl enable awg-quick@awg0 2>/dev/null || warn "could not enable awg-quick@awg0."
+	if [ "$DRY_RUN" -eq 0 ] && [ -f "$awg_conf" ] && ! systemctl is-active --quiet awg-quick@awg0; then
+		run systemctl start awg-quick@awg0 2>/dev/null \
+			|| warn "awg-quick@awg0 did not start — check 'journalctl -u awg-quick@awg0' (is amneziawg-go on PATH?)."
+	fi
 }
 
 # ---------------------------------------------------------------------------
