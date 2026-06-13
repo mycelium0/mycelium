@@ -49,7 +49,7 @@ singbox_ctl_template_rel: "control/testdata/singbox.server.template.json"
 #                   contract drift between the role and the control tooling is impossible to miss.
 #   false (lenient): a failure emits a LOUD warning and the role falls back to the bundled Jinja/jq
 #                    renderers. The fallback is never silent either way.
-singbox_render_strict: false
+singbox_render_strict: true
 
 # Operator output: rendered client subscriptions are fetched here on the control host.
 singbox_out_subscriptions_dir: "./out/subscriptions"

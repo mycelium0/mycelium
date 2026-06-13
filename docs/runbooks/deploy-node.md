@@ -258,7 +258,7 @@ behaves like ordinary HTTPS to the donor — the handshake completes and a **gen
 response** comes back, with no tell-tale fingerprint:
 
 ```sh
-tests/conformance/cover_site_probe.sh NODE_PUBLIC_IP DONOR_SNI
+tests/conformance/cover_site_probe.sh --node NODE_PUBLIC_IP --donor DONOR_SNI
 ```
 
 A green run satisfies the proposal's `cover_site_probe` acceptance criterion. Cross-check the
