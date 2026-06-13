@@ -24,3 +24,4 @@ migrate the system). The decision "why this way" is recorded in an ADR — see [
 | [0003](0003-network-rollout-signed-self-updating.md) | Network rollout: canonical bootstrap → signed, self-updating network | draft | cross-cutting deploy/bootstrap |
 | [0004](0004-network-weather-explorer-publisher.md) | Network-weather explorer: off-network publisher + static site | draft | cross-cutting Measurement track |
 | [0005](0005-inoculum-bundle-and-toolkit.md) | Inoculum: signed operator starter bundle, v0 schema, local-only toolkit | draft | not before Phase 2 |
+| [0006](0006-in-region-edge-reporting.md) | In-region edge reporting: opt-in edge reachability signal (inert EdgeReport schema now) | draft | not before Phase 2 |
