@@ -33,6 +33,9 @@ config.lastgood.json
 config.staged.ack
 cert.sha256.txt
 awg.port
+# Node-local reachability monitor config (ADR-0019): real anchors are operator state, never
+# committed. The repo ships only control/reach.config.example.json (allowlisted public-DNS anchors).
+reach.config.json
 # If the canonical checkout is ever cloned under the repo (prefer /opt/mycelium outside it):
 /opt/
 /var/
