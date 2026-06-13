@@ -119,7 +119,7 @@ default. Pick a donor that satisfies **all** of:
       the SNI the node accepts and presents; `handshake.server:server_port` is what the node dials
       to fetch that handshake — usually the same hostname on `:443`.
 
-Diversify donors, SNI values, ports, IPs, and ASes across the fleet (see
+Diversify donors, SNI values, ports, IPs, and ASes across the network (see
 [`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) Layer 1): blocking can occur at the
 AS level, so a single shared donor is a single point of failure.
 

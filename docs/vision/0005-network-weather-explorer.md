@@ -93,6 +93,13 @@ must not be** — including not surveilling its own visitors.
 
 ## 4. Scope
 
+**Separation statement (inherited from the [../../README.md](../../README.md) posture).** Like the
+rest of the project, this is *software*, not an operated network. The repository does not run the
+explorer, does not publish a public endpoint, and does not distribute client configs. Each operator
+**independently** deploys and controls their own explorer instance and decides what, if anything, it
+publishes. "public" throughout this document means an operator may choose to make their own instance's
+redacted snapshot publicly viewable — never that the project operates a network or a central service.
+
 ### The fungi role (the contract behind the name)
 
 A **fungi** is a node in a temporary, reversible niche (a `cache-custodian`-class niche, VIS-0004
@@ -107,7 +114,7 @@ aggregation centre. Each fungi sees only its own scope; fungi digests do not til
 - **The public network-weather snapshot** (`network-weather.json`, §contract below): an overall
   resilience index; per-transport-**class** state and reachability (never per node); coarse interference
   signal classes carrying an **opaque scope id, never geography**; the edge-lifecycle distribution as
-  **percentages** (not counts — counts leak fleet size); fleet sizes as order-of-magnitude buckets;
+  **percentages** (not counts — counts leak network size); network sizes as order-of-magnitude buckets;
   obfuscated rotation events; and a methodology block declaring `k`, the noise, and what is withheld.
 - **The fungi opt-in publish path.** Now (Phase 0 onward): a fungi runs a small read-only aggregator
   over its own PII-safe signals and publishes a digest to the explorer's publisher. This rides the
@@ -158,12 +165,12 @@ runs. The explorer is a measurement surface layered on top of working access, ne
   - *At-a-glance health.* A visitor opens the site and reads the resilience index, which transport
     classes are alive, and whether interference is elevated — with no place names and no node identities.
   - *Opt-in contribution.* An operator flips their node into the fungi role; it begins publishing
-    redacted digests; the fleet-wide snapshot reflects more samples without exposing the new node.
+    redacted digests; the network-wide snapshot reflects more samples without exposing the new node.
   - *Rotation story.* A transport class is burned; the snapshot shows it degrade and the fabric
     recover within a bounded window — the immortality-through-rotation property, made visible and
     anonymised.
   - *Audit.* A reviewer diffs `network-weather.json` and the source and confirms: no IP/host/ASN/port/
-    SNI/geo, no per-node rows, every shown cell at/above `k`, fleet sizes bucketed — and the gate agrees.
+    SNI/geo, no per-node rows, every shown cell at/above `k`, network sizes bucketed — and the gate agrees.
 
 ## 6. Assets and trade-offs
 
@@ -192,14 +199,14 @@ runs. The explorer is a measurement surface layered on top of working access, ne
 - [ ] **An auditor cannot reverse the published snapshot** into topology, a membership/node list,
   geography, an endpoint, or any per-user fact — confirmed by inspection and by the gate.
 - [ ] **Every shown cell meets the aggregation floor** `k`; below-floor cells are omitted, never shown
-  as zero; fleet sizes are order-of-magnitude buckets; lifecycle is percentages, not counts.
+  as zero; network sizes are order-of-magnitude buckets; lifecycle is percentages, not counts.
 - [ ] A fungi, audited after emitting a digest, retains **no raw observations** and holds no node list,
   no full topology, and no per-edge weights — only redacted, TTL-bounded, scoped aggregates.
 - [ ] Contribution is **opt-in only**: a node never publishes weather data without its operator
   explicitly choosing the fungi role.
 - [ ] A **fail-closed conformance check** fails the build if a generated snapshot contains an IP/host/
   ASN/port/SNI/country/location-code/secret/per-node identifier, or a shown cell below `k`, or an
-  un-bucketed fleet count. Fail-closed: an unprovable-safe snapshot is not published.
+  un-bucketed network count. Fail-closed: an unprovable-safe snapshot is not published.
 - [ ] The site loads with **no analytics, no third-party scripts, and no identity-linked visitor logs**;
   it is self-hostable from the static snapshot.
 

@@ -21,7 +21,7 @@ from a single multi-protocol node into a decentralized, self-healing mesh.
 It is **not**:
 
 - a generic P2P VPN;
-- a fleet of centrally managed VPN servers with a nicer UI;
+- a network of centrally managed VPN servers with a nicer UI;
 - a company-shaped service with all users around a permanent center;
 - a new cryptographic protocol;
 - a bespoke end-user client project.
@@ -94,7 +94,7 @@ Forbidden even if it seems convenient:
 - assumptions that all useful bridges are IP-based, always-online, bidirectional, or high-bandwidth;
 - decisions that make Phase 4 decentralization a rewrite.
 
-### Phase 3: owned fleet with coordinator
+### Phase 3: an operator's coordinator-managed nodes
 
 The coordinator is allowed as deliberate technical debt.
 

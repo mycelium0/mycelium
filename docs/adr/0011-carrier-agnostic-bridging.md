@@ -20,7 +20,7 @@ later. See the LICENSE file in the repository root.
 
 ## Context
 
-The project goal is not simply to maintain a fleet of reachable endpoints. The target is a living
+The project goal is not simply to maintain a network of reachable endpoints. The target is a living
 private connectivity fabric that can remain useful under disruption, split, partial isolation, and
 heterogeneous link availability.
 

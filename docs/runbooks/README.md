@@ -17,7 +17,7 @@ procedures must be fast and pre-tested.
 
 ## Current runbooks (landed)
 - `deploy-node.md` — deploy a node from scratch (RP-0001).
-- `node-bootstrap.md` — one-command ON-node bootstrap + semi-auto fleet updater (push-to-update).
+- `node-bootstrap.md` — one-command ON-node bootstrap + semi-auto network updater (push-to-update).
 - `rotate-ip-as.md` — migrate by IP/AS after a blocking event.
 
 ## Planned (Phase 1–2)

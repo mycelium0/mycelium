@@ -15,7 +15,7 @@
 #   the script's own path ($NB_SELF) lives under the tmp dir, so REPO_ROOT (= $NB_SELF/..) resolves
 #   to the tmp PARENT — a directory that contains NO nodes/ and NO control/. If the donor list, the
 #   renderer template, the in-repo myceliumctl fallback, or install_tooling's source were resolved
-#   off REPO_ROOT, every fleet UPDATE would render against the wrong (tmp) tree and fail.
+#   off REPO_ROOT, every network UPDATE would render against the wrong (tmp) tree and fail.
 #
 #   The fix introduces ARTIFACT_ROOT (prefer CHECKOUT_DIR, else REPO_ROOT) and points all four
 #   artifact paths at it. This test reproduces the post-re-exec condition and asserts the fix holds.

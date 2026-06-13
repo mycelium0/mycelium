@@ -38,7 +38,7 @@ Notes on the table:
 
 - **Ports are defaults, not constants.** Port/SNI/donor diversification is a Layer-1 design goal
   (see [`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md)); the rendered ports are
-  fed from `group_vars` and should differ across a fleet. `tcp/443` is reserved for the Vision
+  fed from `group_vars` and should differ across a network. `tcp/443` is reserved for the Vision
   inbound because port 443 maximises indistinguishability from ordinary HTTPS.
 - **`users` are filled at deploy.** Every VLESS/TUIC/Trojan/Hysteria2/ShadowTLS inbound ships with
   `users: []`; identities (UUIDs/passwords) are issued and revoked by the control plane

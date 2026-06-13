@@ -465,7 +465,7 @@
 # The myceliumctl renderer (control/lib/render_singbox.sh) terminates HY2/TUIC/Trojan with ONE
 # shared certificate path (params.tls_certificate_path / tls_key_path). Generate a single shared
 # self-signed pair for that path whenever any TLS-cert protocol is enabled. It is per-NODE (ADR-0014:
-# no shared fleet key material) and self-signed; clients trust it ONLY via the pin emitted on the
+# no shared network key material) and self-signed; clients trust it ONLY via the pin emitted on the
 # subscription (NEVER insecure:true).
 - name: Generate the shared self-signed TLS pair used by the myceliumctl render path
   ansible.builtin.command:

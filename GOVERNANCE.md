@@ -194,7 +194,7 @@ commitment that governs the exact keys and seeds the community stewards in commo
 
 The shared identity is **community-owned**, so the authority to approve a network update — accepting a
 new trust root, blessing a bootstrap seed, admitting or revoking an operator from the shared identity,
-or merging a change to the canonical artifacts the fleet converges on — does **not** belong to any one
+or merging a change to the canonical artifacts the network converges on — does **not** belong to any one
 person.
 
 - **From Phase 1–2 onward, approval is by community / organization consensus** — the project's

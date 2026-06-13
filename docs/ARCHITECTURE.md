@@ -83,7 +83,7 @@ available as a last-resort wrapper around a TLS-family shape.
 
 ## Layer 2. Control plane + adaptation layer
 
-The brain of adaptation. Evolution: phases 0–2 — a local agent on the node; phase 3 — a fleet
+The brain of adaptation. Evolution: phases 0–2 — a local agent on the node; phase 3 — a network
 coordinator; phases 4–5 — distributed consensus over gossip.
 
 **Components:**
