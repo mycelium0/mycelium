@@ -131,7 +131,10 @@ clients failover automatically, and block visibility emerges: *what exactly* is 
 **Scope.**
 - **Config distribution endpoint** (server-side) matured: delivers the client a bundle of all
   enabled endpoints with **priorities and metadata** (transport, region, health). Updates reach
-  clients without reinstalling anything; a newly enabled endpoint propagates automatically.
+  clients without reinstalling anything; a newly enabled endpoint propagates automatically. The
+  `region` metadatum MUST use the same coarse, closed-vocabulary discipline as
+  `EdgeReport.RegionBucket` (no precise geo/ASN, drawn from an audited closed set) so the bundle never
+  becomes a user-location channel (Audit-0004 F-020).
 - **Self-replenishing subscription (the "one link" operator/user experience).** A standard client
   imports a node's subscription **once** and thereafter **self-updates**: rotated parameters
   (port / SNI / shortId / a newly enabled transport) reach the already-imported client on its next
@@ -173,6 +176,10 @@ collection feeding the bundle.
   per-node subscriptions) and, when a node rotates parameters or a new node/endpoint is enabled, the
   already-imported client picks up the change on its next refresh **without** a manual re-import —
   and no single artifact enumerates the whole cluster.
+- The subscription / config-distribution channel is itself **at least as block-resistant as the data
+  plane it advertises** (§15.2): it rides an indistinguishability-preserving transport, with a
+  conformance or runbook check proving it does not collapse to a single blockable domain/endpoint
+  (Audit-0004 F-022; a `SINGLE_POINT_OF_BLOCK` invariant carried into the Phase-1 RP).
 
 **Risks / notes.** Still a single node/IP — if it is blocked by IP or AS, the fix is node
 migration (phase 2). UDP paths are provisioned but not relied upon as the primary route.
