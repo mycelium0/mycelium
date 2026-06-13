@@ -102,7 +102,8 @@ func goodDecay() DecayPolicy {
 }
 
 func TestDecayPolicyValidate(t *testing.T) {
-	if err := goodDecay().Validate(); err != nil {
+	okDecay := goodDecay()
+	if err := okDecay.Validate(); err != nil {
 		t.Fatalf("valid decay policy errored: %v", err)
 	}
 	cases := []struct {
@@ -229,7 +230,8 @@ func goodEdge() EdgeState {
 }
 
 func TestEdgeStateValidate(t *testing.T) {
-	if err := goodEdge().Validate(); err != nil {
+	okEdge := goodEdge()
+	if err := okEdge.Validate(); err != nil {
 		t.Fatalf("valid edge errored: %v", err)
 	}
 	cases := []struct {
@@ -328,7 +330,8 @@ func goodSpore() SporeEnvelope {
 }
 
 func TestSporeEnvelopeValidate(t *testing.T) {
-	if err := goodSpore().Validate(); err != nil {
+	okSpore := goodSpore()
+	if err := okSpore.Validate(); err != nil {
 		t.Fatalf("valid spore errored: %v", err)
 	}
 	cases := []struct {
