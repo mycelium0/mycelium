@@ -4,10 +4,12 @@
 // later. See the LICENSE file in the repository root.
 
 // Command myceliumd is the Mycelium node control-agent daemon (the Go spine,
-// ADR-0012). This Phase 0 skeleton exposes a PII-safe health/readiness endpoint
-// and the spine version, and is the seat the Phase-2 network-state detector and
-// auto-rotation loop will occupy later. It holds no policy/rotation logic yet,
-// binds to loopback by default, and logs no PII.
+// ADR-0012). This Phase 0 build exposes a PII-safe health/readiness endpoint and
+// the spine version, and — when the operator supplies a config — runs the
+// node-local reachability/health monitor (ADR-0019) and serves its redacted
+// snapshot. It binds to loopback by default and logs no PII. Channel-state
+// classification, auto-rotation, and routing remain Phase 2 and are not present
+// here; this daemon is the seat they will occupy later.
 package main
 
 import (
@@ -21,13 +23,31 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mindicator/mycelium/internal/reach"
 	"github.com/mindicator/mycelium/internal/spec"
 )
+
+// reachView is the redacted per-anchor health shown on /reachability: the opaque
+// operator ref plus counters and ratio over the window. It carries no address,
+// SNI, destination, identity, or location.
+type reachView struct {
+	Ref          string    `json:"ref"`
+	Successes    int       `json:"successes"`
+	Failures     int       `json:"failures"`
+	SuccessRatio float64   `json:"success_ratio"`
+	WindowStart  time.Time `json:"window_start"`
+	WindowEnd    time.Time `json:"window_end"`
+}
 
 func main() {
 	listen := flag.String("listen", "127.0.0.1:9551",
 		"health/readiness listen address (loopback by default; exposes no PII)")
+	reachConfig := flag.String("reachability-config", "",
+		"path to a node-local reachability monitor config (ADR-0019); empty disables the monitor")
 	flag.Parse()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -37,14 +57,47 @@ func main() {
 		writeJSON(w, map[string]string{"version": spec.Version})
 	})
 
+	// Node-local reachability monitor (ADR-0019). It runs only when the operator
+	// supplies a config; an invalid config is a fail-fast error, not a silent
+	// skip. It stays strictly local: it classifies no channel state, rotates no
+	// transport, actuates no routing, and emits nothing off the node.
+	if *reachConfig != "" {
+		cfg, err := reach.LoadConfig(*reachConfig)
+		if err != nil {
+			log.Fatalf("myceliumd: reachability config: %v", err)
+		}
+		mon, err := reach.New(*cfg, nil)
+		if err != nil {
+			log.Fatalf("myceliumd: reachability monitor: %v", err)
+		}
+		go func() {
+			if err := mon.Run(ctx); err != nil && err != context.Canceled {
+				log.Printf("myceliumd: reachability monitor stopped: %v", err)
+			}
+		}()
+		mux.HandleFunc("/reachability", func(w http.ResponseWriter, _ *http.Request) {
+			snap := mon.Snapshot()
+			views := make([]reachView, 0, len(snap))
+			for _, h := range snap {
+				views = append(views, reachView{
+					Ref:          h.TransportRef,
+					Successes:    h.Successes,
+					Failures:     h.Failures,
+					SuccessRatio: h.SuccessRatio(),
+					WindowStart:  h.WindowStart,
+					WindowEnd:    h.WindowEnd,
+				})
+			}
+			writeJSON(w, map[string]any{"version": spec.Version, "anchors": views})
+		})
+		log.Printf("myceliumd: reachability monitor active (%d anchors)", len(cfg.Targets))
+	}
+
 	srv := &http.Server{
 		Addr:              *listen,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {

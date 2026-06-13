@@ -1,0 +1,10 @@
+{
+  "_note": "Node-local reachability monitor config (ADR-0019). Copy to a local, gitignored path (e.g. /var/lib/mycelium/reach.config.json) and pass it via 'myceliumd --reachability-config'. 'ref' is the opaque label shown on /reachability; 'address' and 'server_name' stay local and are NEVER exposed. Replace these example public-DNS anchors with the anchors this node should measure. With no config supplied, the monitor does not run.",
+  "version": 1,
+  "window_ms": 600000,
+  "targets": [
+    {"ref": "anchor-quad1-tcp", "method": "tcp", "address": "1.1.1.1:443", "interval_ms": 30000, "timeout_ms": 4000},
+    {"ref": "anchor-quad1-tls", "method": "tls", "address": "1.1.1.1:443", "server_name": "one.one.one.one", "interval_ms": 30000, "timeout_ms": 4000},
+    {"ref": "anchor-dns-tcp", "method": "tcp", "address": "8.8.8.8:53", "interval_ms": 30000, "timeout_ms": 4000}
+  ]
+}
