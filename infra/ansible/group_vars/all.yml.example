@@ -112,8 +112,9 @@ xray_sha256:
 # REPLACE placeholders below so an unverified artefact is never installed.
 node_exporter_version: "1.8.2"
 node_exporter_sha256:
-  amd64: "REPLACE_WITH_SHA256_OF_node_exporter-1.8.2.linux-amd64.tar.gz"
-  arm64: "REPLACE_WITH_SHA256_OF_node_exporter-1.8.2.linux-arm64.tar.gz"
+  # Public upstream release checksums (node_exporter v1.8.2 sha256sums.txt).
+  amd64: "6809dd0b3ec45fd6e992c19071d6b5253aed3ead7bf0686885a51d85c6643c66"
+  arm64: "627382b9723c642411c33f48861134ebe893e70a63bcc8b3fc0619cd0bfac4be"
 
 # Caddy version (cover-site web server). Installed from the official Caddy APT repository,
 # pinned to this version.
