@@ -39,7 +39,9 @@ REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 command -v jq >/dev/null 2>&1 || { printf 'FAIL: jq is required for transport_family_independence.sh\n' >&2; exit 2; }
 
 GROUP_VARS="$REPO_ROOT/infra/ansible/group_vars/all.yml.example"
-TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.json"
+# The DEPLOYED template (node-bootstrap.sh renders this one); GO evidence must describe the shipped
+# artifact, not the superseded server.template.json (Audit-0004 F-002; unify in RP-0003 §W5).
+TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
 AWG_ROLE="$REPO_ROOT/infra/ansible/roles/amneziawg"
 
