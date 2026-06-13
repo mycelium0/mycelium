@@ -845,8 +845,13 @@ write_params() {
 	hy="$(printf '%s'   "$s" | jq -r '.secrets.hysteria2_password')"
 	st="$(printf '%s'   "$s" | jq -r '.secrets.shadowtls_password')"
 
-	# DEFAULT-ON SET (friends alpha, Variant A): the two certless REALITY transports only —
-	# VLESS+REALITY+XTLS-Vision and VLESS+REALITY+gRPC. Everything else is behind its toggle (OFF).
+	# DEFAULT-ON SET (friends alpha, "Variant A" — recorded in ADR-0022 + THREAT-MODEL port posture):
+	# the two certless REALITY transports — VLESS+REALITY+XTLS-Vision (443) and VLESS+REALITY+gRPC
+	# (8443). NOTE: gRPC is the SAME reality-tls-tcp FAMILY as Vision (not a second independent family
+	# for D2 — AmneziaWG/UDP is, ADR-0020 §5); it is a second always-on port for client failover, and
+	# the only default-on set above single-443. This live default differs from the conservative
+	# group_vars/Ansible default (Vision only) by design; pinned by
+	# tests/conformance/live_artifact_posture.sh so it cannot silently grow. Everything else = OFF.
 	#
 	# HY2/TUIC are DEFAULT-OFF here, even though they are part of the broader canonical set, because
 	# they present a per-node SELF-SIGNED cert (ADR-0014) that the client MUST verify via a SHA-256
