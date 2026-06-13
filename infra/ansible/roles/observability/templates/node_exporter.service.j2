@@ -43,15 +43,14 @@ RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
 RemoveIPC=true
 UMask=0077
 
 # --- Network / syscall surface --------------------------------------------
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-SystemCallFilter=~@privileged @resources @obsolete
+# No SystemCallFilter / MemoryDenyWriteExecute: node_exporter's host-metric collectors use syscalls an
+# aggressive seccomp filter blocks, which SIGSYS-kills it (status=31/SYS core-dump loop). The
+# filesystem / privilege / namespace protections above remain; this is a loopback-only metrics reader.
 
 [Install]
 WantedBy=multi-user.target
