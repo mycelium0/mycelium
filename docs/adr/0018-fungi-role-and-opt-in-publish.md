@@ -30,8 +30,10 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** proposed
 - **Layer(s):** observability / measurement, control plane (node role assignment), cross-cutting
-- **Phase:** cross-cutting; opt-in telemetry path from Phase 0 onward, dissolving into mesh-native
-  digest spores in Phase 3-4
+- **Phase:** cross-cutting; the schema is inert in Phase 0-2, the opt-in telemetry path RUNS from
+  **Phase 2** (the Measurement track — running emission is not Phase-0 behaviour; see
+  [ADR-0021](0021-decentralized-observability-not-a-central-collector.md) and ROADMAP Scope-discipline),
+  dissolving into mesh-native digest spores in Phase 3-4
 - **Related:** VIS-0005 (network-weather explorer — the source; §4 fungi role + §12 spawned items),
   VIS-0004 (living-network doctrine — niches not classes, concept 5), ADR-0002 (no custom crypto —
   the digest signature), ADR-0013 (vocabulary + phase discipline), ADR-0014 (per-operator
@@ -94,7 +96,9 @@ running publisher, registry, or announce path.
 3. **The opt-in publish path (opt-in only, aggregate-and-forget).** A node publishes weather data
    **if and only if its operator explicitly chooses the fungi role.** There is no default, no
    silent, and no inferred participation; a non-fungi node emits no weather digest at all. From
-   **Phase 0 onward** the fungi path rides the **allowed PII-safe aggregated telemetry envelope**:
+   **Phase 2** (the opt-in Measurement-track telemetry path; the schema is inert in Phase 0-2 and no
+   digest is emitted then — see [ADR-0021](0021-decentralized-observability-not-a-central-collector.md))
+   the fungi path rides the **allowed PII-safe aggregated telemetry envelope**:
    opt-in, PII-safe, aggregated, **no correlation, no identity binding**
    ([../ROADMAP.md](../ROADMAP.md) Phase 2 / Measurement track). A fungi runs a small **read-only**
    aggregator over its own already-PII-safe signals and emits the `stress-digest`; it never opens a
