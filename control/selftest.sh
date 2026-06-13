@@ -437,6 +437,88 @@ grep -Eq 'proxies: \[ "[^]]*", ' "$CL_CLIENT" \
 if grep -q "$PRIV" "$CL_CLIENT"; then bad "clash leaked the private key"; else ok "clash does NOT leak the private key"; fi
 
 # ---------------------------------------------------------------------------
+note "sing-box custom-port roundtrip (server inbound listen_port == client dial port)"
+# ---------------------------------------------------------------------------
+# Regression guard for the setport tag-mismatch bug: the template inbound tags
+# carry an "-in" suffix (hysteria2-in, tuic-in, vless-reality-grpc-in, ...), so a
+# setport() that matched the bare protocol token never hit and a custom port from
+# params was silently ignored on the SERVER side — the client subscription would
+# then dial the new port while the server kept listening on the old default.
+# Here we set NON-default ports for hysteria2 + tuic + vless-reality-grpc, render
+# BOTH the server config and a client subscription, and assert that for each of
+# those protocols the server inbound listen_port equals the param AND the client
+# outbound dials the SAME port. Pre-fix this block FAILS (server keeps defaults);
+# post-fix it PASSES.
+CP_PARAMS="$WORK/params.singbox-customport.json"
+CP_SERVER_OUT="$WORK/server.singbox-customport.json"
+CP_SUBS_OUT="$WORK/subs.singbox-customport"; mkdir -p "$CP_SUBS_OUT"
+
+# Distinct, non-default ports for the three protocols under test. The defaults are
+# hysteria2=8444, tuic=8445, vless-reality-grpc=8443; these differ from all of them.
+CP_HY2_PORT=19444
+CP_TUIC_PORT=19445
+CP_GRPC_PORT=19443
+
+jq -n \
+	--arg priv "$PRIV" --arg pub "$PUB" --arg sid "$SID" \
+	--argjson hy2port "$CP_HY2_PORT" --argjson tuicport "$CP_TUIC_PORT" --argjson grpcport "$CP_GRPC_PORT" \
+	'{
+		engine: "singbox",
+		node_address: "node.example.invalid",
+		donor_host: "donor.example.invalid",
+		donor_sni: "donor.example.invalid",
+		reality_private_key: $priv,
+		reality_public_key: $pub,
+		short_ids: [$sid],
+		tls_sni: "tls.example.invalid",
+		grpc_service_name: "cp-grpc",
+		vless_reality_grpc_enabled: true,    vless_reality_grpc_port: $grpcport,
+		hysteria2_enabled: true,             hysteria2_port: $hy2port,
+		tuic_enabled: true,                  tuic_port: $tuicport
+	}' > "$CP_PARAMS"
+jq -e . "$CP_PARAMS" >/dev/null && ok "custom-port params fixture is valid JSON" || bad "custom-port params invalid"
+
+"$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$CP_PARAMS" \
+	--state "$STATE" --out "$CP_SERVER_OUT" 2>/dev/null
+jq -e . "$CP_SERVER_OUT" >/dev/null && ok "custom-port server.json is valid JSON" || bad "custom-port server.json invalid"
+
+"$CTL" subscription --engine singbox --params "$CP_PARAMS" --state "$STATE" --out "$CP_SUBS_OUT" 2>/dev/null
+CP_CLIENT="$(find "$CP_SUBS_OUT" -name '*.singbox.json' | head -n1)"
+[ -n "$CP_CLIENT" ] && jq -e . "$CP_CLIENT" >/dev/null && ok "custom-port client config is valid JSON" || bad "custom-port client config missing/invalid"
+
+# hysteria2: server inbound listen_port AND client outbound server_port == param.
+jq -e --argjson p "$CP_HY2_PORT" '(.inbounds[] | select(.tag=="hysteria2-in") | .listen_port) == $p' "$CP_SERVER_OUT" >/dev/null \
+	&& ok "hysteria2 SERVER inbound listens on the custom port" || bad "hysteria2 server port not applied (setport bug)"
+jq -e --argjson p "$CP_HY2_PORT" '(.outbounds[] | select(.tag=="hysteria2") | .server_port) == $p' "$CP_CLIENT" >/dev/null \
+	&& ok "hysteria2 CLIENT dials the custom port" || bad "hysteria2 client port mismatch"
+
+# tuic: server inbound listen_port AND client outbound server_port == param.
+jq -e --argjson p "$CP_TUIC_PORT" '(.inbounds[] | select(.tag=="tuic-in") | .listen_port) == $p' "$CP_SERVER_OUT" >/dev/null \
+	&& ok "tuic SERVER inbound listens on the custom port" || bad "tuic server port not applied (setport bug)"
+jq -e --argjson p "$CP_TUIC_PORT" '(.outbounds[] | select(.tag=="tuic") | .server_port) == $p' "$CP_CLIENT" >/dev/null \
+	&& ok "tuic CLIENT dials the custom port" || bad "tuic client port mismatch"
+
+# vless-reality-grpc: server inbound listen_port AND client outbound server_port == param.
+jq -e --argjson p "$CP_GRPC_PORT" '(.inbounds[] | select(.tag=="vless-reality-grpc-in") | .listen_port) == $p' "$CP_SERVER_OUT" >/dev/null \
+	&& ok "vless-grpc SERVER inbound listens on the custom port" || bad "vless-grpc server port not applied (setport bug)"
+jq -e --argjson p "$CP_GRPC_PORT" '(.outbounds[] | select(.tag=="vless-reality-grpc") | .server_port) == $p' "$CP_CLIENT" >/dev/null \
+	&& ok "vless-grpc CLIENT dials the custom port" || bad "vless-grpc client port mismatch"
+
+# The decisive roundtrip assertion: for every protocol under test the SERVER
+# listen_port and the CLIENT dial port must be EQUAL (no silent divergence).
+CP_SRV_HY2="$(jq -r '(.inbounds[] | select(.tag=="hysteria2-in") | .listen_port)' "$CP_SERVER_OUT")"
+CP_CLI_HY2="$(jq -r '(.outbounds[] | select(.tag=="hysteria2") | .server_port)' "$CP_CLIENT")"
+CP_SRV_TUIC="$(jq -r '(.inbounds[] | select(.tag=="tuic-in") | .listen_port)' "$CP_SERVER_OUT")"
+CP_CLI_TUIC="$(jq -r '(.outbounds[] | select(.tag=="tuic") | .server_port)' "$CP_CLIENT")"
+CP_SRV_GRPC="$(jq -r '(.inbounds[] | select(.tag=="vless-reality-grpc-in") | .listen_port)' "$CP_SERVER_OUT")"
+CP_CLI_GRPC="$(jq -r '(.outbounds[] | select(.tag=="vless-reality-grpc") | .server_port)' "$CP_CLIENT")"
+if [ "$CP_SRV_HY2" = "$CP_CLI_HY2" ] && [ "$CP_SRV_TUIC" = "$CP_CLI_TUIC" ] && [ "$CP_SRV_GRPC" = "$CP_CLI_GRPC" ]; then
+	ok "server listen_port == client dial port for hysteria2/tuic/vless-grpc (custom ports roundtrip)"
+else
+	bad "server/client port divergence: hy2 $CP_SRV_HY2/$CP_CLI_HY2, tuic $CP_SRV_TUIC/$CP_CLI_TUIC, grpc $CP_SRV_GRPC/$CP_CLI_GRPC"
+fi
+
+# ---------------------------------------------------------------------------
 note "engine default is now sing-box (project canon); explicit --engine xray still works"
 # ---------------------------------------------------------------------------
 # Default engine (no --engine flag) must now be sing-box: render-server with no --engine

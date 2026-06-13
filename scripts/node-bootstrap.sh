@@ -172,20 +172,41 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 
+# ---------------------------------------------------------------------------
+# ARTIFACT_ROOT — the directory that holds the CANONICAL on-node artifacts (donor list, renderer
+# template, control/ tooling). This is DELIBERATELY NOT REPO_ROOT.
+#
+# WHY: REPO_ROOT is derived from this script's OWN path ($NB_SELF/..). In flow_update the script
+# copies ITSELF to a throwaway tmp dir and re-exec's from there (the self-modification guard), so
+# after re-exec $NB_SELF lives under that tmp dir and REPO_ROOT resolves to the tmp PARENT — which
+# does NOT contain nodes/ or control/. Resolving artifacts off REPO_ROOT would then make the donor
+# list, the renderer template, the in-repo myceliumctl fallback, and install_tooling's source all
+# point at the wrong (tmp) place and the render would fail on every update.
+#
+# The real checkout (default /opt/mycelium) is passed through the re-exec args as --checkout, so it
+# is always known to the re-exec'd copy. Prefer it; fall back to REPO_ROOT only for the in-place
+# (non-re-exec) bootstrap case where the script still lives inside the checkout.
+if [ -n "$CHECKOUT_DIR" ] && [ -d "$CHECKOUT_DIR" ]; then
+	ARTIFACT_ROOT="$CHECKOUT_DIR"
+else
+	ARTIFACT_ROOT="$REPO_ROOT"
+fi
+
 # Derived per-node state paths (all LOCAL-ONLY / gitignored — never committed).
 PARAMS_JSON="$STATE_DIR/params.json"             # flat render schema (see control/README.md)
 IDENTITIES_JSON="$STATE_DIR/identities.json"     # {version,clients:[{name,id,created}]}
 IDENTITY_SECRETS="$STATE_DIR/identity.json"      # 0600: REALITY priv/pub, per-proto secrets, donor
 TLS_DIR="$STATE_DIR/tls"                         # per-node self-signed cert + key (service-readable)
-DONOR_LIST="$REPO_ROOT/nodes/dataplane/donor-sni-candidates.json"
-RENDER_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
+# Canonical artifacts resolve off ARTIFACT_ROOT (the real checkout), NOT REPO_ROOT — see above.
+DONOR_LIST="$ARTIFACT_ROOT/nodes/dataplane/donor-sni-candidates.json"
+RENDER_TEMPLATE="$ARTIFACT_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 LASTGOOD_CONFIG="$STATE_DIR/config.lastgood.json"
 STAGED_CONFIG="$STATE_DIR/config.staged.json"
 ACK_MARKER="$STATE_DIR/config.staged.ack"
 
-# myceliumctl entrypoint: prefer the installed tooling copy; fall back to the in-repo one.
+# myceliumctl entrypoint: prefer the installed tooling copy; fall back to the in-repo (checkout) one.
 MYCTL="$TOOLING_DIR/control/myceliumctl"
-[ -x "$MYCTL" ] || MYCTL="$REPO_ROOT/control/myceliumctl"
+[ -x "$MYCTL" ] || MYCTL="$ARTIFACT_ROOT/control/myceliumctl"
 
 run() {
 	# run CMD... — honor --dry-run. Always log the command for an audit trail.
@@ -197,6 +218,10 @@ run() {
 }
 
 need_root() {
+	# Under --dry-run we MUTATE NOTHING (every real action is gated behind run()), so previewing the
+	# plan must not require root. This also lets the offline update/re-exec path be tested unprivileged
+	# (see tests/conformance/node_update_artifact_root.sh). A real (non-dry-run) step still fails closed.
+	[ "$DRY_RUN" -eq 1 ] && return 0
 	[ "$(id -u)" -eq 0 ] || die "this step needs root; re-run with sudo (fail-closed)."
 }
 
@@ -255,13 +280,28 @@ donor_candidates() {
 }
 
 donor_verify() {
-	# donor_verify HOST -> 0 if HOST negotiates TLSv1.3 over an x25519 group (REALITY's requirement).
+	# donor_verify HOST -> 0 if HOST negotiates TLSv1.3 over an x25519 group (REALITY's HARD
+	# requirement). The donor list's "require" also promises h2 ALPN "where offered"; that is a
+	# best-effort PREFERENCE, not a hard gate (see donor_offers_h2 + pick_donor), so the script's
+	# check and the JSON's promise agree (we do not over-promise).
 	local host="$1"
 	have openssl || { warn "openssl missing; cannot verify donor '$host' — treating as unverified."; return 1; }
 	# Fail-closed: a non-TLSv1.3 / non-x25519 donor is rejected so a bad SNI never reaches the config.
 	echo | openssl s_client -groups x25519 -tls1_3 \
 		-servername "$host" -connect "$host:443" 2>/dev/null \
 		| grep -q 'TLSv1.3'
+}
+
+donor_offers_h2() {
+	# donor_offers_h2 HOST -> 0 if HOST negotiates the h2 ALPN. Best-effort PREFERENCE only: a donor
+	# that lacks h2 is still acceptable (the JSON promises h2 "where offered"), so a non-zero here
+	# never rejects a donor — it only de-prioritises it in pick_donor. REALITY mirrors whatever the
+	# donor actually negotiates, so preferring an h2 donor keeps the borrowed fingerprint realistic.
+	local host="$1"
+	have openssl || return 1
+	echo | openssl s_client -alpn h2,http/1.1 -tls1_3 \
+		-servername "$host" -connect "$host:443" 2>/dev/null \
+		| grep -Eq '^[[:space:]]*ALPN protocol:[[:space:]]*h2[[:space:]]*$'
 }
 
 pick_donor() {
@@ -281,14 +321,29 @@ pick_donor() {
 	else
 		shuffled="$(donor_candidates | awk 'BEGIN{srand()} {printf "%f\t%s\n", rand(), $0}' | sort | cut -f2-)"
 	fi
+	# Two-pass selection that keeps the JSON's "h2 ALPN where offered" promise honest WITHOUT
+	# over-promising: TLSv1.3+x25519 is the HARD gate (donor_verify); h2 is a soft PREFERENCE. Pass 1
+	# returns the first candidate that passes the hard gate AND offers h2; if none does, pass 2 falls
+	# back to the first candidate that merely passes the hard gate. So a fleet with only non-h2 donors
+	# still bootstraps (no false failure), but an h2 donor wins when one exists.
+	local first_hard_ok=""
 	while IFS= read -r host; do
 		[ -n "$host" ] || continue
 		if [ "$DRY_RUN" -eq 1 ]; then printf '%s\n' "$host"; return 0; fi
-		if donor_verify "$host"; then printf '%s\n' "$host"; return 0; fi
-		warn "donor candidate '$host' failed verification; trying the next."
+		if donor_verify "$host"; then
+			[ -n "$first_hard_ok" ] || first_hard_ok="$host"   # remember for the fallback pass
+			if donor_offers_h2 "$host"; then printf '%s\n' "$host"; return 0; fi
+			warn "donor candidate '$host' passes TLSv1.3/x25519 but did not offer h2 ALPN; preferring an h2 donor if available."
+		else
+			warn "donor candidate '$host' failed verification; trying the next."
+		fi
 	done <<EOF
 $shuffled
 EOF
+	if [ -n "$first_hard_ok" ]; then
+		warn "no candidate offered h2 ALPN; using '$first_hard_ok' (TLSv1.3/x25519 verified — the hard requirement)."
+		printf '%s\n' "$first_hard_ok"; return 0
+	fi
 	die "no donor candidate negotiated TLSv1.3 over x25519 (fail-closed). Update the candidate list."
 }
 
@@ -751,8 +806,17 @@ write_params() {
 	hy="$(printf '%s'   "$s" | jq -r '.secrets.hysteria2_password')"
 	st="$(printf '%s'   "$s" | jq -r '.secrets.shadowtls_password')"
 
-	# Canonical four ON; the rest available behind their toggle (default OFF for the fleet contract:
-	# only vision is default-on per policy, but the brief's canonical set is vision+grpc+hy2+tuic).
+	# DEFAULT-ON SET (friends alpha, Variant A): the two certless REALITY transports only —
+	# VLESS+REALITY+XTLS-Vision and VLESS+REALITY+gRPC. Everything else is behind its toggle (OFF).
+	#
+	# HY2/TUIC are DEFAULT-OFF here, even though they are part of the broader canonical set, because
+	# they present a per-node SELF-SIGNED cert (ADR-0014) that the client MUST verify via a SHA-256
+	# cert pin. The client/subscription renderer does not yet EMIT that pin, and blanket
+	# `insecure: true` trust is FORBIDDEN (ADR-0014 — it would accept any certificate / MITM-open).
+	# So shipping HY2/TUIC on by default would yield clients that either cannot connect or only
+	# connect insecurely. Re-enabling them requires the cert-pin client path (tracked follow-up);
+	# until then keep them OFF. An operator can still override per node (the toggles below + the
+	# firewall/render pipeline honour whatever is set here).
 	local tmp
 	tmp="$(mktemp "${STATE_DIR}/.params.XXXXXX")"
 	jq -n \
@@ -775,8 +839,9 @@ write_params() {
 			vless_reality_vision_enabled: true,  vless_reality_vision_port: 443,
 			vless_reality_grpc_enabled:   true,  vless_reality_grpc_port:   8443,
 			vless_reality_xhttp_enabled:  false, vless_reality_xhttp_port:  2096,
-			hysteria2_enabled:            true,  hysteria2_port:            8444,
-			tuic_enabled:                 true,  tuic_port:                 8445,
+			# HY2/TUIC default OFF: need a client cert pin the renderer does not yet emit (ADR-0014).
+			hysteria2_enabled:            false, hysteria2_port:            8444,
+			tuic_enabled:                 false, tuic_port:                 8445,
 			shadowsocks_enabled:          false, shadowsocks_port:          8388,
 			shadowtls_enabled:            false, shadowtls_port:            8446,
 			trojan_enabled:               false, trojan_port:               8447
@@ -961,9 +1026,16 @@ install_tooling() {
 	log "installing control tooling to $TOOLING_DIR"
 	need_root
 	run install -d -m 0755 "$TOOLING_DIR"
-	run cp -a "$REPO_ROOT/control" "$TOOLING_DIR/" 2>/dev/null || run cp -aR "$REPO_ROOT/control" "$TOOLING_DIR/"
-	# Re-point MYCTL at the installed copy if it now exists.
-	[ -x "$TOOLING_DIR/control/myceliumctl" ] && MYCTL="$TOOLING_DIR/control/myceliumctl"
+	# Source the control/ tooling from ARTIFACT_ROOT (the real checkout), NOT REPO_ROOT: after the
+	# update re-exec REPO_ROOT points at the tmp copy's parent, which has no control/ tree.
+	run cp -a "$ARTIFACT_ROOT/control" "$TOOLING_DIR/" 2>/dev/null || run cp -aR "$ARTIFACT_ROOT/control" "$TOOLING_DIR/"
+	# Re-point MYCTL at the installed copy if it now exists. Guard the trailing status: a missing
+	# installed copy (e.g. under --dry-run, where the cp above is a no-op) must NOT make this function
+	# return non-zero and trip `set -e` in the caller — we simply keep the existing MYCTL fallback.
+	if [ -x "$TOOLING_DIR/control/myceliumctl" ]; then
+		MYCTL="$TOOLING_DIR/control/myceliumctl"
+	fi
+	return 0
 }
 
 # ===========================================================================

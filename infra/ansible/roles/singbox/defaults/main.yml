@@ -36,6 +36,21 @@ singbox_run_group: "sing-box"
 singbox_control_tooling_src: "../../control/"
 singbox_config_template_name: "config.template.json"
 
+# Pure-JSON sing-box server template that ships INSIDE the copied control/ tree and whose inbound
+# `tag`s match exactly what the control renderer (control/lib/render_singbox.sh) keys on
+# (vless-reality-vision-in, vless-reality-grpc-in, vless-reality-xhttp-in, hysteria2-in, tuic-in,
+# shadowsocks-in, shadowtls-in, shadowtls-ss-in, trojan-in). This is the template passed to
+# `myceliumctl render-server --template`. It is engine-canonical (NOT this role's Jinja
+# config.template.json, whose tags differ and which is Jinja, not pure JSON).
+singbox_ctl_template_rel: "control/testdata/singbox.server.template.json"
+
+# Render policy for the PREFERRED myceliumctl path.
+#   true  (strict): a myceliumctl render/subscription failure ABORTS the play (fail closed) so
+#                   contract drift between the role and the control tooling is impossible to miss.
+#   false (lenient): a failure emits a LOUD warning and the role falls back to the bundled Jinja/jq
+#                    renderers. The fallback is never silent either way.
+singbox_render_strict: false
+
 # Operator output: rendered client subscriptions are fetched here on the control host.
 singbox_out_subscriptions_dir: "./out/subscriptions"
 singbox_out_public_dir: "./out"
