@@ -753,11 +753,13 @@
 # and Trojan use a per-node self-signed certificate that a client may trust ONLY via an explicit
 # certificate/SPKI pin — NEVER via insecure:true (which accepts ANY cert and is MITM-open). This
 # bundled jq fallback has no per-node cert pin available, so it DELIBERATELY OMITS the HY2/TUIC/
-# Trojan client entries rather than emit them insecurely. Those protocols are delivered by the
-# preferred myceliumctl `subscription` path (which carries the proper per-node material), or via the
-# operator's own-domain ACME certificate. The fallback emits only REALITY (Vision/gRPC/XHTTP, which
-# are certless and borrow the donor handshake), Shadowsocks-2022 (no TLS) and ShadowTLS (utls outer
-# handshake, no insecure flag) — none of which require a cert pin.
+# Trojan client entries rather than emit them insecurely. NOTE (Audit-0004 F-015): the myceliumctl
+# `subscription` path does NOT yet emit a per-node cert/SPKI pin either — the renderer's plain_tls()
+# sets only server_name + uTLS + ALPN (see scripts/node-bootstrap.sh: "the renderer does not yet emit
+# that pin"). So HY2/TUIC/Trojan stay default-OFF until that pin lands, or until the operator fronts
+# them with an own-domain ACME certificate that off-the-shelf clients trust without a pin. The
+# fallback emits only REALITY (Vision/gRPC/XHTTP, which are certless and borrow the donor handshake),
+# Shadowsocks-2022 (no TLS) and ShadowTLS (utls outer handshake, no insecure flag) — none need a pin.
 - name: Detect whether myceliumctl produced subscription files
   ansible.builtin.find:
     paths: "{{ singbox_state_dir }}/subscriptions"
