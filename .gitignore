@@ -46,6 +46,9 @@ reach.config.json
 
 # Internal audit / review reports — kept locally, never published
 docs/audits/
+# Operator's real node AS-diversity inventory (real IPs/AS/providers) — local only; the repo ships
+# only the template + abstracted rationale (docs/runbooks/node-as-inventory.md).
+docs/runbooks/node-as-inventory.local.md
 
 # Stray scratch / tool output — never commit
 .checkout.txt
