@@ -976,7 +976,10 @@ MemoryDenyWriteExecute=true
 RemoveIPC=true
 KeyringMode=private
 UMask=0077
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK is REQUIRED: sing-box subscribes to route/interface updates via rtnetlink at startup;
+# without it sing-box FATALs ("subscribe route updates: address family not supported by protocol")
+# and the service crash-loops. (node_exporter, by contrast, needs no netlink — see its unit below.)
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @obsolete
