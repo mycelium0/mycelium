@@ -71,8 +71,9 @@ Usage:
 
 Commands:
   reality-keys [--shortids N] [--shortid-bytes B]
-        Generate a REALITY X25519 keypair via `xray x25519` and N shortIds via
-        `openssl rand -hex B`. Requires xray and openssl on PATH (no custom crypto).
+        Generate a REALITY X25519 keypair via `xray x25519` (or, on a sing-box-only
+        node, `sing-box generate reality-keypair`) and N shortIds via `openssl rand
+        -hex B`. Requires xray OR sing-box, plus openssl, on PATH (no custom crypto).
         Output is KEY=VALUE lines on stdout.
 
   identity add    --name NAME [--state FILE]
@@ -137,21 +138,29 @@ cmd_reality_keys() {
 	case "$bytes"   in (*[!0-9]*|'') myc_die "reality-keys: --shortid-bytes must be a positive integer" ;; esac
 	[ "$bytes" -ge 1 ] || myc_die "reality-keys: --shortid-bytes must be >= 1"
 
-	# REALITY keypair from xray. Output of `xray x25519` looks like:
-	#   Private key: <base64url>
-	#   Public key:  <base64url>
-	# (older builds print "Password:" for the public key). We parse both forms.
-	myc_require_xray
+	# REALITY keypair from an AUDITED tool (no custom crypto, ADR-0002). Prefer xray
+	# ('xray x25519'); fall back to sing-box ('sing-box generate reality-keypair') so the canonical
+	# sing-box-only node (which ships no xray) can still rotate REALITY keys — Audit-0004 F-008.
+	#   xray:     "Private key: <b64url>" / "Public key: <b64url>"  (older builds: "Password:" for pub)
+	#   sing-box: "PrivateKey: <b64url>"  / "PublicKey: <b64url>"
 	local raw priv pub
-	raw="$(xray x25519 2>/dev/null)" || myc_die "'xray x25519' failed"
-	priv="$(printf '%s\n' "$raw" | sed -n 's/^[Pp]rivate [Kk]ey:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
-	pub="$(printf '%s\n' "$raw"  | sed -n 's/^[Pp]ublic [Kk]ey:[[:space:]]*//p'  | head -n1 | tr -d '[:space:]')"
-	if [ -z "$pub" ]; then
-		# Some builds label the public value "Password".
-		pub="$(printf '%s\n' "$raw" | sed -n 's/^[Pp]assword:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
+	if command -v xray >/dev/null 2>&1; then
+		raw="$(xray x25519 2>/dev/null)" || myc_die "'xray x25519' failed"
+		priv="$(printf '%s\n' "$raw" | sed -n 's/^[Pp]rivate [Kk]ey:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
+		pub="$(printf '%s\n' "$raw"  | sed -n 's/^[Pp]ublic [Kk]ey:[[:space:]]*//p'  | head -n1 | tr -d '[:space:]')"
+		if [ -z "$pub" ]; then
+			# Some builds label the public value "Password".
+			pub="$(printf '%s\n' "$raw" | sed -n 's/^[Pp]assword:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
+		fi
+	elif command -v sing-box >/dev/null 2>&1; then
+		raw="$(sing-box generate reality-keypair 2>/dev/null)" || myc_die "'sing-box generate reality-keypair' failed"
+		priv="$(printf '%s\n' "$raw" | sed -n 's/^[Pp]rivate[Kk]ey:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
+		pub="$(printf '%s\n'  "$raw" | sed -n 's/^[Pp]ublic[Kk]ey:[[:space:]]*//p'  | head -n1 | tr -d '[:space:]')"
+	else
+		myc_die "reality-keys needs an audited keygen tool on PATH: 'xray' (xray x25519) or 'sing-box' (sing-box generate reality-keypair)."
 	fi
-	[ -n "$priv" ] || myc_die "could not parse private key from 'xray x25519' output"
-	[ -n "$pub" ]  || myc_die "could not parse public key from 'xray x25519' output"
+	[ -n "$priv" ] || myc_die "could not parse the private key from the keygen tool output"
+	[ -n "$pub" ]  || myc_die "could not parse the public key from the keygen tool output"
 
 	printf 'REALITY_PRIVATE_KEY=%s\n' "$priv"
 	printf 'REALITY_PUBLIC_KEY=%s\n' "$pub"

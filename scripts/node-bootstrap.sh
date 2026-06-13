@@ -738,9 +738,14 @@ ensure_identity() {
 	donor="$(pick_donor)"
 	log "selected + verified donor SNI (stored locally; never committed)."
 
-	local ss_pw tj_pw hy_pw st_pw
+	local ss_pw tj_pw hy_pw st_pw clash_pw
 	ss_pw="$(gen_secret_b64)"; tj_pw="$(gen_secret_b64)"
 	hy_pw="$(gen_secret_b64)"; st_pw="$(gen_secret_b64)"
+	# clash_api Bearer secret (loopback /connections auth, defence-in-depth — ADR-0014/Audit-0004 F-003).
+	# Generated ONCE here at bootstrap; never regenerated on update (the secrets block is kept if present
+	# above), so the live render stays stable. Legacy nodes whose identity predates this field render
+	# clash_api WITHOUT a secret (byte-identical to today) — see write_params + render_singbox.
+	clash_pw="$(gen_secret_b64)"
 
 	# Per-node SELF-SIGNED cert (CN = donor) for the TLS-cert protocols (HY2/TUIC/Trojan). ADR-0014:
 	# certless REALITY/AmneziaWG per-node keypairs; HY2/TUIC use a per-node self-signed cert + a
@@ -752,12 +757,13 @@ ensure_identity() {
 	jq -n \
 		--arg priv "$priv" --arg pub "$pub" --arg sid "$sid" --arg donor "$donor" \
 		--arg ss "$ss_pw" --arg tj "$tj_pw" --arg hy "$hy_pw" --arg st "$st_pw" \
+		--arg clash "$clash_pw" \
 		--arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		'{
 			version: 1, created: $created,
 			reality: { private_key: $priv, public_key: $pub, short_id: $sid },
 			donor:   { host: $donor, sni: $donor },
-			secrets: { ss_password: $ss, trojan_password: $tj, hysteria2_password: $hy, shadowtls_password: $st }
+			secrets: { ss_password: $ss, trojan_password: $tj, hysteria2_password: $hy, shadowtls_password: $st, clash_secret: $clash }
 		}' >"$tmp"
 	mv -f "$tmp" "$IDENTITY_SECRETS"; chmod 0600 "$IDENTITY_SECRETS"
 	log "wrote node secrets (0600): $IDENTITY_SECRETS"
@@ -844,6 +850,9 @@ write_params() {
 	tj="$(printf '%s'   "$s" | jq -r '.secrets.trojan_password')"
 	hy="$(printf '%s'   "$s" | jq -r '.secrets.hysteria2_password')"
 	st="$(printf '%s'   "$s" | jq -r '.secrets.shadowtls_password')"
+	# // "" so a legacy identity.json without clash_secret yields EMPTY (not the string "null"):
+	# write_params then renders clash_api WITHOUT a secret, byte-identical to today (no-op update).
+	clash="$(printf '%s' "$s" | jq -r '.secrets.clash_secret // ""')"
 
 	# DEFAULT-ON SET (friends alpha, "Variant A" — recorded in ADR-0022 + THREAT-MODEL port posture):
 	# the two certless REALITY transports — VLESS+REALITY+XTLS-Vision (443) and VLESS+REALITY+gRPC
@@ -866,6 +875,7 @@ write_params() {
 	jq -n \
 		--arg priv "$priv" --arg pub "$pub" --arg sid "$sid" --arg donor "$donor" \
 		--arg ss "$ss" --arg tj "$tj" --arg hy "$hy" --arg st "$st" \
+		--arg clash "$clash" \
 		--arg node_address "$node_address" \
 		--arg tls_cert "$TLS_DIR/fullchain.pem" --arg tls_key "$TLS_DIR/privkey.pem" \
 		'{
@@ -879,6 +889,7 @@ write_params() {
 			xhttp_path: "/",
 			shadowtls_handshake_server: $donor, shadowtls_handshake_port: 443,
 			ss_password: $ss, trojan_password: $tj, hysteria2_password: $hy, shadowtls_password: $st,
+			clash_secret: $clash,
 
 			vless_reality_vision_enabled: true,  vless_reality_vision_port: 443,
 			vless_reality_grpc_enabled:   true,  vless_reality_grpc_port:   8443,
@@ -891,6 +902,12 @@ write_params() {
 			trojan_enabled:               false, trojan_port:               8447
 		}' >"$tmp"
 	mv -f "$tmp" "$PARAMS_JSON"; chmod 0600 "$PARAMS_JSON"
+	# Mirror the clash secret to a 0600 file so the loopback data-plane stats exporter can authenticate
+	# to clash_api (--clash-secret-file). Empty on legacy nodes: leave no file (the exporter then reads
+	# the still-open loopback clash_api exactly as today).
+	if [ -n "$clash" ] && [ "$DRY_RUN" -eq 0 ]; then
+		( umask 077; printf '%s' "$clash" >"$STATE_DIR/clash.secret" )
+	fi
 	log "wrote $PARAMS_JSON (0600, local-only)."
 }
 
@@ -1111,9 +1128,11 @@ setup_amneziawg() {
 		warn "AmneziaWG userspace tools not all present. Build them from source (kernel-independent):"
 		warn "  $AWG_GO_REPO        (amneziawg-go: the userspace implementation)"
 		warn "  $AWG_TOOLS_REPO     (awg / awg-quick)"
-		warn "Then re-run; this step is idempotent and will converge once the tools are on PATH."
 		warn "Install them under $AWG_BIN_DIR and ensure awg-quick@ forces WG_QUICK_USERSPACE_IMPLEMENTATION."
-		return 0
+		# Fail-closed (Audit-0004 F-006): AmneziaWG/UDP is the Phase-0 SECOND transport family
+		# (ADR-0020 §5). Silently completing with only the REALITY family leaves the node one block away
+		# from total loss — the exact failure D2 exists to prevent. Refuse, unless the operator opted out.
+		die "AmneziaWG tools missing — refusing to report bootstrap complete with a single transport family. Install the tools above and re-run, or pass --no-amneziawg to deliberately ship a one-family node."
 	fi
 	# Identity: per-node keypair (+ optional psk). Generated once, kept local.
 	local awg_state="$STATE_DIR/awg"
@@ -1141,8 +1160,11 @@ setup_amneziawg() {
 	fi
 	run systemctl enable awg-quick@awg0 2>/dev/null || warn "could not enable awg-quick@awg0."
 	if [ "$DRY_RUN" -eq 0 ] && [ -f "$awg_conf" ] && ! systemctl is-active --quiet awg-quick@awg0; then
-		run systemctl start awg-quick@awg0 2>/dev/null \
-			|| warn "awg-quick@awg0 did not start — check 'journalctl -u awg-quick@awg0' (is amneziawg-go on PATH?)."
+		run systemctl start awg-quick@awg0 2>/dev/null || true
+	fi
+	# Fail-closed (Audit-0004 F-006): the second family MUST be active before bootstrap reports success.
+	if [ "$DRY_RUN" -eq 0 ] && ! systemctl is-active --quiet awg-quick@awg0; then
+		die "awg-quick@awg0 is not active — the AmneziaWG/UDP second family failed to come up. Inspect 'journalctl -u awg-quick@awg0' (is amneziawg-go on PATH and the unit forcing WG_QUICK_USERSPACE_IMPLEMENTATION?). Fix and re-run, or --no-amneziawg to opt out."
 	fi
 }
 

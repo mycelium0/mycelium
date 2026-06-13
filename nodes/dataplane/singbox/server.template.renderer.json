@@ -126,6 +126,7 @@
       "listen": "::",
       "listen_port": 8446,
       "version": 3,
+      "strict_mode": true,
       "users": [],
       "handshake": {
         "server": "SENTINEL_DONOR_HOST",
