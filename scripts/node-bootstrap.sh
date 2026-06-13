@@ -831,7 +831,7 @@ write_params() {
 			short_ids: [ $sid ],
 			tls_sni: $donor,
 			tls_certificate_path: $tls_cert, tls_key_path: $tls_key,
-			grpc_service_name: "grpc",
+			grpc_service_name: "grpc.health.v1.Health",
 			xhttp_path: "/",
 			shadowtls_handshake_server: $donor, shadowtls_handshake_port: 443,
 			ss_password: $ss, trojan_password: $tj, hysteria2_password: $hy, shadowtls_password: $st,
