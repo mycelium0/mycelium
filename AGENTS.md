@@ -219,6 +219,13 @@ Forbidden learning inputs:
 - persistent behavioral profiles;
 - centralized surveillance datasets.
 
+The **public** projection of stress and health is the aggregated **network weather** surface (VIS-0005),
+never a node directory or map: a **fungi**-role node (a temporary `cache-custodian`-class niche) applies
+the aggregation floor and noise at the source, forgets the raw inputs, and emits a signed, TTL-bounded
+**stress-digest** spore; the published snapshot carries transport **classes**, percentages, buckets, and
+opaque scopes — never a node, endpoint, location, or identity. When asked to "expose conditions
+publicly", publish aggregated weather, never a map. The map is never assembled at any tier.
+
 ## 4. Carrier-agnostic bridging doctrine
 
 Mycelium must be able to connect separated islands through **any carrier that can move authenticated
