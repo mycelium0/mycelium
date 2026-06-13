@@ -20,3 +20,5 @@ where", before ADR decisions and RP work items exist. An accepted Vision produce
 | [0001](0001-mycelium-vision-and-scope.md) | Mycelium: resilient mesh for persistent access | accepted | Phase 0–5 |
 | [0002](0002-carrier-agnostic-mycelial-doctrine.md) | Carrier-agnostic mycelial doctrine | proposed | Phase 0–7 |
 | [0003](0003-node-interaction-and-distributed-awareness.md) | Node interaction & distributed awareness | draft | Phase 3–4 |
+| [0004](0004-living-network-doctrine.md) | Living-network doctrine | draft | Phase 0–7 |
+| [0005](0005-network-weather-explorer.md) | Network-weather explorer | draft | Measurement track |
