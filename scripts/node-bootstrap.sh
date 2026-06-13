@@ -485,7 +485,19 @@ RuntimeMaxUse=64M
 ForwardToSyslog=no
 CONF
 	fi
-	run systemctl restart systemd-journald || warn "could not restart journald (continuing)."
+	# The no-logs posture must actually HOLD, not merely be configured: a persistent /var/log/journal
+	# overrides Storage=volatile, so remove it — RAM-only, no on-disk forensic residue (SECURITY.md).
+	[ "$DRY_RUN" -eq 0 ] && [ -d /var/log/journal ] && run rm -rf /var/log/journal
+	# FAIL-CLOSED: a failed restart or a journal that is not actually volatile must abort the bootstrap,
+	# not warn-and-continue — the claimed no-logs posture cannot be allowed to silently not hold.
+	if ! run systemctl restart systemd-journald; then
+		die "journald failed to restart after the volatile drop-in (fail-closed): inspect $dropin"
+	fi
+	if [ "$DRY_RUN" -eq 0 ]; then
+		systemctl is-active --quiet systemd-journald || die "systemd-journald not active after restart (fail-closed)."
+		[ -d /var/log/journal ] && die "persistent /var/log/journal remains — volatile journald not in effect (fail-closed)."
+		log "journald is volatile (RAM-only); no persistent journal directory."
+	fi
 }
 
 harden_sshd() {
