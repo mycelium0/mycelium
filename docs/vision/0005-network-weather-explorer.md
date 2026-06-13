@@ -26,7 +26,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Horizon:** cross-cutting **Measurement** track — a central publisher now (Phase 0 onward), dissolving into mesh-native digest spores in Phase 3–4 (see [../ROADMAP.md](../ROADMAP.md) cross-cutting tracks)
+- **Horizon:** cross-cutting **Measurement** track — schemas inert in Phase 0-2; the opt-in digest path + central publisher run from **Phase 2** (running emission is not Phase-0 behaviour — see [ADR-0021](../adr/0021-decentralized-observability-not-a-central-collector.md) and ROADMAP Scope-discipline), dissolving into mesh-native digest spores in Phase 3–4
 - **Layer(s):** observability / measurement, control plane (cross-cutting)
 - **Related:** [0003-node-interaction-and-distributed-awareness.md](0003-node-interaction-and-distributed-awareness.md),
   [0004-living-network-doctrine.md](0004-living-network-doctrine.md),
@@ -116,9 +116,11 @@ aggregation centre. Each fungi sees only its own scope; fungi digests do not til
   signal classes carrying an **opaque scope id, never geography**; the edge-lifecycle distribution as
   **percentages** (not counts — counts leak network size); network sizes as order-of-magnitude buckets;
   obfuscated rotation events; and a methodology block declaring `k`, the noise, and what is withheld.
-- **The fungi opt-in publish path.** Now (Phase 0 onward): a fungi runs a small read-only aggregator
-  over its own PII-safe signals and publishes a digest to the explorer's publisher. This rides the
-  allowed Phase-0–2 telemetry envelope: **opt-in, PII-safe, aggregated, no correlation, no identity
+- **The fungi opt-in publish path.** From **Phase 2** (the opt-in Measurement track; the schema/envelope
+  is inert in Phase 0-2 and nothing emits then — see
+  [../adr/0021-decentralized-observability-not-a-central-collector.md](../adr/0021-decentralized-observability-not-a-central-collector.md)):
+  a fungi runs a small read-only aggregator over its own PII-safe signals and publishes a digest to the
+  explorer's publisher. The (inert in Phase 0-2) telemetry envelope it uses is: **opt-in, PII-safe, aggregated, no correlation, no identity
   binding** ([../ROADMAP.md](../ROADMAP.md) Phase 2 / Measurement track).
 - **The publisher** (off-network control side): verifies digest signatures, coarsens across sources,
   suppresses below-floor cells, strips anything resembling a leak, and emits the static snapshot. The
@@ -265,8 +267,8 @@ parallel system.
   `network-weather.json` schema, the fungi `stress-digest` spore schema, the floor `k`, noise budget,
   coarsening/bucketing rules, rotation-event obfuscation, and the cumulative-disclosure bound.
 - [ ] **ADR — fungi role & opt-in publish path** (`docs/adr/NNNN-...`): the `cache-custodian`-class
-  fungi niche and rotation, the opt-in upload protocol (Phase 0 onward) and its dissolution into
-  mesh-native digest spores (Phase 3–4), and the anti-Sybil source weighting.
+  fungi niche and rotation, the opt-in upload protocol (running from Phase 2; schema inert in Phase 0-2)
+  and its dissolution into mesh-native digest spores (Phase 3–4), and the anti-Sybil source weighting.
 - [ ] **RP — explorer publisher** (`docs/proposals/NNNN-...`): the off-network publisher (verify →
   coarsen → suppress-below-floor → strip → emit static snapshot), with a fail-closed conformance check
   enforcing the §7 invariants (the check is part of the conformance suite, not specified in the RP).

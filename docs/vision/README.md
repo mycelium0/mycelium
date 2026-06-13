@@ -22,3 +22,4 @@ where", before ADR decisions and RP work items exist. An accepted Vision produce
 | [0003](0003-node-interaction-and-distributed-awareness.md) | Node interaction & distributed awareness | draft | Phase 3–4 |
 | [0004](0004-living-network-doctrine.md) | Living-network doctrine | draft | Phase 0–7 |
 | [0005](0005-network-weather-explorer.md) | Network-weather explorer | draft | Measurement track |
+| [0006](0006-decentralized-observability.md) | Decentralized observability (mesh-native, no collector) | draft | Measurement track |
