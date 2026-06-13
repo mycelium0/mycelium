@@ -103,6 +103,36 @@
       ForwardToSyslog=no
   notify: Restart systemd-journald
 
+# A pre-existing /var/log/journal directory makes journald persist to disk and OVERRIDES
+# Storage=volatile, so the drop-in alone is fail-OPEN (Audit-0004 F-005). Remove it, restart now, and
+# verify — mirroring the bash bootstrap's fail-closed harden_journald.
+- name: Hardening — remove any persistent journal directory (it overrides Storage=volatile)
+  when: hardening_journald_volatile | bool
+  ansible.builtin.file:
+    path: /var/log/journal
+    state: absent
+  notify: Restart systemd-journald
+
+- name: Hardening — restart journald now to apply volatile storage (so the verify below is meaningful)
+  when: hardening_journald_volatile | bool
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted
+
+- name: Hardening — verify the no-logs posture actually holds (fail-closed)
+  when: hardening_journald_volatile | bool
+  block:
+    - name: Stat the persistent journal directory
+      ansible.builtin.stat:
+        path: /var/log/journal
+      register: myc_journal_dir
+    - name: Assert journald is volatile (no persistent journal directory remains)
+      ansible.builtin.assert:
+        that:
+          - not myc_journal_dir.stat.exists
+        fail_msg: "/var/log/journal still exists — journald would persist logs to disk despite Storage=volatile; the no-logs posture (SECURITY.md §4.2) is broken."
+        success_msg: "journald is volatile — no persistent journal directory."
+
 # ---------------------------------------------------------------------------
 # Host firewall (UFW) — default deny inbound, allow SSH + listen_port only.
 # ---------------------------------------------------------------------------
@@ -128,10 +158,12 @@
     proto: tcp
     comment: "mycelium vless-reality data plane"
 
-- name: Enable UFW and turn on logging
+- name: Enable UFW with logging OFF (UFW logs inbound source IPs to the kernel log -> journald)
+  # Audit-0004 F-005: UFW connection logging records client source IPs; on a node that may face
+  # coercion that is a user-trail to disk. The no-logs posture wins over per-packet firewall logs.
   community.general.ufw:
     state: enabled
-    logging: "on"
+    logging: "off"
 
 # ---------------------------------------------------------------------------
 # Automatic security updates.

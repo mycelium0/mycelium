@@ -136,6 +136,14 @@ myc_sb_render_server() {
 	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
 	shadowtls_password="$(myc_params_get "$params" '.shadowtls_password' '')"
 
+	# clash_api secret (optional). When non-empty it is injected into experimental.clash_api so the
+	# loopback /connections metadata endpoint requires a Bearer token (defence-in-depth on top of the
+	# loopback bind). When EMPTY (legacy nodes whose identity predates the secret), the clash_api block
+	# is left exactly as the template ships it, so the rendered config is byte-identical and the
+	# updater's no-op short-circuit keeps the live service untouched.
+	local clash_secret
+	clash_secret="$(myc_params_get "$params" '.clash_secret' '')"
+
 	# Transport-shaping values.
 	local grpc_service xhttp_path stls_handshake stls_handshake_port
 	grpc_service="$(myc_params_get "$params" '.grpc_service_name' 'grpc')"
@@ -212,6 +220,7 @@ myc_sb_render_server() {
 		--arg grpc "$grpc_service" \
 		--arg xpath "$xhttp_path" \
 		--arg stlshs "$stls_handshake" \
+		--arg clash_secret "$clash_secret" \
 		--argjson stlshp "$stls_handshake_port" \
 		--argjson ports "$ports_json" \
 		--argjson enabled "$enabled_json" \
@@ -283,6 +292,10 @@ myc_sb_render_server() {
 				or ( .tag == "trojan-in"               and ($enabled | index("trojan")) )
 			))
 		)
+		# Inject the clash_api Bearer secret only when one was provisioned (non-empty). Empty -> leave
+		# experimental untouched so legacy nodes render byte-identically (no-op update, no restart).
+		| if ($clash_secret != "" and (.experimental?.clash_api? != null))
+			then .experimental.clash_api.secret = $clash_secret else . end
 		' "$template" 2>/dev/null)"
 
 	if [ -z "$rendered" ] || ! printf '%s' "$rendered" | jq -e . >/dev/null 2>&1; then
