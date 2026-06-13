@@ -28,6 +28,8 @@
 #                                    real checkout (CHECKOUT_DIR/ARTIFACT_ROOT), not the tmp re-exec dir
 #   * unit_netlink_parity.sh  — every sing-box/xray unit-producing source (bash bootstrap + Ansible
 #                               templates) grants AF_NETLINK so no deploy path crash-loops (Audit-0004 F-001)
+#   * live_artifact_posture.sh — assertions on the DEPLOYED artifacts: clash_api loopback-only + the
+#                               live default-on transport set == documented Variant A (Audit-0004 F-002/F-004)
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -58,6 +60,7 @@ GATES=(
 	"tests/conformance/phase0_port_canon.sh"
 	"tests/conformance/node_update_artifact_root.sh"
 	"tests/conformance/unit_netlink_parity.sh"
+	"tests/conformance/live_artifact_posture.sh"
 	"control/selftest.sh"
 )
 

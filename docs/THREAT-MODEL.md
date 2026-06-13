@@ -52,14 +52,14 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 |---|---|---|
 | Signature-based DPI | data plane | REALITY/Vision; indistinguishability from HTTPS |
 | ML-based flow classification | data plane | Statistical traffic shaping beyond protocol mimicry; auto A/B obfuscation tuning |
-| Active probing | data plane / node | Donor site returns a legitimate response; no extraneous ports or banners |
+| Active probing | data plane / node | Donor site returns a legitimate response; every exposed port is REALITY/donor-fronted, no plaintext banners. Phase-0 minimal-exposure posture is REALITY-on-443; the bash bootstrap default additionally exposes REALITY+gRPC on 8443 (same family, also donor-fronted) for client failover — a deliberate, recorded two-port default (ADR-0022), not extraneous services |
 | IP-level / AS-level blocking | node | IP/AS diversity, fast rotation, CDN-front, ephemeral ingress nodes |
 | UDP excision | transport | TCP/TLS paths are primary; UDP is a bonus |
 | Block of the config distribution domain | control plane | Domain-fronting, anycast, P2P fallback, out-of-band bootstrap configs |
 | Sybil / ingress enumeration | discovery | Invitation trees, social-graph/history trust, PoW, graduated knowledge |
 | Eclipse / route poisoning | discovery / routing | Reputation scoring, peer diversity, verifiability |
 | Traffic-timing correlation | routing | Multi-hop, padding, mixing (at latency cost) |
-| Node compromise | full stack | Minimal node knowledge; ingress/egress separation; forward secrecy |
+| Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 3–4 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
 | Operator coercion | people | Minimal logging, plausible deniability, jurisdictional distribution |
 
 ## Attack surface: carriers, bridges, and spores

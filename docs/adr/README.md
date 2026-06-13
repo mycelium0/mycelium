@@ -33,6 +33,7 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 | [0019](0019-node-local-reachability-health.md) | Node-local reachability + per-transport health measurement (Phase-0; classification/rotation/routing stay Phase 2) | proposed |
 | [0020](0020-phase0-scope-reconciliations.md) | Phase-0 scope reconciliations (out-of-band delivery, donor-as-cover, manual REALITY rotation, Terraform deferred, D2 = independent families) | **accepted** |
 | [0021](0021-decentralized-observability-not-a-central-collector.md) | Decentralized aggregate-and-forget observability, not a central collector (per-operator own-fleet monitor only; in-region edge reporting is the priority) | **accepted** |
+| [0022](0022-two-port-reality-default.md) | Two-port REALITY default on the bootstrap path (Vision 443 + gRPC 8443, same family, for client failover; conservative Ansible default stays Vision-only; pinned by a posture gate) | **accepted** |
 
 > Reserved (produced by ADR-0003): 0004 no-logs/retention ·
 > 0005 classification as encryption item · 0006 legal wrapper for egress · 0007 role/jurisdiction

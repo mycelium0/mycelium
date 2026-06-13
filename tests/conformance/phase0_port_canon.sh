@@ -41,7 +41,9 @@ command -v jq >/dev/null 2>&1 || { printf 'FAIL: jq is required for phase0_port_
 
 GROUP_VARS="$REPO_ROOT/infra/ansible/group_vars/all.yml.example"
 ROLE_DEFAULTS="$REPO_ROOT/infra/ansible/roles/singbox/defaults/main.yml"
-SB_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.json"
+# The DEPLOYED template (node-bootstrap.sh renders this one); the GO evidence must describe the
+# shipped artifact, not the superseded server.template.json (Audit-0004 F-002; unify in RP-0003 §W5).
+SB_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 PORTS_MD="$REPO_ROOT/nodes/dataplane/PORTS.md"
 RENDER_SB="$REPO_ROOT/control/lib/render_singbox.sh"
 
@@ -144,7 +146,7 @@ check_yaml_source "roles/singbox/defaults/main.yml" "$ROLE_DEFAULTS"
 # ---------------------------------------------------------------------------
 # sing-box server template (JSON): inbound listen_port keyed by tag, read with jq.
 # ---------------------------------------------------------------------------
-note "nodes/dataplane/singbox/server.template.json"
+note "nodes/dataplane/singbox/server.template.renderer.json"
 if [ ! -f "$SB_TEMPLATE" ]; then
 	skipln "sing-box template not present — skipping"
 elif ! jq -e . "$SB_TEMPLATE" >/dev/null 2>&1; then
