@@ -32,7 +32,7 @@ reconciliations it relies on are pinned in [adr/0020-phase0-scope-reconciliation
 | **D5** | No excluded legacy transport configured anywhere | **DONE** | `no_legacy_transport.sh` gate PASS at HEAD. | — |
 | S | Basic observability (node liveness / utilisation **done**; per-transport handshake-success + alerts **deferred** per ADR-0021) | **partial** | Node-side producers live on all 3, loopback-only: `node_exporter`, the `dataplane-stats` utilisation exporter (PII-safe, `no_dataplane_pii` gate), the reachability monitor, + the `mycelium_dataplane_unit_active` metric. **Deferred (named, ADR-0021):** alerting + per-transport handshake-success-rate → the per-operator monitor / Phase-2 edge reporting; **no central collector in any phase.** | deferred (not a Phase-0 blocker) |
 | S | Reproducible deploy (`node-bootstrap.sh` + Ansible; Terraform deferred, ADR-0020 §4) | **DONE** | Canonical idempotent fail-closed bootstrap; ROADMAP annotated `(see ADR-0020)`. (Ansible-from-zero re-validation tracked under D4.) | — |
-| S | Hosting / AS-diversity (no single tainted AS) | **partial** | Operationally met (3 nodes, 3 countries). **Missing:** an auditable AS-diversity inventory (autonomous; no raw IPs). | autonomous |
+| S | Hosting / AS-diversity (no single tainted AS) | **DONE** | Operationally met (3 nodes, 3 countries); the auditable AS-diversity inventory now exists at `runbooks/node-as-inventory.md` (region / AS class / IP-reputation / deploy-date / rationale, keyed by node-A/B/C; no raw IPs). | — |
 | S | ADR-0020 reconciliations recorded + ROADMAP annotated | **DONE** | ADR-0020 accepted; ROADMAP cross-refs present. | — |
 | S | Manual REALITY-rotation runbook **exercised at least once** (ADR-0020 §Compliance) | **remaining** | Runbook exists (`runbooks/reality-rotation.md`); the *exercised-once* transcript is unrecorded. | operator |
 | — | This GO/NO-GO ledger exists (r18) | **DONE** | this document. | — |
@@ -40,10 +40,19 @@ reconciliations it relies on are pinned in [adr/0020-phase0-scope-reconciliation
 ## Remaining autonomous closures (no node / no operator needed)
 These I can land immediately; they harden Phase-0 and complete the self-contained surface:
 - **Atomic on-node revoke wrapper** — `myceliumctl identity revoke → re-render → `sing-box check` → promote → engine reload → verify, with rollback (fail-closed, mirroring the updater).
-- **`harden_journald` fail-closed** — verify the volatile drop-in and fail (not warn) on a bad config.
-- **AS-diversity inventory doc** — region / AS class / IP-reputation posture / deploy-date / rationale, keyed by node-A/B/C (no raw IPs).
 - **Bootstrap subscription emission** — `node-bootstrap.sh` emits per-client subscriptions to a gitignored hand-off dir at the end of bootstrap (the Ansible path already does), so the one-command path is self-complete for the D1 hand-off.
-- **ROADMAP line annotation** — point the observability DoD line at ADR-0021 (the deferral of alerting / per-transport handshake to the per-operator monitor / Phase-2), mirroring the ADR-0020 cross-refs.
+- **DONE — `harden_journald` fail-closed** — implemented in `scripts/node-bootstrap.sh` (`harden_journald`): a failed restart or a surviving persistent `/var/log/journal` aborts the bootstrap via `die` (fail-closed), not a warning.
+- **DONE — AS-diversity inventory doc** — exists at [runbooks/node-as-inventory.md](runbooks/node-as-inventory.md): region / AS class / IP-reputation posture / deploy-date / rationale template, keyed by node-A/B/C (no raw IPs).
+- **DONE — ROADMAP line annotation** — the observability DoD line in [ROADMAP.md](ROADMAP.md) now points at ADR-0021 (deferral of alerting / per-transport handshake to the per-operator monitor / Phase-2), mirroring the ADR-0020 cross-refs.
+
+## Audit-0004 (full-scale) — transition-gating S1 closed
+Audit-0004 ([audits/0004-phase0-to-phase1-full-scale-audit.md](audits/0004-phase0-to-phase1-full-scale-audit.md))
+closed **F-001** (AF_NETLINK unit parity — `AF_NETLINK` now on both Ansible units, `singbox.service.j2` /
+`xray.service.j2`, with the `unit_netlink_parity.sh` conformance gate guarding all unit-producing sources)
+and **F-002 / F-004** (the structural gates now describe the *deployed* artifact via `live_artifact_posture.sh`,
+and the two-port REALITY default is recorded in [adr/0022-two-port-reality-default.md](adr/0022-two-port-reality-default.md)).
+So **the one S1 that gated the Phase-0 → Phase-1 transition is closed**; only the operator-owned production
+proofs below remain.
 
 ## Remaining node-side proof (controlled, read-only)
 - **D3 cover-probe — DONE this session** (recorded above). No further node action outstanding for D3.

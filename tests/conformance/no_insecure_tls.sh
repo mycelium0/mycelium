@@ -16,6 +16,7 @@
 #
 # WHAT THIS CHECKS  (FAIL = exit 1 if found, as a CONFIG VALUE, anywhere in the deploy surface)
 #       * sing-box ...... "insecure": true            (JSON)  / insecure: true        (YAML)
+#       * Go crypto/tls . insecure_skip_verify: true  (YAML/JSON — blackbox probes, generic Go TLS)
 #       * xray .......... "allowInsecure": true        (JSON)  / allowInsecure: true   (YAML)
 #       * clash ......... skip-cert-verify: true       (clash YAML) and the JSON form
 #   The match requires a KEY = TRUE config assignment. Prose mentions and comments that merely NAME
@@ -43,7 +44,9 @@
 #                              before matching, so a "NEVER insecure:true" comment stays green.
 #   * explicit counter-examples — a scanned file may opt out by carrying the literal marker
 #                              "conformance:no_insecure_tls=counter-example" (used by an *.example
-#                              that deliberately shows the forbidden value as a teaching artifact).
+#                              that deliberately shows the forbidden value as a teaching artifact, and
+#                              by the blackbox reachability-probe config, whose insecure_skip_verify
+#                              measures handshake completion and is not a confidentiality boundary).
 #
 # Exit: 0 = clean, 1 = at least one skip-verify flag is configured true, 2 = usage/env error.
 
@@ -66,13 +69,17 @@ COUNTER_MARKER='conformance:no'"_insecure_tls=counter-example"
 # --- Forbidden config-value patterns ---------------------------------------
 # Each requires a KEY then ': '/'= ' then a truthy literal (true / "true" / yes / 1 / on), so a bare
 # mention without an assignment is not flagged. The key tokens:
-#     insecure          (sing-box client TLS skip-verify)
-#     allowInsecure     (xray / clash outbound TLS skip-verify)
-#     skip-cert-verify  (clash TLS skip-verify)
+#     insecure              (sing-box client TLS skip-verify)
+#     insecure_skip_verify  (Go crypto/tls — blackbox_exporter, generic Go TLS configs)
+#     allowInsecure         (xray / clash outbound TLS skip-verify)
+#     skip-cert-verify      (clash TLS skip-verify)
+# A legitimate measurement-probe use of insecure_skip_verify (the blackbox reachability prober, which
+# is NOT a confidentiality boundary) opts out via the counter-example marker — see WHAT IS EXCLUDED.
 TRUTHY='([Tt]rue|"[Tt]rue"|[Yy]es|"[Yy]es"|1|"1"|[Oo]n|"[Oo]n")'
-# Key may be quoted ("insecure") or bare (insecure / allowInsecure / skip-cert-verify), separated by
-# either ':' (JSON / YAML / clash) or '=' (defensive for ini-like surfaces), with optional spaces.
-FLAG_RE='("?(insecure|allowInsecure|skip-cert-verify)"?[[:space:]]*[:=][[:space:]]*'"$TRUTHY"')'
+# Key may be quoted ("insecure") or bare, separated by either ':' (JSON / YAML / clash) or '='
+# (defensive for ini-like surfaces), with optional spaces. insecure_skip_verify is listed BEFORE the
+# shorter `insecure` so it matches the full token regardless of the regex engine's longest-match rule.
+FLAG_RE='("?(insecure_skip_verify|insecure|allowInsecure|skip-cert-verify)"?[[:space:]]*[:=][[:space:]]*'"$TRUTHY"')'
 
 fail=0
 report() {
@@ -146,5 +153,5 @@ if [ "$fail" -ne 0 ]; then
 	exit 1
 fi
 
-printf 'PASS: no TLS skip-verify flag is configured anywhere in the deployable surface.\n'
+printf 'PASS: no TLS skip-verify flag is configured in the deployable surface (documented measurement-probe counter-examples excepted).\n'
 exit 0

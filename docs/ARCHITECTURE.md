@@ -61,7 +61,7 @@ subset and keeps the exposed surface minimal.
 | **Shadowsocks-2022 (AEAD)** | `2022-blake3-aes-256-gcm`, per-session salts | Lightweight non-VLESS shape; independent fallback | Plain TCP shape without a TLS cover on its own | Independent fallback |
 | **ShadowTLS v3 (wrapping Shadowsocks-2022)** | Real TLS handshake to an external host in front of Shadowsocks | Outer shape looks like ordinary TLS and answers active probing; inner stays a modern AEAD channel | Targeted TLS-shape blocking | TLS-covered fallback |
 | **Trojan over TLS** (optional) | TLS-terminated behind a real certificate | Simple plain-TLS option; independent fallback | Generally dominated by the REALITY shapes | Optional fallback |
-| **AmneziaWG** | WireGuard + junk packets, header randomisation, padding (core unchanged) | Fast, ~3 % overhead over WG; non-TLS UDP path that fails differently from every TLS and QUIC shape; each node speaks its own obfuscation dialect | UDP is fully excised in some network environments | Separate non-TLS path |
+| **AmneziaWG** | WireGuard + junk packets, header randomisation, padding (core unchanged) | Fast, ~3 % overhead over WG; non-TLS UDP path that fails differently from every TLS and QUIC shape; Phase 0 uses a single fleet-shared obfuscation dialect (per-node dialect diversification is a Phase-2 deliverable) | UDP is fully excised in some network environments | Separate non-TLS path |
 
 Excluded as legacy / easily-fingerprinted / superseded (full reasoning in
 [ADR-0010](adr/0010-phase0-transport-set.md)): **VMess, plain Shadowsocks (pre-2022), plain
@@ -88,7 +88,8 @@ coordinator; phases 4–5 — distributed consensus over gossip.
 
 **Components:**
 - **Identity and keys:** issuance and revocation of node/client identities, rotation of
-  REALITY parameters, config distribution and updates via the config distribution endpoint.
+  REALITY parameters, config distribution and updates via the config distribution endpoint
+  (Phase 0: out-of-band hand-off, no public always-on endpoint — ADR-0020 §1; matured endpoint is Phase 1).
 - **Network-state detector:** diagnoses the channel state as `clean / throttled / DPI-blocked /
   shutdown` from signals (handshake timeouts, TCP RST injection, throughput collapse after a
   successful connect, probing failures, rising loss/jitter).
@@ -127,7 +128,7 @@ evolution track.
 
 | Phase | Mechanism | Trust model | NAT traversal |
 |---|---|---|---|
-| 0–2 | Static config / config distribution endpoint | Operator owns everything | Nodes on public IPs |
+| 0–2 | Static config / config distribution endpoint (Phase 0: out-of-band hand-off, no public always-on endpoint — ADR-0020 §1; matured endpoint is Phase 1) | Operator owns everything | Nodes on public IPs |
 | 3 | Coordinator registry (Headscale-style) | Central coordinator issues membership | Coordinator DERP relays |
 | 4–5 | DHT + gossip (libp2p Kademlia + GossipSub) | Invitation tree / social graph / PoW | ICE/STUN/TURN, hole-punching, circuit-relay |
 
@@ -190,7 +191,7 @@ any bespoke client software are **explicitly out of scope** for the current proj
 that are consumed by existing off-the-shelf clients such as sing-box or Clash-Meta. Building a
 bespoke client is possible future work, not part of the current roadmap.
 
-The server-side config distribution endpoint (Layer 2) provides a machine-readable bundle of
+The server-side config distribution endpoint (Layer 2; Phase 0: out-of-band hand-off, no public always-on endpoint — ADR-0020 §1; matured endpoint is Phase 1) provides a machine-readable bundle of
 endpoint addresses, transport priorities, and health metadata that standard clients can consume
 without modification.
 
@@ -201,7 +202,7 @@ without modification.
 | Purpose | Choice | Rationale |
 |---|---|---|
 | Tunnel + transport multiplexing | **sing-box** (primary engine); **Xray-core** (optional alternative) | One server, many protocols (REALITY/Vision/gRPC/XHTTP, Hysteria2, TUIC, Shadowsocks-2022, ShadowTLS, Trojan); see [ADR-0010](adr/0010-phase0-transport-set.md) |
-| Non-TLS fallback | **AmneziaWG** | Obfuscated WireGuard; each node speaks its own dialect |
+| Non-TLS fallback | **AmneziaWG** | Obfuscated WireGuard; Phase 0 uses a single fleet-shared dialect (per-node dialect diversification is a Phase-2 deliverable) |
 | Cover / anti-probing | **Caddy/nginx** + real donor site | Legitimate response to any probe |
 | Coordinator (phase 3) | **Headscale** or custom Noise control plane | Proven WireGuard control-plane pattern |
 | P2P / mesh (phase 4+) | **libp2p** (Kademlia, GossipSub, AutoNAT, circuit-relay) | Mature DHT/gossip/NAT-traversal primitives |

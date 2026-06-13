@@ -19,7 +19,8 @@ longer matches a fixed WireGuard fingerprint. The goal is **indistinguishability
 This path is **complementary**, not primary. The primary transports are the sing-box / Xray
 **TLS** (VLESS + XTLS-Vision + REALITY) and **QUIC** (Hysteria2 / TUIC) protocols. AmneziaWG fills
 the niche where those are degraded but UDP still flows: it is fast (~3 % overhead over plain
-WireGuard) and each node speaks its own obfuscation dialect. The trade-off is that **UDP is
+WireGuard) and Phase 0 uses a single fleet-shared obfuscation dialect; per-node dialect
+diversification is a Phase 2 deliverable. The trade-off is that **UDP is
 excised entirely on some networks**, so this path is provisioned as a fallback and never relied on
 as the only route.
 

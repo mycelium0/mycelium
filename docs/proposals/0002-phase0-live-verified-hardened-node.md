@@ -502,7 +502,7 @@ a genuine donor response; one-command deploy + credential revoke without redeplo
 excluded legacy transport present. The deploy gate refuses exposure on a red probe.
 
 **Verification.**
-- `tests/run.sh` green (offline 9 gates).
+- `tests/run.sh` green (all offline gates).
 - `tests/conformance/cover_site_probe.sh --node … --donor …` green (now correctly invoked).
 - Per-protocol reachability gate green for every enabled transport; anti-DPI first-packet
   audit reports exempt (not blockable) for each enabled transport; no extraneous

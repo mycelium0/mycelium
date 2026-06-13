@@ -95,7 +95,7 @@ algorithmic:
   Two source-of-truth templates is a standing drift hazard: a future edit to the wrong file
   silently does nothing, or opens the wrong ports.
 - **The preventive supply-chain gates do not exist.** The offline suite has nine gates
-  (the "9/9" in [`tests/run.sh`](../../tests/run.sh)), but none of them is the strict,
+  (the "9/9" in [`tests/run.sh`](../../tests/run.sh); the suite has since grown to 16), but none of them is the strict,
   *preventive* check that this network's threat model now demands: a public repo whose every
   push is applied network-wide by a root timer must be mechanically guaranteed to never carry
   an IP literal, secret material, or an AI/tool vendor fingerprint. Those guarantees are

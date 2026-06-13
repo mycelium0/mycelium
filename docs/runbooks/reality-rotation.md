@@ -53,16 +53,16 @@ All key material comes from the sanctioned generators only — never hand-rolled
    # choose a new donor host/SNI from nodes/dataplane/donor-sni-candidates.json, verify, then set
    # donor.host / donor.sni in identity.json
    ```
-3. **Re-render the server config from the updated identity** and validate it fail-closed:
+3. **Re-render the server config from the updated identity** and validate it fail-closed.
+   Do **not** hand-render: `params.json` is derived from `identity.json`, so editing the
+   identity alone leaves the cached params (and thus the rendered key) stale. Re-run the
+   bootstrap, which regenerates params from the updated identity before rendering:
    ```sh
-   myceliumctl render-server --engine singbox \
-     --template /opt/mycelium/nodes/dataplane/singbox/server.template.renderer.json \
-     --params /tmp/params.json --state /var/lib/mycelium/identities.json \
-     --out /var/lib/mycelium/config.candidate.json
-   sing-box check -c /var/lib/mycelium/config.candidate.json      # MUST pass before applying
+   node-bootstrap.sh --update            # regenerates params from identity, then renders + checks
    ```
-   (In practice, `node-bootstrap.sh` already wires render → `sing-box check` → promote → settle-check →
-   rollback; re-running it after editing the identity performs steps 3-4 with that fail-closed gating.)
+   (`node-bootstrap.sh --update` already wires regenerate-params → render → `sing-box check` →
+   promote → settle-check → rollback; re-running it after editing the identity performs steps 3-4
+   with that fail-closed gating.)
 4. **Promote and restart**, then confirm the data plane is up:
    ```sh
    systemctl restart sing-box

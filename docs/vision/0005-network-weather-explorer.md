@@ -37,8 +37,11 @@ later. See the LICENSE file in the repository root.
 
 ## 1. Problem and context
 
-The fabric already measures itself: Phase-0 observability gives per-transport handshake success,
-reachability, and interference triage (host fault vs network interference), and VIS-0003 / VIS-0004
+The fabric already measures itself: Phase-0 observability gives aggregate reachability and
+interference triage (host fault vs network interference) — per-transport handshake success and
+edge reachability are **deferred to Phase 2** (the per-operator monitor / edge reporting under the
+decentralized model, with no central cross-operator collector in any phase — see
+[ADR-0021](../adr/0021-decentralized-observability-not-a-central-collector.md)). VIS-0003 / VIS-0004
 define the redacted, scoped, decay-bounded signals (`TransportHealth`, `StressSignal`, `EdgeState`,
 `GradientSignal`) the adaptation layer will run on. None of this is **visible** to the people the
 project is for, or to operators deciding whether the fabric is healthy. There is no public, honest,

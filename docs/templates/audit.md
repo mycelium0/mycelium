@@ -40,20 +40,27 @@ later. See the LICENSE file in the repository root.
 
 ### Expert Lens Scores (mandatory for full-scale audit)
 
-> Lenses are the same six as in the canon ([../refactoring.md](../refactoring.md)),
+> Lenses are the canon §6.2 eight-lens roster ([../refactoring.md](../refactoring.md)
+> §6.2): four domain lenses (Security/Threat, Network-persistence, Anonymity/Privacy,
+> Operational-resilience) plus four general lenses (McConnell, Parnas, Brooks, Dijkstra),
 > read through the Mycelium lens: a distributed resilient mesh for persistent private
 > networking where user security is functional requirement №1 and the adversary is adaptive.
 >
-> Cormen / Tanenbaum / McConnell — **always mandatory**. Parnas / Brooks /
-> Dijkstra — by trigger: new layer/mechanism · new protocol/transport in the
-> matrix · change to the trust/discovery model · change to state/process
-> ownership · change to a public contract (config distribution / telemetry /
-> control) · blast-radius > 20 files.
+> Security/Threat · Network-persistence · Anonymity/Privacy · McConnell —
+> **always mandatory**. Operational-resilience — mandatory for any change to
+> routing/control/discovery, for every phase transition, and for every
+> post-incident audit. Parnas / Brooks / Dijkstra — by trigger: new
+> transport or transport profile · change to discovery / sybil resistance /
+> trust model · change to the contract between layers · change to a public
+> node-facing or config-distribution surface · roadmap phase transition ·
+> blast-radius > 20 files.
 
 | Lens | Score | Verdict |
 |---|---:|---|
-| **Cormen** — algorithmic rigour of the detector/rotation/routing: explicit invariants on every critical flow, formalised channel-state transitions (`clean / throttled / DPI-blocked / shutdown`), idempotency of repeated rotation commands, **anti-flapping and bounded recovery time** (no oscillation), measurability of decisions (precision/recall), absence of "magic" branching instead of a contract. | N / 10 | … |
-| **Tanenbaum** — runtime/processes/fault tolerance: clear boundary between substrate-OS and node-agent (the agent does not substitute the kernel/systemd/firewall), node process lifecycle (start/running/degraded/failed/recovered), supervision and restart-survival strategy, isolation of hardware/network faults from domain semantics, timeout/cancel/retry taxonomy at the network edge, local node autonomy when the control plane is unreachable. | N / 10 | … |
+| **Security / Threat** — user security as functional requirement №1 against an adaptive adversary: fail-closed under DPI/ML/probe/IP-AS/UDP-drop/domain-block/sybil/coercion, no leak path opened by a fallback, secrets and keys never widened in scope, explicit invariants on every critical flow, measurability of detector decisions (precision/recall), absence of "magic" branching instead of a contract. | N / 10 | … |
+| **Network-persistence** — survival of connectivity under blocking and rotation: formalised channel-state transitions (`clean / throttled / DPI-blocked / shutdown`), idempotency of repeated rotation commands, **anti-flapping and bounded recovery time** (no oscillation), local node autonomy when the control plane is unreachable, restart-survival of the persistence path. | N / 10 | … |
+| **Anonymity / Privacy** — minimisation of metadata and de-anonymisation surface: no new correlation handle across nodes/flows, telemetry carries no identifying or locating signal, public contracts (config distribution / telemetry / control) do not expose topology or membership, observability does not weaken the anonymity set. | N / 10 | … |
+| **Operational-resilience** (mandatory for routing/control/discovery changes, phase transitions, and post-incident audits) — runtime/processes/fault tolerance: clear boundary between substrate-OS and node-agent (the agent does not substitute the kernel/systemd/firewall), node process lifecycle (start/running/degraded/failed/recovered), supervision and restart strategy, isolation of hardware/network faults from domain semantics, timeout/cancel/retry taxonomy at the network edge. | N / 10 | … |
 | **McConnell** — construction quality and maintainability: locality of changes, clear names, no divergence between code ↔ README ↔ ADR ↔ RP ↔ CHANGELOG ↔ runbook, tests alongside the change, migration and rollback present, version bump reflects real blast-radius, no stale comments used as boundary definitions. | N / 10 | … |
 | **Parnas** — information hiding and modularity (by trigger): vendor/protocol details hidden behind an adapter boundary (Xray/sing-box/AmneziaWG/libp2p), consumers do not reach into the internals of a neighbouring layer, public contract instead of access to private fields, transport implementation is replaceable without rewriting consumers. | N / 10 | … |
 | **Brooks** — conceptual integrity (by trigger): one architectural story (five layers, interconnected mesh), no proliferation of "managers/controllers" without ownership semantics, temporary form does not become canon, the system is explainable through a small set of stable rules. | N / 10 | … |

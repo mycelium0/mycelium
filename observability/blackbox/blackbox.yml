@@ -6,6 +6,12 @@
 # Mycelium Phase 0 — blackbox_exporter module definitions.
 # Author: mindicator & silicon bags quartet
 #
+# conformance:no_insecure_tls=counter-example — the probe modules below set insecure_skip_verify:true
+# deliberately and safely: blackbox measures donor/cover REALITY handshake COMPLETION and reads the
+# cert's expiry from OUTSIDE; it does NOT authenticate the donor and carries NO user traffic, so it is
+# a reachability probe, not a confidentiality boundary (see the inline note at each module). It is not
+# part of the data-plane TLS surface the no_insecure_tls gate guards, so this file opts out.
+#
 # blackbox_exporter runs on the OPERATOR's control host and probes each node's PUBLIC :443 from
 # outside. Two modules let Prometheus separate two failure shapes:
 #   * mycelium_tcp_connect  — can a TCP connection to :443 even be established? A drop here looks
