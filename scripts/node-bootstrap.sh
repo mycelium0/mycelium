@@ -968,7 +968,9 @@ install_singbox_unit() {
 	need_root
 	local unit="/etc/systemd/system/sing-box.service"
 	if [ "$DRY_RUN" -eq 0 ]; then
-		# Reuse the hardened unit conventions from infra/ansible/roles/singbox/templates.
+		# Mirror the hardened unit conventions in infra/ansible/roles/singbox/templates/singbox.service.j2.
+		# The two unit sources are kept in lockstep — especially RestrictAddressFamilies incl. AF_NETLINK
+		# — by tests/conformance/unit_netlink_parity.sh; change BOTH together (Audit-0004 F-001/F-017).
 		cat >"$unit" <<UNIT
 [Unit]
 Description=Mycelium sing-box data plane (multi-protocol; PRIMARY engine)
