@@ -544,54 +544,39 @@ firewall opens exactly the enabled ports — no extraneous open port from tag mi
 
 ---
 
-### W6 — Add the three strict preventive conformance gates
-**Goal.** Make the catastrophic leaks mechanically impossible for the public,
-root-applied-fleet repo: no IP literal, no secret material, no AI/tool vendor fingerprint —
-each a fail-closed offline gate wired into [`tests/run.sh`](../../tests/run.sh) (alongside
-the existing nine).
+### W6 — Enforce the leak-free-public-tree invariant
+**Goal.** Make the catastrophic leaks mechanically impossible for this public,
+root-applied-fleet repo: **no node IP or location, no secret/key material, and no AI/tool
+vendor fingerprint may enter the tree.** Each invariant is enforced by a fail-closed offline
+conformance check wired into the suite.
 
-**Steps.**
-1. **`no_ip_literal`** — fail on any IPv4/IPv6 literal in a tracked file, with a tight
-   **allowlist**: public-DNS resolvers used in docs only where unavoidable, the RFC 5737
-   documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`), the RFC 1918
-   private ranges (`10/8`, `172.16/12`, `192.168/16`) and loopback/link-local/ULA where a
-   config legitimately needs them (e.g. the loopback detour bind, `ip_is_private` routing).
-   Model it on the existing leak gates (per-file walk, `git check-ignore` to skip gitignored
-   local state, skip `.git/`, skip binaries, self-exempt the conformance dir).
-2. **`no_secret_material`** — fail on PEM blocks (`-----BEGIN … PRIVATE KEY-----`,
-   certificate bodies) and high-entropy token prefixes (the shapes the audited generators
-   emit — REALITY/SS-2022/Trojan/HY2/ShadowTLS base64 secrets, UUIDs that are not the
-   documented sentinels). Exempt the documented `SENTINEL_*` placeholders and the
-   `*.example.json` fixtures so the templates still pass.
-3. **`no_ai_fingerprint`** — fail on AI/tool vendor names and on `Co-Authored-By:`, with the
-   policy docs that *describe the rule* exempted (this RP, the runbook, the gate itself, and
-   any doc that must name the forbidden tokens to define them) — exactly the self-exemption
-   pattern the wording gate uses for its own denylist.
-4. **Wire all three into `tests/run.sh`** so the suite becomes 12 offline gates; keep each
-   gate's structure consistent with the existing ones (the `_ignored`/`git check-ignore`
-   skip, the `.git/`/conformance/binary exclusions, the `report FILE LINENO MATCH` format,
-   exit `0`/`1`/`2`). Each new gate carries the 5-line AGPL SPDX header.
+**Steps.** Add/extend the conformance suite so each invariant above is enforced fail-closed,
+with precise allowlists for legitimate config (the RFC 5737 documentation ranges, the RFC 1918
+private + loopback/ULA ranges a config legitimately needs, the documented `SENTINEL_*`
+placeholders and `*.example.json` fixtures, and the policy docs that must name forbidden tokens
+to define them). The concrete checks, their allowlists, and exemptions are an engineering detail
+maintained in [`../development.md`](../development.md) and the conformance directory — **not
+enumerated in this proposal**.
 
-**Definition of Done.** `no_ip_literal`, `no_secret_material`, and `no_ai_fingerprint` exist,
-each fail-closed with the documented allowlists/exemptions, all three wired into
-`tests/run.sh`; the full offline suite (now 12 gates) passes on the clean tree; a deliberate
-seeded leak of each kind is caught (and the allowlisted/exempt cases are **not** flagged).
+**Definition of Done.** Each invariant above is enforced fail-closed by the conformance suite,
+green on the clean tree; a deliberately seeded leak of each kind (a node IP/location, a
+secret/PEM, an AI/vendor fingerprint) is caught while the legitimate allowlisted/exempt cases
+are not flagged.
 
 **Verification.**
-- `bash tests/run.sh` passes with all gates green on the clean tree.
-- Seed-and-revert tests: an injected IP literal, a PEM/token, and a vendor string /
-  `Co-Authored-By:` line each make the respective gate exit non-zero; the RFC 5737/1918
-  allowlisted IPs, the `SENTINEL_*` placeholders, and this policy doc do **not** trip a gate.
-- Each gate honors `git check-ignore` (gitignored local state/secrets are not scanned) and
-  self-exempts the conformance directory, matching the existing gates.
+- `bash tests/run.sh` passes with all conformance checks green on the clean tree.
+- Seed-and-revert tests: an injected node IP/location, a PEM/token, and an AI/vendor fingerprint
+  are each caught fail-closed; the legitimate allowlisted/exempt cases (the documentation IP
+  ranges, the `SENTINEL_*` placeholders, the policy docs) are **not** flagged.
+- The checks honor gitignore (local state/secrets are not scanned), matching the existing suite.
 
 **Dependencies / ordering.** Independent of W1–W5; **must be green before the first real
 signed push in W7** (the gates are the guarantee that the pushed artifacts are leak-free).
 
-**Risks + mitigations.** False positives blocking legitimate config (RFC1918 in a template,
-a SENTINEL placeholder) → precise allowlists/exemptions and the seed-and-revert tests prove
-both directions. Over-broad vendor denylist tripping ordinary prose → scope to whole-word
-vendor tokens + `Co-Authored-By:` and exempt the policy docs, mirroring the wording gate.
+**Risks + mitigations.** False positives blocking legitimate config (a private-range IP in a
+template, a SENTINEL placeholder) → precise allowlists/exemptions and seed-and-revert tests prove
+both directions. An over-broad fingerprint check tripping ordinary prose → scope it to whole-word
+vendor tokens and exempt the policy docs that define the rule, as the existing suite does.
 **Threat-model:** *Supply-chain interference* (leak-free public artifacts); *Operator
 coercion* / *Knowledge minimisation* (no IP/location/identity breadcrumb in the public tree).
 

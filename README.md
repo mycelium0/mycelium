@@ -38,6 +38,15 @@ networks are one case.
 > **Scope.** This is *server-side* software. Nodes expose **standard protocol endpoints** consumed
 > by existing off-the-shelf clients; a bespoke end-user client is **out of scope** for now.
 
+> [!IMPORTANT]
+> **Software, not an operated network — separation statement.**
+>
+> The repository publishes server-side software.
+> It does not operate a public network.
+> It does not publish public endpoints.
+> It does not distribute public client configs.
+> Each operator independently deploys and controls their own node.
+
 ## Who it's for
 
 Mycelium is built for the people and groups who need dependable private connectivity when networks
@@ -95,15 +104,16 @@ Full term list: [docs/GLOSSARY.md](docs/GLOSSARY.md). Architecture layers and th
 - **[AGENTS.md](AGENTS.md)** — operating doctrine for AI agents working in this repo.
 - **[docs/vision/0001-mycelium-vision-and-scope.md](docs/vision/0001-mycelium-vision-and-scope.md)** — founding vision and scope.
 - **[docs/vision/0002-carrier-agnostic-mycelial-doctrine.md](docs/vision/0002-carrier-agnostic-mycelial-doctrine.md)** — carrier-agnostic mycelial doctrine.
+- **[docs/vision/0005-network-weather-explorer.md](docs/vision/0005-network-weather-explorer.md)** — public, privacy-preserving network-weather explorer (aggregated, not a map).
 - **[docs/ROADMAP.md](docs/ROADMAP.md)** — phases 0→7, scope, Definition of Done, risks.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — layers, transport matrix, carrier adapters, mesh design, stack.
 - **[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)** — adversary, attack surface, honest limits.
 - **[docs/GLOSSARY.md](docs/GLOSSARY.md)** — terminology.
 
 **Governance & legal**
-- **[TRADEMARKS.md](TRADEMARKS.md)** — the name and official-network marks (governed separately from the code).
-- **[ACCEPTABLE-USE.md](ACCEPTABLE-USE.md)** — acceptable use of the official network.
-- **[GOVERNANCE.md](GOVERNANCE.md)** — how the official network is governed.
+- **[TRADEMARKS.md](TRADEMARKS.md)** — the name and shared-identity marks (governed separately from the code; the project does not operate a public network).
+- **[ACCEPTABLE-USE.md](ACCEPTABLE-USE.md)** — acceptable use of the shared name, marks, and trust roots (not of an operated network).
+- **[GOVERNANCE.md](GOVERNANCE.md)** — community/consensus governance of the shared identity and trust roots.
 
 **Operations & security**
 - **[SECURITY.md](SECURITY.md)** — security policy & coordinated disclosure.
@@ -124,7 +134,8 @@ Full term list: [docs/GLOSSARY.md](docs/GLOSSARY.md). Architecture layers and th
 
 **Phase 0 — Foundation:** the deploy-ready node scaffold has landed — multi-protocol data plane
 (sing-box + AmneziaWG), control tooling, provisioning (Ansible), observability, conformance tests,
-and runbooks. Live deployment is pending an operator-provided server. The roadmap now spans phases
+and runbooks. The scaffold is deploy-ready for any operator to self-host on their own server; the
+project itself runs no public network. The roadmap now spans phases
 0→7; each phase is useful on its own and ships to production, and the mesh is extended on top of
 something already working, not instead of it.
 
@@ -147,12 +158,16 @@ The **code** is free software under the GNU AGPL-3.0-or-later (see [LICENSE](LIC
 study, modify, and redistribute it; if you run a modified version as a network service, you must make
 your changes available to its users under the same license.
 
-The **Mycelium name, logo, the official network, bootstrap seeds, trust roots, and spore-signing
-keys** are governed **separately** (not under the AGPL) — see [TRADEMARKS.md](TRADEMARKS.md),
-[ACCEPTABLE-USE.md](ACCEPTABLE-USE.md), and [GOVERNANCE.md](GOVERNANCE.md). A fork is welcome but must
-use its own name and may not present itself as the official Mycelium network. Commercial allies
-(small hosts, NGOs, university spin-offs, cooperatives, security auditors, emergency-connectivity
-providers) are welcome under those terms.
+The repository does **not** operate a public network. It publishes no public endpoints and
+distributes no public client configs; each operator independently deploys and controls their own
+node. What is governed **separately** (not under the AGPL) is the project's **shared identity** —
+the **Mycelium name, logo, bootstrap seeds, trust roots, and spore-signing keys** — see
+[TRADEMARKS.md](TRADEMARKS.md), [ACCEPTABLE-USE.md](ACCEPTABLE-USE.md), and
+[GOVERNANCE.md](GOVERNANCE.md). That identity is **community-owned**: there is no single owner, and
+from Phase 1–2 onward decisions move to community/organization **consensus** ("fungi voting"), not a
+single person. A fork is welcome but must use its own name and may not present itself as carrying the
+shared Mycelium identity. Commercial allies (small hosts, NGOs, university spin-offs, cooperatives,
+security auditors, emergency-connectivity providers) are welcome under those terms.
 
 ## Long-term horizon
 

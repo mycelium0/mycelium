@@ -15,18 +15,35 @@ fits, both yield the same standard endpoints.
 
 The node provides a persistent private network; framing here is neutral and technical throughout.
 
+> **Software, not an operated network.** This repository publishes server-side software; it does not
+> operate a public network, publishes no public endpoints, and distributes no public client configs.
+> Each operator independently deploys and controls **their own** node and **their own** fleet (see
+> the [README separation statement](../../README.md#what-this-is)). "The operator" below means
+> *whoever is self-hosting this fleet* — there is no single project-wide owner of a network.
+
+> **Signing is operator-local, by design — and the project-wide state is deliberately unsigned.**
+> The signature mechanism below is each operator verifying **their own** pushes to **their own**
+> fleet with **their own** out-of-band key. At the **project** level there is, on purpose, **no
+> single signer**: because the shared identity is community-owned and approval is moving to
+> community/organization consensus ("fungi voting") from Phase 1–2, designating one legal signer is
+> specifically being avoided, so project-level updates are currently accepted **UNSIGNED /
+> insecure** as a documented interim state (see [GOVERNANCE.md §6](../../GOVERNANCE.md)). The per-fleet
+> signing here is the operator-local control available in the meantime, not a project-wide signer.
+
 ## Mental model
 
-- **One source of truth, many identical nodes.** The operator pushes canonical artifacts to the
-  public repo once. Every node runs a timer that pulls, re-renders **from its own local
-  identity**, validates, and applies — so the fleet is testable together with no per-node
-  hand-work.
-- **"Semi-auto" = the human approval IS the operator's SIGNATURE on the pushed ref.** Nodes apply
-  automatically, but **fail-closed**: each node first verifies that the canonical ref is signed by
-  the operator's out-of-band key (`--allowed-signers`, never committed) and refuses to run any
-  fetched code otherwise; only then is the candidate config validated with `sing-box check` and
-  rolled back on any failure. So a single bad push to the **public** repo can neither own nor brick
-  the fleet — an unsigned/forged push is rejected before its code ever executes.
+- **One source of truth, many identical nodes.** The operator self-hosting the fleet pushes
+  canonical artifacts to **their** repo once. Every node runs a timer that pulls, re-renders **from
+  its own local identity**, validates, and applies — so the fleet is testable together with no
+  per-node hand-work.
+- **"Semi-auto" = the human approval IS the self-hosting operator's SIGNATURE on the pushed ref.**
+  Nodes apply automatically, but **fail-closed**: each node first verifies that the canonical ref is
+  signed by **that operator's** out-of-band key (`--allowed-signers`, never committed) and refuses to
+  run any fetched code otherwise; only then is the candidate config validated with `sing-box check`
+  and rolled back on any failure. So a single bad push to the repo can neither own nor brick the
+  fleet — an unsigned/forged push is rejected before its code ever executes. (This is an
+  operator-local guarantee for one's own fleet; it is not, and does not imply, a single project-wide
+  signer — see the note above.)
 - **Secrets never leave the node.** The REALITY private key, client UUIDs, per-protocol secrets,
   and the self-signed cert key live only under `/var/lib/mycelium` (`0600`). Only the REALITY
   **public** key and per-client subscriptions are ever exported.

@@ -25,6 +25,13 @@ This document describes: what is in scope, how to report a vulnerability private
 we extend to good-faith researchers (safe harbour), our commitments (no surveillance telemetry, no
 backdoors), our supply-chain posture, and the disclosure timeline.
 
+> **Software, not an operated network.** This security policy covers the software this repository
+> publishes. As stated in the [README separation statement](README.md#what-this-is):
+> the repository publishes server-side software; it does not operate a public network; it does not
+> publish public endpoints; it does not distribute public client configs; and each operator
+> independently deploys and controls their own node. Reports about a *specific operator's*
+> deployment go to that operator; reports here concern the published software.
+
 **If you have found a vulnerability that exposes users, do not open a public issue with
 exploitation details.** For a project that protects people, a public 0-day is a direct risk to
 users. Report privately (see [§2](#2-how-to-report)).
