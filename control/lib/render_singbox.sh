@@ -223,7 +223,13 @@ myc_sb_render_server() {
 		--argjson ustls "$users_stls" \
 		--argjson uss "$users_ss" \
 		'
-		def setport($tag): if .tag == $tag and ($ports[$tag] != null) then .listen_port = $ports[$tag] else . end;
+		# setport maps a protocol token to its SERVER inbound tag (always
+		# "<proto>-in" in the sing-box template) and applies the per-protocol
+		# port from $ports (which is keyed by the bare protocol token). Matching
+		# the proto token directly against .tag would never hit, because the
+		# template tags carry the "-in" suffix — the custom port would then be
+		# silently dropped on the server side while clients dial the new port.
+		def setport($proto): if .tag == ($proto + "-in") and ($ports[$proto] != null) then .listen_port = $ports[$proto] else . end;
 		def reality_fill:
 			if (.tls? and .tls.reality? and .tls.reality.enabled == true) then
 				  .tls.server_name = $dsni

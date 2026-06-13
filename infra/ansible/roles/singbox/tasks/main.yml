@@ -446,7 +446,7 @@
     group: "{{ singbox_run_group }}"
     mode: "0750"
 
-- name: Generate a self-signed TLS pair per TLS-terminating enabled protocol
+- name: Generate a self-signed TLS pair per TLS-terminating enabled protocol (Jinja fallback path)
   ansible.builtin.command:
     cmd: >-
       openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes
@@ -462,6 +462,22 @@
        + (['trojan'] if enable_trojan | bool else []) }}
   no_log: true
 
+# The myceliumctl renderer (control/lib/render_singbox.sh) terminates HY2/TUIC/Trojan with ONE
+# shared certificate path (params.tls_certificate_path / tls_key_path). Generate a single shared
+# self-signed pair for that path whenever any TLS-cert protocol is enabled. It is per-NODE (ADR-0014:
+# no shared fleet key material) and self-signed; clients trust it ONLY via the pin emitted on the
+# subscription (NEVER insecure:true).
+- name: Generate the shared self-signed TLS pair used by the myceliumctl render path
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes
+      -keyout {{ singbox_state_dir }}/tls/server.key
+      -out {{ singbox_state_dir }}/tls/server.crt
+      -days 3650 -subj "/CN={{ donor_sni }}"
+    creates: "{{ singbox_state_dir }}/tls/server.crt"
+  when: (enable_hysteria2 | bool) or (enable_tuic | bool) or (enable_trojan | bool)
+  no_log: true
+
 - name: Set ownership/permissions on the generated TLS material (service-readable, not writable)
   ansible.builtin.file:
     path: "{{ singbox_state_dir }}/tls"
@@ -473,55 +489,141 @@
 
 # ---------------------------------------------------------------------------
 # 5. Render config.json — prefer myceliumctl (engine singbox); else a Jinja fallback.
+#
+# The control CLI (myceliumctl) consumes TWO inputs, NOT one combined blob:
+#   --params  a FLAT params JSON (control/params.example.json schema): donor_host/donor_sni,
+#             reality_{private,public}_key, short_ids[], <proto>_enabled / <proto>_port flags,
+#             tls_{sni,certificate_path,key_path}, and the shared per-protocol secrets.
+#   --state   an identities JSON: { "version": 1, "clients": [ { "name", "id", "created" } ] }.
+# The role's on-node identity.json uses a different (nested) shape, so we PROJECT it into those two
+# files here. This matches the REAL CLI contract:
+#   myceliumctl render-server --engine singbox --template T --params P --state S --out O
+#   myceliumctl subscription  --engine singbox --params P --state S --out DIR
+# (the historical "render-server --input ..." / "render-client --input --identity --out-dir ..."
+#  interface never existed in this tool, so the old preferred path was a guaranteed no-op).
 # ---------------------------------------------------------------------------
-- name: Write the render input (server params + enabled-protocol map) to a root-only temp file
+- name: Project the identity document into the myceliumctl --params file (flat schema, root-only)
   ansible.builtin.copy:
-    dest: "{{ singbox_state_dir }}/render-input.json"
+    dest: "{{ singbox_state_dir }}/render-params.json"
     content: |
       {{ {
         'engine': 'singbox',
+        'node_address': node_address,
         'donor_host': donor_host,
         'donor_sni': donor_sni,
-        'reality': _identity.reality,
+        'reality_private_key': _identity.reality.private_key,
+        'reality_public_key': _identity.reality.public_key,
         'short_ids': _identity.short_ids,
-        'clients': _identity.clients,
-        'passwords': _identity.passwords,
-        'protocols': {
-          'vless_reality_vision': { 'enabled': enable_vless_reality_vision | bool, 'port': singbox_port_vless_vision | int },
-          'vless_reality_grpc':   { 'enabled': enable_vless_reality_grpc   | bool, 'port': singbox_port_vless_grpc   | int },
-          'vless_reality_xhttp':  { 'enabled': enable_vless_reality_xhttp  | bool, 'port': singbox_port_vless_xhttp  | int },
-          'hysteria2':            { 'enabled': enable_hysteria2            | bool, 'port': singbox_port_hysteria2    | int },
-          'tuic':                 { 'enabled': enable_tuic                 | bool, 'port': singbox_port_tuic         | int },
-          'ss2022':               { 'enabled': enable_ss2022              | bool, 'port': singbox_port_ss2022       | int, 'method': singbox_ss2022_method },
-          'shadowtls':            { 'enabled': enable_shadowtls            | bool, 'port': singbox_port_shadowtls    | int },
-          'trojan':               { 'enabled': enable_trojan              | bool, 'port': singbox_port_trojan       | int }
-        }
+        'tls_sni': donor_sni,
+        'tls_certificate_path': singbox_state_dir ~ '/tls/server.crt',
+        'tls_key_path': singbox_state_dir ~ '/tls/server.key',
+        'grpc_service_name': 'grpc',
+        'xhttp_path': '/xhttp',
+        'shadowtls_handshake_server': singbox_shadowtls_handshake_server,
+        'shadowtls_handshake_port': singbox_shadowtls_handshake_port | int,
+        'ss_password': _identity.passwords.ss2022_server,
+        'shadowtls_password': _identity.passwords.shadowtls_ss_server,
+        'vless_reality_vision_enabled': enable_vless_reality_vision | bool,
+        'vless_reality_vision_port': singbox_port_vless_vision | int,
+        'vless_reality_grpc_enabled': enable_vless_reality_grpc | bool,
+        'vless_reality_grpc_port': singbox_port_vless_grpc | int,
+        'vless_reality_xhttp_enabled': enable_vless_reality_xhttp | bool,
+        'vless_reality_xhttp_port': singbox_port_vless_xhttp | int,
+        'hysteria2_enabled': enable_hysteria2 | bool,
+        'hysteria2_port': singbox_port_hysteria2 | int,
+        'tuic_enabled': enable_tuic | bool,
+        'tuic_port': singbox_port_tuic | int,
+        'shadowsocks_enabled': enable_ss2022 | bool,
+        'shadowsocks_port': singbox_port_ss2022 | int,
+        'shadowtls_enabled': enable_shadowtls | bool,
+        'shadowtls_port': singbox_port_shadowtls | int,
+        'trojan_enabled': enable_trojan | bool,
+        'trojan_port': singbox_port_trojan | int
       } | to_nice_json }}
     owner: root
     group: root
     mode: "0600"
   no_log: true
 
-- name: Render config.json via myceliumctl (engine singbox) — preferred
+# The state file carries one client per client_name. Each client's per-client password (used by the
+# password-based protocols via the renderer's per-identity ".password" override) is taken from the
+# identity doc; REALITY/Vision clients need only name+id (uuid). One client = one ".password";
+# protocols that need a distinct per-client secret beyond this single field are not represented by
+# the CLI state model and fall through to the bundled fallback below. Built with jq (already
+# installed) reading identity.json directly — robust and keeps secrets out of Ansible variables.
+- name: Project the identity document into the myceliumctl --state file (clients roster, root-only)
+  ansible.builtin.shell:
+    cmd: >-
+      umask 077;
+      jq -n --slurpfile id {{ singbox_state_dir }}/identity.json
+        '($id[0]) as $i
+         | { version: 1,
+             clients: ( $i.clients | to_entries | map({
+                 name: .key,
+                 id: .value,
+                 created: ($i.generated_at // ""),
+                 password: ( ($i.passwords.trojan[.key])
+                             // ($i.passwords.hysteria2[.key])
+                             // ($i.passwords.ss2022[.key])
+                             // "" )
+               }) ) }'
+      > {{ singbox_state_dir }}/render-state.json
+    executable: /bin/bash
+  changed_when: true
+  no_log: true
+
+- name: Lock down the projected --state file (root-only; carries per-client secrets)
+  ansible.builtin.file:
+    path: "{{ singbox_state_dir }}/render-state.json"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Render config.json via myceliumctl (engine singbox) — preferred (REAL CLI contract)
   ansible.builtin.command:
     cmd: >-
       {{ singbox_tooling_dir }}/control/myceliumctl render-server
       --engine singbox
-      --input {{ singbox_state_dir }}/render-input.json
+      --template {{ singbox_tooling_dir }}/{{ singbox_ctl_template_rel }}
+      --params {{ singbox_state_dir }}/render-params.json
+      --state {{ singbox_state_dir }}/render-state.json
       --out {{ singbox_config_path }}.tmp
   register: _render_ctl
-  changed_when: true
+  changed_when: _render_ctl.rc == 0
   failed_when: false
   when: _myceliumctl.stat.exists
   no_log: true
 
-# Jinja fallback: render the bundled sing-box template directly with the assembled identity. Used
-# whenever no myceliumctl is present OR the myceliumctl path did not produce the file (e.g. the
-# prebuilt tool predates the singbox engine).
+# Detect whether the PREFERRED path actually produced a config. We do NOT swallow a myceliumctl
+# failure silently: if myceliumctl is present but the render did not yield a file, that is contract
+# drift — abort in strict mode, otherwise emit a loud warning before using the Jinja fallback.
 - name: Detect whether the myceliumctl render produced a config
   ansible.builtin.stat:
     path: "{{ singbox_config_path }}.tmp"
   register: _ctl_render_out
+
+- name: Fail loudly when the preferred myceliumctl render path drifted (strict mode)
+  ansible.builtin.fail:
+    msg: >-
+      myceliumctl render-server (engine singbox) is present but did not produce
+      {{ singbox_config_path }}.tmp (rc={{ _render_ctl.rc | default('n/a') }}). This is control-tooling
+      contract drift. Refusing to silently fall back because singbox_render_strict is true. Inspect the
+      copied {{ singbox_tooling_dir }}/control/myceliumctl and its --params/--state/--template inputs.
+  when:
+    - _myceliumctl.stat.exists
+    - not (_ctl_render_out.stat.exists | default(false))
+    - singbox_render_strict | bool
+
+- name: Warn loudly that the preferred myceliumctl render path drifted (falling back to Jinja)
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: myceliumctl render-server (engine singbox) is present but produced no config
+      (rc={{ _render_ctl.rc | default('n/a') }}); falling back to the bundled Jinja renderer.
+      This indicates control-tooling contract drift — set singbox_render_strict: true to fail closed.
+  when:
+    - _myceliumctl.stat.exists
+    - not (_ctl_render_out.stat.exists | default(false))
+    - not (singbox_render_strict | bool)
 
 - name: Render config.json via the Jinja fallback (template -> tmp)
   ansible.builtin.template:
@@ -625,30 +727,69 @@
     group: root
     mode: "0700"
 
-- name: Render client subscriptions via myceliumctl (engine singbox) — preferred
+# Preferred path: the REAL CLI is `subscription` (NOT the nonexistent "render-client"), and it
+# consumes the same --params/--state pair as render-server, emitting one <client>.singbox.json plus
+# a <client>.clash.yaml per client into --out DIR. The control renderer emits per-node self-signed
+# HY2/TUIC/Trojan WITHOUT a blanket insecure:true (ADR-0014); node_address comes from --params.
+- name: Render client subscriptions via myceliumctl (engine singbox) — preferred (REAL CLI contract)
   ansible.builtin.command:
     cmd: >-
-      {{ singbox_tooling_dir }}/control/myceliumctl render-client
+      {{ singbox_tooling_dir }}/control/myceliumctl subscription
       --engine singbox
-      --input {{ singbox_state_dir }}/render-input.json
-      --identity {{ singbox_state_dir }}/identity.json
-      --node-address {{ node_address | quote }}
-      --out-dir {{ singbox_state_dir }}/subscriptions
+      --params {{ singbox_state_dir }}/render-params.json
+      --state {{ singbox_state_dir }}/render-state.json
+      --out {{ singbox_state_dir }}/subscriptions
   register: _sub_ctl
-  changed_when: true
+  changed_when: _sub_ctl.rc == 0
   failed_when: false
   when: _myceliumctl.stat.exists
   no_log: true
 
-# Fallback: build a standard sing-box outbound JSON per client for each ENABLED protocol, with jq
-# reading the identity doc. One file per client aggregates that client's enabled-protocol outbounds.
+# Fallback: build a standard sing-box outbound JSON per client for the ENABLED CERTLESS / pin-safe
+# protocols ONLY, with jq reading the identity doc. One file per client aggregates that client's
+# enabled-protocol outbounds.
+#
+# ADR-0014 (per-node credentials; no blanket insecure:true): the TLS-cert protocols Hysteria2, TUIC
+# and Trojan use a per-node self-signed certificate that a client may trust ONLY via an explicit
+# certificate/SPKI pin — NEVER via insecure:true (which accepts ANY cert and is MITM-open). This
+# bundled jq fallback has no per-node cert pin available, so it DELIBERATELY OMITS the HY2/TUIC/
+# Trojan client entries rather than emit them insecurely. Those protocols are delivered by the
+# preferred myceliumctl `subscription` path (which carries the proper per-node material), or via the
+# operator's own-domain ACME certificate. The fallback emits only REALITY (Vision/gRPC/XHTTP, which
+# are certless and borrow the donor handshake), Shadowsocks-2022 (no TLS) and ShadowTLS (utls outer
+# handshake, no insecure flag) — none of which require a cert pin.
 - name: Detect whether myceliumctl produced subscription files
   ansible.builtin.find:
     paths: "{{ singbox_state_dir }}/subscriptions"
-    patterns: "*.json,*.txt"
+    patterns: "*.json,*.yaml,*.txt"
   register: _sub_existing
 
-- name: Render per-client sing-box subscriptions via jq fallback
+# Do NOT swallow a myceliumctl subscription failure silently. If the tool is present but emitted no
+# files, that is contract drift: abort in strict mode, else warn loudly before the jq fallback runs.
+- name: Fail loudly when the preferred myceliumctl subscription path drifted (strict mode)
+  ansible.builtin.fail:
+    msg: >-
+      myceliumctl subscription (engine singbox) is present but emitted no subscription files
+      (rc={{ _sub_ctl.rc | default('n/a') }}) into {{ singbox_state_dir }}/subscriptions. This is
+      control-tooling contract drift. Refusing to silently fall back because singbox_render_strict
+      is true.
+  when:
+    - _myceliumctl.stat.exists
+    - (_sub_existing.matched | default(0)) == 0
+    - singbox_render_strict | bool
+
+- name: Warn loudly that the preferred myceliumctl subscription path drifted (falling back to jq)
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: myceliumctl subscription (engine singbox) is present but emitted no files
+      (rc={{ _sub_ctl.rc | default('n/a') }}); falling back to the bundled jq renderer. This
+      indicates control-tooling contract drift — set singbox_render_strict: true to fail closed.
+  when:
+    - _myceliumctl.stat.exists
+    - (_sub_existing.matched | default(0)) == 0
+    - not (singbox_render_strict | bool)
+
+- name: Render per-client sing-box subscriptions via jq fallback (certless / pin-safe protocols only)
   when: (_sub_existing.matched | default(0)) == 0
   ansible.builtin.shell:
     cmd: >-
@@ -661,33 +802,23 @@
       jq -r '.clients | to_entries[] | "\(.key)\t\(.value)"' "$ID"
       | while IFS=$'\t' read -r name uuid; do
           out={{ singbox_state_dir }}/subscriptions/"$name".singbox.json;
-          h2pw=$(jq -r --arg n "$name" '.passwords.hysteria2[$n] // empty' "$ID");
-          tuicpw=$(jq -r --arg n "$name" '.passwords.tuic[$n] // empty' "$ID");
           sspw=$(jq -r --arg n "$name" '.passwords.ss2022[$n] // empty' "$ID");
           stpw=$(jq -r --arg n "$name" '.passwords.shadowtls[$n] // empty' "$ID");
-          trpw=$(jq -r --arg n "$name" '.passwords.trojan[$n] // empty' "$ID");
           ssserver=$(jq -r '.passwords.ss2022_server // empty' "$ID");
           jq -n
             --arg addr "$ADDR" --arg sni "$SNI" --arg pbk "$PBK" --arg sid "$SID"
             --arg uuid "$uuid" --arg name "$name"
-            --arg h2pw "$h2pw" --arg tuicpw "$tuicpw" --arg sspw "$sspw"
-            --arg stpw "$stpw" --arg trpw "$trpw" --arg ssserver "$ssserver"
+            --arg sspw "$sspw" --arg stpw "$stpw" --arg ssserver "$ssserver"
             --argjson en_vision {{ (enable_vless_reality_vision | bool) | to_json }}
             --argjson en_grpc {{ (enable_vless_reality_grpc | bool) | to_json }}
             --argjson en_xhttp {{ (enable_vless_reality_xhttp | bool) | to_json }}
-            --argjson en_h2 {{ (enable_hysteria2 | bool) | to_json }}
-            --argjson en_tuic {{ (enable_tuic | bool) | to_json }}
             --argjson en_ss {{ (enable_ss2022 | bool) | to_json }}
             --argjson en_st {{ (enable_shadowtls | bool) | to_json }}
-            --argjson en_tr {{ (enable_trojan | bool) | to_json }}
             --argjson p_vision {{ singbox_port_vless_vision | int }}
             --argjson p_grpc {{ singbox_port_vless_grpc | int }}
             --argjson p_xhttp {{ singbox_port_vless_xhttp | int }}
-            --argjson p_h2 {{ singbox_port_hysteria2 | int }}
-            --argjson p_tuic {{ singbox_port_tuic | int }}
             --argjson p_ss {{ singbox_port_ss2022 | int }}
             --argjson p_st {{ singbox_port_shadowtls | int }}
-            --argjson p_tr {{ singbox_port_trojan | int }}
             --arg ssmethod {{ singbox_ss2022_method | quote }}
             --arg sthandshake {{ singbox_shadowtls_handshake_server | quote }}
             '
@@ -696,11 +827,8 @@
                 (if $en_vision then [ { type: "vless", tag: ("vless-vision-" + $name), server: $addr, server_port: $p_vision, uuid: $uuid, flow: "xtls-rprx-vision", tls: reality_tls } ] else [] end)
               + (if $en_grpc   then [ { type: "vless", tag: ("vless-grpc-" + $name),   server: $addr, server_port: $p_grpc,   uuid: $uuid, tls: reality_tls, transport: { type: "grpc", service_name: "grpc" } } ] else [] end)
               + (if $en_xhttp  then [ { type: "vless", tag: ("vless-xhttp-" + $name),  server: $addr, server_port: $p_xhttp,  uuid: $uuid, tls: reality_tls, transport: { type: "xhttp", path: "/xhttp" } } ] else [] end)
-              + (if $en_h2     then [ { type: "hysteria2", tag: ("hysteria2-" + $name), server: $addr, server_port: $p_h2, password: $h2pw, tls: { enabled: true, server_name: $sni, alpn: ["h3"], insecure: true } } ] else [] end)
-              + (if $en_tuic   then [ { type: "tuic", tag: ("tuic-" + $name), server: $addr, server_port: $p_tuic, uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: { enabled: true, server_name: $sni, alpn: ["h3"], insecure: true } } ] else [] end)
               + (if $en_ss     then [ { type: "shadowsocks", tag: ("ss2022-" + $name), server: $addr, server_port: $p_ss, method: $ssmethod, password: ($ssserver + ":" + $sspw) } ] else [] end)
               + (if $en_st     then [ { type: "shadowsocks", tag: ("shadowtls-" + $name), method: $ssmethod, password: $sspw, detour: ("shadowtls-out-" + $name) }, { type: "shadowtls", tag: ("shadowtls-out-" + $name), server: $addr, server_port: $p_st, version: 3, password: $stpw, tls: { enabled: true, server_name: $sthandshake, utls: { enabled: true, fingerprint: "chrome" } } } ] else [] end)
-              + (if $en_tr     then [ { type: "trojan", tag: ("trojan-" + $name), server: $addr, server_port: $p_tr, password: $trpw, tls: { enabled: true, server_name: $sni, insecure: true } } ] else [] end)
               ) }
             ' > "$out";
         done
@@ -728,7 +856,7 @@
 - name: List rendered subscription files on the node
   ansible.builtin.find:
     paths: "{{ singbox_state_dir }}/subscriptions"
-    patterns: "*.json,*.txt"
+    patterns: "*.json,*.yaml,*.txt"
   register: _sub_files
 
 - name: Fetch rendered subscriptions to the operator's ./out/subscriptions/
@@ -745,6 +873,17 @@
     src: "{{ singbox_state_dir }}/reality_public_key.txt"
     dest: "{{ singbox_out_public_dir }}/{{ inventory_hostname }}-reality_public_key.txt"
     flat: true
+
+# The projected --params/--state files mirror secrets out of identity.json (REALITY private key,
+# protocol passwords). identity.json (root 0600) is the canonical store, so remove the projections
+# once rendering is done — they should not linger as a second copy.
+- name: Remove the projected myceliumctl render inputs (secret-bearing; identity.json is canonical)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ singbox_state_dir }}/render-params.json"
+    - "{{ singbox_state_dir }}/render-state.json"
 
 - name: Report where the operator can find the fetched artefacts
   ansible.builtin.debug:
