@@ -19,6 +19,10 @@ procedures must be fast and pre-tested.
 - `deploy-node.md` — deploy a node from scratch (RP-0001).
 - `node-bootstrap.md` — one-command ON-node bootstrap + semi-auto network updater (push-to-update).
 - `rotate-ip-as.md` — migrate by IP/AS after a blocking event.
+- `reality-rotation.md` — manual Phase-0 REALITY cover-identity rotation (deliberately changes links).
+- `node-as-inventory.md` — AS-diversity inventory template + invariants (real values → `*.local.md`).
+- `verify-phase0-acceptance.md` — the operator-owned Phase-0 acceptance proofs (D1/D2/rotation/D4/GO)
+  that flip the acceptance ledger NO-GO → GO.
 
 ## Planned (Phase 1–2)
 - `incident-blocking-wave.md` — response to a transport blocking wave.
