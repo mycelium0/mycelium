@@ -5,7 +5,7 @@ This file is part of Mycelium, licensed under the GNU Affero General Public Lice
 later. See the LICENSE file in the repository root.
 -->
 
-# Refactoring / Change Proposal — Fleet rollout: from canonical bootstrap to a signed, self-updating fleet
+# Refactoring / Change Proposal — Network rollout: from canonical bootstrap to a signed, self-updating network
 
 > **Document type.** Refactoring / Change Proposal. Structure matches
 > [../refactoring.md](../refactoring.md) and
@@ -13,7 +13,7 @@ later. See the LICENSE file in the repository root.
 > This RP takes the canonical on-node bootstrap + semi-auto updater
 > ([`scripts/node-bootstrap.sh`](../../scripts/node-bootstrap.sh), the live-node DoD from
 > [RP-0002](0002-phase0-live-verified-hardened-node.md)) from *code that works on one node*
-> to a *running, self-updating fleet*: signed pushes, migrated hand-built nodes, the update
+> to a *running, self-updating network*: signed pushes, migrated hand-built nodes, the update
 > timer installed everywhere, fresh-node onboarding for additional operators, one canonical
 > server template, the preventive supply-chain conformance gates, and a verified
 > convergence proof. It pulls **no** Phase 2 detector/rotation logic forward.
@@ -25,12 +25,12 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Phase:** cross-cutting deploy/bootstrap track (binds Phase 0 nodes into a managed fleet; see [../ROADMAP.md](../ROADMAP.md))
+- **Phase:** cross-cutting deploy/bootstrap track (binds Phase 0 nodes into a managed network; see [../ROADMAP.md](../ROADMAP.md))
 - **Related documents:**
-  [RP-0002](0002-phase0-live-verified-hardened-node.md) (the live, verified, hardened single node this fleet is built from);
+  [RP-0002](0002-phase0-live-verified-hardened-node.md) (the live, verified, hardened single node this network is built from);
   [RP-0001](0001-bootstrap-phase-0-node.md) (the original scaffold);
-  [ADR-0014](../adr/0014-per-operator-node-credentials.md) (per-operator node credentials — no shared fleet key material);
-  ADR-0015 (signed-release provenance for fleet artifacts — the decision record for §W1, authored alongside this RP per §8);
+  [ADR-0014](../adr/0014-per-operator-node-credentials.md) (per-operator node credentials — no shared network key material);
+  ADR-0015 (signed-release provenance for network artifacts — the decision record for §W1, authored alongside this RP per §8);
   [ADR-0002](../adr/0002-no-custom-cryptography.md) (no custom cryptography — all key/signature material from audited tools);
   [ADR-0010](../adr/0010-phase0-transport-set.md) (Phase 0 transport set);
   [ADR-0012](../adr/0012-go-primary-control-plane-language.md) (Go as the primary control-plane language);
@@ -43,9 +43,9 @@ later. See the LICENSE file in the repository root.
 
 ## 1. Title
 Operationalise the canonical bootstrap + semi-auto updater into a signed, self-updating
-fleet: migrate the existing hand-built nodes without changing client links, install the
+network: migrate the existing hand-built nodes without changing client links, install the
 update timer everywhere, onboard additional operators, collapse the two server templates
-into one, add the preventive supply-chain gates, and prove fleet-wide convergence from a
+into one, add the preventive supply-chain gates, and prove network-wide convergence from a
 single signed push.
 
 ## 2. Reason
@@ -56,14 +56,14 @@ render-through-`myceliumctl`, `sing-box check` as a fail-closed gate, an
 apply-with-rollback `--update` path, the `--staged`/`--ack` cadence, and the
 re-exec-from-an-immutable-copy self-modification guard. The updater is also already written
 to be the delivery mechanism ("the human approval **is** the operator's signature on the
-pushed ref"). **But the fleet does not yet run that way.** The gap is operational, not
+pushed ref"). **But the network does not yet run that way.** The gap is operational, not
 algorithmic:
 
 - **No signing pipeline exists yet.** `verify_signed_ref` and `--allowed-signers` are
   implemented and fail-closed, but no operator signing key has been generated, no release
   tag has been signed, no `allowed_signers` file has been distributed out-of-band, and no
   node pins `--repo-ref` to a signed tag. Until that pipeline exists, every node would have
-  to run with `--insecure-no-verify` (forbidden on the fleet timer) — i.e. the provenance
+  to run with `--insecure-no-verify` (forbidden on the network timer) — i.e. the provenance
   guarantee is designed but unarmed.
 - **The existing nodes were hand-built** before the bootstrap's identity schema existed.
   Their keys/UUIDs/donor live in ad-hoc state, not in the bootstrap's
@@ -73,9 +73,9 @@ algorithmic:
   place* so they can join the updater without rotating anything client-facing.
 - **The update timer is not installed.** The flow diagram in the runbook
   ([docs/runbooks/node-bootstrap.md](../runbooks/node-bootstrap.md)) describes
-  `mycelium-update.timer`, but no node is actually running it, so "git push → whole fleet
+  `mycelium-update.timer`, but no node is actually running it, so "git push → whole network
   updates" is not yet true of any node.
-- **Onboarding additional operators is undocumented as a fleet step.** The one-command
+- **Onboarding additional operators is undocumented as a network step.** The one-command
   install exists, but the handoff of subscriptions out-of-band (delivery method B,
   per [ADR-0014](../adr/0014-per-operator-node-credentials.md)) is not yet a repeatable
   operator procedure.
@@ -96,15 +96,15 @@ algorithmic:
   silently does nothing, or opens the wrong ports.
 - **The preventive supply-chain gates do not exist.** The offline suite has nine gates
   (the "9/9" in [`tests/run.sh`](../../tests/run.sh)), but none of them is the strict,
-  *preventive* check that this fleet's threat model now demands: a public repo whose every
-  push is applied fleet-wide by a root timer must be mechanically guaranteed to never carry
+  *preventive* check that this network's threat model now demands: a public repo whose every
+  push is applied network-wide by a root timer must be mechanically guaranteed to never carry
   an IP literal, secret material, or an AI/tool vendor fingerprint. Those guarantees are
   currently policy + human review, not gates.
-- **Fleet convergence has never been proven end-to-end.** No test asserts that one signed
+- **Network convergence has never been proven end-to-end.** No test asserts that one signed
   push reaches every node, that each node re-renders from its **own local** identity,
   validates, and applies-or-rolls-back, and that **client links are unchanged** afterwards.
 
-Left as-is, the project has a correct single-node updater and a fleet that is still
+Left as-is, the project has a correct single-node updater and a network that is still
 hand-operated — the worst of both: the appearance of automation without the provenance,
 migration, and convergence guarantees that make automation safe.
 
@@ -151,16 +151,16 @@ migration, and convergence guarantees that make automation safe.
 | `nodes/dataplane/donor-sni-candidates.json` | Read at bootstrap to pick a random per-node donor SNI; expanded/pruned as upstreams change | passive | sing-box (REALITY) / openssl (verify) | Public-hostname list only; selection + TLSv1.3/x25519 verification is the engine's, not ours. |
 | `tests/conformance` (new W6 gates) | W6: `no_ip_literal`, `no_secret_material`, `no_ai_fingerprint` preventive gates + W7 convergence proof; added to [`tests/run.sh`](../../tests/run.sh) | active / test-only | system shell / git | Verification harness; no third-party tool fits the bespoke leak checks. |
 | migration tooling (W2) | W2: convert a hand-built node's existing identity into `identities.json`/`identity.json` **in place**, preserving keys/uuids/donor | active / test-only | jq / system shell | One-shot, node-local schema transform over existing on-node state; no service needed. |
-| `coordinator` (fleet registry / push fan-out) | Not built here — the "fan-out" is the operator's signed git push, pulled by per-node timers | deferred | none | A central registry/coordinator activates in a later RP (Phase 3); inert here by design. |
+| `coordinator` (network registry / push fan-out) | Not built here — the "fan-out" is the operator's signed git push, pulled by per-node timers | deferred | none | A central registry/coordinator activates in a later RP (Phase 3); inert here by design. |
 | interference detector / auto-rotation | Not built here | deferred | none | Phase 2 ([ADR-0012](../adr/0012-go-primary-control-plane-language.md) spine hosts it later); this RP changes no exposed transport surface. |
 
 ### 3.2. Blast-radius cap
 > One RP = one manageable step.
 
 This RP **exceeds** the single-step cap and is therefore declared **multi-phase** (seven
-ordered workstreams W1–W7 in §5). The justification: "stand the fleet up" is one coherent
-*responsibility* — turn the proven single-node updater into a running, self-updating fleet —
-that cannot be cut smaller without leaving a fleet that is signed-but-unmigrated (existing
+ordered workstreams W1–W7 in §5). The justification: "stand the network up" is one coherent
+*responsibility* — turn the proven single-node updater into a running, self-updating network —
+that cannot be cut smaller without leaving a network that is signed-but-unmigrated (existing
 nodes excluded or link-broken), migrated-but-unconverged (no timer), or
 converged-but-unguarded (no preventive gates). Crucially, **no client-facing contract
 changes shape, no layer changes behaviour, and the one template reconciliation collapses two
@@ -183,14 +183,14 @@ existing surfaces into one rather than introducing a new distribution surface.**
   Phase breakdown: **W1** arm signing → **W2** migrate hand-built nodes (links preserved) →
   **W3** install the update timer everywhere → **W4** onboard additional operators →
   **W5** collapse the two templates into one → **W6** add the three preventive gates →
-  **W7** prove fleet convergence. W1 is a prerequisite for W3/W7 (a node cannot safely run
+  **W7** prove network convergence. W1 is a prerequisite for W3/W7 (a node cannot safely run
   the timer until it can verify a signature); W2 must precede W3 on existing nodes (migrate
   before they auto-update); W5 should land before/with W7 so convergence is verified against
   the single template; W6 can land in parallel but **must** be green before the first signed
   push of W7.
 
 ## 4. Current state
-The single-node machinery is complete and correct; the **fleet** machinery is unarmed,
+The single-node machinery is complete and correct; the **network** machinery is unarmed,
 unmigrated, and unproven. Specifically:
 
 - **Signing (W1).** `scripts/node-bootstrap.sh` already implements `verify_signed_ref`
@@ -207,11 +207,11 @@ unmigrated, and unproven. Specifically:
   hand-built node either ignores the existing material (wrong shape) or, if its state dir is
   empty in the new layout, mints **new** identity and **changes every subscription link**.
 - **Update timer (W3).** No node runs `mycelium-update.timer`; the units referenced by the
-  runbook are not yet installed fleet-wide, so the no-op short-circuit, the rollback path,
-  and the re-exec self-modification guard have never run on a schedule against the live fleet.
+  runbook are not yet installed network-wide, so the no-op short-circuit, the rollback path,
+  and the re-exec self-modification guard have never run on a schedule against the live network.
 - **Additional operators (W4).** `ensure_identity` already generates a fully local identity on
   a fresh node, and [ADR-0014](../adr/0014-per-operator-node-credentials.md) fixes that there
-  is **no shared fleet key material** — each operator's node is self-sufficient. What is
+  is **no shared network key material** — each operator's node is self-sufficient. What is
   missing is the *repeatable operator procedure*: the one-command install plus the
   out-of-band subscription handoff (delivery method B: per-node self-signed cert + client
   pin for HY2/TUIC, REALITY public key + params for the rest).
@@ -231,13 +231,13 @@ unmigrated, and unproven. Specifically:
   `validate_configs`, `no_legacy_transport`, `per_protocol_toggle`, `phase0_port_canon`,
   `control/selftest.sh`). There is **no** strict gate that refuses an IP literal, secret
   material, or an AI/tool vendor fingerprint — the exact leaks that are catastrophic when the
-  public repo is also the fleet's root-applied delivery channel.
+  public repo is also the network's root-applied delivery channel.
 - **Convergence (W7).** No test exercises "one signed push → all nodes re-render from local
   identity → validate → apply-or-rollback → links unchanged." Convergence is asserted by the
-  per-node `--update` logic only, never across the fleet end-to-end.
+  per-node `--update` logic only, never across the network end-to-end.
 
 ## 5. Target state
-A live fleet where **one signed push by the operator converges every node** — each node
+A live network where **one signed push by the operator converges every node** — each node
 fetching, verifying the operator signature, re-rendering **from its own local identity**,
 validating with `sing-box check`, and applying-or-rolling-back fail-closed — with the
 existing hand-built nodes migrated so **no client subscription link ever changes**, the
@@ -250,14 +250,14 @@ four template axes:
   renders the same checked inbounds; donor selection stays random-per-node
   ([nodes/dataplane/donor-sni-candidates.json](../../nodes/dataplane/donor-sni-candidates.json)).
   The `no_ai_fingerprint` / `no_ip_literal` gates additionally keep the *public artifacts*
-  free of fleet-correlating breadcrumbs.
+  free of network-correlating breadcrumbs.
 - **Survivability / path redundancy.** Improved operationally: a single signed push can
   update all nodes' transports at once (e.g. swap a donor candidate, toggle a protocol)
   without per-node hand-work, and the no-op short-circuit means an unchanged push costs zero
   restarts. (A single IP/AS per node remains a single blocking point — a Phase 1/2 concern,
   unchanged; see Non-goals.)
-- **Adaptation speed.** The *manual* fleet primitive: time from "operator decides" to
-  "fleet converged" becomes one signed push plus one timer interval, with automatic rollback
+- **Adaptation speed.** The *manual* network primitive: time from "operator decides" to
+  "network converged" becomes one signed push plus one timer interval, with automatic rollback
   on any node that fails to apply. Automated *detection-driven* rotation remains `deferred`
   to Phase 2.
 - **Control-plane network persistence.** No central coordinator is introduced — the
@@ -288,7 +288,7 @@ fetched code runs.
    already shows pointing the unit at `/etc/mycelium/allowed_signers`.
 5. **Pin nodes** to `--repo-ref <signed-tag>` + `--allowed-signers <path>`; confirm a tag
    without a valid signature, and a forged tag, are both **refused** before any code runs.
-6. **Record the decision in ADR-0015** (signed-release provenance for fleet artifacts): why
+6. **Record the decision in ADR-0015** (signed-release provenance for network artifacts): why
    a signed immutable tag verified out-of-band is the canonical approval, why
    `--insecure-no-verify` is testing-only, and how the gate is preserved when the fetch later
    moves to signed release tarballs (`myc_fetch_artifacts` swap, §"the fetch step is
@@ -313,7 +313,7 @@ ADR-0015 is landed.
 W7 (the convergence proof is of a *signed* push). Independent of W5/W6.
 
 **Risks + mitigations.** **Supply-chain:** a single bad push to the public repo applied
-fleet-wide as root — mitigated exactly here: the signature is verified *before* the
+network-wide as root — mitigated exactly here: the signature is verified *before* the
 fast-forward merge, so unauthenticated code never runs. Key compromise → the private key is
 out-of-band and rotatable (re-issue `allowed_signers`, re-sign the tag). **Threat-model:**
 *Node compromise* / *supply-chain interference* (provenance gate); *Operator coercion*
@@ -385,7 +385,7 @@ no-op short-circuit and the rollback path are confirmed to behave on a schedule.
 1. **Author/confirm the units** `infra/systemd/mycelium-update.service` (oneshot calling
    `node-bootstrap.sh --update --repo-ref <signed-tag> --allowed-signers <file>` with the
    node's pins; `--staged` appended on nodes that use the stricter ack cadence) and
-   `mycelium-update.timer` (every few minutes, with a small randomized delay so the fleet
+   `mycelium-update.timer` (every few minutes, with a small randomized delay so the network
    does not fetch in lockstep).
 2. **Install + enable** on every node:
    `cp infra/systemd/mycelium-update.{service,timer} /etc/systemd/system/` →
@@ -395,7 +395,7 @@ no-op short-circuit and the rollback path are confirmed to behave on a schedule.
    (service untouched)" and performs **zero** restarts (an always-on network must not drop
    live connections on an unchanged push).
 4. **Confirm rollback behaves:** push a deliberately invalid candidate (in a test ref, never
-   the fleet tag) and confirm the node fails `sing-box check`, does **not** promote, and
+   the network tag) and confirm the node fails `sing-box check`, does **not** promote, and
    leaves the running service on the last-known-good config; then confirm a post-apply
    health failure path restores `config.lastgood.json` and restarts onto it.
 5. **Confirm the self-modification guard:** the `--update` re-exec from an immutable copy
@@ -423,7 +423,7 @@ green before any *real* signed push (W7).
 **Risks + mitigations.** **SSH lockout** is not introduced by the timer itself, but the
 update path may re-run `harden_sshd`/`harden_ufw`; both keep their anti-lockout guards
 (key-confirmed before disabling passwords; the live sshd port opened before `ufw enable`).
-Timer stampede on a shared upstream → randomized delay. A bad fleet tag bricking everything →
+Timer stampede on a shared upstream → randomized delay. A bad network tag bricking everything →
 prevented structurally: validate-then-rollback per node, and the no-op short-circuit means a
 re-pushed good tag re-converges. **Threat-model:** *Active probing* (rollback never exposes
 an unverified config); *Operator coercion* (volatile journald keeps the timer's logs in RAM).
@@ -433,7 +433,7 @@ an unverified config); *Operator coercion* (volatile journald keeps the timer's 
 ### W4 — Fresh-node onboarding for additional operators (delivery method B)
 **Goal.** An additional operator stands up a self-sufficient node in **one command**, with
 its identity generated **locally**, and receives client subscriptions handed off
-**out-of-band** — no shared fleet key material
+**out-of-band** — no shared network key material
 ([ADR-0014](../adr/0014-per-operator-node-credentials.md)).
 
 **Steps.**
@@ -448,7 +448,7 @@ its identity generated **locally**, and receives client subscriptions handed off
    REALITY family, and the per-node self-signed cert **pin** (SHA-256) for HY2/TUIC — and
    deliver them to users out-of-band. The **private** key, secrets, and cert key never leave
    the node (only the public key, pins, and subscriptions are exported).
-3. **Join the fleet:** install the W3 timer with the same pins; the node now converges on
+3. **Join the network:** install the W3 timer with the same pins; the node now converges on
    every signed push while keeping its own local identity.
 4. **Document the operator handoff** in the runbook as a numbered procedure (so a second
    operator can repeat it without this RP).
@@ -476,8 +476,8 @@ benefits from W3 (the timer install is shared).
 **not** mint new identity: `ensure_identity` keeps existing secrets; the operator is warned
 never to wipe the state dir. Out-of-band handoff leaking the wrong material → export only
 public key + pins + subscription, never the 0600 secrets. **Threat-model:** *Knowledge
-minimisation* (per-node identity, no fleet-wide correlation); *Node compromise* (a
-compromised new node exposes only its own keys, never the fleet's — [ADR-0014](../adr/0014-per-operator-node-credentials.md)).
+minimisation* (per-node identity, no network-wide correlation); *Node compromise* (a
+compromised new node exposes only its own keys, never the network's — [ADR-0014](../adr/0014-per-operator-node-credentials.md)).
 
 ---
 
@@ -513,11 +513,11 @@ template provably changes what is rendered, checked, and firewalled.
    kept for compatibility, make it a thin pointer, not a second editable copy.
 5. **Re-render + `sing-box check`** the merged template against a real `params.json` +
    `identities.json` and confirm the rendered inbounds + ports are unchanged from what the
-   live fleet runs (shape-preserving reconciliation, not a data-plane change).
+   live network runs (shape-preserving reconciliation, not a data-plane change).
 
 **Definition of Done.** Exactly one server template is the rendered source of truth; its
 inbound tags align with the bootstrap's keep-list and `verify_listen_ports`; a render +
-`sing-box check` produces the same checked inbounds/ports the fleet already runs; the
+`sing-box check` produces the same checked inbounds/ports the network already runs; the
 redundant template is removed or reduced to a non-editable alias; `validate_configs` stays
 green.
 
@@ -546,7 +546,7 @@ firewall opens exactly the enabled ports — no extraneous open port from tag mi
 
 ### W6 — Enforce the leak-free-public-tree invariant
 **Goal.** Make the catastrophic leaks mechanically impossible for this public,
-root-applied-fleet repo: **no node IP or location, no secret/key material, and no AI/tool
+root-applied-network repo: **no node IP or location, no secret/key material, and no AI/tool
 vendor fingerprint may enter the tree.** Each invariant is enforced by a fail-closed offline
 conformance check wired into the suite.
 
@@ -582,8 +582,8 @@ coercion* / *Knowledge minimisation* (no IP/location/identity breadcrumb in the 
 
 ---
 
-### W7 — Verify fleet convergence (one signed push → all nodes, links unchanged)
-**Goal.** Prove end-to-end that a single signed push converges the whole fleet: every node
+### W7 — Verify network convergence (one signed push → all nodes, links unchanged)
+**Goal.** Prove end-to-end that a single signed push converges the whole network: every node
 fetches, verifies the operator signature, re-renders **from its own local identity**,
 validates, and applies-or-rolls-back — and **client links are unchanged** afterward.
 
@@ -604,10 +604,10 @@ validates, and applies-or-rolls-back — and **client links are unchanged** afte
 4. **Assert rollback under the convergence path:** push (to a throwaway ref) a change that
    passes schema but fails post-apply on at least one node, and confirm that node rolls back
    to last-known-good and exits non-zero while the rest converge — i.e. one bad node does not
-   block, and a bad change cannot brick, the fleet.
+   block, and a bad change cannot brick, the network.
 5. **Author a convergence-check helper** (test-only) that, given the node list, asserts each
    node is on the signed tag, re-rendered from local identity, and reports unchanged links —
-   the repeatable "is the fleet converged?" check.
+   the repeatable "is the network converged?" check.
 
 **Definition of Done.** A single signed push converges every node (no-op push → zero
 restarts; effective push → all nodes re-render-from-local-identity, validate, apply, pass
@@ -617,7 +617,7 @@ helper reports green.
 
 **Verification.**
 - After a no-op signed push: every node logs the no-op short-circuit;
-  `ExecMainStartTimestamp` for `sing-box` is unchanged fleet-wide (zero restarts).
+  `ExecMainStartTimestamp` for `sing-box` is unchanged network-wide (zero restarts).
 - After an effective signed push: every node's live config reflects the change; each node's
   `identity.json` is byte-identical before/after (no key regeneration);
   `verify_post_apply`/`verify_listen_ports` pass on each.
@@ -650,13 +650,13 @@ config, not identity, so no new user-correlating material is introduced).
   introduced. Per-node identity stays local (0600); only public keys, pins, and subscriptions
   are exported ([ADR-0014](../adr/0014-per-operator-node-credentials.md)). The new W6 gates
   *strengthen* this by mechanically refusing IP/secret/identity leaks into the public,
-  fleet-applied repo. `--insecure-no-verify` stays testing-only and is never on the timer.
+  network-applied repo. `--insecure-no-verify` stays testing-only and is never on the timer.
 - **Indistinguishability / probe surface.** Unchanged at the transport layer — the same
   checked inbounds are rendered; donor selection stays random-per-node. W5 additionally
   guarantees the firewall opens *exactly* the enabled ports (no extraneous open port from a
   tag mismatch).
 - **Supply-chain (primary risk).** A single bad push to the **public** repo applied
-  fleet-wide as root: mitigated by W1 (signature verified before the fast-forward merge — no
+  network-wide as root: mitigated by W1 (signature verified before the fast-forward merge — no
   unauthenticated code runs), the re-exec self-modification guard, `sing-box check` + the
   unit `ExecStartPre` (two independent schema gates), and W6 (leak-free artifacts). The
   signature **is** the approval; an unsigned/forged push is refused before its code executes.
@@ -677,11 +677,11 @@ config, not identity, so no new user-correlating material is introduced).
 - **Temporary degradation.** An *effective* signed push restarts sing-box on changed nodes
   (Type=simple, no real reload — applying = restart, briefly dropping live connections); an
   *unchanged* push restarts nothing (no-op short-circuit). The randomized timer delay avoids
-  a synchronized fleet restart.
+  a synchronized network restart.
 - **Flapping / false migrations.** No auto-rotation exists (Phase 2, `deferred`), so there is
   no false-migration risk; convergence is operator-initiated (a signed push) only.
 - **Rollback risk.** Low and per-node: each node validates-then-applies and restores
-  `config.lastgood.json` on any failure; a bad tag cannot brick the fleet, and re-pushing the
+  `config.lastgood.json` on any failure; a bad tag cannot brick the network, and re-pushing the
   good tag re-converges via the no-op-aware update.
 - **Impact on decentralisation.** None — the "fan-out" is a signed git push pulled by
   independent per-node timers (any mirror works); no central coordinator/registry is
@@ -701,19 +701,19 @@ config, not identity, so no new user-correlating material is introduced).
   per-node HY2/TUIC pin); the node converges on the signed tag — W4.
 - [ ] Exactly **one** sing-box server template is the rendered source of truth; its inbound
   tags match the bootstrap's firewall keep-list; render + `sing-box check` reproduce the
-  fleet's current inbounds/ports — W5.
+  network's current inbounds/ports — W5.
 - [ ] Conformance green: the existing offline suite **plus** the three new gates
   (`no_ip_literal`, `no_secret_material`, `no_ai_fingerprint`) — `bash tests/run.sh` passes
   (now 12 offline gates); a seeded leak of each kind is caught and the allowlisted/exempt
   cases are not — W6.
-- [ ] A single signed push converges the whole fleet (no-op push → zero restarts; effective
+- [ ] A single signed push converges the whole network (no-op push → zero restarts; effective
   push → all nodes re-render-from-local-identity, validate, apply, pass health); a
   deliberately failing change rolls back on the affected node without blocking the rest;
   **client links unchanged** — W7.
 - [ ] No excluded legacy transport is present ([ADR-0010](../adr/0010-phase0-transport-set.md));
-  no shared fleet key material exists ([ADR-0014](../adr/0014-per-operator-node-credentials.md)).
-- [ ] Survivability/recovery not degraded: handshake success rate healthy across the fleet
-  before and after convergence; the manual fleet primitive (one signed push → converged) and
+  no shared network key material exists ([ADR-0014](../adr/0014-per-operator-node-credentials.md)).
+- [ ] Survivability/recovery not degraded: handshake success rate healthy across the network
+  before and after convergence; the manual network primitive (one signed push → converged) and
   per-node rollback both work.
 
 > netsim/netem adversary scenarios (`rst_injection`, `as_blackhole`, `udp_drop`) exercise the
@@ -724,7 +724,7 @@ config, not identity, so no new user-correlating material is introduced).
 ### Non-goals (deferred to later phases — not in this RP)
 - **Interference detector & auto-rotation logic** — convergence here is operator-initiated (a
   signed push), not detection-driven (Phase 2).
-- **Central coordinator / fleet registry / online push fan-out** — the fan-out is a signed
+- **Central coordinator / network registry / online push fan-out** — the fan-out is a signed
   git push pulled by per-node timers; a registry/coordinator is Phase 3.
 - **AS-diversity / multi-provider provisioning** — Phase 1; a single IP/AS per node remains a
   single blocking point by design.
@@ -737,7 +737,7 @@ config, not identity, so no new user-correlating material is introduced).
   client feature (unchanged from RP-0001/RP-0002 out-of-scope).
 
 ## 8. Documentation changes
-- [ ] `docs/adr/0015-<slug>.md` (**new**) — signed-release provenance for fleet artifacts:
+- [ ] `docs/adr/0015-<slug>.md` (**new**) — signed-release provenance for network artifacts:
   the signing-key + signed-immutable-tag + out-of-band `allowed_signers` decision W1 arms,
   why `--insecure-no-verify` is testing-only, and how the gate is preserved across the future
   fetch-to-tarball swap. Add the row to [../adr/README.md](../adr/README.md).
@@ -747,8 +747,8 @@ config, not identity, so no new user-correlating material is introduced).
   the single reconciled template (W5).
 - [ ] [../THREAT-MODEL.md](../THREAT-MODEL.md) — record the *supply-chain* provenance gate and
   the W6 preventive leak gates under the relevant rows; confirm the no-logs/RAM posture.
-- [ ] [../ROADMAP.md](../ROADMAP.md) — record that the fleet is signed + self-updating (the
-  manual fleet primitive lands; automated detection-driven rotation remains Phase 2).
+- [ ] [../ROADMAP.md](../ROADMAP.md) — record that the network is signed + self-updating (the
+  manual network primitive lands; automated detection-driven rotation remains Phase 2).
 - [ ] Contract/registry reconciliation — collapse the two
   [`nodes/dataplane/singbox/`](../../nodes/dataplane/singbox/) templates into one (W5);
   align SENTINEL names + tags with the bootstrap keep-list; update
@@ -778,7 +778,7 @@ means **arm, migrate, then converge — without ever changing a client link**:
   schema is migrated onto, not changed). During W5, the two templates coexist only until the
   redundant one is deleted/aliased; the rendered output is unchanged throughout.
 - **Final cutover.** The moment W7's first effective signed push converges every node with
-  unchanged links, the fleet is "signed + self-updating." The ROADMAP note is flipped only
+  unchanged links, the network is "signed + self-updating." The ROADMAP note is flipped only
   then.
 - **Old-version nodes during transition.** A node not yet migrated (W2) or not yet running
   the timer (W3) keeps serving its current config by hand; it does not auto-update until both
@@ -791,7 +791,7 @@ means **arm, migrate, then converge — without ever changing a client link**:
 - **How to roll back, and how fast.** Rollback is **per node and automatic**: each node
   validates a candidate (`sing-box check`) and, on any apply/post-apply failure, restores
   `config.lastgood.json` and restarts onto it (a persistent private network — downtime means
-  people without access, so rollback is fast and built into every update). To stop the fleet
+  people without access, so rollback is fast and built into every update). To stop the network
   converging at all, revert the signed tag (re-sign the previous good commit, or
   `systemctl disable --now mycelium-update.timer` per node); the no-op-aware update means a
   re-pushed good tag re-converges without extra restarts.
@@ -806,7 +806,7 @@ means **arm, migrate, then converge — without ever changing a client link**:
 - **Fail-closed behaviour during rollback.** No silent security bypass: an unsigned/forged
   push is refused (W1) before any code runs; a node that fails `sing-box check` or post-apply
   health is **never** promoted and stays on last-known-good; `--insecure-no-verify` is never
-  used on the fleet timer; rollback never regenerates identity (links stay stable) and never
+  used on the network timer; rollback never regenerates identity (links stay stable) and never
   disables the no-logs/anti-lockout posture. The safe state is *converged-or-last-known-good*,
   never *applied-but-unverified*.
 
@@ -823,5 +823,5 @@ or exported beyond the public key + client pins + subscriptions handed off out-o
 ([ADR-0014](../adr/0014-per-operator-node-credentials.md)). The operator **signing private
 key** and the `allowed_signers` file are out-of-band artifacts, never in the tree. W6 turns
 this discipline from policy into three fail-closed gates (`no_ip_literal`,
-`no_secret_material`, `no_ai_fingerprint`) so the public, root-applied-fleet repo is
+`no_secret_material`, `no_ai_fingerprint`) so the public, root-applied-network repo is
 mechanically guaranteed leak-free.

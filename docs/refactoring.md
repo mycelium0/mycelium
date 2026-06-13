@@ -227,7 +227,7 @@ Attack surface is limited to a single operator and their infrastructure.
 - event-triggered audit — on every new transport, every blocking event or interference
   incident, every change to the detector or auto-rotation.
 
-### Phase 3 (fleet of nodes with centralized coordination)
+### Phase 3 (network of nodes with centralized coordination)
 A center exists — the highest-value target; compromise of the center exposes the
 network map.
 - PR audit — mandatory;

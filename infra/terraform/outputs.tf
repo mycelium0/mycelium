@@ -26,7 +26,7 @@ output "server_id" {
 
 output "server_location" {
   description = <<-EOT
-    Hetzner location the node was created in. A reminder to verify AS diversity across the fleet:
+    Hetzner location the node was created in. A reminder to verify AS diversity across the network:
     do not concentrate nodes in one provider/region/AS (see README and rotate-ip-as runbook).
   EOT
   value       = hcloud_server.node.location

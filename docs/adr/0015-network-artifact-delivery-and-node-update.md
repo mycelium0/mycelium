@@ -5,19 +5,19 @@ This file is part of Mycelium, licensed under the GNU Affero General Public Lice
 later. See the LICENSE file in the repository root.
 -->
 
-# ADR-0015: `Fleet artifact-delivery and node-update model — signature-gated pull, fail-closed apply`
+# ADR-0015: `Network artifact-delivery and node-update model — signature-gated pull, fail-closed apply`
 
 > **Document type.** ADR (Architectural Decision Record). Records **one** bound
 > decision: how canonical artifacts reach every node and how a node updates itself, as
 > implemented by `scripts/node-bootstrap.sh` (the on-node bootstrap + semi-auto updater).
-> Saved as `docs/adr/0015-fleet-artifact-delivery-and-node-update.md`.
+> Saved as `docs/adr/0015-network-artifact-delivery-and-node-update.md`.
 >
 > **See also:** [0002-no-custom-cryptography.md](0002-no-custom-cryptography.md),
 > [0010-phase0-transport-set.md](0010-phase0-transport-set.md),
 > [0013-mycelial-vocabulary-and-phase-discipline.md](0013-mycelial-vocabulary-and-phase-discipline.md),
 > [0014-per-operator-node-credentials.md](0014-per-operator-node-credentials.md),
 > [../proposals/0002-phase0-live-verified-hardened-node.md](../proposals/0002-phase0-live-verified-hardened-node.md),
-> the forthcoming [RP-0003](../proposals/) (fleet update / artifact-delivery migration),
+> the forthcoming [RP-0003](../proposals/) (network update / artifact-delivery migration),
 > [../runbooks/node-bootstrap.md](../runbooks/node-bootstrap.md),
 > [../../scripts/node-bootstrap.sh](../../scripts/node-bootstrap.sh),
 > [../../AGENTS.md](../../AGENTS.md), [../THREAT-MODEL.md](../THREAT-MODEL.md).
@@ -31,11 +31,11 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** accepted
 - **Layer(s):** infra (deploy/bootstrap), control plane (config rendering + distribution), cross-cutting
-- **Phase:** cross-cutting; binds node bootstrap + fleet update from Phase 0 onward
+- **Phase:** cross-cutting; binds node bootstrap + network update from Phase 0 onward
 - **Related:** ADR-0002 (no custom crypto), ADR-0010 (transport set + per-protocol toggling),
   ADR-0013 (Phase 0-2 inert-schema rule; membership stays static config / no live registry),
   ADR-0014 (per-operator node credentials, no shared key material), RP-0002 (Phase 0 live
-  verified hardened node), RP-0003 (fleet update / artifact-delivery migration),
+  verified hardened node), RP-0003 (network update / artifact-delivery migration),
   `scripts/node-bootstrap.sh`, `infra/systemd/mycelium-update.{service,timer}`
 
 ## Context
@@ -43,16 +43,16 @@ later. See the LICENSE file in the repository root.
 Once more than one node exists, the network needs a way to keep every node identical and to roll a
 change out without per-node hand-work. The forces in tension are:
 
-- **Operator effort vs. fleet size.** Editing each node by hand does not scale and guarantees drift;
+- **Operator effort vs. network size.** Editing each node by hand does not scale and guarantees drift;
   every node must converge on **one** canonical definition.
 - **Speed of rollout vs. supply-chain safety.** The canonical artifacts live in a **public** repo
-  (AGPL). Anything that pulls and runs them as root turns the repo into a fleet-wide remote-code
+  (AGPL). Anything that pulls and runs them as root turns the repo into a network-wide remote-code
   path: a single bad commit, a force-push, or a compromised mirror would otherwise execute on every
   node. `sing-box check` validates a config's **schema**, never its **provenance**, so schema
   validation alone is not a supply-chain control.
 - **Automation vs. brick-resistance.** A fully automatic updater that applies whatever it fetches can
-  take the whole fleet down with one mistake. A fully manual one does not scale. The design must be
-  automatic in the common case yet incapable of bricking or owning the fleet from a single push.
+  take the whole network down with one mistake. A fully manual one does not scale. The design must be
+  automatic in the common case yet incapable of bricking or owning the network from a single push.
 - **Central control vs. doctrine.** AGENTS.md principle 4 forbids a **permanent central brain** — no
   dependency on one coordinator/registry/push-controller — and ADR-0013 keeps membership as static
   config in Phase 0-2 (no live distributed registry). A push-based controller that holds node
@@ -64,12 +64,12 @@ change out without per-node hand-work. The forces in tension are:
 
 - **Adversary model** (see [../THREAT-MODEL.md](../THREAT-MODEL.md)): config-distribution tampering
   and **supply-chain compromise of the update channel** (a malicious or forged push reaching a
-  root-run updater fleet-wide), plus operator coercion (a central push-controller would be a single
+  root-run updater network-wide), plus operator coercion (a central push-controller would be a single
   coercion target).
 - **Affected asset.** Ingress reachability and the integrity of every node (root-level code
   execution via the update path); operators (a central controller is a coercion target); user
-  traffic (a bricked or hostile fleet).
-- **Fundamental trade-off.** Adaptation speed (one push updates the whole fleet) ↔ false-migration /
+  traffic (a bricked or hostile network).
+- **Fundamental trade-off.** Adaptation speed (one push updates the whole network) ↔ false-migration /
   self-brick risk and supply-chain exposure. This ADR resolves it by making the rollout pull-based
   and **signature-gated**, and the apply step **fail-closed with rollback**.
 
@@ -80,17 +80,17 @@ change out without per-node hand-work. The forces in tension are:
 
 1. **Unauthenticated pull + auto-apply.** Every node runs a timer that does a plain `git pull` of the
    public repo and applies the result.
-   - Pros: trivial to implement; one push updates the fleet.
-   - Cons: turns the public repo into a fleet-wide **root RCE** path — one bad/forged push, force-push,
+   - Pros: trivial to implement; one push updates the network.
+   - Cons: turns the public repo into a network-wide **root RCE** path — one bad/forged push, force-push,
      or mirror compromise executes on every node; `sing-box check` cannot catch a hostile-but-valid
      config or hostile fetched **shell**.
    - Impact on indistinguishability / survivability: catastrophic — a single supply-chain event owns
-     or bricks the entire fleet.
+     or bricks the entire network.
 2. **Central push agent / coordinator.** A control service holds node credentials and pushes state to
    each node.
    - Pros: immediate, centrally orchestrated rollouts.
    - Cons: a **permanent central brain** (AGENTS.md §4 violation) and a credential concentrator
-     (ADR-0014 violation); one coercion/compromise target for the whole fleet.
+     (ADR-0014 violation); one coercion/compromise target for the whole network.
    - Impact on indistinguishability / survivability: negative — crowns a permanent center to coerce
      or seize.
 3. **Bake rendered config into the repo per node.** Commit each node's finished config/secrets.
@@ -102,8 +102,8 @@ change out without per-node hand-work. The forces in tension are:
    source delivered by an idempotent on-node updater on a systemd timer; the operator's **signature**
    on the pushed ref is the approval; the node verifies it before any fetched code runs, then renders
    from **local** identity, validates, and applies with rollback.
-   - Pros: one push updates the fleet with no per-node hand-work; no central controller and no shared
-     key material; a bad push can neither own nor brick the fleet; identity and links stay stable.
+   - Pros: one push updates the network with no per-node hand-work; no central controller and no shared
+     key material; a bad push can neither own nor brick the network; identity and links stay stable.
    - Cons: requires distributing the operator's signing key out-of-band and pinning a signed ref;
      two-gate (signature + `sing-box check`) machinery to maintain.
    - Impact on indistinguishability / survivability: positive — pull-based and provenance-gated, no
@@ -111,13 +111,13 @@ change out without per-node hand-work. The forces in tension are:
 
 ## Decision
 
-**Option 4.** Fleet artifact-delivery and node update become canon as implemented by
+**Option 4.** Network artifact-delivery and node update become canon as implemented by
 `scripts/node-bootstrap.sh`:
 
 1. **One canonical source of truth, delivered by an idempotent on-node updater.** The public repo is
    the single canonical definition. Each node runs `node-bootstrap.sh --update` from a systemd timer
    (`infra/systemd/mycelium-update.{service,timer}`); the updater fetches the canonical artifacts,
-   re-renders, validates, and applies. A push updates the whole fleet with **no per-node hand-work**;
+   re-renders, validates, and applies. A push updates the whole network with **no per-node hand-work**;
    nodes converge on re-run (idempotent). Delivery is **pull-based**, never a central push.
 
 2. **Semi-auto = the operator's signature IS the approval.** Nodes apply automatically but
@@ -127,7 +127,7 @@ change out without per-node hand-work. The forces in tension are:
    verification passes does any fetched code merge, install, or execute. Fast-forward-only is **not**
    sufficient alone: it blocks history rewrites but not a fresh malicious commit, so the **signature
    is the provenance gate**. `--insecure-no-verify` exists for local testing only (loud warning); the
-   fleet timer must never run with it. Pin `--repo-ref` to an **immutable signed tag** so the approval
+   network timer must never run with it. Pin `--repo-ref` to an **immutable signed tag** so the approval
    itself is immutable; a bare branch HEAD is advanceable by any push and is only verified per-commit
    as a less-preferred fallback. An optional `--staged` cadence stages a *validated* candidate and
    waits for an explicit operator `--ack` before promoting.
@@ -165,8 +165,8 @@ unvalidated candidate is never promoted, and any post-apply failure restores the
 
 ## Consequences
 
-- **Positive:** a single signed push rolls the whole fleet with no per-node hand-work; a bad/forged
-  push can neither achieve fleet-wide code execution nor brick a node (provenance gate + validate +
+- **Positive:** a single signed push rolls the whole network with no per-node hand-work; a bad/forged
+  push can neither achieve network-wide code execution nor brick a node (provenance gate + validate +
   rollback + no-op short-circuit); no central controller and no shared/concentrated credentials;
   client links stay stable because identity and the donor SNI are pinned and never rotated on update;
   the delivery channel can later move to signed releases/packages without touching the rest.
@@ -212,11 +212,11 @@ How the decision is verified in practice:
 
 ## Alternatives considered
 
-- **Unauthenticated `git pull` + auto-apply** — rejected: makes the public repo a fleet-wide root RCE
+- **Unauthenticated `git pull` + auto-apply** — rejected: makes the public repo a network-wide root RCE
   channel; `sing-box check` validates schema, not provenance.
 - **Central push agent / coordinator holding node credentials** — rejected: a permanent central brain
   (AGENTS.md §4) and a credential concentrator (ADR-0014 violation); one coercion target for the
-  whole fleet.
+  whole network.
 - **Baking rendered config/secrets into the repo per node** — rejected: leaks/duplicates per-node
   secrets into a public repo (ADR-0014 violation) and couples link stability to commits, breaking
   subscriptions whenever a re-bake would rotate identity.

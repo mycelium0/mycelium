@@ -92,7 +92,7 @@ Pick a donor that satisfies **all** of the following. The sentinels `SENTINEL_DO
       TLS for. `dest` is the `host:port` the node dials to fetch that handshake — usually the same
       hostname on `:443`.
 
-Diversify donors, SNI values, ports, IPs, and ASes across the fleet (see ARCHITECTURE.md Layer 1):
+Diversify donors, SNI values, ports, IPs, and ASes across the network (see ARCHITECTURE.md Layer 1):
 blocking can occur at the AS level, so a single shared donor is a single point of failure.
 
 ## REALITY fields explained (`streamSettings.realitySettings`)

@@ -66,7 +66,7 @@ Pick a VPS that is **fresh** (no prior reputation) and on a **public IP**.
   Debian-family host and refuses anything else.
 - **AS diversity — mandatory.** Do **not** concentrate nodes in one provider or one autonomous
   system. AS-level blocking cuts traffic to an entire autonomous system wholesale (the handshake
-  completes; the data silently dies), so a fleet packed into one AS shares a single blocking
+  completes; the data silently dies), so a network packed into one AS shares a single blocking
   point. Spread nodes across **different providers and different ASes**, and keep **1–2 fresh IPs
   in reserve in other ASes** for the `rotate-ip-as` procedure.
 - **Avoid tainted ranges.** Prefer IP ranges with no known-bad reputation. New allocations from a
@@ -108,7 +108,7 @@ deliberate operator decision; see
 - [ ] **`serverNames` matches what the donor actually serves** — every SNI the node presents must
       be a hostname the donor terminates TLS for.
 
-Diversify donors and SNI values across the fleet: a single shared donor is a single point of
+Diversify donors and SNI values across the network: a single shared donor is a single point of
 failure at the AS level.
 
 ---

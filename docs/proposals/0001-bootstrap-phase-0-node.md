@@ -60,7 +60,7 @@ clients (sing-box, Clash-Meta, etc.) connect to the standard endpoints the node 
 | `observability` | Node health, handshake success rate, alerts | active | Prometheus/Alertmanager | standard; we do not write custom metric collection |
 | `infra` | VPS provisioning + deployment from scratch | active | Terraform + Ansible | standard IaC; fast IP/AS migration |
 | `control-agent` | Network interference detector / auto-rotation | deferred | — | activates in RP Phase 2 |
-| `coordinator` | Fleet registry, rerouting | deferred | — | activates in Phase 3 |
+| `coordinator` | Network registry, rerouting | deferred | — | activates in Phase 3 |
 
 ## 3.2. Blast-Radius Cap
 

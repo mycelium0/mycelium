@@ -5,11 +5,11 @@ This file is part of Mycelium, licensed under the GNU Affero General Public Lice
 later. See the LICENSE file in the repository root.
 -->
 
-# Runbook — on-node bootstrap + semi-auto fleet updater
+# Runbook — on-node bootstrap + semi-auto network updater
 
 This runbook covers the **on-node** path: a single idempotent script
 ([`scripts/node-bootstrap.sh`](../../scripts/node-bootstrap.sh)) that brings a fresh node up and
-then keeps the whole fleet identical via a push-to-update loop. It is complementary to the
+then keeps the whole network identical via a push-to-update loop. It is complementary to the
 control-host Ansible path in [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) — use whichever
 fits, both yield the same standard endpoints.
 
@@ -17,32 +17,32 @@ The node provides a persistent private network; framing here is neutral and tech
 
 > **Software, not an operated network.** This repository publishes server-side software; it does not
 > operate a public network, publishes no public endpoints, and distributes no public client configs.
-> Each operator independently deploys and controls **their own** node and **their own** fleet (see
+> Each operator independently deploys and controls **their own** node and **their own** network (see
 > the [README separation statement](../../README.md#what-this-is)). "The operator" below means
-> *whoever is self-hosting this fleet* — there is no single project-wide owner of a network.
+> *whoever is self-hosting this network* — there is no single project-wide owner of a network.
 
 > **Signing is operator-local, by design — and the project-wide state is deliberately unsigned.**
 > The signature mechanism below is each operator verifying **their own** pushes to **their own**
-> fleet with **their own** out-of-band key. At the **project** level there is, on purpose, **no
+> network with **their own** out-of-band key. At the **project** level there is, on purpose, **no
 > single signer**: because the shared identity is community-owned and approval is moving to
 > community/organization consensus ("fungi voting") from Phase 1–2, designating one legal signer is
 > specifically being avoided, so project-level updates are currently accepted **UNSIGNED /
-> insecure** as a documented interim state (see [GOVERNANCE.md §6](../../GOVERNANCE.md)). The per-fleet
+> insecure** as a documented interim state (see [GOVERNANCE.md §6](../../GOVERNANCE.md)). The per-network
 > signing here is the operator-local control available in the meantime, not a project-wide signer.
 
 ## Mental model
 
-- **One source of truth, many identical nodes.** The operator self-hosting the fleet pushes
+- **One source of truth, many identical nodes.** The operator self-hosting the network pushes
   canonical artifacts to **their** repo once. Every node runs a timer that pulls, re-renders **from
-  its own local identity**, validates, and applies — so the fleet is testable together with no
+  its own local identity**, validates, and applies — so the network is testable together with no
   per-node hand-work.
 - **"Semi-auto" = the human approval IS the self-hosting operator's SIGNATURE on the pushed ref.**
   Nodes apply automatically, but **fail-closed**: each node first verifies that the canonical ref is
   signed by **that operator's** out-of-band key (`--allowed-signers`, never committed) and refuses to
   run any fetched code otherwise; only then is the candidate config validated with `sing-box check`
   and rolled back on any failure. So a single bad push to the repo can neither own nor brick the
-  fleet — an unsigned/forged push is rejected before its code ever executes. (This is an
-  operator-local guarantee for one's own fleet; it is not, and does not imply, a single project-wide
+  network — an unsigned/forged push is rejected before its code ever executes. (This is an
+  operator-local guarantee for one's own network; it is not, and does not imply, a single project-wide
   signer — see the note above.)
 - **Secrets never leave the node.** The REALITY private key, client UUIDs, per-protocol secrets,
   and the self-signed cert key live only under `/var/lib/mycelium` (`0600`). Only the REALITY
@@ -107,7 +107,7 @@ What that does, in order (all idempotent, all fail-closed):
 
 Re-running the same command **converges/updates** the node without regenerating identity.
 
-## How a fleet-wide update flows ("git push → whole fleet updates")
+## How a network-wide update flows ("git push → whole network updates")
 
 ```
 operator: git push  (canonical artifacts to the public repo)   <-- the human approval
@@ -140,7 +140,7 @@ each node, every few minutes (mycelium-update.timer):
    ▼
  active AND expected ports bound? ── no ──► ROLL BACK to last-known-good, restart, exit non-zero
    │
-  yes → done (node now matches the fleet)
+  yes → done (node now matches the network)
 ```
 
 Install the timer on every node:
@@ -155,7 +155,7 @@ The updater needs the operator's signing key to verify pushes. Ship it **out-of-
 the repo) and point the unit at it, e.g. append `--allowed-signers /etc/mycelium/allowed_signers`
 to the unit's `ExecStart`, and pin `--repo-ref` to an **immutable signed tag** rather than a
 branch. (For local testing only, `--insecure-no-verify` bypasses verification with a loud warning;
-never run the fleet timer with it.)
+never run the network timer with it.)
 
 - **Default mode** (`--update`): re-exec from an immutable copy → fetch → **verify signature** →
   re-render → validate → **apply with rollback** (a no-op when the candidate equals the live
@@ -189,12 +189,12 @@ sudo install -m 0644 /var/lib/mycelium/config.lastgood.json /usr/local/etc/sing-
 sudo systemctl restart sing-box
 ```
 
-## Fail-closed guarantees (why a bad push cannot own or brick the fleet)
+## Fail-closed guarantees (why a bad push cannot own or brick the network)
 
 - **Provenance first.** Fetched artifacts are merged/installed/executed only after the pinned ref's
   **operator signature** verifies against an out-of-band key. An unsigned/forged push is refused
   before any of its shell (`node-bootstrap.sh`, `myceliumctl`, `render_singbox.sh`) ever runs as
-  root, so a single bad push to the public repo cannot achieve fleet-wide code execution.
+  root, so a single bad push to the public repo cannot achieve network-wide code execution.
 - **The updater cannot mis-run itself.** `--update` re-execs from an immutable copy before fetching,
   so the in-place merge cannot rewrite the running script and make it skip validation/rollback.
 - The renderer only emits **valid JSON**; the updater additionally runs **`sing-box check`** and

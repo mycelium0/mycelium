@@ -3,7 +3,7 @@
 # This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
 # later. See the LICENSE file in the repository root.
 #
-# mycelium-update.service — oneshot that runs the semi-auto fleet-update path.
+# mycelium-update.service — oneshot that runs the semi-auto network-update path.
 # Author: mindicator & silicon bags quartet.
 #
 # Driven by mycelium-update.timer. Runs the canonical updater in its DEFAULT mode:
@@ -20,7 +20,7 @@
 # promote with "node-bootstrap.sh --ack" once the operator has reviewed the staged candidate.
 #
 # The script verifies provenance, self-validates, and rolls back, so a bad push to the public repo
-# can neither own nor brick the fleet: nothing unsigned runs, and the live config and service are
+# can neither own nor brick the network: nothing unsigned runs, and the live config and service are
 # only replaced by a config that already passed check.
 [Unit]
 Description=Mycelium semi-auto node update (fetch + re-render + validate + apply-with-rollback)

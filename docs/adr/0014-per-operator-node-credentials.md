@@ -5,7 +5,7 @@ This file is part of Mycelium, licensed under the GNU Affero General Public Lice
 later. See the LICENSE file in the repository root.
 -->
 
-# ADR-0014: `Per-operator node credentials — no shared fleet key material`
+# ADR-0014: `Per-operator node credentials — no shared network key material`
 
 > **Document type.** ADR (Architectural Decision Record). Records **one** bound
 > decision: how TLS/identity material is provisioned across a mesh whose nodes are
@@ -55,8 +55,8 @@ transports (Hysteria2, TUIC) require a real TLS certificate.**
 
 ## Decision
 
-1. **No shared fleet key material.** Every node holds **only its own** keys and certificates. No
-   private key is ever copied between operators or distributed fleet-wide.
+1. **No shared network key material.** Every node holds **only its own** keys and certificates. No
+   private key is ever copied between operators or distributed network-wide.
 
 2. **Certless REALITY backbone.** The canonical transport backbone is REALITY-based
    (VLESS-Vision / gRPC / XHTTP). Each node is self-sufficient with its own per-node REALITY keypair +
@@ -72,7 +72,7 @@ transports (Hysteria2, TUIC) require a real TLS certificate.**
    Blanket `insecure: true` trust is not used (it would accept any certificate); pinning preserves the
    no-custom-crypto, fail-closed posture of ADR-0002.
 
-4. **No fleet domain dependency.** `example.com` is **one operator's** convenience for **their own**
+4. **No network domain dependency.** `example.com` is **one operator's** convenience for **their own**
    nodes, not part of the protocol and not required by any other operator. Certificates may, and will,
    differ per node. The shared wildcard is explicitly **non-canonical**.
 
@@ -81,7 +81,7 @@ transports (Hysteria2, TUIC) require a real TLS certificate.**
    certificate. A self-signed HY2/TUIC cert says nothing about mesh membership, and a CA-signed one
    grants none. The two concerns are kept separate.
 
-6. **CDN fronting is a per-operator option, not a fleet feature** — and is currently unused (the
+6. **CDN fronting is a per-operator option, not a network feature** — and is currently unused (the
    candidate CDN is blocked on target access networks, so fronting behind it gains nothing).
 
 ## Consequences
@@ -103,7 +103,7 @@ transports (Hysteria2, TUIC) require a real TLS certificate.**
 
 - **Shared wildcard everywhere** (status quo Phase-0 shortcut) — rejected: requires sharing a private
   key with independent operators; central domain dependency.
-- **A fleet-internal CA that signs each node** — rejected for now: reintroduces a central trust root and
+- **A network-internal CA that signs each node** — rejected for now: reintroduces a central trust root and
   key-distribution problem; REALITY (certless) + per-node self-signed-with-pinning achieves the goal
   without one. May be revisited if a federation-level PKI is ever justified, but node *identity* belongs
   to the spore/membership layer (VIS-0003), not a TLS CA.

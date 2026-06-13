@@ -21,7 +21,7 @@ later. See the LICENSE file in the repository root.
 
 ## 1. Core idea
 
-Mycelium is not a star network, not a VPN fleet, and not a corporation-like service with users around
+Mycelium is not a star network, not a VPN network, and not a corporation-like service with users around
 a center. Mycelium is a living private connectivity fabric.
 
 It grows through many small local connections, reinforces useful paths, forgets dead paths, forms

@@ -229,7 +229,7 @@ phases may define only inert data models / interfaces, and only ones that do not
 ## 5. Target audience and scenarios
 
 - **Who:** a node operator / volunteer running a home machine behind NAT · a community maintaining a
-  mesh segment · the fleet coordinator operator in Phase 3 · a new node owner onboarding for the first
+  mesh segment · the network coordinator operator in Phase 3 · a new node owner onboarding for the first
   time.
 - **Key scenarios:**
   - *Joining.* A new node boots, presents its inviter-bound join token, observes reachable neighbours
