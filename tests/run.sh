@@ -14,8 +14,14 @@
 #   * no_custom_crypto.sh     — no hand-rolled cryptography (ADR-0002)
 #   * validate_configs.sh     — JSON valid (jq); YAML/xray checks run if their tools are present
 #   * no_legacy_transport.sh  — disabled-legacy transports are never configured as inbounds
+#   * no_insecure_tls.sh      — TLS verification is never disabled (no insecure/allowInsecure/
+#                               skip-cert-verify = true) in the deployable config surface (ADR-0014)
+#   * no_operated_network_claim.sh — no AFFIRMATIVE "operates a public network" claim; the negated
+#                               separation statement ("does not operate a public network") is allowed
 #   * per_protocol_toggle.sh  — every protocol is enable_*-gated; only vless_reality_vision default-on
 #   * phase0_port_canon.sh    — the canonical per-protocol port map is consistent everywhere
+#   * node_update_artifact_root.sh — the --update re-exec path resolves canonical artifacts from the
+#                                    real checkout (CHECKOUT_DIR/ARTIFACT_ROOT), not the tmp re-exec dir
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -38,8 +44,11 @@ GATES=(
 	"tests/conformance/no_custom_crypto.sh"
 	"tests/conformance/validate_configs.sh"
 	"tests/conformance/no_legacy_transport.sh"
+	"tests/conformance/no_insecure_tls.sh"
+	"tests/conformance/no_operated_network_claim.sh"
 	"tests/conformance/per_protocol_toggle.sh"
 	"tests/conformance/phase0_port_canon.sh"
+	"tests/conformance/node_update_artifact_root.sh"
 	"control/selftest.sh"
 )
 
