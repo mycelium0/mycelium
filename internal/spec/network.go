@@ -309,15 +309,15 @@ func (e EdgeLifecycle) IsValid() bool {
 // machine runs over these in Phase 0-2; transitions are wired in Phase 3-4
 // (VIS-0003 §4).
 type EdgeState struct {
-	Version     int           `json:"version"`      // schema version (NetworkStateVersion)
-	FromRef     string        `json:"from_ref"`     // opaque local endpoint reference (no identity)
-	ToRef       string        `json:"to_ref"`       // opaque remote endpoint reference (no identity)
-	Lifecycle   EdgeLifecycle `json:"lifecycle"`    // current lifecycle state
-	Reliability float64       `json:"reliability"`  // measured reliability hint in [0,1]
-	LatencyMS   int           `json:"latency_ms"`   // measured one-way latency hint in milliseconds
-	Scope       TrustScope    `json:"scope"`        // the trust scope this edge belongs to
-	UpdatedAt   time.Time     `json:"updated_at"`   // RFC 3339, UTC
-	ExpiresAt   time.Time     `json:"expires_at"`   // RFC 3339, UTC — record is stale after this
+	Version     int           `json:"version"`     // schema version (NetworkStateVersion)
+	FromRef     string        `json:"from_ref"`    // opaque local endpoint reference (no identity)
+	ToRef       string        `json:"to_ref"`      // opaque remote endpoint reference (no identity)
+	Lifecycle   EdgeLifecycle `json:"lifecycle"`   // current lifecycle state
+	Reliability float64       `json:"reliability"` // measured reliability hint in [0,1]
+	LatencyMS   int           `json:"latency_ms"`  // measured one-way latency hint in milliseconds
+	Scope       TrustScope    `json:"scope"`       // the trust scope this edge belongs to
+	UpdatedAt   time.Time     `json:"updated_at"`  // RFC 3339, UTC
+	ExpiresAt   time.Time     `json:"expires_at"`  // RFC 3339, UTC — record is stale after this
 }
 
 // Validate checks the schema version, a known lifecycle, non-empty endpoint
