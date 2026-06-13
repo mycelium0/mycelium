@@ -27,6 +27,7 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 | [0013](0013-mycelial-vocabulary-and-phase-discipline.md) | Mycelial vocabulary discipline + Phase 0-2 inert schemas | **accepted** |
 | [0014](0014-per-operator-node-credentials.md) | Per-operator node credentials — no shared fleet key material | **accepted** |
 | [0015](0015-fleet-artifact-delivery-and-node-update.md) | Fleet artifact-delivery and node-update model (signature-gated pull, fail-closed apply) | **accepted** |
+| [0016](0016-software-releases-not-an-operated-network.md) | Software releases, not an operated network; community-consensus governance | **accepted** |
 
 > Reserved (produced by ADR-0003): 0004 no-logs/retention ·
 > 0005 classification as encryption item · 0006 legal wrapper for egress · 0007 role/jurisdiction
