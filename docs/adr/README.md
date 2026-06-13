@@ -28,6 +28,8 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 | [0014](0014-per-operator-node-credentials.md) | Per-operator node credentials — no shared network key material | **accepted** |
 | [0015](0015-network-artifact-delivery-and-node-update.md) | Network artifact-delivery and node-update model (signature-gated pull, fail-closed apply) | **accepted** |
 | [0016](0016-software-releases-not-an-operated-network.md) | Software releases, not an operated network; community-consensus governance | **accepted** |
+| [0017](0017-network-weather-data-contract.md) | Network-weather data contract + aggregation floor (definitions only; running publisher deferred) | proposed |
+| [0018](0018-fungi-role-and-opt-in-publish.md) | Fungi role + the opt-in weather publish path (opt-in, aggregate-and-forget) | proposed |
 
 > Reserved (produced by ADR-0003): 0004 no-logs/retention ·
 > 0005 classification as encryption item · 0006 legal wrapper for egress · 0007 role/jurisdiction
