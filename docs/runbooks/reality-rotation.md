@@ -47,6 +47,9 @@ All key material comes from the sanctioned generators only — never hand-rolled
    myceliumctl reality-keys            # emits a fresh private/public keypair + short id
    # update /var/lib/mycelium/identity.json: reality.private_key, reality.public_key, reality.short_id
    ```
+   `reality-keys` uses `xray x25519` when xray is present and otherwise falls back to
+   `sing-box generate reality-keypair`, so it works on the canonical sing-box-only node (no xray
+   required). Equivalent by hand: `sing-box generate reality-keypair` + `openssl rand -hex 8`.
    To also rotate the donor, pick a new one from the curated list and re-verify it supports TLS1.3 +
    X25519 + H2 before committing it:
    ```sh

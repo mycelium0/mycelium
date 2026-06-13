@@ -38,12 +38,15 @@ variable "server_type" {
 
 variable "location" {
   description = <<-EOT
-    Hetzner location code (e.g. "nbg1", "fsn1", "hel1", "ash", "hil", "sin"). Pick with attention
-    to AS diversity: do NOT concentrate every node in one provider/region/AS (see README and
-    docs/runbooks/rotate-ip-as.md). A single AS is a single AS-level blocking point.
+    Datacenter/location code for the chosen provider (example provider codes look like "nbg1",
+    "fsn1", "ash", "sin"). Pick with attention to AS diversity: do NOT concentrate every node in one
+    provider/region/AS (see README and docs/runbooks/rotate-ip-as.md). A single AS is a single
+    AS-level blocking point.
   EOT
   type        = string
-  default     = "hel1"
+  # No default on purpose (Audit-0004 F-019): a baked-in location would make every operator who
+  # follows the example provision in the same place, narrowing AS diversity and weakly hinting at
+  # where nodes live. Terraform requires/prompts for it, like the API token above.
 }
 
 variable "image" {

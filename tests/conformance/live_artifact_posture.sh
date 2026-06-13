@@ -90,9 +90,29 @@ else
 	fi
 fi
 
+# --- 3. ShadowTLS strict_mode on the deployed template (Audit-0004 F-016) ------------------------
+if jq -e '.inbounds[]? | select(.tag=="shadowtls-in")' "$RT" >/dev/null 2>&1; then
+	stm="$(jq -r '.inbounds[]? | select(.tag=="shadowtls-in") | .strict_mode // empty' "$RT")"
+	if [ "$stm" = "true" ]; then
+		okln "renderer shadowtls-in sets strict_mode: true (harder to detect under active probing)"
+	else
+		badln "renderer shadowtls-in is present but strict_mode is '${stm:-unset}' (ShadowTLS v3 without strict_mode is more detectable)"
+	fi
+else
+	okln "no shadowtls-in in the renderer template (nothing to assert)"
+fi
+
+# --- 4. clash_api secret injection is wired in the render path (Audit-0004 F-003) ----------------
+RS="$REPO_ROOT/control/lib/render_singbox.sh"
+if [ -f "$RS" ] && grep -qF 'clash_api.secret = $clash_secret' "$RS"; then
+	okln "render_singbox.sh injects clash_api.secret from the provisioned clash_secret (defence-in-depth)"
+else
+	badln "render_singbox.sh does not wire clash_api.secret from clash_secret — clash_api would lack auth even when a secret is provisioned"
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
-	printf 'FAIL: the deployed artifact posture is not as documented (clash_api bind or live default-on set).\n' >&2
+	printf 'FAIL: the deployed artifact posture is not as documented (clash_api bind/secret, default-on set, or ShadowTLS strict_mode).\n' >&2
 	exit 1
 fi
 printf 'PASS: clash_api is loopback-only and the live default-on set matches the documented Variant A.\n'
