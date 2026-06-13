@@ -137,6 +137,31 @@ it defines a real contract — a schema, a state machine, a policy rule, or a me
 - **Coordinator** — a Phase-3 temporary, scoped centre that dissolves into the Phase-4 DHT;
   present but inert in Phase 0 (VIS-0003). Never a permanent centre.
 
+## Network weather (public measurement surface)
+
+The sanctioned **public** way to expose the fabric's condition: aggregated, privacy-preserving, and
+**never a map or directory** (VIS-0005). It projects the redacted distributed-awareness signals into a
+surface that cannot be reversed into topology, membership, geography, or identity.
+
+- **Network weather** — the public snapshot of the fabric's health: an overall resilience index,
+  per-transport-**class** health and reachability, coarse interference classes, the edge-lifecycle
+  distribution as percentages, and obfuscated rotation events. Carries opaque scope ids — never a node,
+  endpoint, location, or user (VIS-0005). The opposite of a blockchain explorer: no tier ever holds the
+  global map.
+- **fungi (role)** — a node in a temporary, rotating `cache-custodian`-class niche (a `NodeRole`, not a
+  permanent class) that aggregates its own neighbourhood's redacted signals, applies the aggregation
+  floor and noise **at the source**, forgets the raw inputs, and emits a signed, TTL-bounded
+  stress-digest spore. Opt-in only; aggregate-and-forget (VIS-0005).
+- **Stress-digest** — the signed, TTL-bounded `SporeEnvelope` a fungi emits: a redacted, floored,
+  noised aggregate of neighbourhood stress. The unit the explorer publisher ingests; never raw
+  observations (VIS-0005).
+- **Aggregation floor (`k`)** — the minimum-aggregation threshold below which a cell is omitted (never
+  shown as zero), applied at the source so the published surface stays impossible to reverse into a map
+  (VIS-0005; the exact `k` is pinned by the spawned ADR).
+- **Explorer publisher / snapshot** — the off-network step that verifies digests, coarsens across
+  sources, suppresses below-floor cells, and emits a static `network-weather.json`; the explorer site
+  renders only that snapshot and adds no visitor tracking (VIS-0005).
+
 ## Mycelial schemas (`internal/spec`)
 
 Typed control-plane schemas formalising the doctrine above. Each is a data model with `Validate()`
