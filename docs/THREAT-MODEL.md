@@ -19,6 +19,18 @@ A large-scale network operator (the adversary) with the following capabilities:
   blocking at the network backbone.
 - **AS-level blocking** — cuts all traffic to "tainted" autonomous systems wholesale (observed
   pattern: handshake succeeds, data dies). IP and AS diversity is not optional.
+- **Destination-AS / subnet download-direction throughput degradation** — distinct from wholesale
+  AS-level blocking above: the connection *establishes and stays up*, and the **download direction**
+  is throttled to a trickle against whole out-of-region egress ranges, applied by **destination AS /
+  subnet as a class** rather than per-flow signature. Observed pattern: a transfer to an out-of-region
+  host advances a small fixed amount (order ~16KB), then freezes — the handshake and the first bytes
+  pass, sustained download does not. Because the filter keys on the **destination** AS/subnet, it
+  catches out-of-region hosters and **out-of-region CDNs as a class**, so changing *which* out-of-region
+  front you use does not change the outcome. This is corroborated by a two-vantage test (an in-region
+  vantage and an out-of-region vantage observing the same destinations) — it is the in-region edge
+  vantage, not the operator's clean network, that sees it, consistent with the vantage problem
+  ([ADR-0021](adr/0021-decentralized-observability-not-a-central-collector.md),
+  [VIS-0006](vision/0006-decentralized-observability.md)).
 - **ML-based traffic classification** — learns from flow statistics, not signatures. Protocol
   mimicry alone is therefore insufficient; statistical indistinguishability is required.
 - **Active probing** — contacts a suspicious server and checks whether it behaves as the claimed
@@ -61,6 +73,67 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 | Traffic-timing correlation | routing | Multi-hop, padding, mixing (at latency cost) |
 | Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 3–4 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
 | Operator coercion | people | Minimal logging, plausible deniability, jurisdictional distribution |
+
+## Attack surface: download-direction throughput degradation and the out-of-region path
+
+The capability above (**destination-AS / subnet download-direction throughput degradation**) defeats
+the mitigations that work against the rest of this table, and it deserves its own treatment because the
+naive fix — front through an out-of-region CDN — *does not work and makes the metadata posture worse*.
+
+**The effect, stated precisely.** The connection is not blocked. TLS completes, the donor front answers,
+the first bytes arrive — and then sustained download to an out-of-region egress range is choked. From the
+user's seat it reads as "it connects but nothing loads"; from the wire it is a download-direction
+throughput filter keyed on the **destination AS / subnet**, not on the flow's signature. Signature
+indistinguishability (REALITY/Vision) and ML-flow shaping do not address it, because the discriminator is
+*where the bytes are going*, not *what they look like*.
+
+**Why out-of-region CDN fronting does not mitigate it.** Two independent reasons:
+
+1. **The filter is by destination class, so any out-of-region front is in scope.** Fronting moves the
+   visible destination to a CDN, but that CDN's egress ranges are themselves out-of-region — the same
+   class the throughput filter degrades. Swapping one out-of-region front for another keeps the path
+   crossing the same high-interference border filter, so the strangle persists. This is the AS/subnet
+   diversity mitigation (row "IP-level / AS-level blocking") reaching its limit: diversity *within* the
+   degraded class buys nothing.
+2. **A TLS-terminating CDN front is also a metadata leak.** A front that terminates TLS sees the user's
+   **source address** and the **destination hostnames** behind it, and hands both to a third party — a
+   party that, where it is compelled to log, becomes an enrolment point against assets #1 (user identity
+   and location) and #2 (traffic content and destination). So out-of-region TLS-terminating fronting is
+   *worse than neutral* against this adversary: it does not restore throughput and it widens metadata
+   exposure.
+
+**Topology mitigation — the path that never crosses the border filter.** The path that survives is one
+whose data direction never traverses the high-interference border filter as out-of-region traffic:
+
+- **In-region ingress.** The user reaches an **in-region** ingress node over an in-region path that is
+  not subject to the out-of-region throughput filter.
+- **Node-to-node (anastomosis-hop) egress, never user-direct.** Out-of-region egress is carried
+  **node-to-node** — an in-region ingress hands the flow to an out-of-region node over a node-to-node
+  hop — so the user is **never** pointed directly at an out-of-region node, and no user-direct flow
+  crosses the degraded border class. This separates ingress from egress across nodes and is therefore
+  an **automated cross-node** posture (Phase 3-5, see [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md)
+  and the ingress/egress-separation note in the table above). In the **current** posture it is available
+  as an **operator-built two-hop**: an operator manually stands up an in-region ingress and an
+  out-of-region egress under their own genetics, with the egress reached only over the node-to-node hop —
+  no automated route selection, no gossip, no cross-node bridging implied
+  ([ADR-0013](adr/0013-mycelial-vocabulary-and-phase-discipline.md) phase discipline).
+
+**Selective Growth (split-tunnel by default).** The tunnel carries **only** traffic whose native path is
+impaired; destinations that are natively reachable route **direct**, outside the tunnel. The operator's
+principle — *the mycelium does not grow where it is not needed* — is named **Selective Growth**: routing
+an already-reachable destination through an out-of-region egress would needlessly push that flow across
+the very border filter this section is about (and enlarge the correlation and liability surface for no
+gain). Selective Growth keeps the impaired-path set small and the native-path set direct. This is a
+**current-posture** per-client routing decision (manual split-tunnel configuration), not automated route
+selection.
+
+> **Engine note (precision of the instrument).** Domain-aware split — the geo-routing in the xray-class
+> transports — is the precise instrument for Selective Growth: it can route by destination domain, so the
+> impaired-path set is expressed exactly. CIDR-only transports (the WireGuard-class, including
+> AmneziaWG) cannot split by domain; they can only **approximate** Selective Growth via region-exclude
+> route sets (carry all but an excluded set of in-region/native CIDRs). The approximation is coarser —
+> it cannot follow a single impaired hostname inside an otherwise-native range — so where domain-grain
+> Selective Growth is required, the xray-class transport is the correct engine.
 
 ## Attack surface: carriers, bridges, and spores
 
