@@ -35,6 +35,11 @@ this way" (decision); the "how we migrate the system" is described by an RP in [
 | [0021](0021-decentralized-observability-not-a-central-collector.md) | Decentralized aggregate-and-forget observability, not a central collector (per-operator own-fleet monitor only; in-region edge reporting is the priority) | **accepted** |
 | [0022](0022-two-port-reality-default.md) | Two-port REALITY default on the bootstrap path (Vision 443 + gRPC 8443, same family, for client failover; conservative Ansible default stays Vision-only; pinned by a posture gate) | **accepted** |
 
+| [0023](0023-communes-mycobiome-genetics.md) | Mycelium is a Mycobiome of sovereign Communes with their own genetics (Commune = a first-class society entity, explicitly distinct from the architectural layer-planes; compatible by protocol, not by authority) | **accepted** |
+| [0024](0024-immunity-temporary-cuts-and-signals.md) | Immunity — temporary scoped cuts (clotting) of node/route/transport/bridge/corridor/trust-scope/Commune (scoped, reversible, time-bounded, auditable-in-Commune, minimally-revealing, global-topology-independent, non-global) + immune signals that never carry raw traffic/identity/location/full-map and do carry scope/severity/reason-code/TTL/evidence-class/signer-or-quorum/reversible-action-hint; heal requires clot | proposed |
+| [0025](0025-no-global-abuse-oracle.md) | No global abuse oracle — abuse resistance is not a global kill switch (fungi may sign warnings; Communes may subscribe or ignore; bridge contracts decide what binds; local decisions stay local) | **accepted** |
+| [0026](0026-anastomosis-bridges-and-safe-defaults.md) | Anastomosis Bridges, traffic capability classes, and closed-by-default safe defaults (no bridge without an explicit contract; higher-risk classes need stronger trust; anonymous egress is not a default primitive) | proposed |
+
 > Reserved (produced by ADR-0003): 0004 no-logs/retention ·
 > 0005 classification as encryption item · 0006 legal wrapper for egress · 0007 role/jurisdiction
 > separation · 0008 applicable-sanctions screening · 0009 distribution channels.

@@ -851,6 +851,86 @@ coordinator, master map) and were introduced by `Audit-0001`
 | `TELEMETRY_SAFETY_VIOLATION` | **S1** | Telemetry, stress memory, or a scoped summary carries more than the redacted, aggregated, decaying signal the doctrine permits — approaching raw traffic, identity, full peer lists, full maps, or a persistent behavioural profile. Default S1; escalates to **S0** if it links a user to identity, location, or destination (then also `USER_DEANON` / `TRAFFIC_CORRELATION`). |
 | `FORBIDDEN_TOPOLOGY_CENTRALIZATION` / `MASTER_MAP_DRIFT` | **S1** | The system is accreting a global view of the topology — a master map — that no node is meant to hold by default. A registry, coordinator, DHT, or island-merge summary is becoming an authoritative full map instead of scoped, need-to-know route knowledge. Escalates to **S0** if a single such map becomes a point of block/failure for the whole network (then also `SINGLE_POINT_OF_BLOCK`). |
 
+| `GLOBAL_KILL_SWITCH` | **S0** | A global authority is able to ban nodes or Communes network-wide, or a cross-Commune abuse oracle produces signals that are *binding* on Communes that did not consent. Any such network-wide ban power, mandatory blocklist, or coercible central decision point is a centralization/coercion kill switch. Abuse decisions belong to local Communes; fungi may *sign* warnings, Communes may *subscribe* to or *ignore* them, and only bridge contracts make a signal binding inside an explicit relationship. Abuse resistance must never become a global kill switch. |
+| `OPEN_RELAY_OR_DEFAULT_EGRESS` | **S0** | A node defaults to open relay, public egress, anonymous egress as a primitive, or unknown third-party transit — turning Mycelium into an attack substrate (DDoS amplification, abuse transit, C2 carriage, one Commune using another as an attack platform). Safe default posture is closed: no open relay, no public egress by default, no unknown transit, no bridge without an explicit trust policy, rate limits for untrusted scopes. Higher-risk capability classes (relay, egress, unknown bulk) require stronger trust and immunity policy before they are enabled. |
+| `IMMUNE_SIGNAL_OVERREACH` | **S1** | An immune / abuse / cut / quarantine / rate-limit / bridge-risk / corridor-revocation signal carries more than the doctrine permits — approaching raw traffic, user identity, location, or a complete topology map. Permitted signal contents are bounded: scope, severity, reason code, TTL, evidence class, signer or quorum, and a reversible action hint. Default S1; escalates to **S0** if the signal carries user identity or location (then also `USER_DEANON`), or a destination linkage (then also `TRAFFIC_CORRELATION`). |
+| `BRIDGE_WITHOUT_CONTRACT` | **S1** | An inter-Commune (Anastomosis) bridge exists, or traffic crosses between Communes, without an explicit contract that names the trust relationship, allowed and forbidden traffic/capability classes, abuse-propagation and quarantine rules, revocation and recovery rules, and evidence requirements. Default rule: no bridge exists unless explicitly established. A bridge used outside its declared scope or class is also `UNSAFE_ROUTING_OR_UNAUTHORIZED_BRIDGE_USE` (S0). |
+| `UNCLOTTABLE` / `CUT_OVERREACH` | **S1** | A cut (of a node, route, transport, bridge, corridor, trust scope, or Commune) is not scoped, not reversible, not time-bounded, or not auditable inside the affected Commune; or it over-reveals (leaks more than the minimum about the cut); or it depends on a global topology view — *or* the system cannot perform a scoped, reversible cut at all. The ability to heal requires the ability to clot: clotting must be local, bounded, and independent of any global topology. A cut that becomes a network-wide ban is `GLOBAL_KILL_SWITCH` (S0). |
+
+---
+
+<!-- §15.10 — insert as a new subsection at the end of §15 (after §15.9 "Do not invent
+     cryptography or transports", immediately before the closing `---` that precedes
+     §16). It continues the existing 15.x numbering as 15.10. -->
+
+### 15.10. Immunity, sovereign defense, and no global kill switch
+Resilience without immunity is a defect, not a feature: a network that cannot
+defend itself becomes a carrier for parasites. Mycelium is a **Mycobiome** of
+sovereign **Communes** — a Commune being a first-class governance/deployment
+entity (family, company, university, municipal, NGO, emergency-response, state),
+each with its own trust roots, governance, update/bridge/immune/observability
+policy, fungi quorum, and acceptable-use rules. The Commune is **not** one of the
+architectural layers: data plane, control plane, routing plane, and discovery
+plane keep their names and meaning and are **not** renamed. Two Communes may run
+identical software with completely different genetics; they are compatible by
+protocol, not by authority. A refactoring that erodes this sovereignty — that
+makes one Commune able to dictate another's policy, or that collapses the
+Mycobiome into a single owned network — is an architectural defect.
+
+The following are mandatory and must not be watered down:
+
+- **Clotting is the precondition for healing.** The system must be able to make
+  temporary, scoped cuts — of a node, route, transport, bridge, corridor, trust
+  scope, or Commune. Cuts must be scoped, reversible, time-bounded, auditable
+  *inside the affected Commune*, minimally revealing, and independent of any
+  global topology. A system that cannot clot, or whose cut over-reaches, is
+  `UNCLOTTABLE` / `CUT_OVERREACH` (S1). A network that cannot cut infection is
+  not alive — it is already captured.
+- **No global abuse oracle; no global kill switch.** There must NEVER be a global
+  authority capable of banning nodes or Communes network-wide. Local decisions
+  belong to local Communes. Fungi may *sign* warnings; Communes may *subscribe*
+  to or *ignore* them; only bridge contracts determine which signals are binding.
+  Any network-wide ban power, mandatory blocklist, or coercible central decision
+  point is `GLOBAL_KILL_SWITCH` (S0). Abuse resistance must never become a global
+  kill switch.
+- **Safe defaults: closed posture.** Default node posture is closed — no open
+  relay, no public egress by default, no unknown third-party transit, no bridge
+  without an explicit trust policy, no topology sharing by default, rate limits
+  for untrusted scopes, quarantine of suspicious behaviour, and local/community
+  traffic preferred over external transit. A node that defaults to open relay or
+  default egress is `OPEN_RELAY_OR_DEFAULT_EGRESS` (S0). The closed-by-default
+  posture, local rate limits, and local quarantine are *current* node properties
+  (per-operator credentials, no open relay/egress); the cross-Commune machinery
+  (Communes, Anastomosis bridges, immune signals, cross-Commune trust) is
+  Phase 4–5, definable now only as inert typed schema hooks under phase
+  discipline.
+- **Capability classes gate risk.** Traffic capabilities are distinguished —
+  local control; emergency coordination; messaging; signed content replication;
+  software updates; real-time media; relay; egress; unknown bulk. Higher-risk
+  classes require stronger trust and stronger immunity policy. **Anonymous egress
+  is not a default primitive.** Enabling a higher-risk class without the matching
+  trust and immunity policy is a defect.
+- **Inter-Commune bridges require contracts.** Communes communicate only through
+  explicit **Anastomosis bridges**. No bridge exists unless explicitly
+  established; each bridge names its trust relationship, allowed/forbidden
+  traffic and capability classes, abuse-propagation and quarantine rules, and
+  revocation/recovery/evidence rules. A bridge without such a contract is
+  `BRIDGE_WITHOUT_CONTRACT` (S1).
+- **Immune signals never carry payload, identity, location, or the map.** Future
+  immune-system signals (`abuse_signal`, `quarantine_signal`, `cut_signal`,
+  `rate_limit_signal`, `corridor_revocation`, `bridge_risk_signal`,
+  `commune_policy_signal`) must NEVER contain raw traffic, user identities,
+  locations, or complete topology maps. They carry only scope, severity, reason
+  code, TTL, evidence class, signer or quorum, and a reversible action hint. A
+  signal that exceeds this envelope is `IMMUNE_SIGNAL_OVERREACH` (S1; S0 if it
+  carries identity or location).
+
+Canonical rule: Mycelium is not a universal bypass substrate. The Core provides
+compatibility; Communes provide life. Communes may cooperate, isolate, defend
+themselves, and evolve different genetics — no global authority owns the
+Mycobiome. Mycelium must grow through anything, but must not attack through
+everything.
+
 The list of named categories is extended via separate RPs/ADRs. For unnamed
 findings, the auditor assigns severity per §7.
 
