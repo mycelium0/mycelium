@@ -23,3 +23,4 @@ where", before ADR decisions and RP work items exist. An accepted Vision produce
 | [0004](0004-living-network-doctrine.md) | Living-network doctrine | draft | Phase 0–7 |
 | [0005](0005-network-weather-explorer.md) | Network-weather explorer | draft | Measurement track |
 | [0006](0006-decentralized-observability.md) | Decentralized observability (mesh-native, no collector) | draft | Measurement track |
+| [0007](0007-fungi-served-subscription.md) | Fungi-served self-propagating subscription (decentralized ingress distribution) | draft | Distribution track (Phase 3–5) |
