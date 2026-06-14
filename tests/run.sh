@@ -55,6 +55,7 @@ GATES=(
 	"tests/conformance/no_insecure_tls.sh"
 	"tests/conformance/no_operated_network_claim.sh"
 	"tests/conformance/per_protocol_toggle.sh"
+	"tests/conformance/no_full_tunnel_default.sh"
 	"tests/conformance/transport_family_independence.sh"
 	"tests/conformance/no_dataplane_pii.sh"
 	"tests/conformance/phase0_port_canon.sh"
