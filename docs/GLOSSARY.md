@@ -162,6 +162,54 @@ surface that cannot be reversed into topology, membership, geography, or identit
   sources, suppresses below-floor cells, and emits a static `network-weather.json`; the explorer site
   renders only that snapshot and adds no visitor tracking (VIS-0005).
 
+## Selective Growth and the surviving-path pattern
+
+The current-posture deployment pattern for a high-interference path, and the principle that governs it:
+**the mycelium does not grow where it is not needed.** The tunnel carries only the traffic whose native
+path is impaired; everything natively reachable routes direct. The path that survives is one that never
+traverses the high-interference border filter — in-region ingress, with out-of-region egress carried
+node-to-node (an anastomosis hop), never user-direct to an out-of-region node. The manual operator-built
+two-hop and the per-client split-tunnel here are **current-posture** deployment patterns (allowed now);
+their *automated* cross-node selection and route-set assembly are Phase 3-5 (gossip/route promotion), not
+near-term node behaviour.
+
+- **Selective Growth** — the principle that the tunnel carries **only** traffic whose native path is
+  impaired, while natively-reachable destinations route direct (split-tunnel by default): *the mycelium
+  does not grow where it is not needed.* It is the routing-discipline expression of the same restraint as
+  the closed-by-default safe defaults (ADR-0026) and "Mycelium is not a universal bypass substrate"
+  (ADR-0016): reach is extended exactly where direct reach is degraded, and nowhere else, which minimises
+  exposed surface, cost, and the amount of traffic an observer can attribute to the tunnel. **Engine
+  note:** domain-aware split (the geo-routing of the xray-class transports) is the precise instrument for
+  this; CIDR-only transports (the WireGuard-class / AmneziaWG) can only approximate it via region-exclude
+  route sets. The manual operator-built form is current posture; automated selection is Phase 3-5.
+- **In-region ingress** — an entry node reached over an **in-region path**, so the user's first hop never
+  crosses the high-interference border filter. The user connects to a node whose path is native-reachable;
+  the impaired out-of-region reach is taken on **behind** the ingress, node-to-node, not from the user's
+  device. Pairs with out-of-region (node-hop) egress to form the surviving path.
+- **Out-of-region (node-hop) egress** — out-of-region reach carried **node-to-node** from an in-region
+  ingress to an out-of-region node, so the impaired border filter is crossed by the inter-node hop and
+  **never user-direct**. A user-direct connection to an out-of-region node hits the border filter and is
+  degraded as a class (see destination-AS throughput degradation); carrying that egress over an
+  anastomosis hop is the path that survives. Distinct from the closed-by-default *anonymous egress*, which
+  is not a default primitive (ADR-0026): this is an operator's own consented two-hop, not open egress for
+  an unidentified third party.
+- **Destination-AS throughput degradation** — a download-direction throughput filter applied to
+  out-of-region egress ranges by **destination AS / subnet as a class** (the handshake completes, then the
+  download direction is throttled — e.g. a short burst then a freeze), rather than a clean block of one
+  host. Because it hits out-of-region hosters and CDNs **as a class**, fronting via any out-of-region CDN
+  does not help — and a TLS-terminating CDN additionally discloses the user's source address and the
+  destination hostnames to a third party. The surviving answer is a path that never traverses the
+  border filter at all (in-region ingress + node-hop egress), not a different out-of-region front. The
+  download-direction sibling of **AS-level / IP-range blocking** (where the handshake completes and data
+  silently dies); here the path is **impaired**, not cleanly cut.
+- **Anastomosis hop (egress)** — the inter-node hop that carries out-of-region egress for an in-region
+  ingress: the deployment-level instance of **anastomosis** ("two exploring paths fuse where useful")
+  applied to the egress leg, so the impaired path is crossed node-to-node and never user-direct. The
+  manual operator-built form (a deliberate two-hop an operator stands up) is **current posture**;
+  *automated* discovery and promotion of such a hop is Phase 3-5, and a hop that crosses **between**
+  Communes is an **Anastomosis Bridge** governed by an explicit contract (ADR-0026), not an implicit
+  route.
+
 ## Mycelial schemas (`internal/spec`)
 
 Typed control-plane schemas formalising the doctrine above. Each is a data model with `Validate()`

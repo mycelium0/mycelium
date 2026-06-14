@@ -853,6 +853,7 @@ coordinator, master map) and were introduced by `Audit-0001`
 
 | `GLOBAL_KILL_SWITCH` | **S0** | A global authority is able to ban nodes or Communes network-wide, or a cross-Commune abuse oracle produces signals that are *binding* on Communes that did not consent. Any such network-wide ban power, mandatory blocklist, or coercible central decision point is a centralization/coercion kill switch. Abuse decisions belong to local Communes; fungi may *sign* warnings, Communes may *subscribe* to or *ignore* them, and only bridge contracts make a signal binding inside an explicit relationship. Abuse resistance must never become a global kill switch. |
 | `OPEN_RELAY_OR_DEFAULT_EGRESS` | **S0** | A node defaults to open relay, public egress, anonymous egress as a primitive, or unknown third-party transit — turning Mycelium into an attack substrate (DDoS amplification, abuse transit, C2 carriage, one Commune using another as an attack platform). Safe default posture is closed: no open relay, no public egress by default, no unknown transit, no bridge without an explicit trust policy, rate limits for untrusted scopes. Higher-risk capability classes (relay, egress, unknown bulk) require stronger trust and immunity policy before they are enabled. |
+| `OVERBROAD_GROWTH` | **S1** | A generated or templated client/route config grows the tunnel where it is not needed: it full-tunnels by default, or otherwise routes destinations whose **native path is unimpaired** through the tunnel instead of direct. This violates **Selective Growth** (§15.11) — *the mycelium does not grow where it is not needed*. The tunnel must carry **only** traffic whose native path is impaired (degraded/throttled/unreachable on the direct route); natively-reachable destinations route direct (split-tunnel by default). A full-tunnel default needlessly enlarges the volume, timing, and destination set that a single hop observes (correlation surface), and concentrates ordinary native traffic onto the impaired-path egress for no reachability gain. Default S1. Escalates to **S0** when the over-grown path also makes one hop see both the user and a native destination it had no need to carry (then also `USER_DEANON` / `TRAFFIC_CORRELATION`), or when it routes a user's traffic user-direct to an out-of-region egress across a high-interference border filter instead of via an in-region ingress with node-carried egress (an unsafe path; also `UNSAFE_ROUTING_OR_UNAUTHORIZED_BRIDGE_USE`). De-escalates to **S2** only for a test-only/example fixture clearly marked non-production. The precise instrument is a domain-aware split (the xray-class transports' geo-routing); CIDR-only transports (the WireGuard-class / AmneziaWG) approximate it via region-exclude route sets — a CIDR-only config that cannot express the split still owes a documented region-exclude route set, not a blanket default route. |
 | `IMMUNE_SIGNAL_OVERREACH` | **S1** | An immune / abuse / cut / quarantine / rate-limit / bridge-risk / corridor-revocation signal carries more than the doctrine permits — approaching raw traffic, user identity, location, or a complete topology map. Permitted signal contents are bounded: scope, severity, reason code, TTL, evidence class, signer or quorum, and a reversible action hint. Default S1; escalates to **S0** if the signal carries user identity or location (then also `USER_DEANON`), or a destination linkage (then also `TRAFFIC_CORRELATION`). |
 | `BRIDGE_WITHOUT_CONTRACT` | **S1** | An inter-Commune (Anastomosis) bridge exists, or traffic crosses between Communes, without an explicit contract that names the trust relationship, allowed and forbidden traffic/capability classes, abuse-propagation and quarantine rules, revocation and recovery rules, and evidence requirements. Default rule: no bridge exists unless explicitly established. A bridge used outside its declared scope or class is also `UNSAFE_ROUTING_OR_UNAUTHORIZED_BRIDGE_USE` (S0). |
 | `UNCLOTTABLE` / `CUT_OVERREACH` | **S1** | A cut (of a node, route, transport, bridge, corridor, trust scope, or Commune) is not scoped, not reversible, not time-bounded, or not auditable inside the affected Commune; or it over-reveals (leaks more than the minimum about the cut); or it depends on a global topology view — *or* the system cannot perform a scoped, reversible cut at all. The ability to heal requires the ability to clot: clotting must be local, bounded, and independent of any global topology. A cut that becomes a network-wide ban is `GLOBAL_KILL_SWITCH` (S0). |
@@ -1315,6 +1316,39 @@ The project is built on proven, audited primitives and implementations (Xray/sin
 AmneziaWG, libp2p, Snowflake/Headscale patterns). Any proposal that introduces
 custom cryptography or a custom transport protocol instead of a standard one
 requires a separate RFC with justification and is rejected by default.
+
+### 15.11. Selective Growth — the tunnel carries only impaired-path traffic
+*The mycelium does not grow where it is not needed.* Split-tunnel is the default,
+not a tuning option. A node, and every client/route config it renders, must carry
+through the tunnel **only** traffic whose **native path is impaired** — degraded,
+throttled, or unreachable on the direct route. Destinations whose native path is
+unimpaired route **direct**. A generated config that full-tunnels by default, or
+that routes natively-reachable destinations through the tunnel, is `OVERBROAD_GROWTH`
+(S1; see §7).
+
+This is not only frugality — it is a safety boundary. Over-broad growth enlarges,
+for no reachability gain, the volume/timing/destination set a single hop observes
+(a correlation surface, cf. §15.3) and concentrates ordinary native traffic onto
+the impaired-path egress. The mechanism the empirical posture must respect: where
+direct reach is degraded, the degradation is a destination-AS / subnet,
+download-direction throughput filter hitting out-of-region hosters and CDNs **as a
+class** — so fronting via any out-of-region CDN does not help, and a TLS-terminating
+front additionally leaks the user's source address and destination hostnames to a
+third party (worse where that party is compelled to log). The path that survives is
+one that **never traverses the high-interference border filter**: an in-region
+ingress, with out-of-region egress carried node-to-node (an anastomosis hop), never
+user-direct to an out-of-region node. Routing native traffic over that scarce path,
+or routing a user user-direct across the border filter, is the over-growth this
+rule forbids.
+
+The precise instrument is a **domain-aware split** (the xray-class transports'
+geo-routing). CIDR-only transports (the WireGuard-class / AmneziaWG) can only
+**approximate** it via region-exclude route sets; a CIDR-only config that cannot
+express the split still owes a documented region-exclude route set — never a blanket
+default route. (Manual operator-built two-hop and per-client split-tunnel routing
+are **current-posture** deployment patterns; automated cross-node route selection
+is Phase 3-5 — this rule governs the *config that is rendered now*, under that
+phase discipline.)
 
 ---
 
