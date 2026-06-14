@@ -475,6 +475,56 @@ The rule: early phases anticipate the future with **inert interfaces**, never wi
 behaviour. Each phase's Definition of Done stays coherent and self-contained — a phase is done when its
 own DoD is met, not when a later phase's mechanism is half-built inside it.
 
+## Immunity, Communes, and sovereign defense across the phases
+
+The operator doctrine — **immunity, temporary cuts, Communes, Anastomosis Bridges, and sovereign
+defense** — is canonical (see [GLOSSARY](GLOSSARY.md) and [THREAT-MODEL](THREAT-MODEL.md)). A resilient
+network that cannot defend itself becomes an attack substrate: a network that cannot cut infection is
+not alive, it is already captured. This doctrine maps onto the phase discipline exactly like every
+other advanced mechanism here — **safe-default node posture is current behaviour; the cross-Commune
+machinery is inert schema now and live only in Phases 4–5** ([ADR-0013](adr/0013-phase-discipline-and-scope-control.md)).
+
+**Terminology guard.** A **Mycelium Commune** is a *new first-class entity* — a sovereign Mycelium
+society (family, company, university, municipal, NGO, emergency-response, state) with its own trust
+roots, governance, update/bridge/immunity/observability policies, fungi quorum, and acceptable-use
+rules. It is **not** one of the architectural *layer planes* (data plane, control plane, routing plane,
+discovery plane), which keep their names unchanged. The collection of all protocol-compatible Communes
+is the **Mycobiome** — an ecosystem, not a single owned network. Communes are compatible by protocol,
+not by authority.
+
+**Cross-cutting invariant (all phases): no global abuse oracle.** There must **never** be a global
+authority capable of banning nodes or Communes network-wide — abuse resistance must not become a global
+kill switch. Local decisions belong to local Communes. `fungi` may *sign* warnings ([ADR-0018](adr/0018-fungi-cache-custodian.md));
+Communes may subscribe to, weigh, or ignore them; bridge contracts alone determine which signals are
+binding. This invariant binds every phase below, alongside the existing **never a global kill switch**,
+**never a master map**, and **signals never carry raw traffic, identity, location, or a full topology**
+constraints ([VIS-0003](vision/0003-distributed-awareness.md), [VIS-0006](vision/0006-decentralized-observability.md)).
+
+| Doctrine element | When it is real | Notes |
+|---|---|---|
+| **Safe defaults / closed-by-default posture** — no open relay; no public egress by default; no unknown third-party transit; no bridge without explicit trust policy; no topology sharing by default; local/community traffic preferred over external transit | **Phase 0–1 (largely already true)** | Follows directly from per-operator credentials ([ADR-0014](adr/0014-per-operator-credentials.md)) and the no-open-relay/no-egress data-plane posture. Anonymous egress is **not** a default primitive. |
+| **Local rate limits + local quarantine** for untrusted scopes; quarantine suspicious behaviour | **Phase 0–1 node policy** | Per-node, per-operator enforcement; no cross-Commune coordination required, so no membership/trust dependency. |
+| **Traffic capability classes** (local control, emergency coordination, messaging, signed content replication, software updates, real-time media, relay, egress, unknown bulk) — higher-risk capabilities require stronger trust and immunity policy | **Phase 0–2 as typed schema; enforced per class as capabilities ship** | Define the class taxonomy as an inert descriptor early; classes gate behaviour only once the relevant transport/relay capability exists. |
+| **Inert immune / cut / Commune / bridge schemas** — typed, no runtime behaviour: `abuse_signal`, `quarantine_signal`, `cut_signal`, `rate_limit_signal`, `corridor_revocation`, `bridge_risk_signal`, `commune_policy_signal`; Commune genetics; bridge-contract descriptors | **Phase 0–2 (data models / interfaces only)** | Sketched the same way carrier/spore/discovery/trust schemas are — defined so as **not to block** later implementation, with **no** gossip, membership, or cross-Commune action running ([ADR-0013](adr/0013-phase-discipline-and-scope-control.md)). Signals carry only: scope, severity, reason code, TTL, evidence class, signer/quorum, reversible action hint — **never** raw traffic, identities, locations, or complete topology maps. |
+| **Temporary cuts (clotting)** — scoped, reversible, time-bounded, auditable inside the affected Commune, minimally revealing, independent of any global topology — isolating a node, route, transport, bridge, corridor, trust scope, or Commune | **Local cut of a node/route/transport: Phase 1–2** (operator-scoped). **Cut of a bridge / corridor / trust scope / Commune: Phase 4–5** | The ability to heal requires the ability to clot. Local clotting needs no membership; Commune-scoped cuts ride on Phase 4–5 trust/membership. |
+| **Live Communes + Commune genetics** (trust roots, accepted signers, governance, bridge/immunity/transport/observability policies, trust-propagation rules) | **Phase 4–5** | Communes are first-class once membership and trust exist; two Communes may run identical software with completely different genetics. |
+| **Anastomosis Bridges** — explicit inter-Commune bridges defining trust relationships, allowed/forbidden traffic classes, abuse-propagation/quarantine/revocation/recovery rules, evidence requirements | **Phase 4–5** | **No bridge exists unless explicitly established.** (Distinct from the Phase-7 biological *anastomosis* of local **paths** at §[Phase 7](#phase-7--biological-flow-optimization-the-science--compute-heavy-endgame); a Bridge is a governed inter-Commune contract, not a fused route.) Builds on carrier-agnostic bridging ([ADR-0011](adr/0011-carrier-agnostic-bridging.md)). |
+| **Immune signals in flight + cross-Commune cuts** — gossiped abuse/quarantine/cut/revocation signals; subscription and weighting per bridge contract | **Phase 4–5** | Requires gossip/DHT and trust gradient; honours the no-global-abuse-oracle invariant — signals are advisory unless a bridge contract makes them binding. |
+| **Governance / quorum / federation** — Commune governance, fungi quorum, how Communes cooperate, coexist, isolate, specialise, or evolve independent genetics | **Phase 4–5** | Decentralised and consensus-based; global Mycelium does not own Communes ([ADR-0016](adr/0016-software-not-an-operated-network.md)). |
+
+**Sovereign defense (cross-cutting posture).** Every Commune must be *capable* of self-defense —
+accepting educational/emergency/update traffic while rejecting anonymous relay, unknown egress, bulk
+scanning, or specific bridges, and quarantining suspicious nodes. No Commune is required to relay all
+traffic, to trust all other Communes, or to remain connected during active abuse. These are
+policy-driven choices, never controlled by a global authority. The closed-by-default end of this
+posture is **already** the Phase-0–1 node default above; the Commune-scoped policy engine that makes it
+expressive arrives with membership in Phases 4–5.
+
+**Canonical rule.** Mycelium is not a universal bypass substrate. It is a Mycobiome composed of
+sovereign Communes: the Core provides compatibility, Communes provide life. Communes may cooperate,
+isolate, defend themselves, and evolve different genetics; no global authority owns the Mycobiome.
+Mycelium must grow through anything — and must **not** attack through everything.
+
 ## Phase-transition principle
 
 Do not begin phase N+1 until phase N has met its Definition of Done **in production with real

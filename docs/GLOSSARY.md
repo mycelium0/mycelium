@@ -232,3 +232,69 @@ references use standard primitives via a key-id string plus signature bytes, nev
 - **Cryptographic-means licensing** — in some jurisdictions, developing, producing, or
   distributing software that performs encryption may require a licence from a national authority;
   operators should assess applicable rules for their deployment context.
+
+## Immunity, Communes, and the Mycobiome
+
+The doctrine that a resilient fabric must also be able to defend itself: resilience without immunity
+turns a network into an attack substrate. Builds on opt-in publish + cache-custodian custody
+(ADR-0018), trust scope / spore / knowledge gradient (VIS-0003), carrier-agnostic bridging (ADR-0011),
+cords (VIS-0004), decentralized observability with no central collector (VIS-0006/ADR-0021),
+per-operator credentials (ADR-0014), and software-not-an-operated-network with consensus governance
+(ADR-0016). The cross-Commune machinery (bridges, immune signals, cross-Commune trust) is Phase 4-5
+with inert schema hooks definable now (ADR-0013); local safe defaults, rate limits, and quarantine are
+already-true Phase-0 node posture.
+
+- **Commune** (Mycelium Commune) — a sovereign Mycelium society: a deployment with its own trust
+  roots, governance, update policy, bridge policy, immune system, observability policy, fungi quorum,
+  and acceptable-use rules. Examples: a family, company, university, municipal, NGO,
+  emergency-response, or state Commune. Global Mycelium does not own Communes; they are first-class
+  entities, compatible by protocol and not by authority. **Distinct from the layer "planes"** — the
+  architectural layers (data plane, control plane, routing plane, discovery plane) are unchanged and
+  are NOT renamed; a Commune is a governed *society*, not a layer.
+- **Mycobiome** — the collection of all protocol-compatible Communes. Not a single network but an
+  ecosystem: Communes may cooperate, coexist, remain isolated, specialize, and evolve independently
+  without losing interoperability. The Core provides compatibility; Communes provide life. No global
+  authority owns the Mycobiome.
+- **Commune Genetics** — a Commune's defining profile: trust roots, accepted signers, governance
+  rules, bridge policies, immunity policies, transport policies, observability policies, and trust
+  propagation rules. Two Communes may run identical software while having completely different
+  genetics; compatibility is by protocol, not by shared authority.
+- **Anastomosis Bridge** — an explicit, contracted link between two Communes (the inter-Commune form
+  of anastomosis — "fuse where useful"). A bridge defines trust relationships, allowed and forbidden
+  traffic classes, abuse-propagation rules, quarantine rules, revocation rules, recovery rules, and
+  evidence requirements. Default rule: **no bridge exists unless explicitly established** (Phase 4-5;
+  inert schema hooks definable now).
+- **Immunity** — a Commune's capacity to defend itself rather than optimize for universal
+  availability at any cost. A Commune must be capable of protecting against DDoS traffic, scanning,
+  credential attacks, malware command-and-control, hostile relay use, abuse transit, infrastructure
+  attacks, and one Commune using another as an attack platform. No Commune is required to relay all
+  traffic, to trust all other Communes, or to remain connected during active abuse.
+- **Temporary Cut / Clotting** — a scoped, reversible, time-bounded isolation that a living fabric
+  uses to stop the spread of harm, as an organism clots a wound. A cut may isolate a node, route,
+  transport, bridge, corridor, trust scope, or Commune. Cuts must be scoped, reversible,
+  time-bounded, auditable inside the affected Commune, minimally revealing, and independent of any
+  global topology. Rule: **the ability to heal requires the ability to clot.**
+- **Immune Signal** — a future-phase control signal carrying a defensive decision, not data:
+  `abuse_signal`, `quarantine_signal`, `cut_signal`, `rate_limit_signal`, `corridor_revocation`,
+  `bridge_risk_signal`, `commune_policy_signal`. A signal must **NEVER** contain raw traffic, user
+  identities, locations, or complete topology maps. A signal **should** contain scope, severity,
+  reason code, TTL, evidence class, signer or quorum, and a reversible action hint (Phase 4-5; inert
+  schema hooks definable now).
+- **Sovereign Defense** — the principle that every Commune may set and enforce its own defensive
+  posture: accepting (e.g.) educational, emergency, or update traffic while rejecting anonymous relay,
+  unknown egress, bulk scanning, or specific bridges, and quarantining suspicious nodes. These
+  choices are policy-driven and local — never controlled by a global authority.
+- **Global Abuse Oracle (forbidden)** — the explicitly prohibited notion of a global authority able
+  to ban nodes or Communes network-wide. There must **NEVER** be one. Local decisions belong to local
+  Communes; fungi may sign warnings, Communes may subscribe to or ignore them, and bridge contracts
+  determine which signals are binding. Rule: **abuse resistance must not become a global kill switch.**
+- **Traffic Capability Class** — the risk-graded category of a flow, used to gate it against trust
+  and immunity policy: local control, emergency coordination, messaging, signed-content replication,
+  software updates, real-time media, relay traffic, egress traffic, and unknown bulk traffic.
+  Higher-risk capabilities require stronger trust and stronger immunity policies. Anonymous egress is
+  **not** a default primitive.
+- **Safe Defaults** — the closed-by-default node posture: no open relay; no public egress by default;
+  no unknown third-party transit by default; no bridge without an explicit trust policy; no topology
+  sharing by default; rate limits for untrusted scopes; quarantine for suspicious behavior; and
+  local/community traffic preferred over external transit. Largely already-true Phase-0 posture
+  (per-operator credentials, no open relay/egress).
