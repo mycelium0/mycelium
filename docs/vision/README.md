@@ -25,3 +25,4 @@ where", before ADR decisions and RP work items exist. An accepted Vision produce
 | [0006](0006-decentralized-observability.md) | Decentralized observability (mesh-native, no collector) | draft | Measurement track |
 | [0007](0007-fungi-served-subscription.md) | Fungi-served self-propagating subscription (decentralized ingress distribution) | draft | Distribution track (Phase 3–5) |
 | [0008](0008-immunity-communes-mycobiome.md) | Immunity, Communes, and the Mycobiome (sovereign defense without a global oracle) | draft | Sovereignty & defense track (local now; cross-Commune Phase 4–5) |
+| [0009](0009-selective-growth-reachability-topology.md) | Selective Growth & Reachability Topology (grow only into impaired paths; out-of-region egress node-to-node) | draft | Routing & reachability track (manual now; automated Phase 3–5) |
