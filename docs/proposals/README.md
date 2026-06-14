@@ -25,3 +25,4 @@ migrate the system). The decision "why this way" is recorded in an ADR — see [
 | [0004](0004-network-weather-explorer-publisher.md) | Network-weather explorer: off-network publisher + static site | draft | cross-cutting Measurement track |
 | [0005](0005-inoculum-bundle-and-toolkit.md) | Inoculum: signed operator starter bundle, v0 schema, local-only toolkit | draft | not before Phase 2 |
 | [0006](0006-in-region-edge-reporting.md) | In-region edge reporting: opt-in edge reachability signal (inert EdgeReport schema now) | draft | not before Phase 2 |
+| [0007](0007-phase1-distribution-health-xhttp.md) | Phase 1: matured distribution + health/failover + an XHTTP-over-real-TLS LTE channel (gated NO-GO behind the Phase-0 GO signature) | draft | Phase 1 (after GO) |
