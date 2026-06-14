@@ -155,6 +155,26 @@ AWG_MTU="1280"
 AWG_JC="4"; AWG_JMIN="40"; AWG_JMAX="70"; AWG_S1="51"; AWG_S2="102"
 AWG_H1="1148403838"; AWG_H2="1351874800"; AWG_H3="1936608092"; AWG_H4="1830553362"
 
+# --- Selective Growth: client-side split-tunnel defaults (VIS-0009; ADR-0027; closed-by-default lineage
+# ADR-0026) -------------------------------------------------------------------------------------------
+# "The mycelium does not grow where it is not needed." A generated CLIENT config carries ONLY traffic
+# whose native path is impaired; natively-reachable destinations route DIRECT (split-tunnel). The
+# WireGuard-class transport is CIDR-only, so it can only APPROXIMATE this via a region-exclude
+# AllowedIPs route set (domain-aware split is the xray-class engine's job, not this path's). These
+# knobs touch ONLY the generated client config(s); the server awg0.conf is never affected.
+AWG_SPLIT_TUNNEL=1                 # 1 = split-tunnel by default (Selective Growth); 0 only with the opt-out below
+AWG_REGION_EXCLUDE_FILE=""         # path to a file of PRECOMPUTED region-exclude AllowedIPs CIDRs (one per
+                                   # line; '#'-comments + blanks ignored). This is the route set to INSTALL —
+                                   # i.e. the complement of the in-region native CIDRs against the default
+                                   # route, produced out-of-band by an AllowedIPs calculator over the
+                                   # region's CIDR list. We do NOT do CIDR-complement arithmetic in bash:
+                                   # the route policy stays operator-owned and auditable. Empty => safe
+                                   # narrow default (tunnel ranges only); we NEVER silently full-tunnel.
+AWG_FULL_TUNNEL_OPTOUT=0           # 1 = deliberately emit a full-tunnel client (0.0.0.0/0[, ::/0]) WITH the
+                                   # documented Selective-Growth opt-out marker. Records intent AND keeps
+                                   # tests/conformance/no_full_tunnel_default.sh green.
+AWG_SG_OPTOUT_MARKER="# selective-growth: opt-out (full-tunnel)"  # exact marker the gate look-behinds for
+
 # node_exporter (host metrics) — pinned public release, loopback-only (scraped over an SSH tunnel, the
 # host firewall opens NO port for it). Plus a tiny textfile metric mycelium_dataplane_unit_active so the
 # SingBoxDown alert can fire. Pins + layout mirror infra/ansible/roles/observability + group_vars; the
@@ -187,6 +207,8 @@ while [ "$#" -gt 0 ]; do
 		--singbox-version) SINGBOX_VERSION="${2:?--singbox-version needs a value}"; shift 2 ;;
 		--singbox-sha256)  SINGBOX_SHA256="${2:?--singbox-sha256 needs a value}"; shift 2 ;;
 		--clients)         CLIENT_NAMES="${2:?--clients needs a value}"; shift 2 ;;
+		--region-exclude)  AWG_REGION_EXCLUDE_FILE="${2:?--region-exclude needs a path}"; shift 2 ;;
+		--full-tunnel)     AWG_FULL_TUNNEL_OPTOUT=1; shift ;;
 		--node-address)    NODE_ADDRESS="${2:?--node-address needs a value}"; shift 2 ;;
 		--donor)           FORCE_DONOR="${2:?--donor needs a value}"; shift 2 ;;
 		--no-harden)       DO_HARDEN=0; shift ;;
@@ -1035,6 +1057,62 @@ restart_singbox() { need_root; run systemctl enable --now sing-box 2>/dev/null |
 # distinguish a failed restart from a failed post-check.
 apply_singbox()   { need_root; run systemctl enable sing-box 2>/dev/null || true; run systemctl restart sing-box; }
 
+# compute_client_allowed HAS_V6 -> set SG_ALLOWED_LINES (one CIDR/line) + SG_MARKER. Selective Growth
+# (VIS-0009/ADR-0027): the generated CLIENT tunnel carries ONLY impaired-path traffic; we NEVER silently
+# full-tunnel. Resolution order:
+#   1. AWG_FULL_TUNNEL_OPTOUT=1            -> deliberate full tunnel: marker + default route(s).
+#   2. split-tunnel ON + non-empty list   -> that file's region-exclude route set, verbatim.
+#   3. split-tunnel ON + no/empty list    -> SAFE NARROW: in-tunnel range(s) only; warn loudly.
+#   4. split-tunnel OFF without opt-out    -> refuse (return 1).
+compute_client_allowed() {
+	local has_v6="$1" line v4net
+	SG_ALLOWED_LINES=""; SG_MARKER=""
+	if [ "$AWG_FULL_TUNNEL_OPTOUT" -eq 1 ]; then
+		SG_MARKER="$AWG_SG_OPTOUT_MARKER"
+		if [ "$has_v6" -eq 1 ]; then SG_ALLOWED_LINES="0.0.0.0/0
+::/0"; else SG_ALLOWED_LINES="0.0.0.0/0"; fi
+		warn "AWG_FULL_TUNNEL_OPTOUT=1 — emitting a DELIBERATE full-tunnel client (marker recorded). Prefer a region-exclude list (Selective Growth)."
+		return 0
+	fi
+	if [ "$AWG_SPLIT_TUNNEL" -eq 0 ]; then
+		warn "AWG_SPLIT_TUNNEL=0 with no AWG_FULL_TUNNEL_OPTOUT — refusing an undocumented full-tunnel client."
+		return 1
+	fi
+	if [ -n "$AWG_REGION_EXCLUDE_FILE" ] && [ -f "$AWG_REGION_EXCLUDE_FILE" ]; then
+		while IFS= read -r line; do
+			line="${line%%#*}"
+			line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+			[ -n "$line" ] || continue
+			case "$line" in
+				0.0.0.0/0|::/0) warn "region-exclude file lists a default route ($line) — that is a full tunnel; ignoring that entry."; continue ;;
+			esac
+			if [ -z "$SG_ALLOWED_LINES" ]; then SG_ALLOWED_LINES="$line"; else SG_ALLOWED_LINES="$SG_ALLOWED_LINES
+$line"; fi
+		done < "$AWG_REGION_EXCLUDE_FILE"
+		if [ -n "$SG_ALLOWED_LINES" ]; then
+			log "split-tunnel: AllowedIPs from region-exclude file $AWG_REGION_EXCLUDE_FILE (Selective Growth)."
+			return 0
+		fi
+		warn "region-exclude file $AWG_REGION_EXCLUDE_FILE yielded no usable CIDRs — falling back to the safe narrow default."
+	fi
+	v4net="$(printf '%s' "$AWG_TUNNEL_V4" | sed -E 's#\.[0-9]+/[0-9]+$#.0/24#')"
+	SG_ALLOWED_LINES="$v4net"
+	if [ "$has_v6" -eq 1 ]; then SG_ALLOWED_LINES="$SG_ALLOWED_LINES
+${AWG_PEER_BASE_V6}/64"; fi
+	warn "no region-exclude list configured (AWG_REGION_EXCLUDE_FILE unset/empty) — emitting a SAFE NARROW client (tunnel ranges only). It will NOT carry out-of-region impaired-path traffic until you supply a region-exclude AllowedIPs file. Intentional: we never silently full-tunnel."
+	return 0
+}
+
+# sg_allowed_join -> echo SG_ALLOWED_LINES as 'a, b, c' (pure bash; no paste dependency).
+sg_allowed_join() {
+	local out="" line
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		if [ -z "$out" ]; then out="$line"; else out="$out, $line"; fi
+	done < <(printf '%s\n' "$SG_ALLOWED_LINES")
+	printf '%s' "$out"
+}
+
 # render_awg0 — FIRST-TIME render of the AmneziaWG server config (awg0.conf) + one [Peer] per client,
 # plus a ready-to-import client config per identity. Mirrors the audited amneziawg Ansible role
 # (templates/awg0.conf.j2 + defaults). The CALLER invokes this ONLY when awg0.conf is ABSENT, so a
@@ -1085,10 +1163,13 @@ render_awg0() {
 		[ -f "$clients_dir/$name.psk" ] || ( umask 077; awg genpsk >"$clients_dir/$name.psk" )
 		cpsk="$(cat "$clients_dir/$name.psk")"
 		if [ "$has_v6" -eq 1 ]; then
-			cv6=", ${AWG_PEER_BASE_V6}${n}/128"; client_allowed="0.0.0.0/0, ::/0"; client_dns="1.1.1.1, 2606:4700:4700::1111"
+			cv6=", ${AWG_PEER_BASE_V6}${n}/128"; client_dns="1.1.1.1, 2606:4700:4700::1111"
 		else
-			cv6=""; client_allowed="0.0.0.0/0"; client_dns="1.1.1.1"
+			cv6=""; client_dns="1.1.1.1"
 		fi
+		# Selective Growth (VIS-0009/ADR-0027): the client tunnel carries ONLY impaired-path traffic by default.
+		compute_client_allowed "$has_v6" || die "AmneziaWG client AllowedIPs unresolved — set AWG_FULL_TUNNEL_OPTOUT=1 to deliberately full-tunnel, or supply AWG_REGION_EXCLUDE_FILE."
+		client_allowed="$(sg_allowed_join)"
 		{
 			printf '\n[Peer]\n# name = %s\n' "$name"
 			printf 'PublicKey = %s\n' "$cpub"
@@ -1107,6 +1188,7 @@ render_awg0() {
 			printf 'PublicKey = %s\n' "$spub"
 			printf 'PresharedKey = %s\n' "$cpsk"
 			printf 'Endpoint = %s:%s\n' "$node_addr" "$port"
+			[ -n "$SG_MARKER" ] && printf '%s\n' "$SG_MARKER"
 			printf 'AllowedIPs = %s\n' "$client_allowed"
 			printf 'PersistentKeepalive = 25\n'
 		} > "$clients_dir/$name.conf" )
@@ -1416,6 +1498,8 @@ flow_update() {
 		if [ -n "$SINGBOX_VERSION" ]; then reexec_args+=(--singbox-version "$SINGBOX_VERSION"); fi
 		if [ -n "$SINGBOX_SHA256" ]; then reexec_args+=(--singbox-sha256 "$SINGBOX_SHA256"); fi
 		reexec_args+=(--clients "$CLIENT_NAMES")
+		if [ -n "$AWG_REGION_EXCLUDE_FILE" ]; then reexec_args+=(--region-exclude "$AWG_REGION_EXCLUDE_FILE"); fi
+		if [ "$AWG_FULL_TUNNEL_OPTOUT" -eq 1 ]; then reexec_args+=(--full-tunnel); fi
 		if [ -n "$NODE_ADDRESS" ]; then reexec_args+=(--node-address "$NODE_ADDRESS"); fi
 		if [ "$DO_HARDEN" -eq 0 ]; then reexec_args+=(--no-harden); fi
 		if [ "$DO_AMNEZIAWG" -eq 0 ]; then reexec_args+=(--no-amneziawg); fi
