@@ -46,6 +46,7 @@ MYC_DEFAULT_TEMPLATE_SINGBOX="$MYC_ROOT/../nodes/dataplane/singbox/server.templa
 MYC_DEFAULT_ENGINE="singbox"   # project canon: sing-box is PRIMARY (default). xray stays optional via --engine xray.
 MYC_DEFAULT_OUT_SERVER="$MYC_ROOT/state/server.json"
 MYC_DEFAULT_OUT_SUBS="$MYC_ROOT/out"
+MYC_DEFAULT_OUT_BUNDLE="$MYC_ROOT/state/bundle.json"
 
 # shellcheck source=lib/common.sh
 . "$MYC_LIB/common.sh"
@@ -57,6 +58,8 @@ MYC_DEFAULT_OUT_SUBS="$MYC_ROOT/out"
 . "$MYC_LIB/render.sh"
 # shellcheck source=lib/render_singbox.sh
 . "$MYC_LIB/render_singbox.sh"
+# shellcheck source=lib/render_bundle.sh
+. "$MYC_LIB/render_bundle.sh"
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -102,6 +105,13 @@ Commands:
                             selector + urltest (sing-box) / select + url-test group
                             (Clash-Meta), preferring protocols in priority order.
           --engine xray     optional single VLESS+REALITY+Vision outbound.
+
+  bundle        --params FILE [--state FILE] [--out FILE]
+        Render the node's typed distribution Bundle (internal/spec/bundle.go): one
+        Endpoint per ENABLED transport — coarse transport_class (closed vocab),
+        coarse region bucket, priority hint, advisory health ("unknown" in Phase 1),
+        and the opaque dialable Link. Output is valid JSON (default: state/bundle.json).
+        The served, self-updating endpoint that emits it is RP-0007-b deploy config.
 
   help | -h | --help
         Show this help.
@@ -312,6 +322,28 @@ cmd_subscription() {
 }
 
 # ---------------------------------------------------------------------------
+# Subcommand: bundle
+# ---------------------------------------------------------------------------
+
+cmd_bundle() {
+	local params state out
+	params=""
+	state="$MYC_DEFAULT_STATE"
+	out="$MYC_DEFAULT_OUT_BUNDLE"
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--params) params="${2:?--params needs a value}"; shift 2 ;;
+			--state)  state="${2:?--state needs a value}"; shift 2 ;;
+			--out)    out="${2:?--out needs a value}"; shift 2 ;;
+			-h|--help) usage; return 0 ;;
+			*) myc_die "bundle: unknown argument: $1" ;;
+		esac
+	done
+	[ -n "$params" ] || myc_die "bundle: --params is required"
+	myc_render_bundle "$params" "$state" "$out"
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -329,6 +361,7 @@ main() {
 		identity)       cmd_identity "$@" ;;
 		render-server)  cmd_render_server "$@" ;;
 		subscription)   cmd_subscription "$@" ;;
+		bundle)         cmd_bundle "$@" ;;
 		help|-h|--help) usage ;;
 		*) myc_die "unknown command: $cmd (run 'myceliumctl help')" 2 ;;
 	esac

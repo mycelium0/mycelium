@@ -34,3 +34,41 @@
 		output discard
 	}
 }
+{% if caddy_serve_bundle %}
+
+# ---------------------------------------------------------------------------
+# Served distribution bundle (RP-0007-b) — the self-replenishing subscription.
+#
+# Serves the node's typed Bundle (internal/spec/bundle.go, rendered + validated fail-closed by
+# node-bootstrap.sh) over local TLS, with a profile-update-interval header so a self-polling client
+# knows when to replenish. Loopback-only by default ({{ caddy_bundle_listen }}); the operator fronts
+# it via their chosen reach path, so the channel is never a single public chokepoint. Caddy serves
+# the file AS-IS: the fail-closed last-known-good guarantee lives in the renderer, never here.
+# ---------------------------------------------------------------------------
+{{ caddy_bundle_listen }} {
+	handle {{ caddy_bundle_path }} {
+		header {
+			# Tell self-polling clients how often to re-fetch the bundle (self-heal cadence).
+			profile-update-interval "{{ caddy_bundle_update_interval }}"
+			Content-Type "application/json"
+			Cache-Control "no-store"
+			-Server
+			X-Content-Type-Options "nosniff"
+		}
+		rewrite * {{ caddy_bundle_file }}
+		file_server {
+			root /
+		}
+	}
+
+	# Anything other than the bundle path is not served here.
+	handle {
+		respond "Not found" 404
+	}
+
+	log {
+		# Do not retain client PII (THREAT-MODEL: user safety #1).
+		output discard
+	}
+}
+{% endif %}

@@ -33,6 +33,9 @@
 #   * active_probe_owncert.sh — every genuine single-TLS XHTTP inbound (own cert, no reality) serves
 #                               its OWN cert, avoids the 8443 mobile tell, and stays distinct from the
 #                               REALITY-XHTTP (TLS-in-TLS) inbound — probe-safe (RP-0007-a §AC-a3)
+#   * sub_channel_not_single_point.sh — the subscription/bundle delivery channel is never a single
+#                               point of block: no committed config pins a lone hardcoded sub URL, and
+#                               the bundle spans >=2 independent transport families (RP-0007-b)
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -68,6 +71,7 @@ GATES=(
 	"tests/conformance/dependency_policy.sh"
 	"tests/conformance/bundle_region_closed_vocab.sh"
 	"tests/conformance/active_probe_owncert.sh"
+	"tests/conformance/sub_channel_not_single_point.sh"
 	"control/selftest.sh"
 )
 

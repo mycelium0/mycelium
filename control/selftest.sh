@@ -596,6 +596,79 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+note "bundle emission (typed distribution Bundle — internal/spec/bundle.go shape)"
+# ---------------------------------------------------------------------------
+# Render the node's distribution Bundle from the multi-protocol sing-box params fixture (several
+# transports enabled, trojan disabled) + the two-client identity state. Assert the emitted JSON is
+# structurally exact per bundle.go so it round-trips through internal/spec.Bundle.Validate() (the
+# authoritative Go round-trip runs on a node — go is not assumed here). One Endpoint per ENABLED
+# transport; every health "unknown" (Phase-1 invariant); every transport_class in the closed vocab;
+# every link non-empty; top-level version + generated_at present.
+BUNDLE_OUT="$WORK/bundle.json"
+"$CTL" bundle --params "$SB_PARAMS" --state "$STATE" --out "$BUNDLE_OUT" 2>/dev/null
+
+jq -e . "$BUNDLE_OUT" >/dev/null && ok "bundle is valid JSON" || bad "bundle invalid JSON"
+
+# Top-level shape: version (NetworkStateVersion == 1) + generated_at (RFC-3339 UTC) + endpoints[].
+jq -e '.version == 1' "$BUNDLE_OUT" >/dev/null \
+	&& ok "bundle version is NetworkStateVersion (1)" || bad "bundle version mismatch"
+jq -e '(.generated_at | type == "string") and (.generated_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))' "$BUNDLE_OUT" >/dev/null \
+	&& ok "bundle generated_at is RFC-3339 UTC" || bad "bundle generated_at missing/malformed"
+
+# At least one endpoint (Bundle.Validate requires >=1).
+jq -e '(.endpoints | type == "array") and (.endpoints | length >= 1)' "$BUNDLE_OUT" >/dev/null \
+	&& ok "bundle has >=1 endpoint" || bad "bundle endpoint count"
+
+# Each endpoint carries EXACTLY the six bundle.go fields (no extras, none missing).
+jq -e '.endpoints | all((keys | sort) == ["health","link","priority","region","tag","transport_class"])' "$BUNDLE_OUT" >/dev/null \
+	&& ok "every endpoint has exactly {tag,transport_class,region,priority,health,link}" || bad "endpoint field set"
+
+# Phase-1 invariant: health is advisory-only and MUST be "unknown" (Bundle.Validate rejects else).
+jq -e '.endpoints | all(.health == "unknown")' "$BUNDLE_OUT" >/dev/null \
+	&& ok "every endpoint health == \"unknown\" (Phase-1 invariant)" || bad "non-unknown health leaked"
+
+# transport_class is in the closed ADR-0010/0020 vocab (matches internal/spec TransportClass*).
+jq -e '.endpoints | all(.transport_class | IN("reality-tcp","xhttp-tls","quic-udp","shadowsocks-tcp","shadowtls-tcp","trojan-tls","amneziawg-udp"))' "$BUNDLE_OUT" >/dev/null \
+	&& ok "every transport_class is in the closed vocab" || bad "transport_class outside closed vocab"
+
+# Link is the per-endpoint dialable client config string — never empty.
+jq -e '.endpoints | all((.link | type == "string") and ((.link | length) > 0))' "$BUNDLE_OUT" >/dev/null \
+	&& ok "every endpoint link is a non-empty dialable string" || bad "empty link leaked"
+
+# priority is a non-negative integer (selection-order hint; Bundle.Validate requires >= 0).
+jq -e '.endpoints | all((.priority | type == "number") and (.priority >= 0))' "$BUNDLE_OUT" >/dev/null \
+	&& ok "every endpoint priority is >= 0" || bad "endpoint priority negative/non-numeric"
+
+# region is a non-empty coarse bucket (came from .region_bucket // "unspecified").
+jq -e '.endpoints | all((.region | type == "string") and ((.region | length) > 0))' "$BUNDLE_OUT" >/dev/null \
+	&& ok "every endpoint region is a non-empty coarse bucket" || bad "empty region"
+
+# Disabled trojan must NOT appear as an endpoint (per-transport gating carries into the bundle).
+jq -e '.endpoints | all(.transport_class != "trojan-tls")' "$BUNDLE_OUT" >/dev/null \
+	&& ok "disabled trojan absent from the bundle (per-transport gating)" || bad "disabled trojan present in bundle"
+
+# The bundle spans >=2 INDEPENDENT transport families (mirrors transport_family_independence): the
+# sub channel is not a single point of block.
+[ "$(jq -r '[.endpoints[].transport_class] | unique | length' "$BUNDLE_OUT")" -ge 2 ] \
+	&& ok "bundle endpoints span >=2 independent transport families" || bad "bundle has <2 transport families"
+
+# A node with zero identities cannot hand out a dialable endpoint — fail-closed.
+EMPTY_STATE="$WORK/identities.empty.json"
+printf '{"clients":[]}\n' > "$EMPTY_STATE"
+if "$CTL" bundle --params "$SB_PARAMS" --state "$EMPTY_STATE" --out "$WORK/bundle.empty.json" >/dev/null 2>&1; then
+	bad "bundle with zero identities was rendered (should be refused — no dialable endpoint)"
+else
+	ok "bundle with zero identities is refused (fail-closed)"
+fi
+
+# The REALITY private key must NEVER reach a bundle Link (only the public key does).
+if grep -q "$PRIV" "$BUNDLE_OUT"; then
+	bad "bundle leaked the REALITY private key into a Link"
+else
+	ok "bundle does NOT leak the REALITY private key"
+fi
+
+# ---------------------------------------------------------------------------
 note "Summary"
 printf 'passed: %d   failed: %d\n' "$PASS" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
