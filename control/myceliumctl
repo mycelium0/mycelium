@@ -60,6 +60,8 @@ MYC_DEFAULT_OUT_BUNDLE="$MYC_ROOT/state/bundle.json"
 . "$MYC_LIB/render_singbox.sh"
 # shellcheck source=lib/render_bundle.sh
 . "$MYC_LIB/render_bundle.sh"
+# shellcheck source=lib/render_aggregate.sh
+. "$MYC_LIB/render_aggregate.sh"
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -112,6 +114,16 @@ Commands:
         coarse region bucket, priority hint, advisory health ("unknown" in Phase 1),
         and the opaque dialable Link. Output is valid JSON (default: state/bundle.json).
         The served, self-updating endpoint that emits it is RP-0007-b deploy config.
+
+  aggregate     --bundle FILE [--name LABEL] [--bundle FILE --name LABEL ...] --out FILE
+        CLIENT-SIDE merge: fold >=2 per-node Bundles (each from `bundle`, one per
+        node you operate) into ONE client-importable sing-box profile — "one profile,
+        all MY nodes". Each node's outbound tags are namespaced by its --name (derived
+        node1/node2/... if omitted) so tags never collide; the result carries every
+        endpoint from every input plus one urltest "auto" and one selector — a single
+        cross-node auto-switch. PURELY LOCAL: reads the inputs, writes --out, performs
+        NO network I/O and NO transmission. It is NOT a central cross-node endpoint
+        (each node still serves its own bundle); the merge is the §15.8 VIS-0007 seam.
 
   help | -h | --help
         Show this help.
@@ -344,6 +356,59 @@ cmd_bundle() {
 }
 
 # ---------------------------------------------------------------------------
+# Subcommand: aggregate (client-side multi-node merge)
+# ---------------------------------------------------------------------------
+#
+# Parse a repeated --bundle FILE [--name LABEL] sequence (each --name binds to the MOST RECENT
+# --bundle) plus a single --out, then hand the collected (file,label) pairs to the local merge.
+# A --bundle without a following --name gets a stable derived label (node1/node2/... by input
+# order). Local-only: no network, no transmission — see render_aggregate.sh.
+cmd_aggregate() {
+	local out
+	out=""
+	# Parallel arrays of input files and their labels, in input order.
+	local -a agg_files=()
+	local -a agg_labels=()
+	local cur=-1   # index of the most recent --bundle (so a following --name binds to it)
+
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--bundle)
+				local f; f="${2:?--bundle needs a value}"; shift 2
+				agg_files+=("$f")
+				agg_labels+=("")          # default empty; a following --name overrides it
+				cur=$(( ${#agg_files[@]} - 1 ))
+				;;
+			--name)
+				local nm; nm="${2:?--name needs a value}"; shift 2
+				[ "$cur" -ge 0 ] || myc_die "aggregate: --name '$nm' has no preceding --bundle (give --bundle FILE first)"
+				[ -z "${agg_labels[$cur]}" ] || myc_die "aggregate: --bundle already has a --name ('${agg_labels[$cur]}'); only one --name per --bundle"
+				agg_labels[$cur]="$nm"
+				;;
+			--out)
+				out="${2:?--out needs a value}"; shift 2
+				;;
+			-h|--help) usage; return 0 ;;
+			*) myc_die "aggregate: unknown argument: $1" ;;
+		esac
+	done
+
+	[ -n "$out" ] || myc_die "aggregate: --out is required"
+	[ "${#agg_files[@]}" -ge 2 ] || myc_die "aggregate: need >=2 --bundle inputs (got ${#agg_files[@]})"
+
+	# Build the (file label) argument list, deriving node<N> for any unnamed input (stable, by order).
+	local -a pairs=()
+	local i
+	for i in "${!agg_files[@]}"; do
+		local label; label="${agg_labels[$i]}"
+		[ -n "$label" ] || label="node$(( i + 1 ))"
+		pairs+=("${agg_files[$i]}" "$label")
+	done
+
+	myc_render_aggregate "$out" "${pairs[@]}"
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -362,6 +427,7 @@ main() {
 		render-server)  cmd_render_server "$@" ;;
 		subscription)   cmd_subscription "$@" ;;
 		bundle)         cmd_bundle "$@" ;;
+		aggregate)      cmd_aggregate "$@" ;;
 		help|-h|--help) usage ;;
 		*) myc_die "unknown command: $cmd (run 'myceliumctl help')" 2 ;;
 	esac
