@@ -87,18 +87,18 @@ listen_port: 443
 # sing-box release tag (PRIMARY engine). MUST be >= 1.11.x. Pin a concrete stable tag and record
 # its checksums below. Updating this pin is a separate, verified change. Asset names follow
 # sing-box-<version-without-v>-linux-<arch>.tar.gz (see roles/singbox for the exact mapping).
-singbox_version: "v1.11.15"
+singbox_version: "v1.13.13"
 
 # Per-architecture SHA256 of the sing-box release tarball. Leave the placeholders below as-is to
 # make the singbox role FAIL CLOSED until you record the real checksums from the upstream release's
 # attached checksum manifest. Never deploy unverified.
 singbox_sha256:
-  amd64: "REPLACE_WITH_SHA256_OF_sing-box-1.11.15-linux-amd64.tar.gz"
-  arm64: "REPLACE_WITH_SHA256_OF_sing-box-1.11.15-linux-arm64.tar.gz"
+  amd64: "REPLACE_WITH_SHA256_OF_sing-box-1.13.13-linux-amd64.tar.gz"
+  arm64: "REPLACE_WITH_SHA256_OF_sing-box-1.13.13-linux-arm64.tar.gz"
 
 # Xray-core release tag (OPTIONAL alternative engine; used only when engine == "xray"). MUST be
-# >= v26.2.4. Updating this pin is a separate, verified change.
-xray_version: "v26.2.4"
+# >= v26.3.27 (post-handshake mimicry — see ADR-0028). Updating this pin is a separate, verified change.
+xray_version: "v26.3.27"
 
 # Per-architecture SHA256 of the Xray release zip. Leave the placeholders below as-is to make the
 # xray role FAIL CLOSED until you record the real checksums from the upstream release's
