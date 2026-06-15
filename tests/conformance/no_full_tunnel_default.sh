@@ -151,6 +151,44 @@ if [ -n "${MYC_AWG_SCAN_DIR:-}" ] && [ -d "${MYC_AWG_SCAN_DIR}" ]; then
 	done < <(find "$MYC_AWG_SCAN_DIR" -type f \( -name '*.conf' -o -name '*.j2' \) -print0)
 fi
 
+# 4) AmneziaWG role defaults + group_vars: the rendered client's DEFAULT AllowedIPs is a YAML list
+#    (client.conf.j2 templates it via {{ awg_client_allowed_ips }}, so the literal scans above cannot
+#    see it). That default must not be a full route unless awg_full_tunnel_optout is deliberately true.
+#    Catches the Ansible-path regression the .conf/.j2 scans miss. bash 3.2-safe (while-read only).
+_yaml_full_tunnel_default() {
+	# _yaml_full_tunnel_default FILE -> 0 (VIOLATION) if awg_client_allowed_ips includes a default
+	# route (0.0.0.0/0 or ::/0) AND awg_full_tunnel_optout is not true in the same file.
+	local f="$1" in_block route_found line
+	[ -f "$f" ] || return 1
+	grep -Eq '^[[:space:]]*awg_full_tunnel_optout[[:space:]]*:[[:space:]]*([Tt]rue|[Yy]es|1)[[:space:]]*$' "$f" 2>/dev/null && return 1
+	in_block=0; route_found=1
+	while IFS= read -r line; do
+		case "$line" in
+			awg_client_allowed_ips:*|*[[:space:]]awg_client_allowed_ips:*) in_block=1; continue ;;
+		esac
+		[ "$in_block" -eq 1 ] || continue
+		# a new top-level key (non-space first char, contains a colon) ends the list block
+		case "$line" in
+			[!\ ]*:*) in_block=0; continue ;;
+		esac
+		case "$line" in
+			*0.0.0.0/0*|*::/0*) route_found=0 ;;
+		esac
+	done < "$f"
+	return $route_found
+}
+
+for y in "$REPO_ROOT/infra/ansible/roles/amneziawg/defaults/main.yml" \
+		"$REPO_ROOT"/infra/ansible/group_vars/*.yml \
+		"$REPO_ROOT"/infra/ansible/group_vars/*.yml.example; do
+	[ -f "$y" ] || continue
+	rel="${y#"$REPO_ROOT"/}"
+	_ignored "$rel" && continue
+	if _yaml_full_tunnel_default "$y"; then
+		report "$rel" "awg_client_allowed_ips" "full-tunnel default route without awg_full_tunnel_optout: true"
+	fi
+done
+
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: an AmneziaWG client config routes ALL traffic by default (AllowedIPs = 0.0.0.0/0\n' >&2
 	printf '      or ::/0) without the documented Selective-Growth opt-out marker on the line above.\n' >&2
