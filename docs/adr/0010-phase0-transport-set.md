@@ -19,7 +19,8 @@ later. See the LICENSE file in the repository root.
   [../ARCHITECTURE.md](../ARCHITECTURE.md) Layer 1,
   [../ROADMAP.md](../ROADMAP.md) Phase 0 / Phase 1,
   [RP-0001](../proposals/0001-bootstrap-phase-0-node.md),
-  [../dependency-policy.md](../dependency-policy.md)
+  [../dependency-policy.md](../dependency-policy.md),
+  [../../nodes/dataplane/singbox/protocols.md](../../nodes/dataplane/singbox/protocols.md) (sing-box inbound map)
 
 ## Context
 
@@ -99,16 +100,37 @@ toggleable** via `group_vars` so an operator exposes only a chosen subset.
 | 1 | **VLESS + REALITY + XTLS-Vision (TCP)** | TCP/TLS | Highest-reachability TCP/TLS shape; borrows a real donor handshake so active probing receives a legitimate response; Vision equalises TLS record lengths against length-fingerprinting. The primary shape, carried over from [RP-0001](../proposals/0001-bootstrap-phase-0-node.md). |
 | 2 | **VLESS + REALITY + gRPC** | HTTP/2 over TLS | Wraps the stream in HTTP/2; survives some conditions that take down bare TCP-TLS, and multiplexes cleanly through HTTP/2-aware middleboxes. First TLS-family fallback. |
 | 3 | **VLESS + REALITY + XHTTP** | HTTP-framed over TLS | Modern HTTP-framed transport (successor to earlier HTTP-upgrade transports); resilient where plain streams are disrupted and friendlier to HTTP-shaped paths and CDNs. Second TLS-family fallback. |
-| 4 | **Hysteria2** | QUIC / UDP | Aggressive congestion control over QUIC; strong on lossy, throttled, or high-latency links where TCP collapses. UDP-friendly networks. |
+| 4 | **Hysteria2** | QUIC / UDP | Aggressive congestion control over QUIC; strong on lossy, throttled, or high-latency links where TCP collapses. Shipped with **Salamander obfs + H3 masquerade** (not bare QUIC) so it defeats SNI-based QUIC blocking — see the obfs note below. UDP-friendly but non-primary, since UDP is excised wholesale in some networks. |
 | 5 | **TUIC v5** | QUIC / UDP | A second, independent QUIC/UDP shape with low-overhead multiplexing; gives a distinct QUIC fingerprint so the QUIC family is not a single point of failure. |
 | 6 | **Shadowsocks-2022 (AEAD, `2022-blake3-aes-256-gcm`)** | TCP (and UDP) | The modern AEAD-2022 construction with per-session salts; a lightweight non-VLESS shape useful as an independent fallback. (The legacy pre-2022 Shadowsocks is excluded — see below.) |
 | 7 | **ShadowTLS v3 wrapping Shadowsocks-2022** | TCP/TLS wrapper | Presents a genuine TLS handshake to a real external host in front of Shadowsocks, so the outer shape looks like ordinary TLS and answers active probing, while the inner shape stays a modern AEAD channel. |
 | 8 | **Trojan over TLS (optional)** | TCP/TLS | A simple TLS-terminated shape for operators who want a plain-TLS option behind a real certificate; included as optional because shapes 1–3 generally dominate it, but it remains a useful independent fallback. |
 | 9 | **AmneziaWG (obfuscated WireGuard)** | non-TLS / UDP | Obfuscated WireGuard (junk packets, header randomisation, padding) with the WireGuard cryptographic core unchanged; a non-TLS UDP path that fails differently from every TLS shape and from QUIC, covering a distinct gap. Runs as a **separate** path, not inside the sing-box engine. |
+| 10 | **VLESS + XHTTP over genuine single-layer TLS (real certificate, non-REALITY, CDN-frontable)** | HTTP-framed over TLS | A genuine single-layer TLS shape (real certificate, not a borrowed donor handshake) carrying XHTTP — there is no TLS inside TLS, so it presents the flow profile of an ordinary HTTPS client to a real origin and removes the nested-handshake handle that single-connection classifiers key on. Frontable behind a CDN, which makes it the doctrine-clean HTTP-framed option for paths where a real certificate and origin are preferable to a donor handshake. Served on the Xray path. |
+| 11 | **VLESS + WebSocket + TLS (CDN-frontable)** | HTTP-framed over TLS | The broadest-compatibility CDN-frontable shape: a long-lived WebSocket inside ordinary TLS that traverses HTTP-aware middleboxes and CDN edges that pass WebSocket upgrades. It is the successor role to earlier HTTP-upgrade transports and the widest-reach fallback when the HTTP/2 (#2) and XHTTP (#3, #10) shapes are constrained. |
 
-All shaping above — padding, junk packets, header randomisation, transport framing — is
-obfuscation, **not** a confidentiality boundary; confidentiality is held only by the audited
-upstream primitives ([ADR-0002](0002-no-custom-cryptography.md)).
+**Hysteria2 ships obfuscated, not as bare QUIC.** The node template wraps inbound #4 in
+**Salamander obfuscation** (`obfs.type = salamander`) and points unauthenticated requests at an
+**H3 masquerade** site (the `obfs` and `masquerade` blocks of
+[`server.template.json`](../../nodes/dataplane/singbox/server.template.json), documented in
+[`protocols.md`](../../nodes/dataplane/singbox/protocols.md) row 4). This is the QUIC shape that
+specifically answers **SNI-based QUIC blocking**: Salamander XOR-scrambles the entire QUIC
+datagram, so a filter that classifies QUIC by lifting a plaintext SNI out of the QUIC Initial /
+TLS ClientHello finds no parseable field to match — the discriminator it keys on is simply not on
+the wire. The threat is real and current: per a gfw.report study on SNI-based QUIC filtering
+(USENIX Security 2025,
+[gfw.report/publications/usenixsecurity25](https://gfw.report/publications/usenixsecurity25/en/)),
+the GFW began blocking QUIC in April 2024 by inspecting the SNI field. Should the obfuscated path
+still be probed or blocked, the **H3 masquerade is the fallback** — the endpoint impersonates an
+ordinary HTTP/3 site (`alpn: ["h3"]`) rather than returning an empty or anomalous response. This
+shaping is obfuscation, **not** a confidentiality boundary (next paragraph); and consistent with the
+provisioned-but-non-primary doctrine for UDP, it does not change Hysteria2's standing — UDP shapes
+(#4, #5) remain available but are not the primary route because UDP is excised wholesale in some
+environments.
+
+All shaping above — padding, junk packets, header randomisation, transport framing, Salamander's
+datagram scrambling — is obfuscation, **not** a confidentiality boundary; confidentiality is held
+only by the audited upstream primitives ([ADR-0002](0002-no-custom-cryptography.md)).
 
 ### Excluded transports (legacy / easily-fingerprinted / superseded) and why
 
@@ -194,3 +216,74 @@ How to verify the decision is respected in practice:
   reports no connectivity rather than falling back to a weaker boundary;
 - dependency-policy check — sing-box, Xray-core, and AmneziaWG are pinned to concrete versions
   ([../dependency-policy.md](../dependency-policy.md)).
+
+## Amendment (2026-06-14)
+
+This amendment records two findings from a 2025–2026 transport-technique landscape review. It
+adds no new decision; it documents shapes the data plane already serves and two hardening facts
+that bear on how the set is operated. The decision and its **accepted** status are unchanged.
+
+### Doc gap closed: two already-served HTTP-framed shapes
+
+Rows **#10 (VLESS + XHTTP over genuine single-layer TLS, real certificate, non-REALITY,
+CDN-frontable)** and **#11 (VLESS + WebSocket + TLS, CDN-frontable)** were already part of the
+served set but were absent from the decision table above. They are now listed. Both are
+HTTP-framed-over-TLS shapes that complement the REALITY-family rows: #10 is the genuine
+single-layer-TLS answer for paths where a real certificate and origin are preferable to a borrowed
+donor handshake (no TLS inside TLS), and #11 is the broadest-compatibility CDN-frontable fallback.
+Neither is a confidentiality boundary; both rest only on audited upstream primitives
+([ADR-0002](0002-no-custom-cryptography.md)).
+
+### Engine asymmetry: the strongest current hardening is Xray/awg-only
+
+The most repeated finding of the review is an **engine asymmetry**, and it is the reason this ADR
+retains Xray-core and runs AmneziaWG as a separate path rather than collapsing onto a single engine.
+The strongest currently-available hardening for indistinguishability lives in Xray-core and in the
+AmneziaWG userspace path — **not** in sing-box, the primary engine:
+
+- **Post-quantum REALITY** (X25519MLKEM768 key exchange, optional ML-DSA-65) — keeps the handshake
+  inside the rising post-quantum browser population and adds harvest-now/decrypt-later resistance.
+  Available on the **Xray** path; gated off on sing-box, which lacks parity.
+- **Post-handshake mimicry** (REALITY NewSessionTicket / Aparecium-class conformance) — closes the
+  active-probing differential against the real TLS stacks of donor origins. Landed on the **Xray**
+  path; sing-box parity is **not** yet confirmed and is treated as PARTIAL until it is.
+- **VLESS-Encryption** (ML-KEM-768 + X25519) — an optional inner layer relevant only on the genuine-TLS
+  XHTTP (#10) and WebSocket (#11) paths, not on REALITY shapes. **Xray**-only at present.
+- **AmneziaWG 2.0** (ranged header randomisation, per-packet padding) — per-packet randomisation that
+  defeats the static-parameter fingerprinting that exposed the earlier version. Carried by the
+  separate **awg** userspace service; sing-box does not carry AmneziaWG 2.0, so the split is permanent.
+
+The practical consequence: where post-quantum REALITY or post-handshake conformance is load-bearing,
+serve the REALITY shape on the **Xray** path; keep these features **off by default on sing-box** until
+upstream parity lands. This is exactly the engine-diversity escape hatch the Decision preserves, and it
+is now load-bearing for indistinguishability rather than a convenience. The version pins, the
+parity-tracking, and the conformance probes that enforce this are recorded in the forthcoming
+dependency-policy and conformance ADR (**ADR-0028**) and in the maintained landscape reference
+([../reference/transport-technique-landscape.md](../reference/transport-technique-landscape.md));
+sing-box parity for each item above is tracked there per engine bump. None of this is a confidentiality
+change ([ADR-0002](0002-no-custom-cryptography.md)).
+
+### QUIC server-hygiene note
+
+For the QUIC/UDP shapes (#4 Hysteria2, #5 TUIC), the client-side QUIC-Initial handling is already
+inherited from the pinned engines. The remaining server-side residue is two hygiene items that
+operators of a QUIC leg should set:
+
+- bind the QUIC listener to a **high, non-443 UDP destination port** rather than the well-known
+  default, so the UDP shape does not advertise itself by port; and
+- present a **real `server_name`** on the QUIC endpoint so the handshake matches an ordinary
+  server, not an empty or placeholder name.
+
+These are operator-tunable hygiene defaults, not new transports.
+
+### Scope guard (what this amendment does NOT claim)
+
+Breadth of the set does **not** answer the two structural exposures that no transport shape resolves:
+the destination-AS download-throughput throttle and the cross-layer round-trip-time correlation
+fingerprint. Both are addressed — only partially — at the routing and topology layer
+([ADR-0027](0027-selective-growth-and-in-region-ingress.md),
+[VIS-0009](../vision/0009-selective-growth-reachability-topology.md)) via in-region ingress and
+node-to-node egress, never claimed beaten at the transport layer. Consistent with
+[ADR-0016](0016-software-releases-not-an-operated-network.md), Mycelium is node software and is **not a universal
+bypass substrate**; the transport set is breadth and indistinguishability, not a guarantee against
+every analysis.

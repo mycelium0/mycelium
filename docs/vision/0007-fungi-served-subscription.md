@@ -182,8 +182,12 @@ Per [../adr/0013-mycelial-vocabulary-and-phase-discipline.md](../adr/0013-myceli
 ## Open research questions (carried from the deep-research, 2025–2026)
 - **Sub-over-tunnel as default.** Which off-the-shelf clients route the subscription fetch *through the
   active tunnel* by default (so updates survive a blocked bootstrap channel), and how is it configured? Not
-  established as standard behavior — do **not** rely on server-driven HTTP 301/308 endpoint-migration (the
-  research refuted that as a documented standard).
+  established as standard behavior. Server-driven HTTP 301/308 endpoint-migration **is** documented and
+  standard — the subscription standard specifies 301/308 redirect-following as a MUST — but it is doctrinally
+  insufficient as a *sole* resilience mechanism: to learn the redirect the client must still reach the **old**
+  origin, which is itself a `SINGLE_POINT_OF_BLOCK` (S0). So Mycelium treats redirect-based migration as **one
+  signal among several**, never the sole migration path, and never a substitute for client-side multi-sub
+  merge across independent origins (RP-0007-c/d).
 - **Fast rotation signaling.** `profile-update-interval` is hour-granular — too coarse for sub-hour ingress
   rotation. What push / short-lived-config / next-fetch-hint mechanism rotates promptly without overloading
   fungi?

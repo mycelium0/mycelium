@@ -62,6 +62,7 @@ GATES=(
 	"tests/conformance/node_update_artifact_root.sh"
 	"tests/conformance/unit_netlink_parity.sh"
 	"tests/conformance/live_artifact_posture.sh"
+	"tests/conformance/dependency_policy.sh"
 	"control/selftest.sh"
 )
 
