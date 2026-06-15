@@ -79,6 +79,10 @@ The autonomous closures above are all landed; nothing further requires the maint
 - [x] All DoD cells GREEN with recorded evidence (operator)
 - [x] Phase-0 → Phase-1 transition **authorized** — signer / date: **mindicator (operator) / 2026-06-15**
 
-Operator validated both transport families hands-on on a real restrictive-network device (D1 REALITY
-self-replenishing subscription + D2 AmneziaWG/UDP, Wi-Fi + LTE), confirmed the auto-updating subscription
-propagates server-side changes, and **authorized the Phase-0 → Phase-1 transition (GO) on 2026-06-15.**
+Operator validated both transport families hands-on on a real restrictive-network device (D1 + D2
+AmneziaWG/UDP, Wi-Fi + LTE) and **authorized the Phase-0 → Phase-1 transition (GO) on 2026-06-15.** A
+client-pull subscription URL was also demonstrated propagating a server-side change without re-import —
+note this is the **Phase-1 RP-0007-b *seam* working early** (a self-hosted nginx-served URL the client
+re-polls), **not** the matured RP-0007-b deliverable (a `myceliumd`-served bundle endpoint with
+`profile-update-interval`, the bundle schema, and the sub-channel-not-single-point gate). That build is
+Phase-1 work; this GO authorizes *starting* it, not its acceptance. (Phase status: the ledger is the SoT.)
