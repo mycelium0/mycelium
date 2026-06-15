@@ -9,33 +9,24 @@ later. See the LICENSE file in the repository root.
 
 - **ID:** RP-0007
 - **Slug:** `phase1-distribution-health-xhttp-tls`
-- **Status:** draft — **forward design seam only; NOT authorized to start**
+- **Status:** **ACTIVE — Phase 1 authorized** (Phase-0 GO signed 2026-06-15). Live phase/DoD status is tracked in the acceptance ledger; this proposal does not snapshot it.
 - **Phase:** Phase 1 (gated behind a signed Phase-0 GO; ROADMAP Phase-transition principle)
 - **Type:** pre-declared **multi-phase / multi-workstream RP** (§13.3.2) — four workstreams (a, b, c, d), each with its own acceptance criteria and conformance evidence
 - **Supersedes / relates to:** matures the Phase-0 out-of-band hand-rendered subscription (ADR-0020 §1); is the §15.8 seam the fungi layer (VIS-0007) later sits behind; consumes the inert EdgeReport schema (RP-0006); fences the signed cross-node bundle to the Inoculum (RP-0005, Phase 2)
 
 ---
 
-## GO precondition (gating — read first)
+## GO precondition — SATISFIED (Phase-0 signed GO 2026-06-15)
 
-**Phase 1 does not begin until the Phase-0 acceptance ledger is signed GO.** This RP is written and
-reviewable now; **no code merges as "Phase-1 in progress" before the operator GO signature**
-(ROADMAP "Phase-transition principle": do not begin phase N+1 until phase N DoD is met in production
-with real users and the operator signs the GO decision; `docs/phase0-acceptance-ledger.md`).
+**Phase 1 is now AUTHORIZED.** The Phase-0 acceptance ledger was signed **GO on 2026-06-15**. The
+Phase-0 → Phase-1 transition gate (ROADMAP "Phase-transition principle") is met: the Phase-0 DoD was
+demonstrated in production with a real user, both transport families were validated on-device, and the
+operator recorded the GO signature. Phase-1 code may now merge per the workstreams below.
 
-Current ledger verdict (2026-06-14): **NO-GO — for the right reason.** The engineering /
-conformance plane is complete and live on the three-node fleet (D3 **DONE**, D5 **DONE**, the
-transport-family-independence and port-canon gates green, and **D1 flipped to PASS 2026-06-14** — a
-real client on a restrictive mobile carrier imported the out-of-band subscription and reached the
-open internet through a REALITY node, with client-side failover observed). What remains is
-**operator-owned live proofs**:
-
-- **D2** — ✓ **PASS** (2026-06-14): a client device connected AmneziaWG/UDP and reached the open internet
-  over a restrictive mobile link **while REALITY was DPI-blocked on that same link** — the second family
-  proved genuinely independent; server-side `awg show` confirmed handshake + bidirectional transfer.
-- **D4** — an atomic on-node revoke wrapper + Ansible-from-zero re-validation on a fresh VPS (currently `partial`).
-- the **REALITY-rotation runbook** exercised once with a transcript.
-- the **operator GO signature**.
+**The authoritative phase / per-DoD status lives in the acceptance ledger**
+(`docs/phase0-acceptance-ledger.md`). This proposal deliberately does **not** re-snapshot that verdict
+here — an embedded snapshot desyncs (this very section did: it read "NO-GO" with a stale D1–D5 list well
+after the ledger flipped to GO). For the live state, read the ledger, not this file.
 
 > **D1 caveat.** D1 passed over a **REALITY node in the local region** with client-side
 > multi-endpoint failover — it does **not** pre-demonstrate the not-yet-built genuine-TLS-XHTTP shape
@@ -390,7 +381,7 @@ REALITY would collapse breadth on the local-region node — REALITY is **kept in
 
 > **Cross-cutting gate (every workstream):** a machine-checkable assertion that
 > `docs/phase0-acceptance-ledger.md` reads **GO-signed** before any RP-0007 code merges as "Phase-1
-> in progress." While the ledger is NO-GO, the workstreams are reviewable design only.
+> in progress." The ledger is **GO-signed (2026-06-15)**, so the workstreams are authorized to merge.
 
 ### RP-0007-a — genuine-TLS-XHTTP transport
 
