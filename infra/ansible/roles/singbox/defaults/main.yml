@@ -68,6 +68,7 @@ shortid_count: 3
 enable_vless_reality_vision: true
 enable_vless_reality_grpc: false
 enable_vless_reality_xhttp: false
+enable_vless_xhttp_tls: false
 enable_hysteria2: false
 enable_tuic: false
 enable_ss2022: false
@@ -86,7 +87,8 @@ enable_amneziawg: false
 # ---------------------------------------------------------------------------
 singbox_port_vless_vision: 443     # TCP — primary VLESS+REALITY+XTLS-Vision
 singbox_port_vless_grpc: 8443      # TCP — VLESS+REALITY+gRPC
-singbox_port_vless_xhttp: 2096     # TCP — VLESS+REALITY+XHTTP
+singbox_port_vless_xhttp: 2096     # TCP — VLESS+REALITY+XHTTP (XHTTP-in-REALITY = TLS-in-TLS)
+singbox_port_vless_xhttp_tls: 2087 # TCP — VLESS+XHTTP over GENUINE single-layer TLS (own cert; NO reality). NOT 8443.
 singbox_port_hysteria2: 8444       # UDP — Hysteria2 (QUIC)
 singbox_port_tuic: 8445            # UDP — TUIC v5 (QUIC)
 singbox_port_ss2022: 8388         # TCP — Shadowsocks-2022 AEAD

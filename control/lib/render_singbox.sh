@@ -32,7 +32,7 @@
 # REALITY/TCP (most survivable) first, UDP/QUIC paths next, then SS/ShadowTLS,
 # Trojan last. Each token is matched against an inbound's `tag` in the template
 # and against a `<token>_enabled` flag in params.
-MYC_SB_PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp hysteria2 tuic shadowsocks shadowtls trojan"
+MYC_SB_PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp vless-xhttp-tls hysteria2 tuic shadowsocks shadowtls trojan"
 
 # myc_sb_proto_enabled PARAMS_JSON PROTO -> 0 if enabled, 1 otherwise.
 # A protocol is enabled when params.<proto>_enabled is exactly true. The dash in a
@@ -152,10 +152,12 @@ myc_sb_render_server() {
 	stls_handshake_port="$(myc_params_get "$params" '.shadowtls_handshake_port' '443')"
 
 	# Per-protocol listen ports (defaults are sane, distinct values).
-	local p_vision p_grpc p_xhttp p_hy2 p_tuic p_ss p_stls p_trojan
+	local p_vision p_grpc p_xhttp p_xhttp_tls p_hy2 p_tuic p_ss p_stls p_trojan
 	p_vision="$(myc_params_get "$params" '.vless_reality_vision_port' '443')"
 	p_grpc="$(myc_params_get "$params"   '.vless_reality_grpc_port'   '8443')"
 	p_xhttp="$(myc_params_get "$params"  '.vless_reality_xhttp_port'  '2096')"
+	# vless-xhttp-tls: genuine single-layer TLS (own cert, NO reality). Canonical port 2087 (non-8443).
+	p_xhttp_tls="$(myc_params_get "$params" '.vless_xhttp_tls_port'   '2087')"
 	p_hy2="$(myc_params_get "$params"    '.hysteria2_port'            '8444')"
 	p_tuic="$(myc_params_get "$params"   '.tuic_port'                 '8445')"
 	p_ss="$(myc_params_get "$params"     '.shadowsocks_port'          '8388')"
@@ -184,12 +186,14 @@ myc_sb_render_server() {
 	local ports_json
 	ports_json="$(jq -nc \
 		--argjson vision "$p_vision" --argjson grpc "$p_grpc" --argjson xhttp "$p_xhttp" \
+		--argjson xhttptls "$p_xhttp_tls" \
 		--argjson hy2 "$p_hy2" --argjson tuic "$p_tuic" --argjson ss "$p_ss" \
 		--argjson stls "$p_stls" --argjson trojan "$p_trojan" \
 		'{
 			"vless-reality-vision": $vision,
 			"vless-reality-grpc":   $grpc,
 			"vless-reality-xhttp":  $xhttp,
+			"vless-xhttp-tls":      $xhttptls,
 			"hysteria2":            $hy2,
 			"tuic":                 $tuic,
 			"shadowsocks":          $ss,
@@ -261,6 +265,7 @@ myc_sb_render_server() {
 				| setport("vless-reality-vision")
 				| setport("vless-reality-grpc")
 				| setport("vless-reality-xhttp")
+				| setport("vless-xhttp-tls")
 				| setport("hysteria2")
 				| setport("tuic")
 				| setport("shadowsocks")
@@ -270,6 +275,7 @@ myc_sb_render_server() {
 				| if .tag == "vless-reality-vision-in" then .users = $uvision else . end
 				| if .tag == "vless-reality-grpc-in"   then .users = $uplain  | .transport.service_name = $grpc else . end
 				| if .tag == "vless-reality-xhttp-in"  then .users = $uplain  | .transport.path = $xpath else . end
+				| if .tag == "vless-xhttp-tls-in"      then .users = $uplain  | .transport.path = $xpath else . end
 				| if .tag == "hysteria2-in"            then .users = $uhy2 else . end
 				| if .tag == "tuic-in"                 then .users = $utuic else . end
 				| if .tag == "shadowsocks-in"          then .users = $uss | .password = $sspw else . end
@@ -284,6 +290,7 @@ myc_sb_render_server() {
 				( .tag == "vless-reality-vision-in" and ($enabled | index("vless-reality-vision")) )
 				or ( .tag == "vless-reality-grpc-in"   and ($enabled | index("vless-reality-grpc")) )
 				or ( .tag == "vless-reality-xhttp-in"  and ($enabled | index("vless-reality-xhttp")) )
+				or ( .tag == "vless-xhttp-tls-in"      and ($enabled | index("vless-xhttp-tls")) )
 				or ( .tag == "hysteria2-in"            and ($enabled | index("hysteria2")) )
 				or ( .tag == "tuic-in"                 and ($enabled | index("tuic")) )
 				or ( .tag == "shadowsocks-in"          and ($enabled | index("shadowsocks")) )
@@ -395,6 +402,7 @@ myc_sb_render_subscription() {
 		--argjson vision "$(myc_params_get "$params" '.vless_reality_vision_port' '443')" \
 		--argjson grpc   "$(myc_params_get "$params" '.vless_reality_grpc_port' '8443')" \
 		--argjson xhttp  "$(myc_params_get "$params" '.vless_reality_xhttp_port' '2096')" \
+		--argjson xhttptls "$(myc_params_get "$params" '.vless_xhttp_tls_port' '2087')" \
 		--argjson hy2    "$(myc_params_get "$params" '.hysteria2_port' '8444')" \
 		--argjson tuic   "$(myc_params_get "$params" '.tuic_port' '8445')" \
 		--argjson ss     "$(myc_params_get "$params" '.shadowsocks_port' '8388')" \
@@ -402,6 +410,7 @@ myc_sb_render_subscription() {
 		--argjson trojan "$(myc_params_get "$params" '.trojan_port' '8447')" \
 		'{
 			"vless-reality-vision": $vision, "vless-reality-grpc": $grpc, "vless-reality-xhttp": $xhttp,
+			"vless-xhttp-tls": $xhttptls,
 			"hysteria2": $hy2, "tuic": $tuic, "shadowsocks": $ss, "shadowtls": $stls, "trojan": $trojan
 		}')"
 
@@ -455,6 +464,9 @@ myc_sb_render_subscription() {
 					"vless-reality-vision": { type: "vless", tag: "vless-reality-vision", server: $server, server_port: $ports["vless-reality-vision"], uuid: $uuid, flow: "xtls-rprx-vision", packet_encoding: "xudp", tls: reality_tls },
 					"vless-reality-grpc":   { type: "vless", tag: "vless-reality-grpc",   server: $server, server_port: $ports["vless-reality-grpc"],   uuid: $uuid, flow: "", packet_encoding: "xudp", tls: reality_tls, transport: { type: "grpc", service_name: $grpc } },
 					"vless-reality-xhttp":  { type: "vless", tag: "vless-reality-xhttp",  server: $server, server_port: $ports["vless-reality-xhttp"],  uuid: $uuid, flow: "", packet_encoding: "xudp", tls: reality_tls, transport: { type: "xhttp", path: $xpath } },
+					# vless-xhttp-tls: genuine single-layer TLS (own cert, verified by the client — NO reality donor).
+					# transport.type matches the server template ("xhttp") so there is no server/client naming mismatch.
+					"vless-xhttp-tls":      { type: "vless", tag: "vless-xhttp-tls",      server: $server, server_port: $ports["vless-xhttp-tls"],      uuid: $uuid, flow: "", packet_encoding: "xudp", tls: plain_tls(["h2","http/1.1"]), transport: { type: "xhttp", path: $xpath } },
 					"hysteria2":            { type: "hysteria2", tag: "hysteria2",        server: $server, server_port: $ports["hysteria2"], password: $hy2pw, tls: plain_tls(["h3"]) },
 					"tuic":                 { type: "tuic", tag: "tuic",                  server: $server, server_port: $ports["tuic"], uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: plain_tls(["h3"]) },
 					"shadowsocks":          { type: "shadowsocks", tag: "shadowsocks",    server: $server, server_port: $ports["shadowsocks"], method: "2022-blake3-aes-256-gcm", password: $sspw },
