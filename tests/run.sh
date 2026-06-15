@@ -63,6 +63,7 @@ GATES=(
 	"tests/conformance/unit_netlink_parity.sh"
 	"tests/conformance/live_artifact_posture.sh"
 	"tests/conformance/dependency_policy.sh"
+	"tests/conformance/bundle_region_closed_vocab.sh"
 	"control/selftest.sh"
 )
 
