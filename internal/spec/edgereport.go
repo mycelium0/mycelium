@@ -45,6 +45,12 @@ const (
 	TransportClassTrojanTLS TransportClass = "trojan-tls"
 	// TransportClassAmneziaWGUDP is the AmneziaWG (obfuscated WireGuard) over UDP family.
 	TransportClassAmneziaWGUDP TransportClass = "amneziawg-udp"
+	// TransportClassXHTTPTLS is the VLESS+XHTTP over GENUINE single-layer TLS family (own certificate,
+	// NO REALITY). It is DISTINCT from reality-tcp: not TLS-in-TLS, so it survives links where TLS-in-TLS
+	// is blocked. It must never be folded into reality-tcp — a clean-vantage probe sees reality-tcp as
+	// healthy and so cannot represent the blocked path unless the surviving single-TLS family is its own
+	// closed-vocab member (RP-0007-a; ADR-0010 amendment).
+	TransportClassXHTTPTLS TransportClass = "xhttp-tls"
 )
 
 // IsValid reports whether the class is one of the canonical members (the unset zero value is not
@@ -52,7 +58,8 @@ const (
 func (c TransportClass) IsValid() bool {
 	switch c {
 	case TransportClassRealityTCP, TransportClassQUICUDP, TransportClassShadowsocksTCP,
-		TransportClassShadowTLSTCP, TransportClassTrojanTLS, TransportClassAmneziaWGUDP:
+		TransportClassShadowTLSTCP, TransportClassTrojanTLS, TransportClassAmneziaWGUDP,
+		TransportClassXHTTPTLS:
 		return true
 	default:
 		return false
