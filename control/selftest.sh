@@ -519,6 +519,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+note "sing-box two-hop egress (ADR-0029): params.two_hop -> upstream outbound + auth_user route"
+# ---------------------------------------------------------------------------
+# When params declare a two_hop upstream, the rendered SERVER config must gain a vless+ws+tls outbound to
+# that out-of-region node AND an auth_user route rule sending the designated client through it (in-region
+# ingress -> out-of-region egress). With NO two_hop param the config is unchanged: the feature is gated, so
+# every node without it renders byte-identically (zero blast radius for the fleet).
+TH_PARAMS="$WORK/params.singbox-twohop.json"
+TH_SERVER_OUT="$WORK/server.singbox-twohop.json"
+jq -n --arg priv "$PRIV" --arg pub "$PUB" --arg sid "$SID" '{
+	engine: "singbox",
+	node_address: "node.example.invalid",
+	donor_host: "donor.example.invalid",
+	donor_sni: "donor.example.invalid",
+	reality_private_key: $priv,
+	reality_public_key: $pub,
+	short_ids: [$sid],
+	tls_sni: "tls.example.invalid",
+	vless_reality_vision_enabled: true,
+	two_hop: {
+		tag: "to-egress", server: "203.0.113.10", server_port: 443,
+		uuid: "00000000-0000-4000-8000-000000000000",
+		sni: "egress.example.invalid", ws_path: "/ws", ws_host: "egress.example.invalid",
+		fingerprint: "chrome", alpn: "http/1.1", via_user: "egress-user"
+	}
+}' > "$TH_PARAMS"
+jq -e . "$TH_PARAMS" >/dev/null && ok "two-hop params fixture is valid JSON" || bad "two-hop params invalid"
+
+"$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$TH_PARAMS" \
+	--state "$STATE" --out "$TH_SERVER_OUT" 2>/dev/null
+jq -e . "$TH_SERVER_OUT" >/dev/null && ok "two-hop server.json is valid JSON" || bad "two-hop server.json invalid"
+jq -e 'any(.outbounds[]; .tag=="to-egress" and .type=="vless" and .transport.type=="ws" and .tls.enabled==true)' "$TH_SERVER_OUT" >/dev/null \
+	&& ok "two-hop upstream outbound present (vless+ws+tls)" || bad "two-hop upstream outbound missing/malformed"
+jq -e 'any(.route.rules[]; (.auth_user // []) == ["egress-user"] and .outbound=="to-egress")' "$TH_SERVER_OUT" >/dev/null \
+	&& ok "two-hop auth_user route rule present (designated client -> upstream egress)" || bad "two-hop route rule missing"
+jq -e 'any(.outbounds[]; .tag=="to-egress") | not' "$SB_SERVER_OUT" >/dev/null \
+	&& ok "no two_hop param -> no upstream outbound (feature gated, zero blast radius)" || bad "two_hop leaked into a config without the param"
+
+# ---------------------------------------------------------------------------
 note "engine default is now sing-box (project canon); explicit --engine xray still works"
 # ---------------------------------------------------------------------------
 # Default engine (no --engine flag) must now be sing-box: render-server with no --engine

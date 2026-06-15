@@ -302,6 +302,32 @@ myc_sb_render_server() {
 		myc_die "render-server: sing-box rendering produced invalid JSON (check template shape)"
 	fi
 
+	# Optional two-hop egress (ADR-0029, RP-0007 in-region-ingress topology): when the node-local params
+	# declare a `two_hop` upstream, append a VLESS+WS+TLS outbound to that out-of-region node plus an
+	# auth_user route rule, so a designated client egresses through it (in-region ingress -> out-of-region
+	# egress, carried node-to-node — never user-direct). Gated on the param being present, so every node
+	# WITHOUT `two_hop` renders byte-identically (no-op for the whole fleet; zero blast radius).
+	local two_hop
+	two_hop="$(printf '%s' "$params" | jq -c '.two_hop // empty' 2>/dev/null)"
+	if [ -n "$two_hop" ]; then
+		rendered="$(printf '%s' "$rendered" | jq --argjson th "$two_hop" '
+			.outbounds += [{
+				type: "vless", tag: $th.tag, server: $th.server,
+				server_port: ($th.server_port | tonumber), uuid: $th.uuid, flow: "",
+				tls: { enabled: true, server_name: $th.sni,
+				       utls: { enabled: true, fingerprint: ($th.fingerprint // "chrome") },
+				       alpn: [ ($th.alpn // "http/1.1") ] },
+				transport: { type: "ws", path: ($th.ws_path // "/ws"),
+				             headers: { Host: ($th.ws_host // $th.sni) } }
+			}]
+			| .route.rules = ((.route.rules // []) + [{ auth_user: [ $th.via_user ], outbound: $th.tag }])
+		' 2>/dev/null)"
+		if [ -z "$rendered" ] || ! printf '%s' "$rendered" | jq -e . >/dev/null 2>&1; then
+			myc_die "render-server: two_hop injection produced invalid JSON (check params.two_hop schema)"
+		fi
+		myc_log "render-server: appended two-hop egress (params.two_hop.tag=$(printf '%s' "$two_hop" | jq -r '.tag'))"
+	fi
+
 	printf '%s\n' "$rendered" | jq . | myc_atomic_write "$out"
 	myc_assert_json "$out" "rendered sing-box server config"
 	myc_log "wrote sing-box server config: $out ($(printf '%s' "$rendered" | jq '.inbounds | length') inbound(s))"
