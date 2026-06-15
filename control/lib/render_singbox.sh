@@ -310,6 +310,11 @@ myc_sb_render_server() {
 	local two_hop
 	two_hop="$(printf '%s' "$params" | jq -c '.two_hop // empty' 2>/dev/null)"
 	if [ -n "$two_hop" ]; then
+		# Fail-closed: a two_hop with no designated client (empty via_user) would add an upstream outbound
+		# that NO route rule selects — an unscoped, silently-unused egress. Refuse it: a two-hop must name
+		# exactly which client egresses out-of-region; everyone else stays on the in-region final route.
+		local th_via; th_via="$(printf '%s' "$two_hop" | jq -r '.via_user // ""')"
+		[ -n "$th_via" ] || myc_die "render-server: params.two_hop.via_user is empty — refusing an unscoped two-hop egress (set the designated client name)."
 		rendered="$(printf '%s' "$rendered" | jq --argjson th "$two_hop" '
 			.outbounds += [{
 				type: "vless", tag: $th.tag, server: $th.server,

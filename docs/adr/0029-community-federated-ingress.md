@@ -67,6 +67,29 @@ provider, or place is load-bearing; losing any subset degrades gracefully rather
 - **Framing:** this is about **resilient, diverse, community-grown reachability** — many hands providing
   varied ingresses — not any one party, provider, or place.
 
+## Failure modes & blast radius (the two-hop, as built)
+
+The Phase-1 two-hop egress is a route-mutating change applied per node from a **node-local** `two_hop`
+overlay (`render_singbox.sh` reads `params.two_hop` → upstream outbound + an `auth_user` route). Its
+failure surface:
+
+- **Gated → zero blast radius for the fleet.** A node WITHOUT the overlay renders byte-identically; only a
+  node that opts in carries the egress. The overlay is node-local + never committed.
+- **Scoped, fail-closed selection.** Exactly the named `via_user` egresses out-of-region; every other client
+  stays on the node's in-region `final` route (its normal exit). An **empty/absent `via_user` is refused**
+  at render (it would be an unscoped, unused egress). A client is therefore never *silently* two-hopped, and
+  a client that is *not* the designated user is never routed out-of-region.
+- **Expectation caveat (not a leak, but worth stating).** A client that *expects* the out-of-region exit but
+  is not the designated `via_user` exits from the **ingress** node's own address — the in-region exit, not a
+  deanonymising failure (the client is still behind the node), but not the country it expected. Mitigation:
+  the designated client is explicit + validated; bundle/health (RP-0007-b/-c) will make the exit legible.
+- **Single-edge is the weak form.** One maintainer-run ingress concentrates trust + reachability in one place
+  — exactly what this ADR says diversity should dissolve. The single two-hop is the *first instance*, not the
+  target shape; federation across many community edges (Phase 2+) is the mitigation, not an afterthought.
+- **Egress trust.** The ingress reaches its out-of-region egress over WS+TLS to a named peer; it does not
+  pin the egress peer's certificate today. Acceptable while ingress + egress are co-operated; a contract +
+  pin is required once egresses are community-contributed (ADR-0026 capability classes).
+
 ## Relationship to other records
 
 - **ADR-0027** (selective growth + in-region ingress topology) — this ADR answers *who provides the ingress*

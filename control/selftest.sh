@@ -555,6 +555,15 @@ jq -e 'any(.route.rules[]; (.auth_user // []) == ["egress-user"] and .outbound==
 	&& ok "two-hop auth_user route rule present (designated client -> upstream egress)" || bad "two-hop route rule missing"
 jq -e 'any(.outbounds[]; .tag=="to-egress") | not' "$SB_SERVER_OUT" >/dev/null \
 	&& ok "no two_hop param -> no upstream outbound (feature gated, zero blast radius)" || bad "two_hop leaked into a config without the param"
+# Fail-closed: an empty via_user is an UNSCOPED two-hop (an upstream no route selects) -> must be REFUSED,
+# not silently emitted. Guards the latent fail-open the Phase-1 review flagged.
+TH_EMPTY_PARAMS="$WORK/params.singbox-twohop-empty.json"; TH_EMPTY_OUT="$WORK/server.twohop-empty.json"
+jq '.two_hop.via_user = ""' "$TH_PARAMS" > "$TH_EMPTY_PARAMS"; rm -f "$TH_EMPTY_OUT"
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$TH_EMPTY_PARAMS" --state "$STATE" --out "$TH_EMPTY_OUT" >/dev/null 2>&1 && [ -s "$TH_EMPTY_OUT" ]; then
+	bad "two-hop with empty via_user was rendered (FAIL-OPEN) — should be refused"
+else
+	ok "two-hop with empty via_user is REFUSED (fail-closed; no unscoped egress)"
+fi
 
 # ---------------------------------------------------------------------------
 note "engine default is now sing-box (project canon); explicit --engine xray still works"
