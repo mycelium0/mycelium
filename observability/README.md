@@ -132,7 +132,7 @@ loopback port so the `dataplane_stats` scrape job never has to change.
 
 **Primary engine — sing-box.** A default node enables `experimental.clash_api` bound to
 `127.0.0.1:9090` (see
-[`../nodes/dataplane/singbox/server.template.json`](../nodes/dataplane/singbox/server.template.json)),
+[`../nodes/dataplane/singbox/server.template.renderer.json`](../nodes/dataplane/singbox/server.template.renderer.json)),
 which serves aggregate connection/traffic counters over **HTTP/JSON** — not the Prometheus text
 format — so Prometheus cannot scrape it directly. The chosen approach is a **small read-only
 exporter on the node**: it reads that loopback `clash_api`, translates the inbound/aggregate byte

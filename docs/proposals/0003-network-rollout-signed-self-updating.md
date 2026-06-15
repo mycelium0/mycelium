@@ -36,8 +36,7 @@ later. See the LICENSE file in the repository root.
   [ADR-0012](../adr/0012-go-primary-control-plane-language.md) (Go as the primary control-plane language);
   [scripts/node-bootstrap.sh](../../scripts/node-bootstrap.sh) (the implementation this RP operationalises);
   [docs/runbooks/node-bootstrap.md](../runbooks/node-bootstrap.md) (the operator runbook for the same system);
-  [nodes/dataplane/singbox/server.template.json](../../nodes/dataplane/singbox/server.template.json) and
-  [nodes/dataplane/singbox/server.template.renderer.json](../../nodes/dataplane/singbox/server.template.renderer.json) (the two templates §W5 reconciles);
+  [nodes/dataplane/singbox/server.template.renderer.json](../../nodes/dataplane/singbox/server.template.renderer.json) (the single sing-box server template after §W5 reconciled the historical pair; the stale `server.template.json` was removed);
   [nodes/dataplane/donor-sni-candidates.json](../../nodes/dataplane/donor-sni-candidates.json);
   [docs/refactoring.md](../refactoring.md) §13.
 
@@ -79,11 +78,10 @@ algorithmic:
   install exists, but the handoff of subscriptions out-of-band (delivery method B,
   per [ADR-0014](../adr/0014-per-operator-node-credentials.md)) is not yet a repeatable
   operator procedure.
-- **Two sing-box server templates have drifted.** The canonical
-  [`server.template.json`](../../nodes/dataplane/singbox/server.template.json) and the
-  renderer-compatible
+- **Two sing-box server templates had drifted (now resolved).** A stale `server.template.json` and
+  the renderer-compatible
   [`server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json)
-  disagree on inbound **tags** (e.g. `tuic-v5-in` vs `tuic-in`, `shadowsocks-2022-in` vs
+  disagreed on inbound **tags** (e.g. `tuic-v5-in` vs `tuic-in`, `shadowsocks-2022-in` vs
   `shadowsocks-in`, `shadowtls-v3-in` vs `shadowtls-in`, `trojan-tls-in` vs `trojan-in`),
   on SENTINEL names (`SENTINEL_REALITY_SHORT_ID` vs `SENTINEL_SHORTID`,
   `SENTINEL_TLS_SERVER_NAME`/`_CERTIFICATE_PATH` vs `SENTINEL_TLS_SNI`/`_CERT_PATH`,
@@ -215,17 +213,15 @@ unmigrated, and unproven. Specifically:
   missing is the *repeatable operator procedure*: the one-command install plus the
   out-of-band subscription handoff (delivery method B: per-node self-signed cert + client
   pin for HY2/TUIC, REALITY public key + params for the rest).
-- **Two templates (W5).** Both [`server.template.json`](../../nodes/dataplane/singbox/server.template.json)
-  (canonical: clash_api, obfs/masquerade, `transport.type:"http"`, listen `0.0.0.0`, tags
-  `*-vision-in`/`tuic-v5-in`/`shadowsocks-2022-in`/`shadowtls-v3-in`/`trojan-tls-in`) and
+- **Two templates (W5) — CLOSED.** Historically two sing-box server templates existed and
+  disagreed: a `server.template.json` (long-form tags `tuic-v5-in`/`shadowsocks-2022-in`/
+  `shadowtls-v3-in`/`trojan-tls-in`, no `vless-xhttp-tls-in`, listen `0.0.0.0`) the renderer never
+  matched, and the renderer-compatible
   [`server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json)
-  (renderer-compatible: no clash_api, no obfs/masquerade, `transport.type:"xhttp"`, listen
-  `::`, tags `tuic-in`/`shadowsocks-in`/`shadowtls-in`/`trojan-in`, a bittorrent route rule)
-  exist and disagree. The bootstrap renders the **renderer** one
-  (`RENDER_TEMPLATE=…/server.template.renderer.json`), and the firewall keep-list in
-  `harden_ufw` selects the `shadowsocks-in` tag — so the renderer template is the de-facto
-  truth, while the canonical template is the documented one. SENTINEL names also diverge,
-  so the two cannot be swapped blindly.
+  (tags `tuic-in`/`shadowsocks-in`/`shadowtls-in`/`shadowtls-ss-in`/`trojan-in`, listen `::`) the
+  bootstrap actually renders (`RENDER_TEMPLATE=…/server.template.renderer.json`). The stale
+  `server.template.json` has now been **removed** and `myceliumctl render-server` defaults to the
+  renderer template, so there is ONE sing-box server template and the split-brain is gone.
 - **Preventive gates (W6).** [`tests/run.sh`](../../tests/run.sh) runs nine offline gates
   (`check_headers`, `check_ppn_wording`, `no_contact_leak`, `no_custom_crypto`,
   `validate_configs`, `no_legacy_transport`, `per_protocol_toggle`, `phase0_port_canon`,
@@ -487,13 +483,10 @@ bootstrap's firewall keep-list and `verify_listen_ports` selection, so an edit t
 template provably changes what is rendered, checked, and firewalled.
 
 **Steps.**
-1. **Pick the canonical source.** Reconcile
-   [`server.template.json`](../../nodes/dataplane/singbox/server.template.json) and
-   [`server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json)
-   into one file that the renderer (`myceliumctl render-server --template …`, which the
-   bootstrap points at via `RENDER_TEMPLATE`) consumes. The bootstrap currently renders the
-   **renderer** template, so the merged file must stay renderer-compatible while adopting the
-   canonical decisions where they are the documented intent.
+1. **Pick the canonical source — DONE.** The stale `server.template.json` was removed and
+   [`server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json) is
+   the single template the renderer (`myceliumctl render-server`, which the bootstrap points at via
+   `RENDER_TEMPLATE`) consumes; `render-server` now defaults to it directly.
 2. **Reconcile the inbound tags to the firewall keep-list.** `harden_ufw` and
    `verify_listen_ports` select by **type** (`vless`/`trojan`/`shadowtls`/`shadowsocks`
    non-loopback for TCP; `hysteria2`/`tuic` for UDP) **and** by the tag `shadowsocks-in`

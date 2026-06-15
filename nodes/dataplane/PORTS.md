@@ -36,6 +36,17 @@ orthogonal UDP path handled by its own role.
 
 The firewall opens ONLY the ports of the protocols that are enabled.
 
+### Loopback-only ports (intentionally outside the public canon)
+
+These ports are bound to `127.0.0.1` only and are **never opened by the host firewall**. They are
+NOT part of the public data-plane canon above (they carry no public passive fingerprint), and they
+deliberately do not reuse any canonical PUBLIC port number:
+
+| Port | Bind | Role | Default |
+|------|------|------|---------|
+| `8443` | `127.0.0.1` | Caddy cover-site listener (REALITY `dest` forwards active probes here). `caddy_cover_listen`. | on |
+| `8472` | `127.0.0.1` | Caddy served-distribution-bundle listener (`caddy_bundle_listen`); the operator fronts it via their own reach path. Outside the public canon on purpose so it never collides with a public listen port (e.g. `8444`/Hysteria2). | off |
+
 ## Where these values appear (all must match this table)
 
 | File | Role |

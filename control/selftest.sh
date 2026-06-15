@@ -684,9 +684,13 @@ AGG_P1="$WORK/agg.paramsA.json"
 AGG_P2="$WORK/agg.paramsB.json"
 AGG_OUT="$WORK/agg.merged.json"
 
-# Two distinct node params, both from the shared SB_PARAMS fixture.
-jq '.node_address = "nodea.example.invalid" | .region_bucket = "bucket-alpha"' "$SB_PARAMS" > "$AGG_P1"
-jq '.node_address = "nodeb.example.invalid" | .region_bucket = "bucket-bravo"' "$SB_PARAMS" > "$AGG_P2"
+# Two distinct node params, both from the shared SB_PARAMS fixture. ShadowTLS is disabled on the
+# happy-path inputs: its ss:// Link is non-reconstructible into a dialable client outbound (the v3
+# handshake password/version are not in the Link), so the aggregate refuses it fail-closed — that
+# refusal is exercised on its own below ("aggregate refuses a ShadowTLS endpoint"). The Link-based
+# merge here uses only the Link-reconstructible transports.
+jq '.node_address = "nodea.example.invalid" | .region_bucket = "bucket-alpha" | .shadowtls_enabled = false' "$SB_PARAMS" > "$AGG_P1"
+jq '.node_address = "nodeb.example.invalid" | .region_bucket = "bucket-bravo" | .shadowtls_enabled = false' "$SB_PARAMS" > "$AGG_P2"
 "$CTL" bundle --params "$AGG_P1" --state "$STATE" --out "$AGG_B1" 2>/dev/null
 "$CTL" bundle --params "$AGG_P2" --state "$STATE" --out "$AGG_B2" 2>/dev/null
 jq -e . "$AGG_B1" >/dev/null && jq -e . "$AGG_B2" >/dev/null \
@@ -778,6 +782,36 @@ if "$CTL" aggregate --bundle "$AGG_B1" --name a --bundle "$AGG_NOTBUNDLE" --name
 	bad "aggregate accepted a non-bundle input (should validate the bundle.go shape)"
 else
 	ok "aggregate refuses a non-bundle input (bundle.go shape validated)"
+fi
+
+# Fail-closed (N1 regression guard): a bundle carrying a ShadowTLS endpoint MUST be refused.
+# A ShadowTLS endpoint is shared as `ss://...?plugin=shadow-tls&sni=...` — that Link carries only the
+# INNER Shadowsocks material + the masquerade SNI, NOT the v3 handshake password/version. The
+# subscription path emits a `shadowtls` (version:3) handshake outbound with the inner SS detouring
+# through it; the aggregate cannot rebuild that detour from the Link alone. Silently emitting a bare
+# `shadowsocks` outbound (dialing the handshake port as plain SS with the wrong credential) is the N1
+# functional break. The aggregate MUST refuse such a bundle fail-closed instead. This fixture
+# explicitly ENABLES shadowtls so the lossy path is exercised — it can never false-green again.
+AGG_STLS_PARAMS="$WORK/agg.params-shadowtls.json"
+AGG_STLS_BUNDLE="$WORK/agg.bundle-shadowtls.json"
+jq '.node_address = "nodec.example.invalid" | .region_bucket = "bucket-charlie" | .shadowtls_enabled = true' "$SB_PARAMS" > "$AGG_STLS_PARAMS"
+"$CTL" bundle --params "$AGG_STLS_PARAMS" --state "$STATE" --out "$AGG_STLS_BUNDLE" 2>/dev/null
+# Sanity: the bundle really does carry a shadowtls endpoint with a plugin=shadow-tls Link (so the
+# refusal below is exercising the real lossy transport, not a no-op).
+jq -e 'any(.endpoints[]; .transport_class == "shadowtls-tcp" and (.link | contains("plugin=shadow-tls")))' "$AGG_STLS_BUNDLE" >/dev/null \
+	&& ok "shadowtls fixture bundle carries a plugin=shadow-tls endpoint (lossy path present)" || bad "shadowtls fixture bundle has no plugin=shadow-tls endpoint"
+# The decisive N1 assertion: merging a shadowtls-bearing bundle is REFUSED (no broken outbound).
+AGG_STLS_OUT="$WORK/agg.shadowtls.json"; rm -f "$AGG_STLS_OUT"
+if "$CTL" aggregate --bundle "$AGG_STLS_BUNDLE" --name nodeC --bundle "$AGG_B1" --name nodeD --out "$AGG_STLS_OUT" >/dev/null 2>&1 && [ -s "$AGG_STLS_OUT" ]; then
+	# It must NOT have produced a profile; if it did, prove the break: a bare-SS shadowtls outbound
+	# (no shadowtls type, no detour) would be the non-dialable N1 artifact.
+	if jq -e 'any(.outbounds[]; (.tag | endswith(".shadowtls")) and .type == "shadowsocks" and (has("detour") | not))' "$AGG_STLS_OUT" >/dev/null 2>&1; then
+		bad "aggregate emitted a NON-DIALABLE bare-Shadowsocks outbound for a ShadowTLS endpoint (N1 functional break)"
+	else
+		bad "aggregate accepted a ShadowTLS-bearing bundle (must fail closed: its Link is non-reconstructible)"
+	fi
+else
+	ok "aggregate refuses a ShadowTLS-bearing bundle fail-closed (N1: Link non-reconstructible, no broken bare-SS outbound)"
 fi
 
 # ---------------------------------------------------------------------------

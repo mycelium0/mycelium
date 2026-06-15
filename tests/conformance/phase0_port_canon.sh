@@ -24,7 +24,7 @@
 # a note, not failed — so the gate is robust to optional docs):
 #   * infra/ansible/group_vars/all.yml.example         (singbox_port_* / awg_listen_port)
 #   * infra/ansible/roles/singbox/defaults/main.yml    (singbox_port_*)
-#   * nodes/dataplane/singbox/server.template.json     (inbound listen_port by tag, via jq)
+#   * nodes/dataplane/singbox/server.template.renderer.json (inbound listen_port by tag, via jq)
 #   * nodes/dataplane/PORTS.md                          (a "<proto> ... <port>" table, if present)
 #   * control/lib/render_singbox.sh                     (per-protocol myc_params_get defaults)
 #
@@ -42,8 +42,8 @@ command -v jq >/dev/null 2>&1 || { printf 'FAIL: jq is required for phase0_port_
 
 GROUP_VARS="$REPO_ROOT/infra/ansible/group_vars/all.yml.example"
 ROLE_DEFAULTS="$REPO_ROOT/infra/ansible/roles/singbox/defaults/main.yml"
-# The DEPLOYED template (node-bootstrap.sh renders this one); the GO evidence must describe the
-# shipped artifact, not the superseded server.template.json (Audit-0004 F-002; unify in RP-0003 §W5).
+# The DEPLOYED template (node-bootstrap.sh renders this one) — now the ONLY sing-box server template:
+# the superseded server.template.json was removed and RP-0003 §W5 (two templates) is closed.
 SB_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 PORTS_MD="$REPO_ROOT/nodes/dataplane/PORTS.md"
 RENDER_SB="$REPO_ROOT/control/lib/render_singbox.sh"
@@ -153,7 +153,7 @@ note "nodes/dataplane/singbox/server.template.renderer.json"
 if [ ! -f "$SB_TEMPLATE" ]; then
 	skipln "sing-box template not present — skipping"
 elif ! jq -e . "$SB_TEMPLATE" >/dev/null 2>&1; then
-	badln "nodes/dataplane/singbox/server.template.json: not valid JSON"
+	badln "nodes/dataplane/singbox/server.template.renderer.json: not valid JSON"
 else
 	tmpl_port_for_tags() {
 		# echo the listen_port of the FIRST inbound whose tag matches any of the given tags.

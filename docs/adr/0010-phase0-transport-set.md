@@ -111,10 +111,11 @@ toggleable** via `group_vars` so an operator exposes only a chosen subset.
 
 **Hysteria2 ships obfuscated, not as bare QUIC.** The node template wraps inbound #4 in
 **Salamander obfuscation** (`obfs.type = salamander`) and points unauthenticated requests at an
-**H3 masquerade** site (the `obfs` and `masquerade` blocks of
-[`server.template.json`](../../nodes/dataplane/singbox/server.template.json), documented in
-[`protocols.md`](../../nodes/dataplane/singbox/protocols.md) row 4). This is the QUIC shape that
-specifically answers **SNI-based QUIC blocking**: Salamander XOR-scrambles the entire QUIC
+**H3 masquerade** site (the `obfs` and `masquerade` design, documented in
+[`protocols.md`](../../nodes/dataplane/singbox/protocols.md) row 4; the deployed sing-box template is
+[`server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json)). This
+is the QUIC shape that specifically answers **SNI-based QUIC blocking**: Salamander XOR-scrambles the
+entire QUIC
 datagram, so a filter that classifies QUIC by lifting a plaintext SNI out of the QUIC Initial /
 TLS ClientHello finds no parseable field to match — the discriminator it keys on is simply not on
 the wire. The threat is real and current: per a gfw.report study on SNI-based QUIC filtering

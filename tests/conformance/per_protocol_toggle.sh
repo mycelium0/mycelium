@@ -37,8 +37,8 @@ REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 command -v jq >/dev/null 2>&1 || { printf 'FAIL: jq is required for per_protocol_toggle.sh\n' >&2; exit 2; }
 
 # Point at the DEPLOYED template — node-bootstrap.sh renders server.template.renderer.json into the
-# live config, so the GO/NO-GO conformance evidence must describe THAT artifact, not the superseded
-# server.template.json (Audit-0004 F-002; templates unify in RP-0003 §W5).
+# live config, so the GO/NO-GO conformance evidence describes THAT artifact. It is now the only
+# sing-box server template: the superseded server.template.json was removed, closing RP-0003 §W5.
 TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 GROUP_VARS="$REPO_ROOT/infra/ansible/group_vars/all.yml.example"
 

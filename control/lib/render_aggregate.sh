@@ -132,10 +132,21 @@ myc_agg_link_outbound() {
 				           alpn: (($q.alpn // "h3") | split(",")) } }
 			elif $scheme == "ss" then
 				# ss://method:password@host:port  (optionally ?plugin=shadow-tls&sni=...)
-				($userinfo | before(":")) as $method
-				| ($userinfo | after(":")) as $pw
-				| { type: "shadowsocks", tag: $tag, server: $host, server_port: $port,
-				    method: $method, password: $pw }
+				# FAIL-CLOSED on a ShadowTLS share-link: the ss:// Link carries only the INNER
+				# Shadowsocks material (method:password) + the masquerade SNI. It does NOT carry the
+				# v3 handshake password or version, so the shadowtls+detour outbound the subscription
+				# path emits (render_singbox.sh: a "shadowtls" version:3 handshake outbound that the
+				# inner SS detours through) CANNOT be faithfully reconstructed from the Link alone.
+				# Emitting a bare Shadowsocks outbound here would dial the ShadowTLS handshake port as
+				# plain SS with the wrong (inner) credential, a non-dialable endpoint. Refuse it instead.
+				# (N1: yield null so the fail-closed path in the caller rejects this endpoint loudly.)
+				if (($q.plugin // "") == "shadow-tls") then null
+				else
+					($userinfo | before(":")) as $method
+					| ($userinfo | after(":")) as $pw
+					| { type: "shadowsocks", tag: $tag, server: $host, server_port: $port,
+					    method: $method, password: $pw }
+				end
 			elif $scheme == "trojan" then
 				{ type: "trojan", tag: $tag, server: $host, server_port: $port,
 				  password: $userinfo,
@@ -215,6 +226,15 @@ myc_render_aggregate() {
 			short_tag="${raw_tag#mycelium-}"
 			[ -n "$short_tag" ] || short_tag="$raw_tag"
 			ns_tag="${safe_label}.${short_tag}"
+
+			# Fail-closed BEFORE parsing on a ShadowTLS Link: its v3 handshake password/version are not
+			# carried in the ss:// share-link, so a faithful shadowtls+detour client outbound cannot be
+			# rebuilt from it (see myc_agg_link_outbound's ss branch). Refuse the whole merge with a
+			# precise message rather than silently emit a non-dialable bare-Shadowsocks outbound (N1).
+			case "$link" in
+				*plugin=shadow-tls*)
+					myc_die "aggregate: endpoint link is a ShadowTLS share-link (node '$safe_label', tag '$raw_tag') which cannot be reconstructed into a dialable client outbound from its Link alone (the v3 handshake password/version are not in the Link). Re-export this node via its served subscription, which carries the full shadowtls detour; the aggregate refuses it fail-closed rather than emit a broken bare-Shadowsocks outbound." ;;
+			esac
 
 			outbound="$(myc_agg_link_outbound "$ns_tag" "$link")"
 			if [ -z "$outbound" ] || [ "$outbound" = "null" ] || ! printf '%s' "$outbound" | jq -e . >/dev/null 2>&1; then

@@ -31,7 +31,10 @@ caddy_apt_repo_url: "https://dl.cloudsmith.io/public/caddy/stable/deb/debian any
 caddy_serve_bundle: false
 
 # Loopback address:port the bundle is served on (never exposed by the host firewall by default).
-caddy_bundle_listen: "127.0.0.1:8444"
+# Port 8472 is deliberately OUTSIDE the public data-plane port canon (nodes/dataplane/PORTS.md): it is
+# loopback-only, so it must not reuse a canonical PUBLIC listen port (e.g. 8444 is Hysteria2/UDP in the
+# canon — sharing that number invites confusion if an operator ever moves the bundle off loopback).
+caddy_bundle_listen: "127.0.0.1:8472"
 
 # Absolute path to the rendered, validated bundle file the node serves. node-bootstrap.sh renders it
 # fail-closed (keeps the last-known-good if a fresh render fails validation; never serves an invalid

@@ -68,19 +68,19 @@ See [`../../../docs/adr/0002-no-custom-cryptography.md`](../../../docs/adr/0002-
 
 ## License note (why there is no header in the `.json`)
 
-`server.template.json` is **pure JSON** consumed by `jq` (to fill sentinels) and by `sing-box`
-(to load the config). JSON has no comment syntax, so embedding the AGPL header inside the file
-would make it invalid and break both tools. The license therefore lives here instead:
+`server.template.renderer.json` is **pure JSON** consumed by `jq` (to fill sentinels) and by
+`sing-box` (to load the config). JSON has no comment syntax, so embedding the AGPL header inside the
+file would make it invalid and break both tools. The license therefore lives here instead:
 
 > Copyright © 2026 mindicator & silicon bags quartet.
 > SPDX-License-Identifier: AGPL-3.0-or-later
-> This file (`server.template.json`) is part of Mycelium, licensed under the GNU Affero General
-> Public License v3.0 or later. See the `LICENSE` file in the repository root.
+> This file (`server.template.renderer.json`) is part of Mycelium, licensed under the GNU Affero
+> General Public License v3.0 or later. See the `LICENSE` file in the repository root.
 
 ## How `myceliumctl` fills the sentinels
 
-`server.template.json` ships with **sentinel** string values (`SENTINEL_*`) so it stays valid JSON
-(and `jq`-fillable) while carrying no secrets. The control tool `myceliumctl`
+`server.template.renderer.json` ships with **sentinel** string values (`SENTINEL_*`) so it stays
+valid JSON (and `jq`-fillable) while carrying no secrets. The control tool `myceliumctl`
 ([`../../../control/`](../../../control/)) renders a real, deploy-only `server.json` — which lands
 under a **gitignored** path (`state/`, `secrets/`, `out/`, or `server.json` itself, never committed)
 — by editing the config **by `jq` path** (it never string-splices secrets into the file):
@@ -144,26 +144,26 @@ the node). No per-connection identity logging is performed anywhere in this conf
   from being used to reach internal hosts; `final` is `direct` for normal egress, with a `block`
   outbound available.
 
-## Templates in this directory (licensing)
+## Template in this directory (licensing)
 
-Both templates are **pure JSON** (no comment syntax), so they carry **no inline license header**;
-their license is the repository AGPL-3.0-or-later, documented here per the project convention.
+The template is **pure JSON** (no comment syntax), so it carries **no inline license header**; its
+license is the repository AGPL-3.0-or-later, documented here per the project convention.
 
-- `server.template.json` — the historical canonical template. **Note:** its inbound `tag`s use the
-  long forms (`tuic-v5-in`, `shadowsocks-2022-in`, `shadowtls-v3-in`, `shadowtls-shadowsocks-in`,
-  `trojan-tls-in`), which **do not match** the tag set the `myceliumctl` renderer fills/keeps
-  (`tuic-in`, `shadowsocks-in`, `shadowtls-in`, `shadowtls-ss-in`, `trojan-in`). Rendering this
-  template with the current renderer would silently drop TUIC/Shadowsocks/ShadowTLS/Trojan. This is
-  a known divergence to reconcile into one source.
-- `server.template.renderer.json` — a **renderer-compatible** template (uses the renderer's `-in`
-  tag set, listens on `::` for dual-stack) shipped so the on-node
-  [`scripts/node-bootstrap.sh`](../../../scripts/node-bootstrap.sh) can render the canonical config
-  through the existing pipeline today. Port values match [`../PORTS.md`](../PORTS.md). Until the two
-  templates above are unified, the bootstrap points `--template` at this one.
+- `server.template.renderer.json` — the single canonical sing-box server template. It uses the
+  renderer's `-in` inbound tag set (`vless-reality-vision-in`, `vless-xhttp-tls-in`, `tuic-in`,
+  `shadowsocks-in`, `shadowtls-in`, `shadowtls-ss-in`, `trojan-in`, …) that `myceliumctl` and
+  `render_singbox.sh` fill/keep, and listens on `::` for dual-stack. The on-node
+  [`scripts/node-bootstrap.sh`](../../../scripts/node-bootstrap.sh) renders the deployed config from
+  it, and `myceliumctl render-server --engine singbox` defaults to it. Port values match
+  [`../PORTS.md`](../PORTS.md).
+
+  > Historical note: an earlier `server.template.json` carried long-form inbound tags
+  > (`tuic-v5-in`, `shadowsocks-2022-in`, `shadowtls-v3-in`, `trojan-tls-in`) the renderer never
+  > matched and lacked `vless-xhttp-tls-in`. It has been **removed** — there is now ONE sing-box
+  > server template, closing RP-0003 §W5.
 
 ## Validate
 
 ```sh
-jq . server.template.json            # must parse cleanly (no secrets, only SENTINEL_* values)
-jq . server.template.renderer.json   # renderer-compatible variant; same rule
+jq . server.template.renderer.json   # must parse cleanly (no secrets, only SENTINEL_* values)
 ```

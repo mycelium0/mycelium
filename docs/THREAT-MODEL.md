@@ -63,6 +63,7 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 | Attack | Where it strikes | Project mitigation |
 |---|---|---|
 | Signature-based DPI | data plane | REALITY/Vision; indistinguishability from HTTPS |
+| TLS-in-TLS detection (nested-TLS-record heuristic) | data plane | Run **two structurally different TLS families**: the REALITY shapes (nested TLS-in-TLS) AND a genuine single-layer own-cert family (`xhttp-tls`, port 2087). A path that drops the TLS-in-TLS pattern still leaves the single-TLS family reachable, and vice-versa (see the dedicated subsection below; ARCHITECTURE.md Layer 1; ADR-0010; RP-0007) |
 | ML-based flow classification | data plane | Statistical traffic shaping beyond protocol mimicry; auto A/B obfuscation tuning |
 | Active probing | data plane / node | Donor site returns a legitimate response; every exposed port is REALITY/donor-fronted, no plaintext banners. Phase-0 minimal-exposure posture is REALITY-on-443; the bash bootstrap default additionally exposes REALITY+gRPC on 8443 (same family, also donor-fronted) for client failover — a deliberate, recorded two-port default (ADR-0022), not extraneous services |
 | IP-level / AS-level blocking | node | IP/AS diversity, fast rotation, CDN-front, ephemeral ingress nodes |
@@ -73,6 +74,59 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 | Traffic-timing correlation | routing | Multi-hop, padding, mixing (at latency cost) |
 | Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 3–4 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
 | Operator coercion | people | Minimal logging, plausible deniability, jurisdictional distribution |
+
+## Attack surface: TLS-in-TLS detection and the two-family mitigation
+
+**The threat.** The REALITY transport family borrows a real donor site's TLS handshake and then runs
+the tunnel's own TLS record stream *inside* that session — a TLS handshake nested within an outer TLS
+session (**TLS-in-TLS**). A path can apply a heuristic that flags the nested-TLS-record pattern
+(record-size and timing structure characteristic of one TLS stream tunnelled inside another) and drop
+flows that match it, without ever fingerprinting the specific protocol. Because **every** REALITY
+shape (Vision, gRPC, XHTTP) shares the nested-TLS structure, a single such heuristic degrades the
+whole REALITY family at once — a correlated failure across what would otherwise be independent
+fallbacks.
+
+**The mitigation — a second, structurally distinct TLS family.** Mycelium ships, alongside the
+REALITY families, a genuine **single-layer** TLS family: **VLESS + XHTTP over the node's OWN
+certificate** (family `xhttp-tls`, port `2087`, default-OFF). This family terminates **one** real
+TLS 1.3 session with the operator's own certificate — there is no donor and no nesting, so the
+TLS-in-TLS heuristic has nothing to match. The two families therefore fail under **different**
+conditions:
+
+- A path that drops the TLS-in-TLS pattern still leaves the genuine single-TLS `xhttp-tls` family
+  reachable.
+- A path that disfavours unknown own-certificates still leaves the donor-fronted REALITY families
+  reachable.
+
+Running both is a deliberate redundancy across an **independent failure axis** (nested-vs-single TLS
+structure), not two flavours of the same shape. The own-cert family carries its own trade-off — a
+genuine certificate and SNI are server-attributable and depend on a clean own-cert reputation — which
+is why it is **default-OFF** and enabled per operator judgement. Family details and ports:
+[ARCHITECTURE.md](ARCHITECTURE.md) Layer 1, [ADR-0010](adr/0010-phase0-transport-set.md) (amended),
+[RP-0007](proposals/0007-phase1-distribution-health-xhttp.md), and
+[PORTS.md](../nodes/dataplane/PORTS.md) (row 3b).
+
+## Attack surface: the served per-node distribution bundle
+
+Phase 1 matures the config-distribution endpoint into a **served, self-replenishing** per-node
+bundle (ARCHITECTURE.md Layer 2): `myceliumctl bundle` renders the node's typed Bundle, Caddy serves
+it over local TLS at an operator-chosen URL, and self-polling clients re-fetch it on a
+profile-update-interval cadence. This adds a new surface, treated as follows:
+
+- **Not a lone public chokepoint.** Serving is **OFF by default**, and when enabled it binds
+  **loopback by default** (`127.0.0.1:8472`, outside the public port canon — see
+  [PORTS.md](../nodes/dataplane/PORTS.md)); the operator fronts it via their own reach path so the
+  distribution channel stays plural rather than becoming a single point of block. The related
+  community-fronted reach path is [ADR-0029](adr/0029-community-federated-ingress.md).
+- **Per-node, never a central aggregator.** Each node serves only **its own** bundle. The
+  `myceliumctl aggregate` merge is a **purely local, at-rest** operation an operator runs over their
+  **own** nodes' bundles (read M files, write one profile, no network I/O, no upload, no server). A
+  *served* cross-node aggregator would be both a single point of block and a forbidden topology
+  centralisation; it does not exist by construction. The bounded at-rest exception (one device holding
+  the operator's M own-node bundles) is accepted: own nodes, local, no transmission.
+- **No global health/abuse oracle.** Bundle `health` is hard-pinned to `unknown` in Phase 1
+  (advisory-only) per [ADR-0025](adr/0025-no-global-abuse-oracle.md), so a served bundle cannot become
+  a network-wide health/reputation signal. Distribution design: [RP-0007](proposals/0007-phase1-distribution-health-xhttp.md).
 
 ## Attack surface: download-direction throughput degradation and the out-of-region path
 
