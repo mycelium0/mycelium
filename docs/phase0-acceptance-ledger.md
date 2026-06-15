@@ -13,14 +13,14 @@ Definition of Done is met in production with real users** — not when the code 
 ledger maps every Phase-0 DoD and scope item to its status, evidence, and owner; the scope
 reconciliations it relies on are pinned in [adr/0020-phase0-scope-reconciliations.md](adr/0020-phase0-scope-reconciliations.md).
 
-> **Current verdict: NO-GO — pending only the operator's GO signature.** Every DoD and acceptance cell is now
-> **GREEN with recorded evidence**: D1 ✅ (real-user proof), D2 ✅ (AmneziaWG client-device proof), D3 ✅
-> (cover-probe), D4 ✅ (one-command deploy + atomic revoke wrapper + from-zero install path validated end-to-end
-> on a node, **no new VDS**), D5 ✅, REALITY-rotation ✅ (exercised once), engine-currency ✅; 18 offline gates
-> green; the Go spine builds/tests/`-race` green; node-side observability live loopback-only; out-of-band D1
-> delivery correct (only the REALITY *public* key + client UUIDs reach clients). All autonomous closures are
-> landed. **Nothing further requires the maintainer, a new node, or a new VPS — the single remaining gate is the
-> operator reviewing this ledger and signing GO.** (Node identifiers are abstracted as node-A/B/C; no
+> **Current verdict: GO — Phase-0 → Phase-1 transition AUTHORIZED 2026-06-15** (operator sign-off recorded
+> below). Every DoD and acceptance cell is **GREEN with recorded evidence**: D1 ✅ (real-user proof), D2 ✅
+> (AmneziaWG client-device proof), D3 ✅ (cover-probe), D4 ✅ (one-command deploy + atomic revoke wrapper +
+> from-zero install path validated end-to-end on a node, **no new VDS**), D5 ✅, REALITY-rotation ✅ (exercised
+> once), engine-currency ✅; 18 offline gates green; the Go spine builds/tests/`-race` green; node-side
+> observability live loopback-only; out-of-band D1 delivery correct (only the REALITY *public* key + client
+> UUIDs reach clients). The operator additionally validated both families hands-on on a real device and signed
+> GO. **Phase 1 (RP-0007) is now unlocked.** (Node identifiers are abstracted as node-A/B/C; no
 > IPs/hostnames/donor-mappings appear here, per the project OPSEC rule.)
 
 ## DoD scorecard
@@ -76,5 +76,9 @@ confirmed running with alerting/per-transport-handshake explicitly deferred per 
 The autonomous closures above are all landed; nothing further requires the maintainer or a new VPS.
 
 ## Sign-off
-- [ ] All DoD cells GREEN with recorded evidence (operator)
-- [ ] Phase-0 → Phase-1 transition **authorized** — signer / date: ____________________
+- [x] All DoD cells GREEN with recorded evidence (operator)
+- [x] Phase-0 → Phase-1 transition **authorized** — signer / date: **mindicator (operator) / 2026-06-15**
+
+Operator validated both transport families hands-on on a real restrictive-network device (D1 REALITY
+self-replenishing subscription + D2 AmneziaWG/UDP, Wi-Fi + LTE), confirmed the auto-updating subscription
+propagates server-side changes, and **authorized the Phase-0 → Phase-1 transition (GO) on 2026-06-15.**
