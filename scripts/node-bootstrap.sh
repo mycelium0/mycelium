@@ -100,7 +100,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack
+MODE="bootstrap"            # bootstrap | update | ack | revoke
+REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
 ASSUME_YES=0
@@ -201,6 +202,7 @@ while [ "$#" -gt 0 ]; do
 	case "$1" in
 		--update)          MODE="update"; shift ;;
 		--ack)             MODE="ack"; shift ;;
+		--revoke)          MODE="revoke"; REVOKE_NAME="${2:?--revoke needs a client NAME or ID}"; shift 2 ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;
@@ -1656,6 +1658,37 @@ flow_ack() {
 	fi
 }
 
+# flow_revoke — atomic on-node client revoke: drop the client from the identity state, re-render the
+# server config WITHOUT it, validate fail-closed, promote, reload sing-box, and verify (rollback on
+# failure). One command instead of revoke-then-manually-re-render. LOCAL only — no fetch, no key
+# regeneration; other clients' links are unchanged (nothing to re-distribute). Closes the D4 atomic
+# revoke-wrapper item (Audit-0004); the revoke itself reuses myceliumctl + the tested render/apply path.
+flow_revoke() {
+	log "=== revoke client + re-render + reload (atomic, no fetch) ==="
+	[ -n "$REVOKE_NAME" ] || die "--revoke needs a client NAME or ID."
+	[ -x "$MYCTL" ] || die "myceliumctl not found/executable: $MYCTL"
+	[ -f "$IDENTITIES_JSON" ] || die "identities.json missing — nothing to revoke (bootstrap first)."
+	run "$MYCTL" identity revoke "$REVOKE_NAME" --state "$IDENTITIES_JSON" \
+		|| die "revoke failed — is '$REVOKE_NAME' a known client? (myceliumctl identity list)"
+	local candidate="$STATE_DIR/config.candidate.json"
+	render_candidate "$candidate"
+	if ! validate_config "$candidate"; then
+		rm -f "$candidate" 2>/dev/null || true
+		die "candidate failed 'sing-box check' after revoke (fail-closed; nothing promoted)."
+	fi
+	promote_config "$candidate"
+	rm -f "$candidate" 2>/dev/null || true
+	install_singbox_unit
+	if apply_singbox && verify_post_apply; then
+		log "revoked '$REVOKE_NAME'; config re-rendered + sing-box reloaded — the client's UUID is gone from every inbound. Other clients' links are unchanged."
+	else
+		warn "post-apply verification failed after revoke; rolling back."
+		rollback_config
+		apply_singbox || true
+		die "revoke rolled back (fail-closed) — the prior config (with the client) is restored."
+	fi
+}
+
 verify_post_apply() {
 	# Robust post-apply health check. ExecStartPre's "sing-box check" only validates SCHEMA; a config
 	# that passes check can still fail at RUNTIME (port already in use, cert unreadable under the
@@ -1718,6 +1751,7 @@ case "$MODE" in
 	bootstrap) flow_bootstrap ;;
 	update)    flow_update ;;
 	ack)       flow_ack ;;
+	revoke)    flow_revoke ;;
 	*) die "unknown mode: $MODE" ;;
 esac
 exit 0
