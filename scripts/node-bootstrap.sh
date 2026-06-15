@@ -260,6 +260,16 @@ LASTGOOD_CONFIG="$STATE_DIR/config.lastgood.json"
 STAGED_CONFIG="$STATE_DIR/config.staged.json"
 ACK_MARKER="$STATE_DIR/config.staged.ack"
 
+# Served distribution bundle (RP-0007-b). The node renders its typed Bundle (internal/spec/bundle.go)
+# via `myceliumctl bundle`, then SERVES it (e.g. via the caddy role's loopback bundle vhost) so a
+# client self-polls (profile-update-interval). The SERVED copy is updated fail-closed: a freshly
+# rendered bundle replaces the served file ONLY after it validates; on any failure the last-known-good
+# served bundle is left in place (never serve an invalid bundle). Loopback-only by default; the
+# operator fronts it via their chosen reach path, so the channel is never a single public chokepoint.
+BUNDLE_DIR="/etc/mycelium/bundle"
+BUNDLE_SERVED="$BUNDLE_DIR/bundle.json"           # the file the server serves (last-known-good)
+BUNDLE_CANDIDATE="$STATE_DIR/bundle.candidate.json"
+
 # myceliumctl entrypoint: prefer the installed tooling copy; fall back to the in-repo (checkout) one.
 MYCTL="$TOOLING_DIR/control/myceliumctl"
 [ -x "$MYCTL" ] || MYCTL="$ARTIFACT_ROOT/control/myceliumctl"
@@ -1006,6 +1016,68 @@ rollback_config() {
 }
 
 # ---------------------------------------------------------------------------
+# Served distribution bundle (RP-0007-b) — render + serve fail-closed.
+#
+# Renders the node's typed Bundle (internal/spec/bundle.go) via `myceliumctl bundle` into a
+# candidate, then promotes it to the SERVED path ONLY after it validates. FAIL-CLOSED: if the fresh
+# render fails (myceliumctl exits non-zero) OR the candidate is not valid JSON with the bundle shape,
+# the previously-served (last-known-good) bundle is LEFT IN PLACE and the served file is never
+# overwritten with an invalid one. The first-ever bootstrap has no last-known-good, so a failure
+# there is a hard error (nothing valid to serve).
+#
+# Authoritative validation (internal/spec.Bundle.Validate) is Go-side; this shell gate enforces the
+# same coarse invariants `myceliumctl bundle` already asserts (>=1 endpoint, every health "unknown",
+# every link non-empty), so a structurally-broken bundle never reaches the served path.
+# ---------------------------------------------------------------------------
+render_serve_bundle() {
+	[ -x "$MYCTL" ] || { warn "myceliumctl not found; skipping bundle render (sub channel unaffected)."; return 0; }
+	[ -f "$PARAMS_JSON" ] || { warn "params.json missing; skipping bundle render."; return 0; }
+	[ -f "$IDENTITIES_JSON" ] || { warn "identities.json missing; skipping bundle render."; return 0; }
+
+	log "rendering served distribution bundle via myceliumctl -> $BUNDLE_CANDIDATE"
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "[dry-run] $MYCTL bundle --params $PARAMS_JSON --state $IDENTITIES_JSON --out $BUNDLE_CANDIDATE"
+		log "[dry-run] would serve validated bundle at $BUNDLE_SERVED (fail-closed: keep last-known-good on failure)"
+		return 0
+	fi
+
+	# Render the candidate. A non-zero exit means NOTHING is promoted (fail-closed).
+	if ! "$MYCTL" bundle --params "$PARAMS_JSON" --state "$IDENTITIES_JSON" --out "$BUNDLE_CANDIDATE" 2>/dev/null; then
+		rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
+		if [ -f "$BUNDLE_SERVED" ]; then
+			warn "bundle render failed; keeping the last-known-good served bundle ($BUNDLE_SERVED) — fail-closed."
+			return 0
+		fi
+		die "bundle render failed and there is no last-known-good served bundle (fail-closed; nothing valid to serve)."
+	fi
+
+	# Coarse structural validation (mirrors bundle.go.Validate's shape; the authoritative round-trip is
+	# the Go check). A candidate that fails here must NOT replace the served file.
+	if ! jq -e '
+		(.version == 1)
+		and (.endpoints | type == "array") and (.endpoints | length >= 1)
+		and (.endpoints | all(.health == "unknown"))
+		and (.endpoints | all((.link | type == "string") and ((.link | length) > 0)))
+		and (.generated_at | type == "string")
+	' "$BUNDLE_CANDIDATE" >/dev/null 2>&1; then
+		rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
+		if [ -f "$BUNDLE_SERVED" ]; then
+			warn "freshly rendered bundle failed validation; keeping the last-known-good served bundle — fail-closed."
+			return 0
+		fi
+		die "freshly rendered bundle failed validation and there is no last-known-good to fall back to (fail-closed)."
+	fi
+
+	# Promote the validated candidate to the served path (atomic install into the served dir).
+	need_root
+	run mkdir -p "$BUNDLE_DIR"
+	run install -m 0644 "$BUNDLE_CANDIDATE" "$BUNDLE_SERVED"
+	rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
+	log "served bundle updated (validated): $BUNDLE_SERVED ($(jq '.endpoints | length' "$BUNDLE_SERVED" 2>/dev/null || echo '?') endpoint(s))."
+	log "serve it over HTTPS with a profile-update-interval header so clients self-poll (see roles/caddy: caddy_serve_bundle)."
+}
+
+# ---------------------------------------------------------------------------
 # systemd service install + (re)start / reload.
 # ---------------------------------------------------------------------------
 install_singbox_unit() {
@@ -1575,6 +1647,8 @@ flow_bootstrap() {
 	restart_singbox
 	setup_amneziawg
 	setup_observability
+	# Render the served distribution bundle (RP-0007-b). Fail-closed: keeps last-known-good on failure.
+	render_serve_bundle
 	if [ "$DO_HARDEN" -eq 1 ]; then harden_ufw; fi
 	verify_listeners
 	log "bootstrap complete. The REALITY private key, client UUIDs, and per-protocol secrets remain"
@@ -1656,6 +1730,9 @@ flow_update() {
 	install_singbox_unit
 	if apply_singbox && verify_post_apply; then
 		log "update applied and verified."
+		# Re-render the served bundle from the now-live identity/params (fail-closed: keeps
+		# last-known-good if the fresh render does not validate — never serves an invalid bundle).
+		render_serve_bundle
 	else
 		warn "post-apply verification failed; rolling back."
 		rollback_config
