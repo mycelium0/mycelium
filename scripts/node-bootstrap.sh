@@ -930,6 +930,19 @@ write_params() {
 			shadowtls_enabled:            false, shadowtls_port:            8446,
 			trojan_enabled:               false, trojan_port:               8447
 		}' >"$tmp"
+	# Optional two-hop egress overlay (ADR-0029): a node acting as an in-region INGRESS for an
+	# out-of-region egress drops a local-only two_hop.json into STATE_DIR; merge it into params so the
+	# renderer (render_singbox.sh) emits the upstream outbound + auth_user route. Node-local + never
+	# committed -> survives the fetch/re-render cycle; absent on every other node -> params render
+	# byte-identically (gated, zero blast radius). See render_singbox.sh `.two_hop` handling.
+	if [ -f "$STATE_DIR/two_hop.json" ] && jq -e . "$STATE_DIR/two_hop.json" >/dev/null 2>&1; then
+		if jq --slurpfile th "$STATE_DIR/two_hop.json" '.two_hop = $th[0]' "$tmp" >"$tmp.th"; then
+			mv -f "$tmp.th" "$tmp"
+			log "params: merged node-local two_hop egress overlay (ADR-0029 in-region ingress)."
+		else
+			rm -f "$tmp.th"; warn "two_hop.json present but failed to merge — params written WITHOUT two-hop."
+		fi
+	fi
 	mv -f "$tmp" "$PARAMS_JSON"; chmod 0600 "$PARAMS_JSON"
 	# Mirror the clash secret to a 0600 file so the loopback data-plane stats exporter can authenticate
 	# to clash_api (--clash-secret-file). Empty on legacy nodes: leave no file (the exporter then reads
