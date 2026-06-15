@@ -300,6 +300,18 @@ Design implications (not merely a disclaimer):
 
 - **Knowledge minimisation.** Nodes store as little about users as possible; logs are off by
   default; data that is never collected cannot be seized or compelled.
+- **At-rest local aggregate profile — a bounded, accepted exception.** An operator who runs
+  several of their own nodes may merge those nodes' per-node distribution bundles into one
+  client profile, **locally**, with `myceliumctl aggregate`. That merged profile is one client
+  device holding the operator's **own** fleet's endpoints at rest. This is a deliberately
+  **bounded, accepted** exception to knowledge minimisation: the bound is **own nodes, local,
+  no transmission**. The merge runs entirely on the operator's own machine — it reads the input
+  bundles and writes one output file, with no network of any kind — so nothing is uploaded,
+  served, or transmitted, and it is **not** a central cross-node endpoint: every node still
+  serves its own bundle independently, so there is no single aggregator to seize or to block.
+  Because the only at-rest concentration is the operator's own fleet on the operator's own
+  device, and because that concentration never travels, it does not widen the seizure or
+  blocking surface beyond the device the operator already controls.
 - **Role and jurisdictional separation.** Coordination, ingress, and egress are in different
   hands and under different legal regimes, so that compromising or coercing one actor does not
   expose the rest.

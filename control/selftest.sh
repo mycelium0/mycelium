@@ -669,6 +669,118 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+note "aggregate (client-side multi-node merge — RP-0007-d §15.8 VIS-0007 seam)"
+# ---------------------------------------------------------------------------
+# Render TWO per-node bundles from the multi-protocol sing-box params (reusing SB_PARAMS, varying
+# node_address + region_bucket so the nodes are distinct), then merge them LOCALLY into ONE
+# client-importable sing-box profile with `aggregate`. Assert: valid JSON; outbounds from BOTH
+# nodes; tags namespaced + UNIQUE across nodes (no collision); exactly one urltest "auto" and one
+# selector; the urltest covers all node proxies; no private key leaked. The merge is purely local
+# (no network) — it is NOT a central cross-node endpoint, just the operator stitching their own
+# nodes' bundles together at rest.
+AGG_B1="$WORK/agg.bundleA.json"
+AGG_B2="$WORK/agg.bundleB.json"
+AGG_P1="$WORK/agg.paramsA.json"
+AGG_P2="$WORK/agg.paramsB.json"
+AGG_OUT="$WORK/agg.merged.json"
+
+# Two distinct node params, both from the shared SB_PARAMS fixture.
+jq '.node_address = "nodea.example.invalid" | .region_bucket = "bucket-alpha"' "$SB_PARAMS" > "$AGG_P1"
+jq '.node_address = "nodeb.example.invalid" | .region_bucket = "bucket-bravo"' "$SB_PARAMS" > "$AGG_P2"
+"$CTL" bundle --params "$AGG_P1" --state "$STATE" --out "$AGG_B1" 2>/dev/null
+"$CTL" bundle --params "$AGG_P2" --state "$STATE" --out "$AGG_B2" 2>/dev/null
+jq -e . "$AGG_B1" >/dev/null && jq -e . "$AGG_B2" >/dev/null \
+	&& ok "two per-node input bundles rendered for aggregate" || bad "aggregate input bundles invalid"
+
+# The local merge: two named nodes -> one profile.
+"$CTL" aggregate --bundle "$AGG_B1" --name nodeA --bundle "$AGG_B2" --name nodeB --out "$AGG_OUT" 2>/dev/null
+jq -e . "$AGG_OUT" >/dev/null && ok "aggregated profile is valid JSON" || bad "aggregated profile invalid JSON"
+
+# Outbounds from BOTH nodes are present (proxy outbounds carry the "<label>." namespace prefix).
+jq -e 'any(.outbounds[]; (.tag | startswith("nodeA.")))' "$AGG_OUT" >/dev/null \
+	&& ok "merge contains outbounds from nodeA" || bad "nodeA outbounds missing from merge"
+jq -e 'any(.outbounds[]; (.tag | startswith("nodeB.")))' "$AGG_OUT" >/dev/null \
+	&& ok "merge contains outbounds from nodeB" || bad "nodeB outbounds missing from merge"
+
+# Each input node's endpoint count is fully represented in the merged proxies (no endpoint dropped).
+AGG_EP1="$(jq '.endpoints | length' "$AGG_B1")"
+AGG_EP2="$(jq '.endpoints | length' "$AGG_B2")"
+AGG_NA="$(jq '[.outbounds[] | select(.tag | startswith("nodeA."))] | length' "$AGG_OUT")"
+AGG_NB="$(jq '[.outbounds[] | select(.tag | startswith("nodeB."))] | length' "$AGG_OUT")"
+[ "$AGG_NA" -eq "$AGG_EP1" ] && [ "$AGG_NB" -eq "$AGG_EP2" ] \
+	&& ok "every endpoint from every node became a merged outbound ($AGG_NA + $AGG_NB)" \
+	|| bad "endpoint->outbound count mismatch (nodeA $AGG_NA/$AGG_EP1, nodeB $AGG_NB/$AGG_EP2)"
+
+# Tags are NAMESPACED (prefixed) and UNIQUE across nodes — the whole point of namespacing is that
+# the same protocol on two nodes never collides.
+jq -e '[.outbounds[] | select(.type | IN("vless","hysteria2","tuic","shadowsocks","trojan")) | .tag]
+	| (length) == (unique | length)' "$AGG_OUT" >/dev/null \
+	&& ok "all proxy tags are unique (no cross-node collision)" || bad "namespaced tag collision across nodes"
+# The SAME protocol on both nodes yields two DISTINCT tags (nodeA.* and nodeB.*) — concrete proof
+# the namespace prevents a collision that a naive merge would have caused.
+jq -e '(any(.outbounds[]; .tag == "nodeA.vless-reality-vision"))
+	and (any(.outbounds[]; .tag == "nodeB.vless-reality-vision"))' "$AGG_OUT" >/dev/null \
+	&& ok "same protocol on both nodes -> two distinct namespaced tags" || bad "namespaced same-protocol tags missing"
+
+# Exactly ONE urltest "auto" and exactly ONE selector (a single cross-node auto-switch).
+[ "$(jq '[.outbounds[] | select(.type=="urltest")] | length' "$AGG_OUT")" -eq 1 ] \
+	&& ok "exactly one urltest outbound" || bad "urltest count != 1"
+jq -e 'any(.outbounds[]; .type=="urltest" and .tag=="auto")' "$AGG_OUT" >/dev/null \
+	&& ok "the urltest is tagged \"auto\"" || bad "urltest not tagged auto"
+[ "$(jq '[.outbounds[] | select(.type=="selector")] | length' "$AGG_OUT")" -eq 1 ] \
+	&& ok "exactly one selector outbound" || bad "selector count != 1"
+jq -e '(.outbounds[] | select(.type=="selector") | .default) == "auto"' "$AGG_OUT" >/dev/null \
+	&& ok "selector defaults through \"auto\" (the cross-node urltest)" || bad "selector default not auto"
+
+# The urltest covers EXACTLY all merged proxy outbounds (every node's proxy is in the auto-switch).
+jq -e '([.outbounds[] | select(.type=="urltest") | .outbounds[]] | sort)
+	== ([.outbounds[] | select(.type | IN("vless","hysteria2","tuic","shadowsocks","trojan")) | .tag] | sort)' "$AGG_OUT" >/dev/null \
+	&& ok "urltest covers exactly all merged proxy outbounds (cross-node auto-switch)" || bad "urltest does not cover all node proxies"
+
+# A parsed outbound is well-formed: the nodeA vision outbound is a vless reality outbound that
+# dials nodeA's address (proof the link was parsed into a real client outbound, not passed opaque).
+jq -e '(.outbounds[] | select(.tag=="nodeA.vless-reality-vision"))
+	| .type=="vless" and .server=="nodea.example.invalid" and (.tls.reality.enabled==true)' "$AGG_OUT" >/dev/null \
+	&& ok "a merged vless outbound parsed correctly (server + reality from its link)" || bad "merged vless outbound malformed"
+
+# LOCAL-ONLY merge must NEVER leak the REALITY private key (links carry only the public key).
+if grep -q "$PRIV" "$AGG_OUT"; then
+	bad "aggregated profile leaked the REALITY private key"
+else
+	ok "aggregated profile does NOT leak the private key"
+fi
+
+# Derived labels: with NO --name, inputs get stable node1/node2 labels by order (no collision).
+AGG_OUT_DERIVED="$WORK/agg.merged-derived.json"
+"$CTL" aggregate --bundle "$AGG_B1" --bundle "$AGG_B2" --out "$AGG_OUT_DERIVED" 2>/dev/null
+jq -e '(any(.outbounds[]; (.tag | startswith("node1."))))
+	and (any(.outbounds[]; (.tag | startswith("node2."))))' "$AGG_OUT_DERIVED" >/dev/null \
+	&& ok "unnamed inputs get stable derived labels node1/node2" || bad "derived labels missing"
+
+# Fail-closed: a single --bundle is refused (a merge needs >=2 nodes; one node has its own sub).
+if "$CTL" aggregate --bundle "$AGG_B1" --name solo --out "$WORK/agg.single.json" >/dev/null 2>&1; then
+	bad "aggregate accepted a single --bundle (should require >=2)"
+else
+	ok "aggregate with a single --bundle is refused (>=2 required)"
+fi
+
+# Fail-closed: a duplicate --name across nodes is refused (it would re-merge a namespace).
+if "$CTL" aggregate --bundle "$AGG_B1" --name dup --bundle "$AGG_B2" --name dup --out "$WORK/agg.dup.json" >/dev/null 2>&1; then
+	bad "aggregate accepted a duplicate --name (namespaces must be unique)"
+else
+	ok "aggregate with a duplicate --name is refused (unique namespaces)"
+fi
+
+# Fail-closed: a non-bundle JSON input is refused (validated against the bundle.go shape).
+AGG_NOTBUNDLE="$WORK/agg.notbundle.json"
+printf '{"hello":"world"}\n' > "$AGG_NOTBUNDLE"
+if "$CTL" aggregate --bundle "$AGG_B1" --name a --bundle "$AGG_NOTBUNDLE" --name b --out "$WORK/agg.bad.json" >/dev/null 2>&1; then
+	bad "aggregate accepted a non-bundle input (should validate the bundle.go shape)"
+else
+	ok "aggregate refuses a non-bundle input (bundle.go shape validated)"
+fi
+
+# ---------------------------------------------------------------------------
 note "Summary"
 printf 'passed: %d   failed: %d\n' "$PASS" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
