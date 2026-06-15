@@ -173,6 +173,23 @@ Floors are expressed as **equivalents** ("`>= X`-equivalent", "PQ-capable build"
 satisfying tag depends on what the pinned engine vendors at bump time; the conformance gate compares
 the **recorded** pins against the **documented** floors (see Compliance), it does not fetch upstream.
 
+**Machine-readable floors** — the exact grammar `tests/conformance/dependency_policy.sh` parses (a
+recorded pin below any of these fails the gate; a line with no matching in-repo pin, such as uTLS, is
+informational, never a failure). These are kept at or below the current recorded pins so a bump is a
+deliberate, separate change, never a silent regression:
+
+    floor: singbox v1.13.0
+    floor: xray v26.3.27
+    floor: node_exporter 1.8.0
+    floor: utls 1.8.2
+
+Verified `linux-amd64` checksums for the pins now recorded in `group_vars/all.yml.example` (public and
+reproducible via `curl -sL <asset> | sha256sum`; the example keeps placeholders so a deploy fails closed
+until the operator records these into the real `all.yml`):
+
+- sing-box `v1.13.13` — `sing-box-1.13.13-linux-amd64.tar.gz` — `bb99cabf47694625db421ee17898f36cdc1f9c2cb5decf65b12bac8d8437e842`
+- Xray-core `v26.3.27` — `Xray-linux-64.zip` — `23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae`
+
 ### 3. Engine-asymmetry record
 
 The following hardening is **engine-specific today** and is recorded so an operator who needs it
