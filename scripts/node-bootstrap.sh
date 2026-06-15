@@ -1097,6 +1097,16 @@ compute_client_allowed() {
 $line"; fi
 		done < "$AWG_REGION_EXCLUDE_FILE"
 		if [ -n "$SG_ALLOWED_LINES" ]; then
+			# IPv6-leak guard (ADR-0027): a region-exclude list that carries NO v6 route leaves the client's
+			# PUBLIC IPv6 outside the tunnel — the client still gets an in-tunnel v6 ULA AND the host keeps its
+			# own v6 default route, so v6 egresses DIRECT, defeating the split (impaired-path destinations leak
+			# over v6). If the list is v4-only, capture all v6 into the tunnel (::/0): the node routes it when it
+			# has global v6, otherwise it is dropped and apps fall back to (tunnelled) IPv4. Never leak v6.
+			if ! printf '%s\n' "$SG_ALLOWED_LINES" | grep -q ':'; then
+				SG_ALLOWED_LINES="$SG_ALLOWED_LINES
+::/0"
+				log "split-tunnel: region-exclude list is IPv4-only — appended ::/0 to stop an IPv6 leak."
+			fi
 			log "split-tunnel: AllowedIPs from region-exclude file $AWG_REGION_EXCLUDE_FILE (Selective Growth)."
 			return 0
 		fi
