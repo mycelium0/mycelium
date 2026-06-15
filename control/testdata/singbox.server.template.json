@@ -81,7 +81,7 @@
     {
       "type": "vless",
       "tag": "vless-xhttp-tls-in",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 2087,
       "users": [],
       "tls": {

@@ -56,6 +56,7 @@ subset and keeps the exposed surface minimal.
 | **VLESS + REALITY + XTLS-Vision (TCP)** | TCP/TLS, borrows the handshake of a real donor site | Best survivability against DPI + active probing; Vision equalises TLS record lengths | Targeted blocking events aimed at VLESS-TCP-TLS | **Primary** |
 | **VLESS + REALITY + gRPC** | HTTP/2 wrapper over TLS | Survives some conditions that take down bare TCP-TLS; multiplexes through HTTP/2-aware middleboxes | Higher latency cost | First TLS-family fallback |
 | **VLESS + REALITY + XHTTP** | HTTP-framed transport over TLS | Resilient where plain streams are disrupted; friendlier to HTTP-shaped paths and CDNs | Higher framing overhead | Second TLS-family fallback |
+| **VLESS + XHTTP over genuine TLS** (family `xhttp-tls`, port `2087`) | HTTP-framed transport over a **single, genuine** TLS 1.3 session terminated by the node's **OWN** certificate (NO REALITY donor) | A structurally **distinct** family from the REALITY shapes: it is real single-layer TLS, so it survives paths where the TLS-record-inside-TLS pattern (the REALITY families nest TLS inside TLS) is specifically detected and dropped. Own-cert means the SNI and certificate are the operator's own and consistent. | A genuine cert/SNI is a server-attributable identifier; depends on a clean own-cert reputation. Default-OFF. | TLS-in-TLS-blocked-path fallback (own-cert, distinct from the REALITY families) |
 | **Hysteria2** | QUIC/UDP with aggressive congestion control | Strong on lossy, throttled, high-latency links | Depends on live UDP | UDP-friendly networks |
 | **TUIC v5** | QUIC/UDP, low-overhead multiplexing | A second, independent QUIC fingerprint so the QUIC family is not a single point of failure | Depends on live UDP | UDP-friendly networks |
 | **Shadowsocks-2022 (AEAD)** | `2022-blake3-aes-256-gcm`, per-session salts | Lightweight non-VLESS shape; independent fallback | Plain TCP shape without a TLS cover on its own | Independent fallback |
@@ -67,6 +68,17 @@ Excluded as legacy / easily-fingerprinted / superseded (full reasoning in
 [ADR-0010](adr/0010-phase0-transport-set.md)): **VMess, plain Shadowsocks (pre-2022), plain
 WireGuard, OpenVPN, L2TP/IPsec, PPTP, SSTP, IKEv2.** A CDN-fronted (Cloudflare) path remains
 available as a last-resort wrapper around a TLS-family shape.
+
+**Two TLS families on purpose (TLS-in-TLS resilience).** The REALITY shapes nest a TLS record stream
+*inside* the borrowed-donor TLS session (TLS-in-TLS); the `xhttp-tls` family above presents a single,
+genuine, own-certificate TLS session (no nesting). Shipping **both** means a path that specifically
+detects and drops the TLS-in-TLS pattern still leaves the genuine-single-TLS family reachable, and a
+path that disfavours unknown own-certs still leaves the REALITY families reachable — the two fail
+under *different* conditions, which is the whole point of running independent families. The
+corresponding detection threat and this mitigation are recorded in
+[THREAT-MODEL.md](THREAT-MODEL.md) (TLS-in-TLS detection); the family was added per
+[ADR-0010](adr/0010-phase0-transport-set.md) (amended) and [RP-0007](proposals/0007-phase1-distribution-health-xhttp.md),
+and its port and own-cert posture are in [PORTS.md](../nodes/dataplane/PORTS.md) (row 3b).
 
 **Layer principles:**
 - The REALITY (and ShadowTLS) cover host is always a real donor: active probing receives a
@@ -103,6 +115,37 @@ coordinator; phases 4–5 — distributed consensus over gossip.
 **Resilience of the control plane itself:** configs and commands travel via CDN fronts,
 domain-fronting, multiple anycast ingress points, and a P2P fallback. The invariant: "data can
 outlive management" is unacceptable — management must survive wherever data does.
+
+### Served per-node distribution bundle (matured config-distribution endpoint — Phase 1)
+
+The Phase-0 config hand-off was out-of-band (no always-on endpoint, ADR-0020 §1). Phase 1 matures it
+into a **served, self-replenishing** distribution surface that each node serves **for itself**:
+
+- **`myceliumctl bundle`** renders ONE typed distribution Bundle for the node
+  ([`internal/spec/bundle.go`](../internal/spec/bundle.go) shape): one Endpoint per enabled transport,
+  each carrying a coarse `transport_class`/`region` plus an opaque dialable `link`. Health is
+  hard-pinned to `unknown` in Phase 1 (advisory-only; no global health/abuse oracle — ADR-0025).
+- **Caddy serves that bundle file over local TLS.** The served URL is the operator-chosen
+  `{{ caddy_bundle_path }}` (default `/bundle.json`) on `caddy_bundle_listen`, which defaults to
+  **loopback** (`127.0.0.1:8472`, outside the public port canon — see
+  [PORTS.md](../nodes/dataplane/PORTS.md)). The whole feature is **OFF by default**
+  (`caddy_serve_bundle: false`): a node serves a bundle only when the operator opts in, and the
+  default loopback bind means the operator fronts it via their own reach path so the served channel
+  is never a lone public chokepoint.
+- **Self-polling clients** re-fetch the bundle on a cadence advertised by a
+  **profile-update-interval** response header (`caddy_bundle_update_interval`, default `1h`), so a
+  subscribed client replenishes its profile without operator action.
+- **`myceliumctl aggregate`** is a **purely local, at-rest** merge an operator runs on their **own**
+  machine over their **own** nodes' bundles: read M bundle files, write one client-importable profile,
+  **no network I/O, no upload, no server**. It is explicitly NOT a served cross-node aggregator — a
+  served aggregator would be a single point of block and a forbidden topology centralisation. Every
+  node still serves only its OWN bundle; the operator stitches their own copies together locally.
+
+Cross-refs: the served-bundle surface and its single-point/centralisation boundaries are in
+[THREAT-MODEL.md](THREAT-MODEL.md); the transport set it distributes is
+[ADR-0010](adr/0010-phase0-transport-set.md); the distribution design is
+[RP-0007](proposals/0007-phase1-distribution-health-xhttp.md); and the related community-fronted
+reach path is [ADR-0029](adr/0029-community-federated-ingress.md).
 
 ---
 

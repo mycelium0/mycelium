@@ -42,7 +42,11 @@ MYC_DEFAULT_STATE="$MYC_ROOT/state/identities.json"
 # Engine-specific default templates. sing-box is the PRIMARY engine; xray is the
 # optional legacy alternative.
 MYC_DEFAULT_TEMPLATE_XRAY="$MYC_ROOT/../nodes/dataplane/vless-reality/server.template.json"
-MYC_DEFAULT_TEMPLATE_SINGBOX="$MYC_ROOT/../nodes/dataplane/singbox/server.template.json"
+# The DEPLOYED sing-box template (the same one node-bootstrap.sh renders). The historical
+# server.template.json was a split-brain stale variant (no vless-xhttp-tls-in, inbound tags
+# render_singbox.sh never matched) and has been removed (RP-0003 §W5). There is now ONE sing-box
+# server template, and `render-server` defaults to it so the CLI cannot select a stale template.
+MYC_DEFAULT_TEMPLATE_SINGBOX="$MYC_ROOT/../nodes/dataplane/singbox/server.template.renderer.json"
 MYC_DEFAULT_ENGINE="singbox"   # project canon: sing-box is PRIMARY (default). xray stays optional via --engine xray.
 MYC_DEFAULT_OUT_SERVER="$MYC_ROOT/state/server.json"
 MYC_DEFAULT_OUT_SUBS="$MYC_ROOT/out"
