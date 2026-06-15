@@ -19,3 +19,28 @@ caddy_site_src: "../../nodes/cover/site/"
 # Official Caddy APT repository (stable channel).
 caddy_apt_key_url: "https://dl.cloudsmith.io/public/caddy/stable/gpg.key"
 caddy_apt_repo_url: "https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+
+# ---------------------------------------------------------------------------
+# Served distribution bundle (RP-0007-b) — the self-replenishing subscription.
+# ---------------------------------------------------------------------------
+# Serve the node's typed distribution Bundle (internal/spec/bundle.go, rendered by `myceliumctl
+# bundle`) over HTTPS so a client can SELF-POLL it (profile-update-interval header below). OFF by
+# default: a node serves it only when the operator opts in. The bundle is served on LOOPBACK by
+# default (the operator fronts it via their chosen reach path) so it is never a lone public
+# chokepoint — the sub channel stays plural (tests/conformance/sub_channel_not_single_point.sh).
+caddy_serve_bundle: false
+
+# Loopback address:port the bundle is served on (never exposed by the host firewall by default).
+caddy_bundle_listen: "127.0.0.1:8444"
+
+# Absolute path to the rendered, validated bundle file the node serves. node-bootstrap.sh renders it
+# fail-closed (keeps the last-known-good if a fresh render fails validation; never serves an invalid
+# bundle). Caddy only ever serves this file as-is.
+caddy_bundle_file: "/etc/mycelium/bundle/bundle.json"
+
+# The path clients GET to fetch the bundle.
+caddy_bundle_path: "/bundle.json"
+
+# profile-update-interval: how often a self-polling client re-fetches the bundle. Caddy emits this
+# as a response header so the client knows when to replenish. Default 1h (a sane self-heal cadence).
+caddy_bundle_update_interval: "1h"
