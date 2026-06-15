@@ -141,6 +141,11 @@ SINGBOX_DL_BASE="https://github.com/SagerNet/sing-box/releases/download"
 # AmneziaWG userspace sources (public; built from source — kernel-independent).
 AWG_GO_REPO="https://github.com/amnezia-vpn/amneziawg-go"
 AWG_TOOLS_REPO="https://github.com/amnezia-vpn/amneziawg-tools"
+# Pinned source tags for the userspace build. There is NO upstream prebuilt amneziawg-go release, so a
+# from-zero node builds these from source (apt golang-go + build-essential). amneziawg-go matches the
+# fleet; amneziawg-tools is the current tag. Bumping these is a separate, verified change.
+AWG_GO_TAG="v0.2.18"
+AWG_TOOLS_TAG="v1.0.20260223"
 
 # AmneziaWG canonical "dialect": the in-tunnel addressing + obfuscation knobs shared fleet-wide. Every
 # peer (server + all its clients) MUST share Jc/Jmin/Jmax/S1/S2/H1..H4 or the handshake fails. These
@@ -1204,10 +1209,67 @@ render_awg0() {
 # awg-quick@ forcing the userspace implementation. Keys from awg genkey|pubkey|genpsk (ADR-0002).
 # Out-of-band of the sing-box render (AmneziaWG is NOT a sing-box inbound).
 # ---------------------------------------------------------------------------
+# install_awg_tools — build + install the AmneziaWG userspace tools from pinned source when absent, so a
+# fresh-VPS bootstrap brings up the second transport family with no manual fixups (Audit-0004 D4 / F-006).
+# No upstream prebuilt amneziawg-go release exists, so this builds from source (apt golang-go +
+# build-essential). Idempotent: a no-op when awg/awg-quick/amneziawg-go are already present. Also renders
+# the custom awg-quick@.service that forces the userspace implementation (the kernel module is not used).
+# flow_bootstrap-only (called from setup_amneziawg, which the timer never runs).
+install_awg_tools() {
+	if have awg && have awg-quick && have amneziawg-go; then
+		log "AmneziaWG userspace tools already present; skipping build."
+		return 0
+	fi
+	need_root
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "[dry-run] would apt-get install golang-go build-essential, build amneziawg-go $AWG_GO_TAG + amneziawg-tools $AWG_TOOLS_TAG from source, install them, and render the userspace awg-quick@ unit."
+		return 0
+	fi
+	have apt-get || die "AmneziaWG tools absent and no apt-get to bootstrap the build toolchain — install golang-go + build-essential + the awg tools by hand, or pass --no-amneziawg."
+	log "building AmneziaWG userspace tools from pinned source (amneziawg-go $AWG_GO_TAG, amneziawg-tools $AWG_TOOLS_TAG)"
+	env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go build-essential || die "failed to install golang-go + build-essential for the AmneziaWG build."
+	local build; build="$(mktemp -d)" || die "mktemp failed for the AmneziaWG build."
+	if ! have amneziawg-go; then
+		git clone --depth 1 -b "$AWG_GO_TAG" "$AWG_GO_REPO" "$build/awg-go" || die "amneziawg-go clone ($AWG_GO_TAG) failed."
+		( cd "$build/awg-go" && go build -trimpath -o amneziawg-go . ) || die "amneziawg-go build failed (check the Go toolchain)."
+		install -m 0755 "$build/awg-go/amneziawg-go" "$AWG_BIN_DIR/amneziawg-go" || die "amneziawg-go install failed."
+		log "built + installed amneziawg-go -> $AWG_BIN_DIR/amneziawg-go"
+	fi
+	if ! have awg || ! have awg-quick; then
+		git clone --depth 1 -b "$AWG_TOOLS_TAG" "$AWG_TOOLS_REPO" "$build/awg-tools" || die "amneziawg-tools clone ($AWG_TOOLS_TAG) failed."
+		make -C "$build/awg-tools/src" >/dev/null || die "amneziawg-tools build failed."
+		make -C "$build/awg-tools/src" install >/dev/null || die "amneziawg-tools install failed."
+		log "built + installed awg + awg-quick (amneziawg-tools $AWG_TOOLS_TAG)"
+	fi
+	rm -rf "$build" 2>/dev/null || true
+	# Custom awg-quick@ unit forcing the userspace implementation (the kernel module is never used).
+	local unit="/etc/systemd/system/awg-quick@.service"
+	if [ ! -f "$unit" ]; then
+		printf '%s\n' \
+			'[Unit]' \
+			'Description=AmneziaWG (userspace) via awg-quick for %i' \
+			'After=network-online.target nss-lookup.target' \
+			'Wants=network-online.target' \
+			'' \
+			'[Service]' \
+			'Type=oneshot' \
+			'RemainAfterExit=yes' \
+			"Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=$AWG_BIN_DIR/amneziawg-go" \
+			'ExecStart=/usr/bin/awg-quick up %i' \
+			'ExecStop=/usr/bin/awg-quick down %i' \
+			'' \
+			'[Install]' \
+			'WantedBy=multi-user.target' >"$unit"
+		systemctl daemon-reload 2>/dev/null || true
+		log "rendered custom awg-quick@.service (forces userspace amneziawg-go)."
+	fi
+}
+
 setup_amneziawg() {
 	[ "$DO_AMNEZIAWG" -eq 1 ] || { log "AmneziaWG step skipped (--no-amneziawg)."; return 0; }
 	log "setting up the userspace AmneziaWG path (amneziawg-go)"
 	need_root
+	install_awg_tools
 	if ! have awg || ! have awg-quick || ! have amneziawg-go; then
 		warn "AmneziaWG userspace tools not all present. Build them from source (kernel-independent):"
 		warn "  $AWG_GO_REPO        (amneziawg-go: the userspace implementation)"
