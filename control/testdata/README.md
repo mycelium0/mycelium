@@ -39,7 +39,7 @@ A standalone **multi-protocol sing-box** server template used so that `control/s
 exercise the sing-box engine (`render-server --engine singbox` and the multi-protocol
 `subscription --engine singbox`) without depending on the dataplane component. It mirrors the
 shape of the production template the dataplane component owns at
-`../../nodes/dataplane/singbox/server.template.json` (the dataplane component owns the
+`../../nodes/dataplane/singbox/server.template.renderer.json` (the dataplane component owns the
 authoritative one; the tool's `--engine singbox` default points there).
 
 It is **pure JSON** and therefore carries **no comment header** — it must stay valid for `jq` and

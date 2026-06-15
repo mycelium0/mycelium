@@ -39,8 +39,9 @@ REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 command -v jq >/dev/null 2>&1 || { printf 'FAIL: jq is required for transport_family_independence.sh\n' >&2; exit 2; }
 
 GROUP_VARS="$REPO_ROOT/infra/ansible/group_vars/all.yml.example"
-# The DEPLOYED template (node-bootstrap.sh renders this one); GO evidence must describe the shipped
-# artifact, not the superseded server.template.json (Audit-0004 F-002; unify in RP-0003 §W5).
+# The DEPLOYED template (node-bootstrap.sh renders this one); GO evidence describes the shipped
+# artifact. It is now the only sing-box server template: the superseded server.template.json was
+# removed, closing RP-0003 §W5 (Audit-0004 F-002).
 TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
 AWG_ROLE="$REPO_ROOT/infra/ansible/roles/amneziawg"

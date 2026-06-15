@@ -84,8 +84,9 @@ myceliumctl help
 
 `--engine` defaults to `singbox` (primary; project canon); pass `--engine xray` for the optional
 alternative. The default `--template` is engine-specific:
-`nodes/dataplane/singbox/server.template.json` for sing-box and
-`nodes/dataplane/vless-reality/server.template.json` for xray. Pass `--template` to override.
+`nodes/dataplane/singbox/server.template.renderer.json` for sing-box (the same deployed template
+`node-bootstrap.sh` renders) and `nodes/dataplane/vless-reality/server.template.json` for xray. Pass
+`--template` to override.
 
 ### `reality-keys`
 
@@ -138,9 +139,9 @@ protocol is not enabled in params is **pruned** from the output. Per matching in
   Shadowsocks-2022 — `{ name, password }` (multi-user). A per-identity `password` in state, if
   present, overrides the shared per-protocol secret.
 
-Default template path: `../nodes/dataplane/singbox/server.template.json` (produced by the dataplane
-component; `control/testdata/singbox.server.template.json` is a standalone fixture for the
-self-test).
+Default template path: `../nodes/dataplane/singbox/server.template.renderer.json` (the single
+deployed template `node-bootstrap.sh` also renders; produced by the dataplane component).
+`control/testdata/singbox.server.template.json` is a separate standalone fixture for the self-test.
 
 #### `--engine xray` (optional alternative)
 
