@@ -50,7 +50,14 @@ PresharedKey = {{ _awg_client.preshared_key }}
 {% endif %}
 # Reachability address + UDP listen port of the node.
 Endpoint = {{ node_address }}:{{ awg_listen_port | int }}
-# Route all traffic through the tunnel (split-tunnel by narrowing this on the client if desired).
+# Selective Growth (ADR-0027): carry only impaired-path traffic; natively-reachable destinations route
+# direct. The default is safe-narrow (tunnel ranges only); set a region-exclude awg_client_allowed_ips
+# in group_vars. A deliberate full tunnel requires awg_full_tunnel_optout (records the marker below).
+{% if awg_full_tunnel_optout | default(false) %}
+{{ awg_sg_optout_marker | default('# selective-growth: opt-out (full-tunnel)') }}
+AllowedIPs = 0.0.0.0/0, ::/0
+{% else %}
 AllowedIPs = {{ awg_client_allowed_ips | join(', ') }}
+{% endif %}
 # Keep NAT mappings warm so the path survives idle periods on UDP.
 PersistentKeepalive = {{ awg_persistent_keepalive | int }}

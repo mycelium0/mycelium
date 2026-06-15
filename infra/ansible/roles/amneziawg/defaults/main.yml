@@ -43,11 +43,19 @@ awg_use_preshared_keys: true
 awg_client_dns:
   - "1.1.1.1"
   - "2606:4700:4700::1111"
-# AllowedIPs on the client side: default routes all traffic through the tunnel. Narrow these in
-# group_vars for a split-tunnel client (e.g. only the tunnel ranges).
+# Selective Growth (ADR-0027 / VIS-0009): the generated client carries ONLY impaired-path traffic by
+# default — it does NOT full-tunnel. The default below is SAFE-NARROW (the tunnel ranges only). Set a
+# region-exclude AllowedIPs set in group_vars so out-of-region / impaired destinations route through the
+# tunnel while natively-reachable destinations route direct (the WireGuard-class CIDR approximation of
+# the doctrine; the precise domain-aware split is the xray-class engine's job). To emit a deliberate
+# full tunnel, set awg_full_tunnel_optout: true (records the documented marker — never a silent default).
 awg_client_allowed_ips:
-  - "0.0.0.0/0"
-  - "::/0"
+  - "10.13.13.0/24"
+  - "fd13:13:13::/64"
+# Deliberate full-tunnel opt-out: when true the client conf carries 0.0.0.0/0[, ::/0] WITH the documented
+# Selective-Growth marker (and stays green under tests/conformance/no_full_tunnel_default.sh).
+awg_full_tunnel_optout: false
+awg_sg_optout_marker: "# selective-growth: opt-out (full-tunnel)"
 # Seconds between keepalive packets so NAT mappings survive idle periods on UDP.
 awg_persistent_keepalive: 25
 
