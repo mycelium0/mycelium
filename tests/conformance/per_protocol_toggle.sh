@@ -64,6 +64,9 @@ tag_to_toggle() {
 		vless-reality-vision-in|vless-reality-vision)  printf 'enable_vless_reality_vision' ;;
 		vless-reality-grpc-in|vless-reality-grpc)      printf 'enable_vless_reality_grpc' ;;
 		vless-reality-xhttp-in|vless-reality-xhttp)    printf 'enable_vless_reality_xhttp' ;;
+		# VLESS+XHTTP over GENUINE single-layer TLS (own cert; NO reality) — distinct from the
+		# XHTTP-in-REALITY (TLS-in-TLS) inbound above; default-off like every non-primary transport.
+		vless-xhttp-tls-in|vless-xhttp-tls)            printf 'enable_vless_xhttp_tls' ;;
 		hysteria2-in|hysteria2)                        printf 'enable_hysteria2' ;;
 		tuic-v5-in|tuic-in|tuic)                       printf 'enable_tuic' ;;
 		shadowsocks-2022-in|shadowsocks-in|shadowsocks) printf 'enable_ss2022' ;;

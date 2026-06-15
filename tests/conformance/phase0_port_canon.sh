@@ -11,7 +11,8 @@
 # CANONICAL PORT MAP (Phase 0)
 #   vless_reality_vision  443   / tcp   (primary, default-on)
 #   vless_reality_grpc    8443  / tcp
-#   vless_reality_xhttp   2096  / tcp
+#   vless_reality_xhttp   2096  / tcp   (XHTTP inside REALITY = TLS-in-TLS)
+#   vless_xhttp_tls       2087  / tcp   (XHTTP over GENUINE single-layer TLS, own cert; NOT 8443)
 #   hysteria2             8444  / udp
 #   tuic                  8445  / udp
 #   shadowsocks2022       8388  / tcp+udp
@@ -59,6 +60,7 @@ printf 'repo: %s\n' "$REPO_ROOT"
 # Canonical protocol -> port (the single source of truth, embedded here).
 # Space-separated "proto=port" pairs; iterated in a fixed order.
 CANON="vless_reality_vision=443 vless_reality_grpc=8443 vless_reality_xhttp=2096 \
+vless_xhttp_tls=2087 \
 hysteria2=8444 tuic=8445 shadowsocks2022=8388 shadowtls=8446 trojan=8447 amneziawg=51820"
 
 canon_port() {
@@ -106,6 +108,7 @@ yaml_key_for() {
 		vless_reality_vision) printf 'singbox_port_vless_vision' ;;
 		vless_reality_grpc)   printf 'singbox_port_vless_grpc' ;;
 		vless_reality_xhttp)  printf 'singbox_port_vless_xhttp' ;;
+		vless_xhttp_tls)      printf 'singbox_port_vless_xhttp_tls' ;;
 		hysteria2)            printf 'singbox_port_hysteria2' ;;
 		tuic)                 printf 'singbox_port_tuic' ;;
 		shadowsocks2022)      printf 'singbox_port_ss2022' ;;
@@ -123,7 +126,7 @@ check_yaml_source() {
 		skipln "$label not present (${file#"$REPO_ROOT"/}) — skipping"
 		return 0
 	fi
-	for proto in vless_reality_vision vless_reality_grpc vless_reality_xhttp hysteria2 tuic \
+	for proto in vless_reality_vision vless_reality_grpc vless_reality_xhttp vless_xhttp_tls hysteria2 tuic \
 		shadowsocks2022 shadowtls trojan amneziawg; do
 		key="$(yaml_key_for "$proto")"
 		[ -n "$key" ] || continue
@@ -165,6 +168,7 @@ else
 	assert "singbox template" "vless_reality_vision" "$(tmpl_port_for_tags vless-reality-vision-in vless-reality-vision)"
 	assert "singbox template" "vless_reality_grpc"   "$(tmpl_port_for_tags vless-reality-grpc-in vless-reality-grpc)"
 	assert "singbox template" "vless_reality_xhttp"  "$(tmpl_port_for_tags vless-reality-xhttp-in vless-reality-xhttp)"
+	assert "singbox template" "vless_xhttp_tls"      "$(tmpl_port_for_tags vless-xhttp-tls-in vless-xhttp-tls)"
 	assert "singbox template" "hysteria2"            "$(tmpl_port_for_tags hysteria2-in hysteria2)"
 	assert "singbox template" "tuic"                 "$(tmpl_port_for_tags tuic-v5-in tuic-in tuic)"
 	assert "singbox template" "shadowsocks2022"      "$(tmpl_port_for_tags shadowsocks-2022-in shadowsocks-in)"
@@ -196,6 +200,7 @@ else
 	check_md "vless_reality_vision" 'vision'
 	check_md "vless_reality_grpc"   'grpc'
 	check_md "vless_reality_xhttp"  'xhttp'
+	check_md "vless_xhttp_tls"      'xhttp.*genuine|genuine.*tls'
 	check_md "hysteria2"            'hysteria'
 	check_md "tuic"                 'tuic'
 	check_md "shadowsocks2022"      'shadowsocks|ss-?2022|ss2022'
@@ -228,6 +233,7 @@ else
 	assert "render_singbox.sh" "vless_reality_vision" "$(render_default_for 'vless_reality_vision_port')"
 	assert "render_singbox.sh" "vless_reality_grpc"   "$(render_default_for 'vless_reality_grpc_port')"
 	assert "render_singbox.sh" "vless_reality_xhttp"  "$(render_default_for 'vless_reality_xhttp_port')"
+	assert "render_singbox.sh" "vless_xhttp_tls"      "$(render_default_for 'vless_xhttp_tls_port')"
 	assert "render_singbox.sh" "hysteria2"            "$(render_default_for 'hysteria2_port')"
 	assert "render_singbox.sh" "tuic"                 "$(render_default_for 'tuic_port')"
 	assert "render_singbox.sh" "shadowsocks2022"      "$(render_default_for 'shadowsocks_port')"

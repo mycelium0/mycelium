@@ -25,7 +25,8 @@ orthogonal UDP path handled by its own role.
 |---|----------|--------|------|-------|---------|--------|-------|
 | 1 | VLESS + REALITY + XTLS-Vision | sing-box | `443`   | tcp     | on  | `enable_vless_reality_vision` | Primary transport; equals `listen_port`. `443` maximises indistinguishability from ordinary HTTPS. |
 | 2 | VLESS + REALITY + gRPC        | sing-box | `8443`  | tcp     | off | `enable_vless_reality_grpc`   | |
-| 3 | VLESS + REALITY + XHTTP       | sing-box | `2096`  | tcp     | off | `enable_vless_reality_xhttp`  | |
+| 3 | VLESS + REALITY + XHTTP       | sing-box | `2096`  | tcp     | off | `enable_vless_reality_xhttp`  | XHTTP framing *inside* REALITY = TLS-in-TLS. |
+| 3b | VLESS + XHTTP over genuine TLS | sing-box | `2087` | tcp     | off | `enable_vless_xhttp_tls`      | Genuine single-layer TLS with the node's OWN cert (NO reality). Distinct family from row 3 — survives links where TLS-in-TLS is DPI-blocked. **Deliberately not 8443** (a confirmed mobile tell); a node wanting `443` overrides per-node. |
 | 4 | Hysteria2                     | sing-box | `8444`  | udp     | off | `enable_hysteria2`            | QUIC. |
 | 5 | TUIC v5                       | sing-box | `8445`  | udp     | off | `enable_tuic`                 | QUIC. |
 | 6 | Shadowsocks-2022 AEAD         | sing-box | `8388`  | tcp+udp | off | `enable_ss2022`               | Opens BOTH tcp and udp when enabled. |
@@ -44,5 +45,5 @@ The firewall opens ONLY the ports of the protocols that are enabled.
 | `infra/ansible/roles/singbox/defaults/main.yml` | Safe role defaults for `singbox_port_*` (used if a var is omitted). |
 | `infra/ansible/roles/singbox/tasks/main.yml` | UFW rules — opens the enabled protocols' tcp / udp ports. |
 | `infra/ansible/roles/amneziawg/defaults/main.yml` | `awg_listen_port` default for the separate UDP path. |
-| `nodes/dataplane/singbox/server.template.json` | `listen_port` per inbound. |
+| `nodes/dataplane/singbox/server.template.renderer.json` | `listen_port` per inbound (the DEPLOYED template `node-bootstrap.sh` renders). |
 | `control/lib/render_singbox.sh` | `myceliumctl` standalone fallback defaults (must equal the Ansible defaults). |
