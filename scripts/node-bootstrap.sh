@@ -923,6 +923,9 @@ write_params() {
 			vless_reality_vision_enabled: true,  vless_reality_vision_port: 443,
 			vless_reality_grpc_enabled:   true,  vless_reality_grpc_port:   8443,
 			vless_reality_xhttp_enabled:  false, vless_reality_xhttp_port:  2096,
+			# vless-xhttp-tls: XHTTP over GENUINE single-layer TLS (own cert; NO reality). Default OFF
+			# (fail-closed; rendered only when enabled). Canonical port 2087 (deliberately not 8443).
+			vless_xhttp_tls_enabled:      false, vless_xhttp_tls_port:      2087,
 			# HY2/TUIC default OFF: need a client cert pin the renderer does not yet emit (ADR-0014).
 			hysteria2_enabled:            false, hysteria2_port:            8444,
 			tuic_enabled:                 false, tuic_port:                 8445,

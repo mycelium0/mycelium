@@ -30,6 +30,9 @@
 #                               templates) grants AF_NETLINK so no deploy path crash-loops (Audit-0004 F-001)
 #   * live_artifact_posture.sh — assertions on the DEPLOYED artifacts: clash_api loopback-only + the
 #                               live default-on transport set == documented Variant A (Audit-0004 F-002/F-004)
+#   * active_probe_owncert.sh — every genuine single-TLS XHTTP inbound (own cert, no reality) serves
+#                               its OWN cert, avoids the 8443 mobile tell, and stays distinct from the
+#                               REALITY-XHTTP (TLS-in-TLS) inbound — probe-safe (RP-0007-a §AC-a3)
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -64,6 +67,7 @@ GATES=(
 	"tests/conformance/live_artifact_posture.sh"
 	"tests/conformance/dependency_policy.sh"
 	"tests/conformance/bundle_region_closed_vocab.sh"
+	"tests/conformance/active_probe_owncert.sh"
 	"control/selftest.sh"
 )
 
