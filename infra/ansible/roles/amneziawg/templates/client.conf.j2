@@ -57,7 +57,11 @@ Endpoint = {{ node_address }}:{{ awg_listen_port | int }}
 {{ awg_sg_optout_marker | default('# selective-growth: opt-out (full-tunnel)') }}
 AllowedIPs = 0.0.0.0/0, ::/0
 {% else %}
-AllowedIPs = {{ awg_client_allowed_ips | join(', ') }}
+{# IPv6-leak guard (ADR-0027): a v4-only region-exclude list leaves the client's PUBLIC IPv6 outside the #}
+{# tunnel (direct egress). If the list carries no v6 route, capture v6 (::/0) so it is tunnelled, not leaked. #}
+{# Kept {{ }}-driven (runtime decision) so it stays a split, never a literal full-route default. #}
+{% set _awg_v6cap = [] if (awg_client_allowed_ips | select('search', ':') | list | length > 0) else ['::/0'] %}
+AllowedIPs = {{ (awg_client_allowed_ips + _awg_v6cap) | join(', ') }}
 {% endif %}
 # Keep NAT mappings warm so the path survives idle periods on UDP.
 PersistentKeepalive = {{ awg_persistent_keepalive | int }}
