@@ -1444,8 +1444,27 @@ install_tooling() {
 # Mode flows.
 # ===========================================================================
 
+# install_base_deps — ensure the OS packages a from-zero node needs are present so a fresh-VPS
+# bootstrap needs no manual fixups (Audit-0004 D4): git (fetch/verify), jq (identity/params/render),
+# iptables (AmneziaWG PostUp NAT), ufw (host firewall), and curl/ca-certificates/tar/unzip
+# (download + unpack). Idempotent — apt-get install is a no-op for already-present packages.
+# flow_bootstrap-only (never the timer). apt-based hosts only; elsewhere it warns and the per-step
+# `have X || die` guards downstream still fail closed.
+install_base_deps() {
+	need_root
+	if ! have apt-get; then
+		warn "no apt-get on this host — install 'git jq iptables ufw curl ca-certificates tar unzip' by hand; the per-step guards fail closed if any are missing."
+		return 0
+	fi
+	log "ensuring base packages (git jq iptables ufw curl ca-certificates tar unzip)"
+	run env DEBIAN_FRONTEND=noninteractive apt-get update -qq || warn "apt-get update failed; installing against cached lists."
+	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git jq iptables ufw curl ca-certificates tar unzip \
+		|| die "base package install failed — install git/jq/iptables/ufw/curl/ca-certificates/tar/unzip and re-run."
+}
+
 flow_bootstrap() {
 	log "=== bootstrap / converge ==="
+	install_base_deps
 	if [ "$DO_HARDEN" -eq 1 ]; then
 		harden_journald
 		harden_sshd
