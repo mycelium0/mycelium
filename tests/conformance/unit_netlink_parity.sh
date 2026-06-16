@@ -12,14 +12,14 @@
 # route/interface updates via rtnetlink at startup; a hardened unit that omits AF_NETLINK from
 # RestrictAddressFamilies makes the engine FATAL ("subscribe route updates: address family not
 # supported by protocol") and crash-loop. The unit definition is duplicated across two hand-
-# maintained deploy sources of truth — the bash bootstrap heredoc (scripts/node-bootstrap.sh) and
-# the Ansible Jinja templates — and an incident fix that touched only one copy reproduced a live
-# production crash-loop on the other (Audit-0004 F-001). This gate makes the two paths unable to
-# diverge silently again.
+# maintained deploy sources of truth — the bash bootstrap heredoc (now in control/lib/nb_install.sh,
+# carved out of scripts/node-bootstrap.sh by RP-0009; install_singbox_unit) and the Ansible Jinja
+# templates — and an incident fix that touched only one copy reproduced a live production crash-loop
+# on the other (Audit-0004 F-001). This gate makes the two paths unable to diverge silently again.
 #
 # SCOPE — only the TLS-engine (sing-box / xray) units are checked. A single source file may emit
-# several units (e.g. node-bootstrap.sh also writes node_exporter + a dataplane-metrics unit). The
-# gate identifies the engine unit by its ExecStart binary (a literal path, a shell var like
+# several units (e.g. node-bootstrap.sh's observability path writes node_exporter + a dataplane-metrics
+# unit). The gate identifies the engine unit by its ExecStart binary (a literal path, a shell var like
 # $SINGBOX_BIN, or a Jinja var like {{ singbox_bin_path }} — all lowercase-match singbox/sing-box/
 # sing_box/xray) and checks ONLY that unit's RestrictAddressFamilies. node_exporter (loopback host-
 # metric reader, no netlink) and the dataplane-metrics oneshot are correctly NOT required to grant it.
@@ -37,8 +37,10 @@ HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 
 # Sources that emit a sing-box/xray systemd unit. Add a row whenever a new such source appears.
+# RP-0009: the bash engine-unit heredoc moved from scripts/node-bootstrap.sh into the sourced lib
+# control/lib/nb_install.sh (install_singbox_unit); the gate follows the heredoc to its new home.
 SOURCES=(
-	"scripts/node-bootstrap.sh"
+	"control/lib/nb_install.sh"
 	"infra/ansible/roles/singbox/templates/singbox.service.j2"
 	"infra/ansible/roles/xray/templates/xray.service.j2"
 )
