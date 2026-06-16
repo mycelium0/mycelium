@@ -1,0 +1,72 @@
+<!--
+Copyright © 2026 mindicator & silicon bags quartet.
+SPDX-License-Identifier: AGPL-3.0-or-later
+This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+later. See the LICENSE file in the repository root.
+-->
+
+# ADR-0030: Advisory Fleet Awareness — class-aggregate, operator-local, federation not coordination
+
+## Metadata
+- **ID:** ADR-0030
+- **Date:** 2026-06-16
+- **Author:** mindicator & silicon bags quartet
+- **Status:** accepted
+- **Layer(s):** cross-cutting track (Measurement & Immunity); control plane (typed schemas)
+- **Phase:** cross-cutting — rides Phase-2 local self-healing, dissolves into the Phase 4–5 mesh; **not a phase gate**
+- **Related:** [ADR-0017](0017-network-weather-data-contract.md) (weather-publishing privacy contract), [ADR-0018](0018-fungi-role-and-opt-in-publish.md) (fungi opt-in/aggregate-and-forget), [ADR-0021](0021-decentralized-observability-not-a-central-collector.md) (no central collector / no_explorer_leak), [ADR-0025](0025-no-global-abuse-oracle.md) (advisory never actuates), [ADR-0002](0002-no-custom-cryptography.md) + [ADR-0014](0014-per-operator-node-credentials.md) (standard signature, per-operator key); [RP-0004](../proposals/0004-network-weather-explorer-publisher.md) (off-network publisher pipeline), [RP-0005](../proposals/0005-inoculum-bundle-and-toolkit.md) (signed bundle), [RP-0006](../proposals/0006-in-region-edge-reporting.md) (inert EdgeReport), [RP-0007](../proposals/0007-phase1-distribution-health-xhttp.md) (`myceliumctl aggregate`); `internal/spec` (`SporeEnvelope`, `TransportHealth`, `RegionBucket`, `TrustScope`, `DecayPolicy`); [VIS-0005](../vision/0005-network-weather-explorer.md). Prompted by an operator proposal ("Phase 2.5 — Advisory Fleet Awareness / Fungi-lite Weather Layer") + an adversarial design review (2026-06-16).
+
+## Context
+
+The roadmap has a **discontinuity between Phase 2 and Phase 3**. Phase 2 answers "how does **one** node diagnose and heal **itself**?"; Phase 3 stands up a **centralised coordinator** for the operator's fleet (force-routes, serves best-ingress, binds block-intel). The jump is a cliff: it skips the missing question — *"how do several self-healing nodes safely share state without becoming a map or a coordinator?"* An operator running 3–4 independent nodes today has no fleet-level awareness at all, and the only path offered is "build the brain."
+
+**Adversary model.** Sybil enumeration of ingress points; **network-map reconstruction** (THREAT-MODEL.md asset #5 — the adversary's top prize); traffic correlation; operator coercion of a central aggregator. **Affected asset:** the network map (node count, per-node fingerprint, topology) and operator identity. **Fundamental trade-off touched:** fleet awareness ↔ enumeration/map-reconstruction surface; convenience ↔ a coercible central point.
+
+The forces: an operator *wants* "node-B's bundle is fresher / reality is degrading in this region / xhttp-tls is better for this bucket." But the most natural shape for that — a **per-node signed digest carrying a stable opaque `node_ref` + a per-node transport-health vector + a region label** — is *exactly* the per-node row and stable cross-snapshot identifier the existing weather contract (ADR-0017 §2/§7, ADR-0018, VIS-0005, the inert `EdgeReport`) was built **inside-out from the privacy invariants to forbid**. An observer who collects a *sequence* of such digests counts distinct `node_ref`s (= fleet size), correlates each to its transport/region fingerprint, and tracks rotations/outages — reconstructing the map the contract exists to prevent. That is the tumor: a convenience feature that quietly reintroduces the forbidden artifact.
+
+## Considered Options
+
+0. **Leave the gap — jump Phase 2 → Phase 3.** Pros: fewer records. Cons: the jump is too sharp; a coordinator is itself a central map + single point of block + coercion target; nothing tests the future fungi/explorer model first. Survivability: worse (premature centralisation).
+1. **Per-node signed digest with a stable `node_ref`** (the operator's first proposal, verbatim). Pros: simplest "who is fresh/degraded". Cons: **reconstructs the node map** — an S1 FORBIDDEN_TOPOLOGY_CENTRALIZATION (→ S0 if the cache/publisher ever serves); the stable `node_ref` is a persistent cross-snapshot tracking handle; region precision regresses past the closed-vocab invariant. Indistinguishability/survivability: **fails requirement №1.** **Rejected.**
+2. **A numbered "Phase 2.5" / renumber to Phase 3.** Pros: reads as a clear bridge. Cons: a ladder number invites later drift from *ordering* → *hard-trust* → *actuation* (the exact line ADR-0025 holds); renumbering churns the immunity table, the ADR-0013/0024/0026/0027 Phase 3–5 fences, RP-0004 wording, and the GLOSSARY for **zero doctrinal benefit** — the work is advisory federation, not coordination. **Rejected.**
+3. **Class-aggregate advisory federation as a cross-cutting increment.** Anything that leaves a node is the existing class/percentage/opaque-scope/k-floored weather shape — **no transmitted `node_ref`, no per-node row**; the stable own-node handle lives **only** in the operator-local, at-rest, never-transmitted fleet cache. Advisory **never actuates** (ranking input only). Pros: adds no new privacy surface (it is a projection of contracts we already accepted); activates inert `internal/spec` seams; reinforces [RP-0008](../proposals/0008-go-spine-distribution-rendering.md)'s Go-spine direction; gated by proof, not prose. Cons: the operator-local cache is new state; the publisher needs the opt-in/aggregate-and-forget discipline applied even to own nodes. **Chosen.**
+
+## Decision
+
+**Option 3.** Adopt **Advisory Fleet Awareness** as a **cross-cutting Measurement & Immunity increment** — explicitly *advisory federation*, the deliberate **opposite** of Phase 3's actuating coordinator — and build it as a **projection of the existing weather/immunity contracts**, never a new per-node shape. It is **not** a phase; it rides Phase-2 self-healing and dissolves into the Phase 4–5 mesh.
+
+Canon (what becomes binding):
+
+- **Class-aggregate node-status digest.** Anything a node **emits/transmits** is the existing fungi weather shape: per-**class** health (`TransportClass` × `HealthValue`), percentages/order-of-magnitude buckets **not counts**, an **opaque non-geographic** scope id, **k-floored with omit-not-zero**, TTL-bounded, signed with a per-operator key (ADR-0002/0014). It carries **no IP/host/ASN/port/SNI/geo, no per-node row, and no stable per-node identifier.** This activates a new closed-vocab `SporeType` (`node-status`) and an inert, typed `NodeStatusDigest` whose `Validate()` **forbids** the per-node/stable-ref shape *by construction* — landed now as the seam (like `EdgeReport`/`Bundle`), with zero production caller until the build RP.
+- **The stable own-node handle lives only in the operator-local fleet cache** — at-rest, on the operator's own machine, **never transmitted, never served**. This is the existing "own nodes, local, no transmission" aggregate exception (THREAT-MODEL.md / ADR-0017), and it is the *only* place a stable handle may exist.
+- **`cell-pack` = `myceliumctl aggregate --sign --ttl`** — the already-built local multi-node merge (RP-0007) plus a standard per-operator signature (ADR-0002/0014, the RP-0005 Inoculum form) and a TTL. Local, at-rest, own-nodes; **serving is impossible by construction**, not merely off-by-default.
+- **The fungi-lite publisher = RP-0004's pipeline scoped to one operator** — verify → coarsen → suppress-below-floor → strip → emit a static snapshot, **opt-in only**, aggregate-and-forget, emit-not-query, per-source-capped (even own nodes). It ingests the **class-aggregate** digest, never a per-node one.
+- **Advisory never actuates.** The cache and cross-node awareness feed **ranking/ordering input only** and are **structurally incapable** of issuing a ban/cut/force-route or becoming a "best node for user X" oracle (ADR-0025 fail-closed non-enforcement = *non*-enforcement). `myceliumctl aggregate` may consult the cache for ordering, never for hard trust.
+- **Region stays `unspecified`-only** until the closed-`RegionBucket`-vocab + `NoisePolicy` hardening ADR (RP-0006/VIS-0006 §9) lands; a populated free-form "coarse" region is **forbidden** until then.
+- **No node-to-node exchange.** `DiscoveryBackend` `Announce`/`Find`/`ReportStress` stay no-op stubs (ADR-0013): a node never opens a queryable peer endpoint and never reads another node directly. Cross-node *knowing* is an operator-mediated read of the operator's own local cache — **operator-pull / static-publish only**, never gossip/DHT (which is Phase 4).
+
+**Fail-closed:** a forged, expired, wrong-scope, or wrong-type digest leaves the merged bundle and the snapshot **unchanged** (import-inert-until-validated); a sub-floor cell is **omitted, never zeroed**; a snapshot that cannot be proven clean is **not emitted**.
+
+## Consequences
+
+- **Positive:** closes the Phase-2→3 gap without premature centralisation; gives the inert `internal/spec` weather/immunity types their first (still-inert) production caller; tests the future fungi/explorer model with one operator and no mesh; every control decision (sign/verify, TTL, coarsen, floor) is Go-spine work — it reinforces RP-0008 and grows **no** bash.
+- **Negative / cost:** a new operator-local at-rest cache (new state to manage); the publisher must apply opt-in/aggregate-and-forget/per-source caps even to own nodes (a compromised own-node can still skew a snapshot).
+- **Impact on user security (requirement №1):** **strictly improved vs the rejected design** — no per-node row, no stable cross-snapshot correlator, no transmitted `node_ref`, no map. The node learns coarse class-level fabric health only; it learns nothing new about users.
+- **Impact on observability:** adds advisory, class-aggregate fleet weather (operator-local) and an opt-in static snapshot; **never** a map, count, or per-node row.
+- **Follow-on actions required:** the inert `SporeTypeNodeStatus` + `NodeStatusDigest` schema + `Validate()` + tests land now as the seam; the *build* (the live digest emitter, the cache, `aggregate --sign --ttl`, the operator-local publisher) is a future RP that must pass the gates below; the closed-`RegionBucket`-vocab + `NoisePolicy` hardening ADR is a hard prerequisite before any region value beyond `unspecified`.
+- **What is now forbidden:** a per-node digest or any transmitted/published structure containing a per-node row, a per-node transport-health vector, or a stable per-node identifier; a served cross-node aggregator or queryable fleet endpoint; an advisory signal that mechanically actuates a trust/route/ban decision; a populated region bucket before the vocab-hardening ADR; a shared "fleet authority" signing key.
+
+## Compliance
+
+The decision is enforced by **ten conformance gates** (the testable DoD — proof, not prose). The build RP must wire each before it merges:
+
+1. **NO_PER_NODE_ROW** — any artifact that leaves a node (cross-node advisory, served cell-pack output, weather snapshot) MUST be a per-**class** aggregate; the build fails if any transmitted/published structure contains a per-node row, a per-node transport-health vector, or a field keyed by an individual node. (Extends ADR-0017 §2 + VIS-0005 §7.)
+2. **NO_STABLE_CORRELATOR** — no transmitted digest/snapshot field may be a stable cross-digest/cross-snapshot identifier for a node; any opaque id MUST be a rotating per-epoch / per-consumer pseudonym whose unlinkability is asserted by test (diff two epochs → no stable join key). (ADR-0017 §6, VIS-0003 §10.)
+3. **AGGREGATION_FLOOR** (reuse `ErrAggregationFloor` / ADR-0017 §3) — every shared/published cell meets the minimum-aggregation floor *k* or is **omitted entirely** (never 0, never imputed); enforced at the source AND again across sources at the publisher.
+4. **NO_LEAK_STRIP** (reuse `no_explorer_leak` / ADR-0021 + ADR-0017 §7 allow-list) — emission is blocked if a digest/snapshot contains an IP, hostname, ASN, port, SNI, country/region/location code, precise geo, email, secret, per-node identifier, per-edge weight, exact count, or sibling-node list; fail-closed.
+5. **REGION_COARSENESS** — `RegionBucket` is drawn only from the closed audited coarse vocabulary; until the hardening ADR lands, region is `unspecified`-only; a finer-than-vocab or free-form region fails.
+6. **CUMULATIVE_DISCLOSURE** (ADR-0017 §6) — a *sequence* of digests/snapshots must not disclose more than one: differencing/summing must not reverse a below-floor cell, narrow a bucket, de-obfuscate a rotation, count the nodes, or infer fleet size.
+7. **ADVISORY_NEVER_ACTUATES** (reuse `no_global_abuse_oracle` / ADR-0025) — the advisory cache/awareness feeds ranking input only; no code path lets it auto-ban, auto-cut, force-route, hard-trust, or become a "best node for user X" oracle.
+8. **NO_SERVED_AGGREGATOR** (reuse SINGLE_POINT_OF_BLOCK / FORBIDDEN_TOPOLOGY_CENTRALIZATION) — the cell-pack bundle and the fleet cache are local/at-rest/own-nodes with **serving impossible by construction**; any queryable cross-node endpoint fails.
+9. **SIGNATURE_AND_TTL** (reuse `SporeEnvelope.Validate`, ADR-0002/0014) — a forged/wrong-key digest fails verification and is dropped; a stale (TTL-expired/replay) digest is rejected and unused; per-operator `signer_key_id`, **no** shared fleet key.
+10. **PHASE_2_DISABLE_FLOOR** — with the entire advisory layer disabled, Phase-2 local self-healing still functions AND no residual digest/cache/publisher endpoint remains active (disabling is complete, not partial — zero privacy surface when off).

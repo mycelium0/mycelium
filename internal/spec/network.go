@@ -418,13 +418,17 @@ const (
 	SporeTypeManifest SporeType = "manifest"
 	// SporeTypeStressDigest carries a redacted, aggregated stress summary.
 	SporeTypeStressDigest SporeType = "stress-digest"
+	// SporeTypeNodeStatus carries a CLASS-AGGREGATE advisory fleet-awareness digest (a NodeStatusDigest):
+	// per-class transport health within a coarse scope, k-floored and TTL-bounded — NEVER a per-node row
+	// or a stable node identifier (ADR-0030). Inert in Phase 0-2.
+	SporeTypeNodeStatus SporeType = "node-status"
 )
 
 // IsValid reports whether the spore type is one of the canonical members.
 func (t SporeType) IsValid() bool {
 	switch t {
 	case SporeTypeBootstrap, SporeTypeRouteCapsule, SporeTypeTrustInvitation,
-		SporeTypeRevocation, SporeTypeManifest, SporeTypeStressDigest:
+		SporeTypeRevocation, SporeTypeManifest, SporeTypeStressDigest, SporeTypeNodeStatus:
 		return true
 	default:
 		return false
@@ -611,4 +615,78 @@ type DiscoveryBackend interface {
 	// ReportStress would contribute a redacted, aggregation-floored stress summary
 	// to the awareness layer. Not implemented in Phase 0-2.
 	ReportStress(signal StressSignal) error
+}
+
+// ClassHealth is one per-CLASS advisory health cell in a NodeStatusDigest: a coarse transport class and
+// its advisory health. It is deliberately per-CLASS — there is NO node identifier here, by construction.
+type ClassHealth struct {
+	Class  TransportClass `json:"class"`  // coarse transport family (closed vocab)
+	Health HealthValue    `json:"health"` // advisory health for this class (alive/degraded/unknown)
+}
+
+// NodeStatusDigest is the INERT, typed shape of the advisory fleet-awareness digest (ADR-0030) — the
+// CLASS-AGGREGATE projection a self-healing node may emit so an operator's other nodes can sense coarse
+// fleet weather. By CONSTRUCTION it carries NO node identifier, NO per-node row, NO stable cross-digest
+// correlator, and NO precise region: those are forbidden because the rejected per-node design (a stable
+// node_ref + a per-node health vector) lets an observer reconstruct the fleet map (ADR-0030,
+// THREAT-MODEL asset #5). The stable own-node handle lives ONLY in the operator-local, never-transmitted
+// fleet cache. Health is ADVISORY and never actuates trust (ADR-0025). The digest is the class-aggregate
+// payload; a SporeEnvelope of type SporeTypeNodeStatus carries the signature (ADR-0002/0014) when wrapped.
+//
+// PHASE DISCIPLINE: inert in Phase 0-2. Nothing emits, signs, merges, coarsens, or consumes it yet; the
+// shape exists now so the future Advisory-Fleet-Awareness build (a cross-cutting Measurement & Immunity
+// increment) cannot drift back to the unsafe per-node form — the type itself makes a per-node row
+// unrepresentable.
+type NodeStatusDigest struct {
+	Version      int           `json:"version"`       // schema version (NetworkStateVersion)
+	Scope        TrustScope    `json:"scope"`         // coarse trust scope (opaque, never per-node, never geo)
+	Classes      []ClassHealth `json:"classes"`       // per-CLASS advisory health; never a per-node row
+	Region       RegionBucket  `json:"region"`        // coarse bucket; Phase invariant: RegionUnspecified only
+	SampleCount  int           `json:"sample_count"`  // observations aggregated into this digest
+	MinAggregate int           `json:"min_aggregate"` // minimum-aggregation floor (k) this digest must meet
+	IssuedAt     time.Time     `json:"issued_at"`     // RFC 3339, UTC
+	ExpiresAt    time.Time     `json:"expires_at"`    // RFC 3339, UTC — replay-bounded TTL
+}
+
+// Validate checks the advisory-fleet digest's safety invariants (ADR-0030), pure (no I/O): a supported
+// schema version; a valid coarse scope; at least one per-class cell, each with a known transport class
+// and a known advisory health; a region that — until the closed-vocabulary hardening ADR lands — must be
+// RegionUnspecified (REGION_COARSENESS); a non-negative aggregation floor the sample count MEETS
+// (AGGREGATION_FLOOR, the k-anonymity-style floor); and a strictly-positive TTL. It cannot by itself
+// prove the upstream coarsening; it proves the structure forbids a per-node map.
+func (d *NodeStatusDigest) Validate() error {
+	if d.Version != NetworkStateVersion {
+		return fmt.Errorf("unsupported node status digest version %d (want %d)", d.Version, NetworkStateVersion)
+	}
+	if err := d.Scope.Validate(); err != nil {
+		return fmt.Errorf("node status digest scope: %w", err)
+	}
+	if len(d.Classes) == 0 {
+		return fmt.Errorf("%w: classes", ErrEmptyField)
+	}
+	for i := range d.Classes {
+		if !d.Classes[i].Class.IsValid() {
+			return fmt.Errorf("%w: class %q at index %d", ErrUnknownEnum, d.Classes[i].Class, i)
+		}
+		if !d.Classes[i].Health.IsValid() {
+			return fmt.Errorf("%w: health %q at index %d", ErrUnknownEnum, d.Classes[i].Health, i)
+		}
+	}
+	if d.Region != RegionUnspecified {
+		// REGION_COARSENESS (ADR-0030): a populated region re-opens the enumeration surface until the
+		// closed-vocab + NoisePolicy hardening ADR lands; region is unspecified-only until then.
+		return fmt.Errorf("%w: region %q (the advisory digest carries only %q until the region-vocab hardening lands)",
+			ErrUnknownEnum, d.Region, RegionUnspecified)
+	}
+	if d.MinAggregate < 0 {
+		return fmt.Errorf("node status digest: min_aggregate must be >= 0, got %d", d.MinAggregate)
+	}
+	if d.SampleCount < d.MinAggregate {
+		// AGGREGATION_FLOOR (ADR-0030): a sub-floor digest must be omitted, never emitted.
+		return fmt.Errorf("%w: have %d, need %d", ErrAggregationFloor, d.SampleCount, d.MinAggregate)
+	}
+	if !d.ExpiresAt.After(d.IssuedAt) {
+		return fmt.Errorf("%w (node status digest)", ErrBadTTL)
+	}
+	return nil
 }
