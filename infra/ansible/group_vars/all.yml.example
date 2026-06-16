@@ -38,6 +38,7 @@ enable_vless_reality_vision: true    # (1) VLESS + REALITY + XTLS-Vision  (TCP) 
 enable_vless_reality_grpc: false     # (2) VLESS + REALITY + gRPC         (TCP)
 enable_vless_reality_xhttp: false    # (3) VLESS + REALITY + XHTTP        (TCP, XHTTP-in-REALITY = TLS-in-TLS)
 enable_vless_xhttp_tls: false        # (3b) VLESS + XHTTP over GENUINE single-layer TLS (own cert; NO reality)
+enable_vless_ws_tls: false           # (3c) VLESS + WebSocket over GENUINE single-layer TLS (own cert; NO reality) — SERVABLE on sing-box
 enable_hysteria2: false              # (4) Hysteria2                      (QUIC/UDP)
 enable_tuic: false                   # (5) TUIC v5                        (QUIC/UDP)
 enable_ss2022: false                 # (6) Shadowsocks-2022 AEAD          (TCP)
@@ -51,6 +52,7 @@ singbox_port_vless_vision: 443       # TCP — keep equal to listen_port (the po
 singbox_port_vless_grpc: 8443        # TCP
 singbox_port_vless_xhttp: 2096       # TCP — XHTTP inside REALITY (TLS-in-TLS)
 singbox_port_vless_xhttp_tls: 2087   # TCP — XHTTP over GENUINE single-layer TLS (own cert). NOT 8443 (a mobile tell): a node wanting 443 overrides per-node.
+singbox_port_vless_ws_tls: 2089      # TCP — WebSocket over GENUINE single-layer TLS (own cert; SERVABLE on sing-box). NOT 8443: a node wanting 443 overrides per-node.
 singbox_port_hysteria2: 8444         # UDP
 singbox_port_tuic: 8445              # UDP
 singbox_port_ss2022: 8388            # TCP

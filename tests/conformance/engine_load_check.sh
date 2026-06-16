@@ -12,7 +12,10 @@
 # `transport.type: "xhttp"` (FATAL "unknown transport type: xhttp"). This gate closes that blind spot:
 #   1. render the realistic default set (vless-reality-vision + vless-reality-grpc) and prove
 #      `sing-box check` LOADS it — the engine can actually serve what we render.
-#   2. render with vless-xhttp-tls ENABLED and prove the shell render FAILS CLOSED (the render-guard in
+#   2. render with vless-ws-tls ENABLED (genuine single-layer TLS over sing-box's NATIVE WebSocket
+#      transport) and prove the render SUCCEEDS and `sing-box check` LOADS it — the AC-a1 proof that the
+#      genuine-TLS family is actually servable on the primary engine (the ws transport, unlike xhttp).
+#   3. render with vless-xhttp-tls ENABLED and prove the shell render FAILS CLOSED (the render-guard in
 #      control/lib/render_singbox.sh — `render-server` exits non-zero), so the bug can never reach a node:
 #      enabling xhttp-tls on the sing-box engine is a loud refusal, not a crash on load.
 #
@@ -113,6 +116,50 @@ else
 	else
 		badln "sing-box check REJECTED the rendered default config: $(tr -d '\n' < "$WORK/check.out" | cut -c1-300)"
 	fi
+fi
+
+# --- ws-tls POSITIVE case (AC-a1): unlike xhttp-tls, the genuine-TLS ws-tls family uses sing-box's
+#     NATIVE WebSocket (`ws`) transport, so the engine CAN serve it. Render with vless_ws_tls_enabled=true
+#     + a tls_sni (own-cert family requires its own SNI), prove the shell render SUCCEEDS (ws-tls is NOT
+#     refused by the engine guard — the contrast with xhttp-tls below), and where sing-box is present prove
+#     `sing-box check` LOADS the rendered ws-tls config. This is the "it actually works on the engine" proof
+#     for the genuine single-layer TLS family. The load half SKIPs without a sing-box binary (jq-only host).
+WS_PARAMS="$WORK/params.wstls.json"
+WS_OUT="$WORK/server.wstls.json"; rm -f "$WS_OUT"
+# Own-cert family: `sing-box check` does not merely parse — it READS the TLS cert FILE off disk (a missing
+# certificate_path fails FATAL "read certificate: ... no such file"). So when sing-box is present, mint a
+# short-lived self-signed cert+key and point the params at them (a real node has a provisioned cert at
+# these paths); without sing-box the load half SKIPs, so the file is moot. This mirrors the reality-key
+# mint above — the engine validates real material, so the fixture must carry real material.
+mkdir -p "$WORK/tls"
+WS_CERT="$WORK/tls/fullchain.pem"; WS_KEY="$WORK/tls/privkey.pem"
+if [ -n "$SB" ] && command -v openssl >/dev/null 2>&1; then
+	openssl req -x509 -newkey rsa:2048 -nodes -keyout "$WS_KEY" -out "$WS_CERT" \
+		-days 1 -subj "/CN=tls.example.invalid" >/dev/null 2>&1 || true
+fi
+jq --arg cert "$WS_CERT" --arg key "$WS_KEY" \
+	'. + { vless_ws_tls_enabled: true, vless_ws_tls_port: 2089, ws_path: "/ws", tls_sni: "tls.example.invalid",
+	       tls_certificate_path: $cert, tls_key_path: $key }' "$PARAMS" > "$WS_PARAMS"
+if bash "$CTL" render-server --engine singbox --params "$WS_PARAMS" --state "$STATE" --out "$WS_OUT" >"$WORK/ws.err" 2>&1 && [ -s "$WS_OUT" ]; then
+	okln "vless-ws-tls is SERVED on the sing-box engine (render succeeds; ws is a native sing-box transport — NOT refused like xhttp-tls)"
+	# Confirm the served inbound is the WebSocket own-cert shape (transport.type ws, no reality block).
+	if jq -e 'any(.inbounds[]; .tag=="vless-ws-tls-in" and .transport.type=="ws" and (.tls.reality? == null) and (.tls.certificate_path | type=="string"))' "$WS_OUT" >/dev/null 2>&1; then
+		okln "rendered ws-tls inbound carries transport.type \"ws\" + own certificate_path (genuine single-layer TLS, no reality)"
+	else
+		badln "rendered ws-tls inbound is not the expected ws own-cert shape (transport.type ws, own cert, no reality)"
+	fi
+	if [ -n "$SB" ]; then
+		if "$SB" check -c "$WS_OUT" >"$WORK/ws.check.out" 2>&1; then
+			okln "sing-box check LOADS the rendered ws-tls config (the genuine single-layer TLS family is servable on the primary engine)"
+		else
+			badln "sing-box check REJECTED the rendered ws-tls config: $(tr -d '\n' < "$WORK/ws.check.out" | cut -c1-300)"
+		fi
+	else
+		printf '\nSKIP (ws-tls load half): no sing-box binary present — `sing-box check` cannot run here. This is\n'
+		printf '      NOT a failure (jq-only host/CI lane); on a node with sing-box it runs the real ws-tls load check.\n'
+	fi
+else
+	badln "vless-ws-tls FAILED to render on the sing-box engine: $(tr -d '\n' < "$WORK/ws.err" | cut -c1-200) (ws-tls must be SERVABLE — it is a native sing-box transport, unlike xhttp-tls)"
 fi
 
 # --- Render-guard fail-closed (ALWAYS runs; bash + jq only): enabling vless-xhttp-tls on the sing-box

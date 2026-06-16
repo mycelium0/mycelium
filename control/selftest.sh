@@ -686,7 +686,7 @@ jq -e '.endpoints | all(.health == "unknown")' "$BUNDLE_OUT" >/dev/null \
 	&& ok "every endpoint health == \"unknown\" (Phase-1 invariant)" || bad "non-unknown health leaked"
 
 # transport_class is in the closed ADR-0010/0020 vocab (matches internal/spec TransportClass*).
-jq -e '.endpoints | all(.transport_class | IN("reality-tcp","xhttp-tls","quic-udp","shadowsocks-tcp","shadowtls-tcp","trojan-tls","amneziawg-udp"))' "$BUNDLE_OUT" >/dev/null \
+jq -e '.endpoints | all(.transport_class | IN("reality-tcp","xhttp-tls","ws-tls","quic-udp","shadowsocks-tcp","shadowtls-tcp","trojan-tls","amneziawg-udp"))' "$BUNDLE_OUT" >/dev/null \
 	&& ok "every transport_class is in the closed vocab" || bad "transport_class outside closed vocab"
 
 # Link is the per-endpoint dialable client config string — never empty.
@@ -1006,6 +1006,47 @@ if "$CTL" subscription --engine singbox --params "$XHT_PARAMS" --state "$STATE" 
 	bad "vless-xhttp-tls subscription was emitted on the sing-box engine (a sing-box client cannot dial xhttp)"
 else
 	ok "vless-xhttp-tls subscription is REFUSED on the sing-box engine (fail-closed; client cannot dial xhttp)"
+fi
+
+# ---------------------------------------------------------------------------
+note "ws-tls — genuine single-layer TLS over native WebSocket IS servable on sing-box (AC-a1/a5/a6)"
+# ---------------------------------------------------------------------------
+# The CONTRAST with xhttp-tls above: ws-tls uses sing-box's NATIVE `ws` transport, so the engine CAN
+# serve it. Enabling vless-ws-tls must RENDER (not be refused), produce a ws own-cert inbound, emit a
+# ws-tls subscription outbound, and carry a security=tls&type=ws bundle Link tagged class ws-tls. This is
+# the genuine single-layer-TLS family that is actually servable on the primary engine (the AC the
+# guarded xhttp-tls family cannot satisfy on sing-box).
+WS_PARAMS="$WORK/params.singbox-wstls.json"; WS_OUT="$WORK/server.singbox-wstls.json"; rm -f "$WS_OUT"
+jq '. + { vless_ws_tls_enabled: true, vless_ws_tls_port: 2089, ws_path: "/owncert-ws", tls_sni: "tls.example.invalid" }' "$SB_PARAMS" > "$WS_PARAMS"
+# (1) server render SUCCEEDS (NOT refused — the engine-compat guard is xhttp-tls-only).
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$WS_PARAMS" --state "$STATE" --out "$WS_OUT" >/dev/null 2>&1 && [ -s "$WS_OUT" ]; then
+	ok "vless-ws-tls is SERVED on the sing-box engine (render succeeds; ws is native — NOT refused like xhttp-tls)"
+else
+	bad "vless-ws-tls was REFUSED on the sing-box engine (it must be servable — ws is a native sing-box transport)"
+fi
+# (2) the served inbound is the ws own-cert shape: transport.type "ws", own certificate_path, NO reality.
+if jq -e '(.inbounds[] | select(.tag=="vless-ws-tls-in") | .transport.type) == "ws"' "$WS_OUT" >/dev/null 2>&1 \
+   && jq -e '(.inbounds[] | select(.tag=="vless-ws-tls-in") | .transport.path) == "/owncert-ws"' "$WS_OUT" >/dev/null 2>&1 \
+   && jq -e '(.inbounds[] | select(.tag=="vless-ws-tls-in") | .tls.reality?) == null' "$WS_OUT" >/dev/null 2>&1 \
+   && jq -e '(.inbounds[] | select(.tag=="vless-ws-tls-in") | .tls.certificate_path) == "/etc/mycelium/tls/fullchain.pem"' "$WS_OUT" >/dev/null 2>&1; then
+	ok "ws-tls inbound renders transport.type \"ws\" + its own per-family path + own cert (genuine single-TLS, no reality)"
+else
+	bad "ws-tls inbound is not the expected ws own-cert shape"
+fi
+# (3) the ws-tls subscription outbound IS emitted (a sing-box client CAN dial ws).
+if "$CTL" subscription --engine singbox --params "$WS_PARAMS" --state "$STATE" --out "$WORK/subs.wstls" >/dev/null 2>&1 \
+   && jq -e 'any(.outbounds[]; .tag=="vless-ws-tls" and .transport.type=="ws" and .tls.enabled==true and (.tls.reality? == null))' "$WORK/subs.wstls"/*.singbox.json >/dev/null 2>&1; then
+	ok "ws-tls subscription outbound is emitted on the sing-box engine (client can dial native ws over genuine TLS)"
+else
+	bad "ws-tls subscription outbound missing or wrong shape (a sing-box client must be able to dial ws)"
+fi
+# (4) the bundle Link carries security=tls & type=ws & is tagged class ws-tls.
+WS_BUNDLE="$WORK/wstls.bundle.json"
+"$CTL" bundle --params "$WS_PARAMS" --state "$STATE" --out "$WS_BUNDLE" 2>/dev/null
+if jq -e 'any(.endpoints[]; .transport_class=="ws-tls" and (.link | contains("security=tls")) and (.link | contains("type=ws")) and (.link | contains("path=%2Fowncert-ws")))' "$WS_BUNDLE" >/dev/null 2>&1; then
+	ok "ws-tls bundle Link carries security=tls&type=ws with its own path, tagged transport_class ws-tls"
+else
+	bad "ws-tls bundle Link is missing security=tls / type=ws / its path / the ws-tls class"
 fi
 
 # ---------------------------------------------------------------------------

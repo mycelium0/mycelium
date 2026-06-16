@@ -21,8 +21,8 @@
 #
 #   This gate is OFFLINE + INSPECT-ONLY: it reasons about the DEPLOYED renderer template's SHAPE, not
 #   a live handshake. For EVERY inbound that is the genuine-single-TLS shape — i.e.
-#     tls.enabled == true  AND  no `reality` block  AND  an xhttp/http transport —
-#   it asserts:
+#     tls.enabled == true  AND  no `reality` block  AND  an xhttp/http/ws transport —
+#   (this covers BOTH own-cert families: xhttp-tls and the WebSocket ws-tls family) it asserts:
 #     (a) the inbound carries its OWN certificate_path AND key_path (it serves a real cert; it is NOT
 #         a donor/reality cover that would borrow a third party's handshake);
 #     (b) its listen_port is NOT 8443 (a confirmed per-path mobile tell — RP-0007 §AC-a4);
@@ -65,15 +65,17 @@ printf '== active-probe own-cert (genuine single-TLS) safety check ==\n'
 printf 'template: %s\n' "${TEMPLATE#"$REPO_ROOT"/}"
 
 # Select the tags of every inbound that is the GENUINE-SINGLE-TLS shape:
-#   tls.enabled == true  AND  no reality block  AND  an xhttp/http transport.
-# Emitted one tag per line (newline-separated; bash 3.2-safe, no mapfile).
+#   tls.enabled == true  AND  no reality block  AND  an xhttp/http/ws transport.
+# Both own-cert genuine-TLS families are covered: xhttp-tls (transport "xhttp", a future Xray serving
+# path) AND ws-tls (transport "ws", servable on sing-box today). Emitted one tag per line
+# (newline-separated; bash 3.2-safe, no mapfile).
 GENUINE_TAGS="$(jq -r '
 	.inbounds[]?
 	| select(
 		(.tls? != null)
 		and (.tls.enabled == true)
 		and ((.tls.reality?) == null)
-		and ((.transport?.type) == "xhttp" or (.transport?.type) == "http")
+		and ((.transport?.type) == "xhttp" or (.transport?.type) == "http" or (.transport?.type) == "ws")
 	)
 	| .tag // empty
 ' "$TEMPLATE")"

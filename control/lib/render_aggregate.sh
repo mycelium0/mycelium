@@ -153,6 +153,7 @@ myc_agg_link_outbound() {
 				  + ( ($q.type // "tcp") as $nt
 				      | if $nt == "grpc" then { transport: { type: "grpc", service_name: ($q.serviceName // "grpc") } }
 				        elif $nt == "xhttp" then { transport: { type: "xhttp", path: ($q.path // "/") } }
+				        elif $nt == "ws" then { transport: { type: "ws", path: ($q.path // "/ws"), headers: { Host: ($q.host // $q.sni // "") } } }
 				        else {} end ))
 			elif $scheme == "hysteria2" then
 				{ type: "hysteria2", tag: $tag, server: $host, server_port: $port,
@@ -301,7 +302,7 @@ myc_render_aggregate() {
 			# scheme -> the set of transport_class values that scheme may legitimately carry (mirrors
 			# render_bundle.sh myc_bundle_class_of + internal/spec TransportClass*).
 			case "$scheme:$ep_class" in
-				vless:reality-tcp|vless:xhttp-tls) : ;;
+				vless:reality-tcp|vless:xhttp-tls|vless:ws-tls) : ;;
 				hysteria2:quic-udp|tuic:quic-udp) : ;;
 				ss:shadowsocks-tcp|ss:shadowtls-tcp) : ;;
 				trojan:trojan-tls) : ;;

@@ -96,6 +96,26 @@
       }
     },
     {
+      "type": "vless",
+      "tag": "vless-ws-tls-in",
+      "listen": "0.0.0.0",
+      "listen_port": 2089,
+      "users": [],
+      "tls": {
+        "enabled": true,
+        "server_name": "SENTINEL_TLS_SNI",
+        "certificate_path": "SENTINEL_TLS_CERT_PATH",
+        "key_path": "SENTINEL_TLS_KEY_PATH",
+        "alpn": [
+          "http/1.1"
+        ]
+      },
+      "transport": {
+        "type": "ws",
+        "path": "SENTINEL_WS_PATH"
+      }
+    },
+    {
       "type": "hysteria2",
       "tag": "hysteria2-in",
       "listen": "0.0.0.0",

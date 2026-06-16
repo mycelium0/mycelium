@@ -131,7 +131,7 @@ else
 	# Every protocol the bundle can emit, mapped to its closed-vocab transport family. We enumerate the
 	# canonical protocol set (the same tokens render_bundle classifies) and collect the DISTINCT
 	# families. amneziawg is included because it is the canonical independent second family (ADR-0020).
-	PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp vless-xhttp-tls hysteria2 tuic shadowsocks shadowtls trojan amneziawg"
+	PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp vless-xhttp-tls vless-ws-tls hysteria2 tuic shadowsocks shadowtls trojan amneziawg"
 	FAMILIES=" "
 	have_fam() { case "$FAMILIES" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 	unclassified=0
