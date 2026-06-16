@@ -178,6 +178,16 @@ myc_bundle_link() {
 # priority order. The node's distribution bundle is per-NODE, so the endpoint credential is the
 # node's FIRST identity (a node with no identities cannot hand out a dialable endpoint).
 #
+# C30 — PER-NODE SCOPE (NOT a network map). This producer emits THIS ONE node's OWN subscription: the
+# endpoints are this single node's enabled transports, dialing this node's address. It is the matured,
+# self-replenishing form of the per-node hand-rendered subscription (RP-0007-b), and nothing more. It
+# is NOT a fleet/topology map, NOT a cross-node aggregate, and carries NO node-id/issuer/signature — by
+# design (bundle.go schema). The invariant is "every node serves its OWN bundle"; a served cross-node
+# aggregator would be a forbidden topology centralisation + single point of block. The only place
+# multiple nodes' bundles meet is the LOCAL, at-rest `aggregate` merge an operator runs over THEIR OWN
+# nodes' bundles on THEIR OWN device (render_aggregate.sh) — never a network service. Read a bundle as
+# "one node's endpoints", never as a view of the network.
+#
 # myc_render_bundle PARAMS_FILE STATE OUT
 myc_render_bundle() {
 	local params_file state out
@@ -195,6 +205,38 @@ myc_render_bundle() {
 	# The bundle hands out a dialable endpoint; that requires a node identity to dial as. Fail-closed:
 	# a bundle with zero usable endpoints would not pass Bundle.Validate (>=1 endpoint) anyway.
 	[ "$count" -ge 1 ] || myc_die "bundle: identity state has zero clients; cannot render a dialable endpoint (add an identity first)."
+
+	# C17/C18 fail-closed: if the node-local params carry a two_hop overlay, validate its SHAPE at
+	# bundle-render too — the SAME fail-closed bar render_singbox.sh applies at server-render. The bundle
+	# does not itself emit a two-hop endpoint, but a node whose params declare a malformed two_hop would
+	# fail the server render while the bundle still advertised its (non-two-hop) endpoints — a producer
+	# that emits a bundle for a config that cannot render is a CONFLICTING_SOURCE_OF_TRUTH. Catching the
+	# malformed overlay here keeps the two producers consistent. An ABSENT two_hop is fine (feature off).
+	local two_hop
+	two_hop="$(printf '%s' "$params" | jq -c '.two_hop // empty' 2>/dev/null)"
+	if [ -n "$two_hop" ]; then
+		# Must be a JSON object with a non-empty via_user and a well-formed upstream (C17).
+		printf '%s' "$two_hop" | jq -e 'type == "object"' >/dev/null 2>&1 \
+			|| myc_die "bundle: params.two_hop is not an object (fail-closed; a two-hop overlay must be an object)."
+		local th_via th_server th_sni th_port
+		th_via="$(printf '%s' "$two_hop" | jq -r '.via_user // ""')"
+		th_server="$(printf '%s' "$two_hop" | jq -r '.server // ""')"
+		th_sni="$(printf '%s' "$two_hop" | jq -r '.sni // ""')"
+		th_port="$(printf '%s' "$two_hop" | jq -r '.server_port // empty')"
+		[ -n "$th_via" ]    || myc_die "bundle: params.two_hop.via_user is empty (fail-closed; a two-hop must name the designated client)."
+		[ -n "$th_server" ] || myc_die "bundle: params.two_hop.server is empty (fail-closed; the upstream needs an address)."
+		[ -n "$th_sni" ]    || myc_die "bundle: params.two_hop.sni is empty (fail-closed; the upstream TLS needs a server_name)."
+		case "$th_port" in
+			''|*[!0-9]*) myc_die "bundle: params.two_hop.server_port is not a positive integer ('$th_port'); must be 1..65535 (fail-closed)." ;;
+		esac
+		if [ "$th_port" -lt 1 ] || [ "$th_port" -gt 65535 ]; then
+			myc_die "bundle: params.two_hop.server_port is out of range ('$th_port'); must be 1..65535 (fail-closed)."
+		fi
+		# C18: via_user must match an existing identity (clients[].name) or the auth_user route never matches.
+		if ! printf '%s' "$clients" | jq -e --arg u "$th_via" 'any(.[]; .name == $u)' >/dev/null 2>&1; then
+			myc_die "bundle: params.two_hop.via_user '$th_via' is not a known client (fail-closed; the server's auth_user route would never match this user)."
+		fi
+	fi
 
 	local enabled
 	enabled="$(myc_sb_enabled_list "$params")"

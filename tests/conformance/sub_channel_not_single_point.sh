@@ -32,6 +32,10 @@
 #   2. The bundle's transport-class mapping (control/lib/render_bundle.sh myc_bundle_class_of) spans
 #      >=2 INDEPENDENT transport families, mirroring transport_family_independence — so a single
 #      delivered bundle carries >=2 reach paths and is itself not a single point of block.
+#   3. The SERVED-BUNDLE delivery surface itself (the caddy role's caddy_bundle_listen) binds
+#      LOOPBACK-ONLY whenever the served bundle is enabled — so the operator fronts it via their chosen
+#      plural reach path and the served artifact is never itself a lone public chokepoint (N2). A public
+#      bind with the bundle enabled is the single point of block this gate is named after -> FAIL.
 #
 # bash 3.2-safe: no mapfile, no associative arrays, no process substitution into arrays.
 #
@@ -145,6 +149,58 @@ else
 		okln "the bundle spans $fam_count independent transport families: $(printf '%s' "$FAMILIES" | tr -s ' ' | sed 's/^ //; s/ $//')"
 	elif [ "$fam_count" -lt 2 ]; then
 		badln "the bundle's transport-class mapping yields only $fam_count family; a single delivered bundle would be a single point of block (need >=2)"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# 3. The SERVED-BUNDLE DELIVERY SURFACE (the actual artifact this gate exists to protect) binds
+#    LOOPBACK-ONLY by default (N2). The "loopback-only -> plural delivery" guarantee was previously
+#    proven by NO test: Check 1 only matches *_url keys, but the Caddy bundle vhost is a file_server
+#    block keyed on `caddy_bundle_listen` — structurally invisible to it. Here we inspect the caddy
+#    role's committed default: whenever the served bundle is enabled, its listen address MUST be a
+#    loopback literal (127.0.0.0/8 or [::1]) so the operator fronts it via their chosen plural reach
+#    path — never a lone public chokepoint. A public bind (0.0.0.0 / :: / a routable literal) with the
+#    bundle enabled by default is exactly the single point of block this gate is named after -> FAIL.
+# ---------------------------------------------------------------------------
+CADDY_DEFAULTS="$REPO_ROOT/infra/ansible/roles/caddy/defaults/main.yml"
+if [ ! -f "$CADDY_DEFAULTS" ]; then
+	okln "caddy role defaults not present ($CADDY_DEFAULTS) — no served-bundle surface to check (gates-first)"
+else
+	# Extract the two relevant committed defaults (simple `key: "value"` YAML; bash 3.2-safe scalar read).
+	# sed strips the key+colon, a trailing comment, surrounding whitespace, and any single/double quotes.
+	serve_default="$(grep -E '^[[:space:]]*caddy_serve_bundle[[:space:]]*:' "$CADDY_DEFAULTS" 2>/dev/null \
+		| head -n1 | sed -E "s/^[^:]*:[[:space:]]*//; s/[[:space:]]*(#.*)?\$//; s/[\"' ]//g" | tr '[:upper:]' '[:lower:]')"
+	listen_val="$(grep -E '^[[:space:]]*caddy_bundle_listen[[:space:]]*:' "$CADDY_DEFAULTS" 2>/dev/null \
+		| head -n1 | sed -E "s/^[^:]*:[[:space:]]*//; s/[[:space:]]*(#.*)?\$//; s/[\"']//g")"
+
+	if [ -z "$listen_val" ]; then
+		badln "caddy_bundle_listen is not declared in $CADDY_DEFAULTS (cannot prove the served bundle binds loopback)"
+	else
+		# Host part = everything before the LAST ':' (port). Strip [] for an IPv6 literal.
+		host_part="${listen_val%:*}"
+		host_part="${host_part#[}"
+		host_part="${host_part%]}"
+		# Loopback when the host is 127.0.0.0/8 (127.*) or the IPv6 loopback ::1 / localhost name.
+		case "$host_part" in
+			127.*|::1|localhost) is_loopback=1 ;;
+			*) is_loopback=0 ;;
+		esac
+		if [ "${serve_default:-false}" != "true" ]; then
+			# Bundle serving is OFF by default. The committed default listen must STILL be loopback so a
+			# bare `caddy_serve_bundle: true` flip does not silently publish a single public endpoint.
+			if [ "$is_loopback" -eq 1 ]; then
+				okln "caddy_serve_bundle is off by default AND caddy_bundle_listen ($listen_val) binds loopback-only (no default public chokepoint)"
+			else
+				badln "caddy_bundle_listen ($listen_val) is NOT loopback: enabling caddy_serve_bundle would publish a lone public served-bundle endpoint with no fallback — a single point of block (bind 127.0.0.1 / [::1], or front a public bundle with >=2 independent reach paths)"
+			fi
+		else
+			# Bundle serving is ON by default — the listen MUST be loopback (or this is a live single point).
+			if [ "$is_loopback" -eq 1 ]; then
+				okln "caddy_serve_bundle is on by default AND caddy_bundle_listen ($listen_val) binds loopback-only (operator fronts it via a plural reach path)"
+			else
+				badln "caddy_serve_bundle is ON by default with a PUBLIC caddy_bundle_listen ($listen_val) — that is a lone public served-bundle endpoint = a single point of block (bind loopback, or guarantee >=2 independent reach fronts)"
+			fi
+		fi
 	fi
 fi
 
