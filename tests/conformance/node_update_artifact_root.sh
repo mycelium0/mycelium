@@ -44,11 +44,18 @@ REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 SCRIPT="$REPO_ROOT/scripts/node-bootstrap.sh"
 REAL_DONOR="$REPO_ROOT/nodes/dataplane/donor-sni-candidates.json"
 REAL_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
+REAL_LIB_DIR="$REPO_ROOT/control/lib"
+# RP-0009: the orchestrator now SOURCES its leaf libs (nb_*.sh) from ARTIFACT_ROOT/control/lib. The
+# fake checkout must carry them or the (fail-closed) sourcing loop aborts before any flow runs.
+NB_LIBS="nb_identity nb_donor nb_harden nb_install"
 
 command -v git >/dev/null 2>&1 || { printf 'SKIP: git not available; cannot stage a fake checkout.\n'; exit 0; }
 [ -f "$SCRIPT" ]        || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$SCRIPT" >&2; exit 2; }
 [ -f "$REAL_DONOR" ]    || { printf 'FAIL: donor list not found: %s\n' "$REAL_DONOR" >&2; exit 2; }
 [ -f "$REAL_TEMPLATE" ] || { printf 'FAIL: renderer template not found: %s\n' "$REAL_TEMPLATE" >&2; exit 2; }
+for _l in $NB_LIBS; do
+	[ -f "$REAL_LIB_DIR/${_l}.sh" ] || { printf 'FAIL: control/lib/%s.sh not found: %s\n' "$_l" "$REAL_LIB_DIR/${_l}.sh" >&2; exit 2; }
+done
 
 fail=0
 okln()  { printf '  ok    %s\n' "$1"; }
@@ -68,13 +75,19 @@ TOOLING_DIR="$WORK/tooling"             # stands in for /usr/local/lib/mycelium
 
 mkdir -p \
 	"$FAKE_CHECKOUT/nodes/dataplane/singbox" \
-	"$FAKE_CHECKOUT/control" \
+	"$FAKE_CHECKOUT/control/lib" \
 	"$REEXEC_DIR" \
 	"$STATE_DIR" \
 	"$TOOLING_DIR"
 
 cp "$REAL_DONOR"    "$FAKE_CHECKOUT/nodes/dataplane/donor-sni-candidates.json"
 cp "$REAL_TEMPLATE" "$FAKE_CHECKOUT/nodes/dataplane/singbox/server.template.renderer.json"
+
+# RP-0009: stage the sourced leaf libs into the fake checkout's control/lib so the orchestrator's
+# (fail-closed) lib-sourcing loop resolves them from ARTIFACT_ROOT, exactly as it will on a node.
+for _l in $NB_LIBS; do
+	cp "$REAL_LIB_DIR/${_l}.sh" "$FAKE_CHECKOUT/control/lib/${_l}.sh"
+done
 
 # control/ stub: an EXECUTABLE myceliumctl placeholder. render_candidate only requires it to exist
 # and be executable; under --dry-run it is never actually invoked (the command is logged, not run).
@@ -162,8 +175,27 @@ else
 	fi
 fi
 
-# 4) REGRESSION GUARD: NO artifact path may point at the re-exec tmp dir. If the old REPO_ROOT
-#    behaviour leaked back, the donor list / template / control path would carry the tmp prefix.
+# 4) RP-0009: the sourced leaf libs (control/lib/nb_*.sh) must resolve from ARTIFACT_ROOT too — the
+#    same artifact-root discipline as the template / myceliumctl / install_tooling above. Two signals:
+#    (a) SOURCE-LEVEL: NB_LIB_DIR is derived from ARTIFACT_ROOT, NOT REPO_ROOT (a regression to
+#        REPO_ROOT would break the lib-sourcing on every --update for exactly the re-exec reason this
+#        whole gate exists); (b) RUNTIME: the (fail-closed) sourcing loop did NOT abort pointing at the
+#        re-exec tmp dir. Because the libs were staged ONLY into the fake checkout (not the tmp image),
+#        a run that reaches the render step at all proves the libs resolved from CHECKOUT_DIR.
+if grep -Eq '^[[:space:]]*NB_LIB_DIR="\$ARTIFACT_ROOT/control/lib"' "$SCRIPT"; then
+	okln "NB_LIB_DIR is derived from ARTIFACT_ROOT (not REPO_ROOT or a tmp path)"
+else
+	badln "NB_LIB_DIR is NOT derived from ARTIFACT_ROOT — the lib-sourcing would break after the --update re-exec"
+fi
+if grep -F -- "cannot source" "$OUT" >/dev/null 2>&1; then
+	badln "the lib-sourcing loop aborted (fail-closed) — libs did not resolve from CHECKOUT_DIR/control/lib"
+else
+	okln "control/lib/nb_*.sh sourced successfully from CHECKOUT_DIR (ARTIFACT_ROOT)"
+fi
+
+# 5) REGRESSION GUARD: NO artifact path may point at the re-exec tmp dir. If the old REPO_ROOT
+#    behaviour leaked back, the donor list / template / control / control/lib path would carry the
+#    tmp prefix.
 if grep -F -- "$REEXEC_DIR/nodes" "$OUT" >/dev/null 2>&1 \
 	|| grep -F -- "$REEXEC_DIR/control" "$OUT" >/dev/null 2>&1 \
 	|| grep -E -- "$WORK/nodes/dataplane" "$OUT" >/dev/null 2>&1; then

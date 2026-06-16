@@ -252,6 +252,25 @@ else
 	ARTIFACT_ROOT="$REPO_ROOT"
 fi
 
+# ---------------------------------------------------------------------------
+# Sourced control/lib modules (RP-0009 decomposition). These nb_*.sh libs hold function groups
+# carved out of this orchestrator (identity, donor selection, host hardening, package/engine
+# install); they are SOURCED (not subshelled) so the entrypoint's shared globals (paths, STATE_DIR,
+# the SINGBOX_*/DRY_RUN vars, MYCTL, …) and the die()/log()/warn()/run()/need_root()/have() helpers
+# remain shared exactly as when the functions were inline. Sourcing only DEFINES functions; their
+# bodies reference those globals/helpers at CALL time, which is after this point.
+#
+# RESOLVED FROM ARTIFACT_ROOT, NOT REPO_ROOT: after the --update re-exec the script runs from a tmp
+# copy whose $NB_SELF/.. (= REPO_ROOT) has no control/ tree; ARTIFACT_ROOT points at the real
+# checkout (passed through as --checkout), so the libs resolve correctly on every update too. This
+# is the same artifact-root discipline tests/conformance/node_update_artifact_root.sh gates.
+NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
+for _lib in nb_identity nb_donor nb_harden nb_install; do
+	# shellcheck source=/dev/null
+	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
+done
+unset _lib
+
 # Derived per-node state paths (all LOCAL-ONLY / gitignored — never committed).
 PARAMS_JSON="$STATE_DIR/params.json"             # flat render schema (see control/README.md)
 IDENTITIES_JSON="$STATE_DIR/identities.json"     # {version,clients:[{name,id,created}]}
@@ -310,127 +329,10 @@ need_root() {
 }
 
 # ---------------------------------------------------------------------------
-# Generators — WRAPPERS ONLY around audited tools (ADR-0002). Not one byte of key
-# material is produced by this script. Prefer the sing-box-native generators; fall
-# back to openssl for random secrets. UUIDs come from sing-box.
-# ---------------------------------------------------------------------------
-gen_reality_keypair() {
-	# Echo "PRIV<TAB>PUB" from "sing-box generate reality-keypair".
-	have "$SINGBOX_BIN" || die "sing-box not installed yet; cannot generate REALITY keypair."
-	local out priv pub
-	out="$("$SINGBOX_BIN" generate reality-keypair 2>/dev/null)" \
-		|| die "'sing-box generate reality-keypair' failed."
-	priv="$(printf '%s\n' "$out" | sed -n 's/^[Pp]rivate[Kk]ey:[[:space:]]*//p; s/^[Pp]rivate [Kk]ey:[[:space:]]*//p' | head -n1 | tr -d '[:space:]')"
-	pub="$(printf '%s\n' "$out"  | sed -n 's/^[Pp]ublic[Kk]ey:[[:space:]]*//p;  s/^[Pp]ublic [Kk]ey:[[:space:]]*//p'  | head -n1 | tr -d '[:space:]')"
-	[ -n "$priv" ] && [ -n "$pub" ] || die "could not parse REALITY keypair output."
-	printf '%s\t%s\n' "$priv" "$pub"
-}
-
-gen_uuid() {
-	if have "$SINGBOX_BIN"; then
-		"$SINGBOX_BIN" generate uuid 2>/dev/null | tr -d '[:space:]' && return 0
-	fi
-	# openssl is the sanctioned fallback for randomness; format it as a UUID shape.
-	have openssl || die "no UUID source (need sing-box or openssl)."
-	local h
-	h="$(openssl rand -hex 16 2>/dev/null | tr -d '[:space:]')"
-	[ -n "$h" ] || die "'openssl rand' produced no output."
-	printf '%s-%s-%s-%s-%s\n' "${h:0:8}" "${h:8:4}" "${h:12:4}" "${h:16:4}" "${h:20:12}"
-}
-
-gen_secret_b64() {
-	# 32 random bytes, base64 — suitable for an SS-2022 PSK and protocol passwords.
-	if have "$SINGBOX_BIN"; then
-		"$SINGBOX_BIN" generate rand --base64 32 2>/dev/null | tr -d '[:space:]' && return 0
-	fi
-	have openssl || die "no random source (need sing-box or openssl)."
-	openssl rand -base64 32 2>/dev/null | tr -d '[:space:]'
-}
-
-gen_shortid() {
-	# 8 random bytes -> 16 hex chars (a common REALITY shortId length).
-	have openssl || die "openssl required for REALITY shortIds."
-	openssl rand -hex 8 2>/dev/null | tr -d '[:space:]'
-}
-
-# ---------------------------------------------------------------------------
-# Donor SNI selection (RANDOM per node from the committed candidate list) + runtime verify.
-# Public hostnames only; the chosen value is stored in LOCAL identity state, never committed.
-# ---------------------------------------------------------------------------
-donor_candidates() {
-	have jq || die "jq required to read the donor candidate list."
-	[ -f "$DONOR_LIST" ] || die "donor candidate list not found: $DONOR_LIST"
-	jq -r '.candidates[]?' "$DONOR_LIST"
-}
-
-donor_verify() {
-	# donor_verify HOST -> 0 if HOST negotiates TLSv1.3 over an x25519 group (REALITY's HARD
-	# requirement). The donor list's "require" also promises h2 ALPN "where offered"; that is a
-	# best-effort PREFERENCE, not a hard gate (see donor_offers_h2 + pick_donor), so the script's
-	# check and the JSON's promise agree (we do not over-promise).
-	local host="$1"
-	have openssl || { warn "openssl missing; cannot verify donor '$host' — treating as unverified."; return 1; }
-	# Fail-closed: a non-TLSv1.3 / non-x25519 donor is rejected so a bad SNI never reaches the config.
-	echo | openssl s_client -groups x25519 -tls1_3 \
-		-servername "$host" -connect "$host:443" 2>/dev/null \
-		| grep -q 'TLSv1.3'
-}
-
-donor_offers_h2() {
-	# donor_offers_h2 HOST -> 0 if HOST negotiates the h2 ALPN. Best-effort PREFERENCE only: a donor
-	# that lacks h2 is still acceptable (the JSON promises h2 "where offered"), so a non-zero here
-	# never rejects a donor — it only de-prioritises it in pick_donor. REALITY mirrors whatever the
-	# donor actually negotiates, so preferring an h2 donor keeps the borrowed fingerprint realistic.
-	local host="$1"
-	have openssl || return 1
-	echo | openssl s_client -alpn h2,http/1.1 -tls1_3 \
-		-servername "$host" -connect "$host:443" 2>/dev/null \
-		| grep -Eq '^[[:space:]]*ALPN protocol:[[:space:]]*h2[[:space:]]*$'
-}
-
-pick_donor() {
-	# Echo a verified donor host. Honors --donor (still verified). Tries candidates in random order.
-	if [ -n "$FORCE_DONOR" ]; then
-		if [ "$DRY_RUN" -eq 1 ] || donor_verify "$FORCE_DONOR"; then
-			printf '%s\n' "$FORCE_DONOR"; return 0
-		fi
-		die "forced donor '$FORCE_DONOR' did not negotiate TLSv1.3 over x25519 (fail-closed)."
-	fi
-	local shuffled host
-	# Shuffle without external deps: number, sort -R if available, else awk rand-tag.
-	if have shuf; then
-		shuffled="$(donor_candidates | shuf)"
-	elif sort -R </dev/null >/dev/null 2>&1; then
-		shuffled="$(donor_candidates | sort -R)"
-	else
-		shuffled="$(donor_candidates | awk 'BEGIN{srand()} {printf "%f\t%s\n", rand(), $0}' | sort | cut -f2-)"
-	fi
-	# Two-pass selection that keeps the JSON's "h2 ALPN where offered" promise honest WITHOUT
-	# over-promising: TLSv1.3+x25519 is the HARD gate (donor_verify); h2 is a soft PREFERENCE. Pass 1
-	# returns the first candidate that passes the hard gate AND offers h2; if none does, pass 2 falls
-	# back to the first candidate that merely passes the hard gate. So a network with only non-h2 donors
-	# still bootstraps (no false failure), but an h2 donor wins when one exists.
-	local first_hard_ok=""
-	while IFS= read -r host; do
-		[ -n "$host" ] || continue
-		if [ "$DRY_RUN" -eq 1 ]; then printf '%s\n' "$host"; return 0; fi
-		if donor_verify "$host"; then
-			[ -n "$first_hard_ok" ] || first_hard_ok="$host"   # remember for the fallback pass
-			if donor_offers_h2 "$host"; then printf '%s\n' "$host"; return 0; fi
-			warn "donor candidate '$host' passes TLSv1.3/x25519 but did not offer h2 ALPN; preferring an h2 donor if available."
-		else
-			warn "donor candidate '$host' failed verification; trying the next."
-		fi
-	done <<EOF
-$shuffled
-EOF
-	if [ -n "$first_hard_ok" ]; then
-		warn "no candidate offered h2 ALPN; using '$first_hard_ok' (TLSv1.3/x25519 verified — the hard requirement)."
-		printf '%s\n' "$first_hard_ok"; return 0
-	fi
-	die "no donor candidate negotiated TLSv1.3 over x25519 (fail-closed). Update the candidate list."
-}
-
+# Generators (gen_reality_keypair/gen_uuid/gen_secret_b64/gen_shortid) live in
+# control/lib/nb_identity.sh; donor selection (donor_candidates/donor_verify/donor_offers_h2/
+# pick_donor) lives in control/lib/nb_donor.sh — both sourced above (RP-0009). They are WRAPPERS
+# ONLY around audited tools (ADR-0002): not one byte of key material is produced by this script.
 # ---------------------------------------------------------------------------
 # Authenticity gate for fetched artifacts (SUPPLY-CHAIN). Fast-forward-only stops history
 # rewrites but does NOT stop a brand-new malicious commit reaching every node: a single bad push
@@ -525,326 +427,12 @@ myc_fetch_artifacts() {
 }
 
 # ---------------------------------------------------------------------------
-# Host hardening (idempotent, fail-closed, with an anti-lockout guard on sshd).
+# Host hardening (harden_journald/harden_sshd/harden_ufw) lives in control/lib/nb_harden.sh;
+# the PINNED + checksum-verified sing-box install, the unprivileged sing-box user/dirs, the
+# per-node self-signed cert, and ensure_identity (the per-node LOCAL-only identity) live in
+# control/lib/nb_install.sh + control/lib/nb_identity.sh — all sourced above (RP-0009). They are
+# idempotent, fail-closed OS-glue; the identity generators they call stay byte-identical.
 # ---------------------------------------------------------------------------
-harden_journald() {
-	log "configuring journald (volatile storage)"
-	need_root
-	local dropin="/etc/systemd/journald.conf.d/10-mycelium-volatile.conf"
-	run mkdir -p "$(dirname "$dropin")"
-	if [ "$DRY_RUN" -eq 0 ]; then
-		cat >"$dropin" <<'CONF'
-# Managed by Mycelium node-bootstrap. Volatile journald: logs live in RAM and do not persist
-# across reboots (less on-disk forensic residue; smaller writable footprint).
-[Journal]
-Storage=volatile
-RuntimeMaxUse=64M
-ForwardToSyslog=no
-CONF
-	fi
-	# The no-logs posture must actually HOLD, not merely be configured: a persistent /var/log/journal
-	# overrides Storage=volatile, so remove it — RAM-only, no on-disk forensic residue (SECURITY.md).
-	[ "$DRY_RUN" -eq 0 ] && [ -d /var/log/journal ] && run rm -rf /var/log/journal
-	# FAIL-CLOSED: a failed restart or a journal that is not actually volatile must abort the bootstrap,
-	# not warn-and-continue — the claimed no-logs posture cannot be allowed to silently not hold.
-	if ! run systemctl restart systemd-journald; then
-		die "journald failed to restart after the volatile drop-in (fail-closed): inspect $dropin"
-	fi
-	if [ "$DRY_RUN" -eq 0 ]; then
-		systemctl is-active --quiet systemd-journald || die "systemd-journald not active after restart (fail-closed)."
-		[ -d /var/log/journal ] && die "persistent /var/log/journal remains — volatile journald not in effect (fail-closed)."
-		log "journald is volatile (RAM-only); no persistent journal directory."
-	fi
-}
-
-harden_sshd() {
-	log "hardening sshd (key-only) with an anti-lockout guard"
-	need_root
-	# ANTI-LOCKOUT: only switch to key-only auth AFTER confirming at least one authorized key
-	# exists for a login account. Otherwise we would lock the operator out — fail-closed by NOT
-	# applying the change. We enumerate EVERY real account home from getent passwd (not just
-	# /root + /home/*), so users with non-standard home dirs are covered, and we also honor an
-	# AuthorizedKeysFile override from the effective sshd config.
-	local has_key=0 akf home akpath
-	# Resolve the configured AuthorizedKeysFile pattern(s); default to the standard locations.
-	akf="$(sshd -T 2>/dev/null | sed -n 's/^authorizedkeysfile[[:space:]]*//p' | head -n1)"
-	[ -n "$akf" ] || akf=".ssh/authorized_keys .ssh/authorized_keys2"
-	# Candidate homes: root + every account that has a real home directory.
-	while IFS=: read -r _u _p _uid _gid _gecos home _shell; do
-		[ -n "${home:-}" ] || continue
-		[ -d "$home" ] || continue
-		local f
-		for f in $akf; do
-			case "$f" in
-				/*) akpath="$f" ;;                 # absolute pattern: use as-is
-				*)  akpath="$home/$f" ;;           # relative pattern: anchored at the home dir
-			esac
-			# %u/%h tokens in the pattern -> resolve to this account.
-			akpath="${akpath//%h/$home}"
-			akpath="${akpath//%u/$_u}"
-			[ -f "$akpath" ] || continue
-			if grep -Eq '^(ssh-(ed25519|rsa)|ecdsa-|sk-)' "$akpath" 2>/dev/null; then
-				has_key=1; break 2
-			fi
-		done
-	done < <(getent passwd 2>/dev/null || true)
-	if [ "$has_key" -ne 1 ]; then
-		warn "no authorized SSH key found in any account — REFUSING to disable password auth"
-		warn "(anti-lockout guard). Add your public key first, then re-run."
-		return 0
-	fi
-	local dropin="/etc/ssh/sshd_config.d/10-mycelium.conf"
-	run mkdir -p "$(dirname "$dropin")"
-	if [ "$DRY_RUN" -eq 0 ]; then
-		cat >"$dropin" <<'CONF'
-# Managed by Mycelium node-bootstrap. Key-only SSH: no passwords, no challenge-response, no root
-# password login. An authorized key was confirmed present before this was applied (anti-lockout).
-PasswordAuthentication no
-ChallengeResponseAuthentication no
-KbdInteractiveAuthentication no
-PermitRootLogin prohibit-password
-UsePAM yes
-CONF
-	fi
-	# Validate the config BEFORE reloading; a broken sshd config must never take down access.
-	if [ "$DRY_RUN" -eq 0 ]; then
-		sshd -t 2>/dev/null || { warn "sshd -t failed; reverting drop-in (fail-closed)."; rm -f "$dropin"; return 0; }
-	fi
-	run systemctl reload ssh 2>/dev/null || run systemctl reload sshd 2>/dev/null \
-		|| warn "could not reload sshd (continuing)."
-}
-
-harden_ufw() {
-	log "configuring the host firewall (ufw) for the enabled canonical ports"
-	need_root
-	have ufw || { warn "ufw not installed; skipping firewall step (install ufw to enable)."; return 0; }
-	# Default deny inbound; allow SSH first (anti-lockout) then ONLY the enabled protocols' ports.
-	run ufw --force default deny incoming
-	run ufw --force default allow outgoing
-	# ANTI-LOCKOUT: never assume port 22. Open EXACTLY the port(s) the running sshd actually listens
-	# on (parsed from the effective config), so enabling ufw cannot cut the live session even when
-	# the operator runs sshd on a non-standard port.
-	local ssh_ports sp opened_ssh=0
-	ssh_ports="$(sshd -T 2>/dev/null | sed -n 's/^port[[:space:]]*//p' | sort -u)"
-	if [ -n "$ssh_ports" ]; then
-		for sp in $ssh_ports; do
-			[ -n "$sp" ] || continue
-			run ufw allow "$sp/tcp" && opened_ssh=1
-			log "allowed the live sshd port $sp/tcp before enabling the firewall (anti-lockout)."
-		done
-	fi
-	if [ "$opened_ssh" -ne 1 ]; then
-		# Could not determine the sshd port (sshd -T unavailable): fall back to the standard profile,
-		# but warn loudly — a non-standard live port could be cut.
-		warn "could not detect the live sshd port; falling back to OpenSSH/22. If sshd runs on a"
-		warn "non-standard port, allow it manually BEFORE 'ufw enable' to avoid a lockout."
-		run ufw allow OpenSSH 2>/dev/null || run ufw allow 22/tcp
-	fi
-	# Canonical ports come from the rendered config (the single source of truth at runtime). We
-	# read the live config's listen_port set so the firewall opens EXACTLY what is enabled.
-	local enabled_tcp enabled_udp
-	enabled_tcp=""; enabled_udp=""
-	if [ -f "$SINGBOX_CONFIG" ] && have jq; then
-		enabled_tcp="$(jq -r '
-			[.inbounds[]? | select(.listen_port != null)
-			 | select(.type=="vless" or .type=="trojan" or .type=="shadowtls"
-			          or (.type=="shadowsocks" and (.listen|test("127\\.0\\.0\\.1")|not)))
-			 | .listen_port] | unique | .[]' "$SINGBOX_CONFIG" 2>/dev/null | tr '\n' ' ')"
-		enabled_udp="$(jq -r '
-			[.inbounds[]? | select(.listen_port != null)
-			 | select(.type=="hysteria2" or .type=="tuic") | .listen_port] | unique | .[]' \
-			"$SINGBOX_CONFIG" 2>/dev/null | tr '\n' ' ')"
-		# Shadowsocks-2022 opens BOTH tcp and udp on its port.
-		local ss_port
-		ss_port="$(jq -r '.inbounds[]? | select(.tag=="shadowsocks-in") | .listen_port // empty' "$SINGBOX_CONFIG" 2>/dev/null)"
-		[ -n "$ss_port" ] && enabled_udp="$enabled_udp $ss_port"
-	fi
-	local p
-	for p in $enabled_tcp; do run ufw allow "$p/tcp"; done
-	for p in $enabled_udp; do run ufw allow "$p/udp"; done
-	# AmneziaWG UDP port (its conventional canon port; the actual value is operator/runtime).
-	if [ "$DO_AMNEZIAWG" -eq 1 ] && [ -f "$STATE_DIR/awg.port" ]; then
-		run ufw allow "$(cat "$STATE_DIR/awg.port")/udp"
-	fi
-	run ufw --force enable
-}
-
-# ---------------------------------------------------------------------------
-# Install a PINNED, checksum-verified sing-box (GitHub release). Idempotent: skips if the
-# pinned version is already installed.
-# ---------------------------------------------------------------------------
-install_singbox() {
-	log "ensuring sing-box is installed (pinned + checksum-verified)"
-	need_root
-	if have "$SINGBOX_BIN"; then
-		local cur
-		cur="$("$SINGBOX_BIN" version 2>/dev/null | sed -n 's/.*version[[:space:]]*//p' | head -n1)"
-		if [ -n "$SINGBOX_VERSION" ] && printf '%s' "$cur" | grep -q "${SINGBOX_VERSION#v}"; then
-			log "sing-box ${SINGBOX_VERSION} already installed; skipping."
-			ensure_singbox_user
-			return 0
-		fi
-	fi
-	[ -n "$SINGBOX_VERSION" ] || die "--singbox-version is required to install sing-box (fail-closed pin)."
-	[ -n "$SINGBOX_SHA256" ]  || die "--singbox-sha256 is required to install sing-box (fail-closed pin)."
-	have curl || have wget || die "need curl or wget to download sing-box."
-	have tar  || die "need tar to unpack the sing-box release."
-
-	# Map machine arch -> the release archive arch token.
-	local march arch
-	march="$(uname -m)"
-	case "$march" in
-		x86_64|amd64) arch="amd64" ;;
-		aarch64|arm64) arch="arm64" ;;
-		armv7l) arch="armv7" ;;
-		*) die "unsupported architecture for the sing-box release: $march" ;;
-	esac
-	local ver="${SINGBOX_VERSION#v}"
-	local archive="sing-box-${ver}-linux-${arch}.tar.gz"
-	local url="$SINGBOX_DL_BASE/${SINGBOX_VERSION}/${archive}"
-	local tmp; tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
-
-	log "downloading $url"
-	if have curl; then
-		run curl -fsSL "$url" -o "$tmp/$archive" || die "download failed: $url"
-	else
-		run wget -qO "$tmp/$archive" "$url" || die "download failed: $url"
-	fi
-
-	# FAIL-CLOSED checksum verification against the operator-supplied pin.
-	if [ "$DRY_RUN" -eq 0 ]; then
-		local got
-		if have sha256sum; then
-			got="$(sha256sum "$tmp/$archive" | awk '{print $1}')"
-		else
-			got="$(shasum -a 256 "$tmp/$archive" | awk '{print $1}')"
-		fi
-		[ "$got" = "$SINGBOX_SHA256" ] \
-			|| die "sing-box checksum MISMATCH (got $got, expected $SINGBOX_SHA256) — refusing to install."
-		log "checksum verified: $got"
-	fi
-
-	run tar -xzf "$tmp/$archive" -C "$tmp"
-	local extracted="$tmp/sing-box-${ver}-linux-${arch}/sing-box"
-	[ "$DRY_RUN" -eq 1 ] || [ -f "$extracted" ] || die "release layout unexpected: $extracted not found."
-	run install -m 0755 "$extracted" "$SINGBOX_BIN"
-	log "installed sing-box to $SINGBOX_BIN"
-	ensure_singbox_user
-}
-
-ensure_singbox_user() {
-	# Create the unprivileged system user/group + canonical dirs idempotently.
-	need_root
-	if ! getent group "$SINGBOX_RUN_GROUP" >/dev/null 2>&1; then
-		run groupadd --system "$SINGBOX_RUN_GROUP"
-	fi
-	if ! id "$SINGBOX_RUN_USER" >/dev/null 2>&1; then
-		run useradd --system --gid "$SINGBOX_RUN_GROUP" --no-create-home \
-			--shell /usr/sbin/nologin "$SINGBOX_RUN_USER"
-	fi
-	run install -d -m 0755 "$SINGBOX_ETC"
-	run install -d -m 0710 -o root -g "$SINGBOX_RUN_GROUP" "$STATE_DIR"
-	run install -d -m 0750 -o root -g "$SINGBOX_RUN_GROUP" "$TLS_DIR"
-	run install -d -m 0750 -o "$SINGBOX_RUN_USER" -g "$SINGBOX_RUN_GROUP" "$STATE_DIR/run"
-}
-
-# ---------------------------------------------------------------------------
-# Per-node identity (generated LOCALLY, once; converged on re-run). Secrets land 0600 in
-# STATE_DIR and NEVER leave the node. The identities.json client list is consumed by the
-# renderer; identity.json holds the REALITY keypair, per-protocol secrets, and chosen donor.
-# ---------------------------------------------------------------------------
-ensure_identity() {
-	log "ensuring per-node identity exists (generated locally if absent)"
-	need_root
-	have jq || die "jq required for identity management."
-	ensure_singbox_user
-
-	# 1) Client identity list (names -> uuids), via myceliumctl (sing-box/openssl-backed).
-	if [ ! -f "$IDENTITIES_JSON" ]; then
-		if [ "$DRY_RUN" -eq 0 ]; then
-			printf '{"version":1,"clients":[]}\n' >"$IDENTITIES_JSON"
-			chmod 0600 "$IDENTITIES_JSON"
-		fi
-	fi
-	local name
-	for name in $CLIENT_NAMES; do
-		if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] ensure client identity: $name"; continue; fi
-		if jq -e --arg n "$name" 'any(.clients[]?; .name==$n)' "$IDENTITIES_JSON" >/dev/null 2>&1; then
-			log "client '$name' already present."
-		else
-			local uuid created tmp
-			uuid="$(gen_uuid)"; created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-			tmp="$(mktemp "${STATE_DIR}/.id.XXXXXX")"
-			jq --arg n "$name" --arg i "$uuid" --arg c "$created" \
-				'.clients += [{name:$n,id:$i,created:$c}]' "$IDENTITIES_JSON" >"$tmp"
-			mv -f "$tmp" "$IDENTITIES_JSON"; chmod 0600 "$IDENTITIES_JSON"
-			log "issued client identity '$name'."
-		fi
-	done
-
-	# 2) Node-level secrets + REALITY keypair + donor (once).
-	if [ -f "$IDENTITY_SECRETS" ]; then
-		log "node secrets already present at $IDENTITY_SECRETS; keeping them."
-		return 0
-	fi
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would generate REALITY keypair, secrets, donor, cert"; return 0; fi
-
-	local kp priv pub sid donor
-	kp="$(gen_reality_keypair)"; priv="${kp%%	*}"; pub="${kp##*	}"
-	sid="$(gen_shortid)"
-	donor="$(pick_donor)"
-	log "selected + verified donor SNI (stored locally; never committed)."
-
-	local ss_pw tj_pw hy_pw st_pw clash_pw
-	ss_pw="$(gen_secret_b64)"; tj_pw="$(gen_secret_b64)"
-	hy_pw="$(gen_secret_b64)"; st_pw="$(gen_secret_b64)"
-	# clash_api Bearer secret (loopback /connections auth, defence-in-depth — ADR-0014/Audit-0004 F-003).
-	# Generated ONCE here at bootstrap; never regenerated on update (the secrets block is kept if present
-	# above), so the live render stays stable. Legacy nodes whose identity predates this field render
-	# clash_api WITHOUT a secret (byte-identical to today) — see write_params + render_singbox.
-	clash_pw="$(gen_secret_b64)"
-
-	# Per-node SELF-SIGNED cert (CN = donor) for the TLS-cert protocols (HY2/TUIC/Trojan). ADR-0014:
-	# certless REALITY/AmneziaWG per-node keypairs; HY2/TUIC use a per-node self-signed cert + a
-	# client sha256 pin. openssl (audited) issues it; the key never leaves the node.
-	ensure_self_signed_cert "$donor"
-
-	local tmp
-	tmp="$(mktemp "${STATE_DIR}/.secrets.XXXXXX")"
-	jq -n \
-		--arg priv "$priv" --arg pub "$pub" --arg sid "$sid" --arg donor "$donor" \
-		--arg ss "$ss_pw" --arg tj "$tj_pw" --arg hy "$hy_pw" --arg st "$st_pw" \
-		--arg clash "$clash_pw" \
-		--arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		'{
-			version: 1, created: $created,
-			reality: { private_key: $priv, public_key: $pub, short_id: $sid },
-			donor:   { host: $donor, sni: $donor },
-			secrets: { ss_password: $ss, trojan_password: $tj, hysteria2_password: $hy, shadowtls_password: $st, clash_secret: $clash }
-		}' >"$tmp"
-	mv -f "$tmp" "$IDENTITY_SECRETS"; chmod 0600 "$IDENTITY_SECRETS"
-	log "wrote node secrets (0600): $IDENTITY_SECRETS"
-}
-
-ensure_self_signed_cert() {
-	# ensure_self_signed_cert CN — per-node self-signed cert + key under TLS_DIR (ADR-0014).
-	local cn="$1"
-	have openssl || die "openssl required to issue the per-node self-signed cert."
-	[ -f "$TLS_DIR/fullchain.pem" ] && [ -f "$TLS_DIR/privkey.pem" ] && { log "self-signed cert already present."; return 0; }
-	log "issuing per-node self-signed cert (CN=donor) via openssl"
-	run openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-		-keyout "$TLS_DIR/privkey.pem" -out "$TLS_DIR/fullchain.pem" \
-		-days 3650 -nodes -subj "/CN=$cn" >/dev/null 2>&1 \
-		|| die "openssl self-signed cert generation failed."
-	# Publish the client sha256 pin (public; clients verify against it).
-	if [ "$DRY_RUN" -eq 0 ]; then
-		openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -fingerprint -sha256 2>/dev/null \
-			| sed 's/.*=//' >"$STATE_DIR/cert.sha256.txt" || true
-	fi
-	run chown -R "root:$SINGBOX_RUN_GROUP" "$TLS_DIR"
-	run chmod 0640 "$TLS_DIR/privkey.pem"
-	run chmod 0644 "$TLS_DIR/fullchain.pem"
-}
 
 # ---------------------------------------------------------------------------
 # Build params.json (the FLAT render schema) from LOCAL identity + canonical port map.
@@ -1298,74 +886,12 @@ render_serve_bundle() {
 }
 
 # ---------------------------------------------------------------------------
-# systemd service install + (re)start / reload.
+# systemd service install + (re)start / reload. install_singbox_unit (the hardened sing-box unit)
+# and restart_singbox live in control/lib/nb_install.sh, sourced above (RP-0009); apply_singbox
+# stays here (it is the flow-level apply primitive the update path calls). The unit's
+# RestrictAddressFamilies incl. AF_NETLINK is kept in lockstep with the Ansible template by
+# tests/conformance/unit_netlink_parity.sh — change BOTH together (Audit-0004 F-001/F-017).
 # ---------------------------------------------------------------------------
-install_singbox_unit() {
-	log "installing the sing-box systemd unit"
-	need_root
-	local unit="/etc/systemd/system/sing-box.service"
-	if [ "$DRY_RUN" -eq 0 ]; then
-		# Mirror the hardened unit conventions in infra/ansible/roles/singbox/templates/singbox.service.j2.
-		# The two unit sources are kept in lockstep — especially RestrictAddressFamilies incl. AF_NETLINK
-		# — by tests/conformance/unit_netlink_parity.sh; change BOTH together (Audit-0004 F-001/F-017).
-		cat >"$unit" <<UNIT
-[Unit]
-Description=Mycelium sing-box data plane (multi-protocol; PRIMARY engine)
-After=network-online.target nss-lookup.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=$SINGBOX_RUN_USER
-Group=$SINGBOX_RUN_GROUP
-ExecStartPre=$SINGBOX_BIN check -c $SINGBOX_CONFIG
-ExecStart=$SINGBOX_BIN run -c $SINGBOX_CONFIG -D $STATE_DIR/run
-Restart=on-failure
-RestartSec=5s
-LimitNOFILE=1048576
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-ReadOnlyPaths=$SINGBOX_ETC
-ReadWritePaths=$STATE_DIR/run
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
-ProtectClock=true
-ProtectHostname=true
-ProtectProc=invisible
-ProcSubset=pid
-PrivateDevices=true
-DevicePolicy=closed
-RestrictNamespaces=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-LockPersonality=true
-MemoryDenyWriteExecute=true
-RemoveIPC=true
-KeyringMode=private
-UMask=0077
-# AF_NETLINK is REQUIRED: sing-box subscribes to route/interface updates via rtnetlink at startup;
-# without it sing-box FATALs ("subscribe route updates: address family not supported by protocol")
-# and the service crash-loops. (node_exporter, by contrast, needs no netlink — see its unit below.)
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-SystemCallFilter=~@privileged @resources @obsolete
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-	fi
-	run systemctl daemon-reload
-}
-
-restart_singbox() { need_root; run systemctl enable --now sing-box 2>/dev/null || true; run systemctl restart sing-box; }
-
 # apply_singbox — make the running service pick up a new config. sing-box is Type=simple with NO
 # ExecReload, so there is no real "reload": applying a config IS a restart (it briefly drops live
 # connections). We do not pretend otherwise. Returns the restart's own status so callers can
@@ -1804,45 +1330,15 @@ verify_listeners() {
 }
 
 # ---------------------------------------------------------------------------
-# Tooling install: copy control/ tooling to TOOLING_DIR so myceliumctl is self-locating on-node.
+# Tooling install (install_tooling: copy control/ tooling to TOOLING_DIR so myceliumctl is
+# self-locating on-node, sourced from ARTIFACT_ROOT) and the base-package install (install_base_deps)
+# live in control/lib/nb_install.sh, sourced above (RP-0009). install_tooling sources control/ from
+# ARTIFACT_ROOT — NOT REPO_ROOT — for the same re-exec reason ARTIFACT_ROOT exists.
 # ---------------------------------------------------------------------------
-install_tooling() {
-	log "installing control tooling to $TOOLING_DIR"
-	need_root
-	run install -d -m 0755 "$TOOLING_DIR"
-	# Source the control/ tooling from ARTIFACT_ROOT (the real checkout), NOT REPO_ROOT: after the
-	# update re-exec REPO_ROOT points at the tmp copy's parent, which has no control/ tree.
-	run cp -a "$ARTIFACT_ROOT/control" "$TOOLING_DIR/" 2>/dev/null || run cp -aR "$ARTIFACT_ROOT/control" "$TOOLING_DIR/"
-	# Re-point MYCTL at the installed copy if it now exists. Guard the trailing status: a missing
-	# installed copy (e.g. under --dry-run, where the cp above is a no-op) must NOT make this function
-	# return non-zero and trip `set -e` in the caller — we simply keep the existing MYCTL fallback.
-	if [ -x "$TOOLING_DIR/control/myceliumctl" ]; then
-		MYCTL="$TOOLING_DIR/control/myceliumctl"
-	fi
-	return 0
-}
 
 # ===========================================================================
 # Mode flows.
 # ===========================================================================
-
-# install_base_deps — ensure the OS packages a from-zero node needs are present so a fresh-VPS
-# bootstrap needs no manual fixups (Audit-0004 D4): git (fetch/verify), jq (identity/params/render),
-# iptables (AmneziaWG PostUp NAT), ufw (host firewall), and curl/ca-certificates/tar/unzip
-# (download + unpack). Idempotent — apt-get install is a no-op for already-present packages.
-# flow_bootstrap-only (never the timer). apt-based hosts only; elsewhere it warns and the per-step
-# `have X || die` guards downstream still fail closed.
-install_base_deps() {
-	need_root
-	if ! have apt-get; then
-		warn "no apt-get on this host — install 'git jq iptables ufw curl ca-certificates tar unzip' by hand; the per-step guards fail closed if any are missing."
-		return 0
-	fi
-	log "ensuring base packages (git jq iptables ufw curl ca-certificates tar unzip)"
-	run env DEBIAN_FRONTEND=noninteractive apt-get update -qq || warn "apt-get update failed; installing against cached lists."
-	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git jq iptables ufw curl ca-certificates tar unzip \
-		|| die "base package install failed — install git/jq/iptables/ufw/curl/ca-certificates/tar/unzip and re-run."
-}
 
 flow_bootstrap() {
 	log "=== bootstrap / converge ==="
