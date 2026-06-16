@@ -34,39 +34,13 @@ MYC_BUNDLE_VERSION=1
 # priority >= 0, so this large value is still a valid (if last-ranked) priority.
 MYC_BUNDLE_PRIORITY_UNRANKED=9999
 
-# MYC_VOCAB -> the Go-owned control vocabulary file (control/vocab.json, emitted by `myceliumctl
-# vocab` from internal/spec). The proto->class table and the closed transport-class vocabulary are
-# READ from here, never re-declared in this shell (RP-0008 P2): Go owns them and the
-# vocab_single_source gate keeps the committed file byte-identical to the Go emission. Overridable for
-# tests; ships to nodes with the rest of control/ via install_tooling.
-MYC_VOCAB="${MYC_VOCAB:-$MYC_ROOT/vocab.json}"
-
-# _MYC_VOCAB_CLASSMAP caches the "proto<TAB>class" rows from MYC_VOCAB so the file is parsed once per
-# render. myc_vocab_load is fail-closed: a missing/empty/unreadable vocab file is a hard error, never a
-# silent fall-back to an inline copy of the table (the inline copy is exactly what P2 removed).
-_MYC_VOCAB_CLASSMAP=""
-myc_vocab_load() {
-	[ -n "$_MYC_VOCAB_CLASSMAP" ] && return 0
-	[ -f "$MYC_VOCAB" ] || myc_die "render-bundle: control/vocab.json not found ($MYC_VOCAB) — the Go-owned transport vocabulary is required (RP-0008 P2)."
-	_MYC_VOCAB_CLASSMAP="$(jq -r '.protos[] | "\(.proto)\t\(.class)"' "$MYC_VOCAB" 2>/dev/null)" \
-		|| myc_die "render-bundle: could not read the proto->class map from $MYC_VOCAB."
-	[ -n "$_MYC_VOCAB_CLASSMAP" ] || myc_die "render-bundle: $MYC_VOCAB has an empty proto registry."
-	return 0
-}
-
-# myc_bundle_class_of PROTO -> the closed-vocab transport CLASS for a protocol token, looked up from the
-# Go-owned registry in MYC_VOCAB (internal/spec, TransportClass*). One family per protocol; the three
-# vless-reality-* shapes collapse to the single reality-tcp family (same handshake surface,
-# ADR-0010/0020). An unregistered proto yields the empty string, exactly as before.
+# myc_bundle_class_of PROTO -> the closed-vocab transport CLASS for a protocol token, via the shared
+# vocab accessor (control/lib/vocab.sh, RP-0008 P2). The proto->class table is Go-owned (internal/spec,
+# TransportClass*) and read from control/vocab.json; one family per protocol (the three vless-reality-*
+# shapes collapse to reality-tcp). A thin alias kept for the call sites below; empty for an unregistered
+# proto, exactly as before.
 myc_bundle_class_of() {
-	local target="$1" p c
-	myc_vocab_load
-	while IFS="$(printf '\t')" read -r p c; do
-		[ "$p" = "$target" ] && { printf '%s' "$c"; return 0; }
-	done <<MYC_VOCAB_EOF
-$_MYC_VOCAB_CLASSMAP
-MYC_VOCAB_EOF
-	printf ''
+	myc_vocab_class_of "$1"
 }
 
 # myc_bundle_priority_of PROTO -> the 0-based order index of PROTO in MYC_SB_PROTOS (lower = more

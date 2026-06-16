@@ -135,6 +135,41 @@ else
 	badln "render_bundle.sh not found: $RB"
 fi
 
+# render_singbox.sh: the priority-ordered proto list (MYC_SB_PROTOS) and the per-proto default ports are
+# derived from the registry (myc_vocab_protos / myc_vocab_port), not a second hardcoded copy (RP-0008 P2.3).
+RS="$REPO_ROOT/control/lib/render_singbox.sh"
+if [ -f "$RS" ]; then
+	if grep -q 'myc_vocab_protos' "$RS" && grep -q 'myc_vocab_port' "$RS"; then
+		okln "render_singbox.sh derives MYC_SB_PROTOS + ports from the registry (myc_vocab_protos/port)"
+	else
+		badln "render_singbox.sh does not derive its proto list / ports from the vocab accessor"
+	fi
+	if grep -Eq 'MYC_SB_PROTOS="vless-reality' "$RS"; then
+		badln "render_singbox.sh still hardcodes the MYC_SB_PROTOS proto list (an inline copy survived)"
+	else
+		okln "render_singbox.sh keeps no hardcoded MYC_SB_PROTOS proto list"
+	fi
+else
+	badln "render_singbox.sh not found: $RS"
+fi
+
+# OPERATOR_TOGGLE_KEYS (nb_render_params.sh) is a static allowlist whose *_enabled/*_port members MUST
+# equal the registry's enable/port keys. It is POLICED here rather than derived in the bootstrap source
+# path on purpose: that lib is sourced in clean envs (node_update_artifact_root re-exec test) where
+# ARTIFACT_ROOT is unset, so a source-time jq would break it. This check makes drift impossible anyway.
+NRP="$REPO_ROOT/control/lib/nb_render_params.sh"
+if [ -f "$NRP" ]; then
+	otk_keys="$(sed -n "/OPERATOR_TOGGLE_KEYS='/,/\]'/p" "$NRP" | grep -oE '"[a-z0-9_]+_(enabled|port)"' | tr -d '"' | sort -u)"
+	voc_keys="$(jq -r '.protos[] | select(.engine != "amneziawg") | .enable_key, .port_key' "$VOCAB" | sort -u)"
+	if [ -n "$otk_keys" ] && [ "$otk_keys" = "$voc_keys" ]; then
+		okln "OPERATOR_TOGGLE_KEYS enable/port allowlist matches the registry exactly (no drift)"
+	else
+		badln "OPERATOR_TOGGLE_KEYS enable/port keys differ from the registry (toggle-key allowlist drifted)"
+	fi
+else
+	badln "nb_render_params.sh not found: $NRP"
+fi
+
 # --- Step 2: drift catch — regenerate from Go and assert byte-identical (skips without Go). ----------
 GO=""
 if command -v go >/dev/null 2>&1; then
