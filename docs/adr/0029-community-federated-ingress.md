@@ -17,9 +17,13 @@ later. See the LICENSE file in the repository root.
 
 ## Status
 
-**Proposed.** Phase 2+ for the federated mechanism (discovery, contracts, distribution); Phase 0/1 keep only
-inert schema/role hooks. The first concrete instance — an operator-contributed in-region ingress relaying to
-an out-of-region egress (a node-to-node "two-hop") — is Phase-1 work.
+**Accepted.** The decision (the in-region ingress is a federated, community-contributed role, not a central
+service) is canon, and its first concrete instance — an operator-contributed in-region ingress relaying to an
+out-of-region egress (a node-to-node "two-hop") — is **implemented** (`control/lib/render_singbox.sh`
+`params.two_hop` → upstream outbound + `auth_user` route, fail-closed; gated by
+`tests/conformance/node_two_hop_failclosed.sh` + `control/selftest.sh`; built upon by ADR-0030). The broader
+**federated mechanism** (discovery, contracts, distribution across many contributors) is deferred to Phase 2+;
+Phase 0/1 keep only inert schema/role hooks for it.
 
 ## Context
 
