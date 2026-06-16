@@ -264,8 +264,14 @@ fi
 # copy whose $NB_SELF/.. (= REPO_ROOT) has no control/ tree; ARTIFACT_ROOT points at the real
 # checkout (passed through as --checkout), so the libs resolve correctly on every update too. This
 # is the same artifact-root discipline tests/conformance/node_update_artifact_root.sh gates.
+#
+# C2 adds the render/serve CONTROL-LOGIC modules: nb_render_params (write_params + the C19 operator-
+# override seed/merge + resolve_node_address, with OPERATOR_TOGGLE_KEYS/OPERATOR_OVERRIDES) and
+# nb_serve_bundle (render_serve_bundle + bundle_served_age*, with the BUNDLE_* served-path constants).
+# They define functions + their dedicated constants only; the constants reference STATE_DIR (already
+# final after arg-parse, above) and the function bodies reference shared globals/helpers at call time.
 NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
-for _lib in nb_identity nb_donor nb_harden nb_install; do
+for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle; do
 	# shellcheck source=/dev/null
 	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
 done
@@ -282,30 +288,11 @@ RENDER_TEMPLATE="$ARTIFACT_ROOT/nodes/dataplane/singbox/server.template.renderer
 LASTGOOD_CONFIG="$STATE_DIR/config.lastgood.json"
 STAGED_CONFIG="$STATE_DIR/config.staged.json"
 ACK_MARKER="$STATE_DIR/config.staged.ack"
-# C19: operator-set TOGGLE overrides, persisted SEPARATELY from identity-derived fields. write_params
-# regenerates the identity-derived fields every run (keys/secrets/ports/paths from local identity), but
-# an operator who turns a transport ON (e.g. setting the hysteria2 enable flag) must NOT have that
-# silently reverted to default-OFF on the next --update. This 0600 file records ONLY the operator-settable
-# toggles (the *_enable* flags + the few operator-tunable knobs); it is merged ON TOP of the regenerated
-# defaults so an operator enablement survives every re-render. Local-only / gitignored; absent on a node
-# whose operator never overrode anything (then defaults apply, byte-identically to today).
-OPERATOR_OVERRIDES="$STATE_DIR/operator-overrides.json"
-
-# Served distribution bundle (RP-0007-b). The node renders its typed Bundle (internal/spec/bundle.go)
-# via `myceliumctl bundle`, then SERVES it (e.g. via the caddy role's loopback bundle vhost) so a
-# client self-polls (profile-update-interval). The SERVED copy is updated fail-closed: a freshly
-# rendered bundle replaces the served file ONLY after it validates; on any failure the last-known-good
-# served bundle is left in place (never serve an invalid bundle). Loopback-only by default; the
-# operator fronts it via their chosen reach path, so the channel is never a single public chokepoint.
-BUNDLE_DIR="/etc/mycelium/bundle"
-BUNDLE_SERVED="$BUNDLE_DIR/bundle.json"           # the file the server serves (last-known-good)
-BUNDLE_CANDIDATE="$STATE_DIR/bundle.candidate.json"
-# C25 staleness signal: a tiny metrics file recording how old the SERVED bundle is (seconds since its
-# mtime) at the last render attempt. A stuck last-known-good (fail-closed fallback that keeps serving an
-# old bundle while fresh renders keep failing) is otherwise SILENT — only a warn, no age. This file lets a
-# node-local exporter/operator observe the skew (a Prometheus-textfile-style `bundle_served_age_seconds N`
-# line) without adding any daemon. Local-only / gitignored.
-BUNDLE_SERVED_AGE_FILE="$STATE_DIR/bundle_served_age_seconds.prom"
+# C2 (RP-0009): the operator-override path (OPERATOR_OVERRIDES + OPERATOR_TOGGLE_KEYS) lives with its
+# functions in control/lib/nb_render_params.sh, and the served-bundle paths (BUNDLE_DIR/BUNDLE_SERVED/
+# BUNDLE_CANDIDATE/BUNDLE_SERVED_AGE_FILE) with theirs in control/lib/nb_serve_bundle.sh — both sourced
+# above. Those constants are used ONLY by the functions that moved, so they moved with them; they
+# reference STATE_DIR (already final by the time the libs are sourced).
 
 # myceliumctl entrypoint: prefer the installed tooling copy; fall back to the in-repo (checkout) one.
 MYCTL="$TOOLING_DIR/control/myceliumctl"
@@ -435,37 +422,12 @@ myc_fetch_artifacts() {
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Build params.json (the FLAT render schema) from LOCAL identity + canonical port map.
-# Ports come from the canonical map (PORTS.md / renderer defaults), NOT from params.example.json
-# (whose port values drift — see the map-phase notes).
+# params.json (the FLAT render schema) — write_params + the C19 operator-override seed/merge +
+# resolve_node_address live in control/lib/nb_render_params.sh, sourced above (RP-0009 C2). They are
+# CONTROL-LOGIC (the operator-override allowlist + the two-hop-merge decision), earmarked for the
+# RP-0008 Go migration; assert_two_hop_shape (below; C3) stays here and is resolved at call time from
+# the shared sourced scope when write_params invokes it.
 # ---------------------------------------------------------------------------
-# resolve_node_address — echo this node's OWN reachable address for client subscriptions.
-# Order: explicit --node-address > a previously stored value > best-effort auto-detect of the
-# primary public/global address > the documented loud placeholder. The chosen value is LOCAL-ONLY
-# (params.json, 0600) — a real IP/host is NEVER committed (the placeholder is the only committed
-# default, and it is non-functional by design).
-resolve_node_address() {
-	if [ -n "$NODE_ADDRESS" ]; then printf '%s\n' "$NODE_ADDRESS"; return 0; fi
-	# Reuse a value already recorded in params.json across re-runs (idempotent; respects an operator
-	# who set a real address once).
-	if [ -f "$PARAMS_JSON" ] && have jq; then
-		local prev
-		prev="$(jq -r '.node_address // empty' "$PARAMS_JSON" 2>/dev/null)"
-		if [ -n "$prev" ] && [ "$prev" != "$NODE_ADDRESS_PLACEHOLDER" ]; then
-			printf '%s\n' "$prev"; return 0
-		fi
-	fi
-	# Best-effort auto-detect of the primary GLOBAL-scope address (no external service contacted).
-	local addr=""
-	if have ip; then
-		addr="$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
-		[ -n "$addr" ] || addr="$(ip -o -6 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
-	fi
-	if [ -n "$addr" ]; then printf '%s\n' "$addr"; return 0; fi
-	# Fail-closed fallback: the documented placeholder, with a loud warning at the call site.
-	printf '%s\n' "$NODE_ADDRESS_PLACEHOLDER"
-	return 0
-}
 
 # ---------------------------------------------------------------------------
 # assert_two_hop_shape FILE — fail-closed shape validation of a node-local two_hop.json overlay
@@ -529,198 +491,10 @@ assert_two_hop_shape() {
 	log "two_hop overlay validated (via_user='$th_via', egress tag='$th_tag', distinct from ingress)."
 }
 
-# ---------------------------------------------------------------------------
-# OPERATOR-TOGGLE OVERRIDES (C19 defect 2). write_params regenerates the FLAT params from the LOCAL
-# identity + canonical ports every run, so any operator-set toggle (e.g. enabling a transport) would be
-# silently reverted to its default on each --update. To preserve operator intent WITHOUT making the
-# whole params file operator-owned (the keys/secrets/ports MUST stay identity-derived + canonical), we
-# persist ONLY the operator-settable toggle subset in a dedicated 0600 overrides file and merge it ON
-# TOP of the regenerated defaults.
-#
-# OPERATOR_TOGGLE_KEYS is the closed allowlist of keys an operator may override (the *_enabled flags +
-# the handful of operator-tunable knobs). Identity-derived fields (keys, secrets, node_address, cert
-# paths, short_ids) are DELIBERATELY excluded so they can never be pinned stale by an override.
-OPERATOR_TOGGLE_KEYS='[
-	"vless_reality_vision_enabled","vless_reality_grpc_enabled","vless_reality_xhttp_enabled",
-	"vless_xhttp_tls_enabled","hysteria2_enabled","tuic_enabled","shadowsocks_enabled",
-	"shadowtls_enabled","trojan_enabled",
-	"vless_reality_vision_port","vless_reality_grpc_port","vless_reality_xhttp_port",
-	"vless_xhttp_tls_port","hysteria2_port","tuic_port","shadowsocks_port","shadowtls_port",
-	"trojan_port","xhttp_path","xhttp_path_tls","grpc_service_name","region_bucket"
-]'
-
-# seed_operator_overrides DEFAULTS_FILE — on the FIRST write under this logic (no overrides file yet),
-# capture any operator toggles that DIFFER from the freshly-generated defaults from the PRIOR params.json
-# (so an operator who enabled a transport before this change is not reverted on the upgrade). If there is
-# no prior params or nothing differs, write an empty {} so subsequent reads are stable. Idempotent.
-seed_operator_overrides() {
-	local defaults_file="$1"
-	[ -f "$OPERATOR_OVERRIDES" ] && return 0
-	local seeded='{}'
-	if [ -f "$PARAMS_JSON" ]; then
-		# Keep only allowlisted keys whose PRIOR value differs from the freshly-generated default.
-		seeded="$(jq -n \
-			--slurpfile prev "$PARAMS_JSON" \
-			--slurpfile def "$defaults_file" \
-			--argjson keys "$OPERATOR_TOGGLE_KEYS" \
-			'($prev[0] // {}) as $p | ($def[0] // {}) as $d
-			 | reduce $keys[] as $k ({};
-				 if ($p|has($k)) and ($p[$k] != $d[$k]) then . + { ($k): $p[$k] } else . end)' \
-			2>/dev/null || printf '{}')"
-		[ -n "$seeded" ] || seeded='{}'
-	fi
-	( umask 077; printf '%s\n' "$seeded" | jq . >"$OPERATOR_OVERRIDES" ) \
-		|| die "could not write operator overrides file $OPERATOR_OVERRIDES (fail-closed)."
-	if [ "$seeded" != '{}' ]; then
-		log "operator overrides seeded from prior params (preserving operator-set toggles across --update): $OPERATOR_OVERRIDES"
-	fi
-}
-
-# merge_operator_overrides DEFAULTS_FILE — merge the persisted operator toggles ON TOP of the freshly
-# generated defaults, in place. Only allowlisted keys are honoured (a stray key in the overrides file is
-# IGNORED, never injected), so the overrides file can never smuggle an identity-derived field.
-merge_operator_overrides() {
-	local defaults_file="$1"
-	[ -f "$OPERATOR_OVERRIDES" ] || return 0
-	jq -e 'type == "object"' "$OPERATOR_OVERRIDES" >/dev/null 2>&1 \
-		|| die "operator overrides file $OPERATOR_OVERRIDES is not a JSON object (fail-closed; fix or remove it)."
-	local merged
-	merged="$(jq -n \
-		--slurpfile def "$defaults_file" \
-		--slurpfile ovr "$OPERATOR_OVERRIDES" \
-		--argjson keys "$OPERATOR_TOGGLE_KEYS" \
-		'($def[0] // {}) as $d | ($ovr[0] // {}) as $o
-		 | reduce $keys[] as $k ($d;
-			 if ($o|has($k)) then . + { ($k): $o[$k] } else . end)' \
-		2>/dev/null)" \
-		|| die "could not merge operator overrides into params (fail-closed)."
-	[ -n "$merged" ] && printf '%s' "$merged" | jq -e . >/dev/null 2>&1 \
-		|| die "operator-override merge produced invalid JSON (fail-closed)."
-	printf '%s\n' "$merged" >"$defaults_file"
-	log "params: applied operator-set toggle overrides on top of regenerated defaults (C19: operator enablement preserved across --update)."
-}
-
-write_params() {
-	log "writing params.json (local-only render input) from node identity + canonical ports"
-	need_root
-	have jq || die "jq required to write params."
-	[ -f "$IDENTITY_SECRETS" ] || die "node secrets missing; run identity step first."
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would write $PARAMS_JSON"; return 0; fi
-
-	# Resolve this node's own reachable address for subscriptions (NEVER hardcoded to the placeholder).
-	local node_address
-	node_address="$(resolve_node_address)"
-	if [ "$node_address" = "$NODE_ADDRESS_PLACEHOLDER" ]; then
-		warn "node_address is the placeholder '$NODE_ADDRESS_PLACEHOLDER': generated client"
-		warn "subscriptions will NOT connect. Set the real value with --node-address ADDR (or fix"
-		warn "auto-detection) before generating subscriptions from this node's params.json."
-	else
-		log "recording node_address for subscriptions (local-only): $node_address"
-	fi
-
-	local s priv pub sid donor ss tj hy st
-	s="$(cat "$IDENTITY_SECRETS")"
-	priv="$(printf '%s' "$s" | jq -r '.reality.private_key')"
-	pub="$(printf '%s'  "$s" | jq -r '.reality.public_key')"
-	sid="$(printf '%s'  "$s" | jq -r '.reality.short_id')"
-	donor="$(printf '%s' "$s" | jq -r '.donor.host')"
-	ss="$(printf '%s'   "$s" | jq -r '.secrets.ss_password')"
-	tj="$(printf '%s'   "$s" | jq -r '.secrets.trojan_password')"
-	hy="$(printf '%s'   "$s" | jq -r '.secrets.hysteria2_password')"
-	st="$(printf '%s'   "$s" | jq -r '.secrets.shadowtls_password')"
-	# // "" so a legacy identity.json without clash_secret yields EMPTY (not the string "null"):
-	# write_params then renders clash_api WITHOUT a secret, byte-identical to today (no-op update).
-	clash="$(printf '%s' "$s" | jq -r '.secrets.clash_secret // ""')"
-
-	# DEFAULT-ON SET (friends alpha, "Variant A" — recorded in ADR-0022 + THREAT-MODEL port posture):
-	# the two certless REALITY transports — VLESS+REALITY+XTLS-Vision (443) and VLESS+REALITY+gRPC
-	# (8443). NOTE: gRPC is the SAME reality-tls-tcp FAMILY as Vision (not a second independent family
-	# for D2 — AmneziaWG/UDP is, ADR-0020 §5); it is a second always-on port for client failover, and
-	# the only default-on set above single-443. This live default differs from the conservative
-	# group_vars/Ansible default (Vision only) by design; pinned by
-	# tests/conformance/live_artifact_posture.sh so it cannot silently grow. Everything else = OFF.
-	#
-	# HY2/TUIC are DEFAULT-OFF here, even though they are part of the broader canonical set, because
-	# they present a per-node SELF-SIGNED cert (ADR-0014) that the client MUST verify via a SHA-256
-	# cert pin. The client/subscription renderer does not yet EMIT that pin, and blanket
-	# `insecure: true` trust is FORBIDDEN (ADR-0014 — it would accept any certificate / MITM-open).
-	# So shipping HY2/TUIC on by default would yield clients that either cannot connect or only
-	# connect insecurely. Re-enabling them requires the cert-pin client path (tracked follow-up);
-	# until then keep them OFF. An operator can still override per node (the toggles below + the
-	# firewall/render pipeline honour whatever is set here).
-	local tmp
-	tmp="$(mktemp "${STATE_DIR}/.params.XXXXXX")"
-	jq -n \
-		--arg priv "$priv" --arg pub "$pub" --arg sid "$sid" --arg donor "$donor" \
-		--arg ss "$ss" --arg tj "$tj" --arg hy "$hy" --arg st "$st" \
-		--arg clash "$clash" \
-		--arg node_address "$node_address" \
-		--arg tls_cert "$TLS_DIR/fullchain.pem" --arg tls_key "$TLS_DIR/privkey.pem" \
-		'{
-			node_address: $node_address,
-			donor_host: $donor, donor_sni: $donor,
-			reality_private_key: $priv, reality_public_key: $pub,
-			short_ids: [ $sid ],
-			tls_sni: $donor,
-			tls_certificate_path: $tls_cert, tls_key_path: $tls_key,
-			grpc_service_name: "grpc.health.v1.Health",
-			xhttp_path: "/",
-			shadowtls_handshake_server: $donor, shadowtls_handshake_port: 443,
-			ss_password: $ss, trojan_password: $tj, hysteria2_password: $hy, shadowtls_password: $st,
-			clash_secret: $clash,
-
-			vless_reality_vision_enabled: true,  vless_reality_vision_port: 443,
-			vless_reality_grpc_enabled:   true,  vless_reality_grpc_port:   8443,
-			vless_reality_xhttp_enabled:  false, vless_reality_xhttp_port:  2096,
-			# vless-xhttp-tls: XHTTP over GENUINE single-layer TLS (own cert; NO reality). Default OFF
-			# (fail-closed; rendered only when enabled). Canonical port 2087 (deliberately not 8443).
-			vless_xhttp_tls_enabled:      false, vless_xhttp_tls_port:      2087,
-			# HY2/TUIC default OFF: need a client cert pin the renderer does not yet emit (ADR-0014).
-			hysteria2_enabled:            false, hysteria2_port:            8444,
-			tuic_enabled:                 false, tuic_port:                 8445,
-			shadowsocks_enabled:          false, shadowsocks_port:          8388,
-			shadowtls_enabled:            false, shadowtls_port:            8446,
-			trojan_enabled:               false, trojan_port:               8447
-		}' >"$tmp"
-	# C19 (defect 2): preserve operator-set toggles across regeneration. The block above is the
-	# identity-derived + canonical DEFAULT. seed_operator_overrides captures (once) any pre-existing
-	# operator enablement from the prior params; merge_operator_overrides then re-applies the persisted
-	# operator toggles ON TOP of these defaults so an enablement set on a previous run is NOT reverted by
-	# this --update. Only the allowlisted toggle keys are honoured; identity-derived fields stay as
-	# regenerated. A node whose operator never overrode anything keeps an empty {} and renders identically.
-	seed_operator_overrides "$tmp"
-	merge_operator_overrides "$tmp"
-	# Optional two-hop egress overlay (ADR-0029): a node acting as an in-region INGRESS for an
-	# out-of-region egress drops a local-only two_hop.json into STATE_DIR; merge it into params so the
-	# renderer (render_singbox.sh) emits the upstream outbound + auth_user route. Node-local + never
-	# committed -> survives the fetch/re-render cycle; absent on every other node -> params render
-	# byte-identically (gated, zero blast radius). See render_singbox.sh `.two_hop` handling.
-	#
-	# C19 FAIL-CLOSED: an ABSENT two_hop.json means the feature is OFF (fine — every other node). But a
-	# PRESENT-yet-malformed two_hop.json (invalid JSON, wrong shape, or empty via_user) is operator error
-	# that MUST hard-fail here, never silently write params WITHOUT the overlay. Writing fail-OPEN would
-	# diverge from render_singbox.sh (which is fail-CLOSED on the same overlay): params would advertise a
-	# node with no egress while the operator believes the egress is live. So: present => it must be a
-	# well-formed object with a non-empty via_user and a well-formed upstream, or we `die`.
-	if [ -f "$STATE_DIR/two_hop.json" ]; then
-		assert_two_hop_shape "$STATE_DIR/two_hop.json"
-		if jq --slurpfile th "$STATE_DIR/two_hop.json" '.two_hop = $th[0]' "$tmp" >"$tmp.th"; then
-			mv -f "$tmp.th" "$tmp"
-			log "params: merged node-local two_hop egress overlay (ADR-0029 in-region ingress)."
-		else
-			rm -f "$tmp.th" "$tmp"
-			die "two_hop.json is present but could not be merged into params (fail-closed; refusing to write params WITHOUT the operator's two-hop overlay). Fix or remove $STATE_DIR/two_hop.json (see --disable-two-hop)."
-		fi
-	fi
-	mv -f "$tmp" "$PARAMS_JSON"; chmod 0600 "$PARAMS_JSON"
-	# Mirror the clash secret to a 0600 file so the loopback data-plane stats exporter can authenticate
-	# to clash_api (--clash-secret-file). Empty on legacy nodes: leave no file (the exporter then reads
-	# the still-open loopback clash_api exactly as today).
-	if [ -n "$clash" ] && [ "$DRY_RUN" -eq 0 ]; then
-		( umask 077; printf '%s' "$clash" >"$STATE_DIR/clash.secret" )
-	fi
-	log "wrote $PARAMS_JSON (0600, local-only)."
-}
+# OPERATOR-TOGGLE OVERRIDES (C19 defect 2) + write_params + resolve_node_address moved to
+# control/lib/nb_render_params.sh (RP-0009 C2), together with their dedicated OPERATOR_TOGGLE_KEYS +
+# OPERATOR_OVERRIDES constants. They are sourced above; write_params calls assert_two_hop_shape (below),
+# resolved at call time from the shared sourced scope.
 
 # ---------------------------------------------------------------------------
 # Render the canonical config THROUGH the existing myceliumctl pipeline, into a candidate file.
@@ -772,118 +546,13 @@ rollback_config() {
 }
 
 # ---------------------------------------------------------------------------
-# Served distribution bundle (RP-0007-b) — render + serve fail-closed.
-#
-# Renders the node's typed Bundle (internal/spec/bundle.go) via `myceliumctl bundle` into a
-# candidate, then promotes it to the SERVED path ONLY after it validates. FAIL-CLOSED: if the fresh
-# render fails (myceliumctl exits non-zero) OR the candidate is not valid JSON with the bundle shape,
-# the previously-served (last-known-good) bundle is LEFT IN PLACE and the served file is never
-# overwritten with an invalid one. The first-ever bootstrap has no last-known-good, so a failure
-# there is a hard error (nothing valid to serve).
-#
-# Authoritative validation (internal/spec.Bundle.Validate) is Go-side; this shell gate enforces EVERY
-# branch that Bundle.Validate + Endpoint.Validate check (version, >=1 endpoint, and per endpoint:
-# non-empty tag, transport_class in the closed vocab, non-empty region, integer priority >= 0, health
-# "unknown", non-empty link — C10), so a structurally-broken bundle never reaches the served path
-# fail-open relative to the Go type.
+# Served distribution bundle (RP-0007-b) — render_serve_bundle + bundle_served_age_seconds +
+# record_bundle_served_age moved to control/lib/nb_serve_bundle.sh (RP-0009 C2), together with the
+# BUNDLE_DIR/BUNDLE_SERVED/BUNDLE_CANDIDATE/BUNDLE_SERVED_AGE_FILE served-path constants. They are
+# sourced above; the flow_* dispatchers (below) call render_serve_bundle on every promotion path (C25).
+# This is CONTROL-LOGIC (validation), earmarked for the RP-0008 Go migration (the authoritative
+# internal/spec.Bundle.Validate round-trip).
 # ---------------------------------------------------------------------------
-
-# bundle_served_age_seconds — echo the age (seconds since mtime) of the SERVED bundle, or empty if none.
-# Portable across GNU/BSD stat (Linux nodes use GNU; the macOS test host uses BSD).
-bundle_served_age_seconds() {
-	[ -f "$BUNDLE_SERVED" ] || { printf ''; return 0; }
-	local mtime now
-	mtime="$(stat -c %Y "$BUNDLE_SERVED" 2>/dev/null || stat -f %m "$BUNDLE_SERVED" 2>/dev/null || printf '')"
-	[ -n "$mtime" ] || { printf ''; return 0; }
-	now="$(date +%s 2>/dev/null || printf '')"
-	[ -n "$now" ] || { printf ''; return 0; }
-	local age=$(( now - mtime ))
-	[ "$age" -lt 0 ] && age=0
-	printf '%s' "$age"
-}
-
-# record_bundle_served_age STALE_FLAG — write the staleness metric file (Prometheus textfile style) and,
-# when STALE_FLAG=1 (a fail-closed fallback kept the last-known-good), emit a loud age signal so a stuck
-# stale bundle is OBSERVABLE, not just warned about once. Best-effort: never fails the caller.
-record_bundle_served_age() {
-	local stale_flag="${1:-0}" age
-	[ "$DRY_RUN" -eq 1 ] && return 0
-	age="$(bundle_served_age_seconds)"
-	[ -n "$age" ] || return 0
-	{
-		printf '# HELP bundle_served_age_seconds Age (seconds) of the served distribution bundle at last render attempt.\n'
-		printf '# TYPE bundle_served_age_seconds gauge\n'
-		printf 'bundle_served_age_seconds %s\n' "$age"
-		printf '# HELP bundle_served_stale Whether the served bundle is a kept last-known-good (1) vs freshly promoted (0).\n'
-		printf '# TYPE bundle_served_stale gauge\n'
-		printf 'bundle_served_stale %s\n' "$stale_flag"
-	} >"$BUNDLE_SERVED_AGE_FILE" 2>/dev/null || true
-	if [ "$stale_flag" = "1" ]; then
-		warn "served bundle is now a STALE last-known-good: bundle_served_age_seconds=$age (a fresh render kept failing — investigate; metric at $BUNDLE_SERVED_AGE_FILE)."
-	fi
-}
-
-render_serve_bundle() {
-	[ -x "$MYCTL" ] || { warn "myceliumctl not found; skipping bundle render (sub channel unaffected)."; return 0; }
-	[ -f "$PARAMS_JSON" ] || { warn "params.json missing; skipping bundle render."; return 0; }
-	[ -f "$IDENTITIES_JSON" ] || { warn "identities.json missing; skipping bundle render."; return 0; }
-
-	log "rendering served distribution bundle via myceliumctl -> $BUNDLE_CANDIDATE"
-	if [ "$DRY_RUN" -eq 1 ]; then
-		log "[dry-run] $MYCTL bundle --params $PARAMS_JSON --state $IDENTITIES_JSON --out $BUNDLE_CANDIDATE"
-		log "[dry-run] would serve validated bundle at $BUNDLE_SERVED (fail-closed: keep last-known-good on failure)"
-		return 0
-	fi
-
-	# Render the candidate. A non-zero exit means NOTHING is promoted (fail-closed).
-	if ! "$MYCTL" bundle --params "$PARAMS_JSON" --state "$IDENTITIES_JSON" --out "$BUNDLE_CANDIDATE" 2>/dev/null; then
-		rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
-		if [ -f "$BUNDLE_SERVED" ]; then
-			warn "bundle render failed; keeping the last-known-good served bundle ($BUNDLE_SERVED) — fail-closed."
-			record_bundle_served_age 1
-			return 0
-		fi
-		die "bundle render failed and there is no last-known-good served bundle (fail-closed; nothing valid to serve)."
-	fi
-
-	# Structural validation mirroring internal/spec.Bundle.Validate + Endpoint.Validate (bundle.go) —
-	# the authoritative round-trip is the Go check, but this jq gate must enforce EVERY branch Go does so
-	# the served path is not fail-open relative to the type (C10). Per Endpoint.Validate: non-empty tag,
-	# transport_class in the closed vocab, non-empty region, priority an integer >= 0, health == unknown
-	# (Phase-1), non-empty link. Per Bundle.Validate: version == NetworkStateVersion (1), >= 1 endpoint.
-	if ! jq -e '
-		(.version == 1)
-		and (.endpoints | type == "array") and (.endpoints | length >= 1)
-		and (.endpoints | all((.tag | type == "string") and ((.tag | length) > 0)))
-		and (.endpoints | all(.transport_class | IN(
-			"reality-tcp","xhttp-tls","quic-udp","shadowsocks-tcp",
-			"shadowtls-tcp","trojan-tls","amneziawg-udp")))
-		and (.endpoints | all((.region | type == "string") and ((.region | length) > 0)))
-		and (.endpoints | all((.priority | type == "number") and (.priority >= 0) and ((.priority | floor) == .priority)))
-		and (.endpoints | all(.health == "unknown"))
-		and (.endpoints | all((.link | type == "string") and ((.link | length) > 0)))
-		and (.generated_at | type == "string")
-	' "$BUNDLE_CANDIDATE" >/dev/null 2>&1; then
-		rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
-		if [ -f "$BUNDLE_SERVED" ]; then
-			warn "freshly rendered bundle failed validation; keeping the last-known-good served bundle — fail-closed."
-			record_bundle_served_age 1
-			return 0
-		fi
-		die "freshly rendered bundle failed validation and there is no last-known-good to fall back to (fail-closed)."
-	fi
-
-	# Promote the validated candidate to the served path (atomic install into the served dir).
-	need_root
-	run mkdir -p "$BUNDLE_DIR"
-	run install -m 0644 "$BUNDLE_CANDIDATE" "$BUNDLE_SERVED"
-	rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
-	# Fresh promotion: the served bundle is now current (stale=0, age ~0). Record the metric so an operator
-	# can distinguish a healthy fresh serve from a stuck last-known-good.
-	record_bundle_served_age 0
-	log "served bundle updated (validated): $BUNDLE_SERVED ($(jq '.endpoints | length' "$BUNDLE_SERVED" 2>/dev/null || echo '?') endpoint(s))."
-	log "serve it over HTTPS with a profile-update-interval header so clients self-poll (see roles/caddy: caddy_serve_bundle)."
-}
 
 # ---------------------------------------------------------------------------
 # systemd service install + (re)start / reload. install_singbox_unit (the hardened sing-box unit)

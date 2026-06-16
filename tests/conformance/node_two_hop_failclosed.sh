@@ -37,18 +37,33 @@ REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 NB="$REPO_ROOT/scripts/node-bootstrap.sh"
 [ -f "$NB" ] || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$NB" >&2; exit 2; }
 
+# RP-0009 C2 decomposition: the entrypoint sources its control-logic from control/lib/nb_*.sh. The
+# render/serve groups this gate inspects (write_params + the C19 operator-override seed/merge, in
+# nb_render_params.sh; render_serve_bundle + bundle_served_age* in nb_serve_bundle.sh) now live in those
+# libs. assert_two_hop_shape + the flow_* dispatchers stay in the entrypoint. Inspect the entrypoint AND
+# the sourced libs as one logical source so the wiring assertions follow the code that moved (the runtime
+# behaviour is unchanged — everything is sourced into one shared scope on the node).
+NB_RENDER_PARAMS="$REPO_ROOT/control/lib/nb_render_params.sh"
+NB_SERVE_BUNDLE="$REPO_ROOT/control/lib/nb_serve_bundle.sh"
+[ -f "$NB_RENDER_PARAMS" ] || { printf 'FAIL: nb_render_params.sh not found: %s\n' "$NB_RENDER_PARAMS" >&2; exit 2; }
+[ -f "$NB_SERVE_BUNDLE" ]  || { printf 'FAIL: nb_serve_bundle.sh not found: %s\n'  "$NB_SERVE_BUNDLE"  >&2; exit 2; }
+# NB_SRC = the files that make up the node control plane (entrypoint + sourced control-logic libs).
+NB_SRC="$NB $NB_RENDER_PARAMS $NB_SERVE_BUNDLE"
+
 fail=0
 okln()  { printf '  ok    %s\n' "$1"; }
 badln() { printf '  FAIL  %s\n' "$1"; fail=1; }
 
-# fn_body NAME -> print the body of a shell function NAME from $NB (from its opener to the next line that
-# is a single closing brace at column 0). bash 3.2-safe; used to scope assertions to one function.
+# fn_body NAME -> print the body of a shell function NAME from $NB_SRC (from its opener to the next line
+# that is a single closing brace at column 0). bash 3.2-safe; used to scope assertions to one function.
+# Scans the entrypoint + the sourced libs so a function that moved into a lib (RP-0009) is still found.
 fn_body() {
 	awk -v fn="$1" '
+		FNR==1 { inb=0 }
 		$0 ~ ("^"fn"\\(\\) \\{") || $0 ~ ("^"fn"\\(\\)$") { inb=1 }
 		inb { print }
-		inb && /^\}$/ { exit }
-	' "$NB"
+		inb && /^\}$/ { inb=0 }
+	' $NB_SRC
 }
 
 printf '== node-bootstrap two-hop / toggle / served-bundle fail-closed check ==\n'
@@ -57,7 +72,7 @@ printf 'repo: %s\n' "$REPO_ROOT"
 # ---------------------------------------------------------------------------
 # C19 — write_params hard-fails on a present-but-invalid two_hop (no fail-open warn).
 # ---------------------------------------------------------------------------
-if grep -q 'params written WITHOUT two-hop' "$NB"; then
+if grep -q 'params written WITHOUT two-hop' $NB_SRC; then
 	badln "C19: the fail-OPEN 'params written WITHOUT two-hop' warn is still present (must hard-fail instead)"
 else
 	okln "C19: no fail-open 'params written WITHOUT two-hop' warn (the fail-open regression is removed)"
@@ -86,8 +101,8 @@ else
 fi
 # The override merge must honour ONLY an allowlist of operator-settable keys (identity-derived fields can
 # never be smuggled), and identity fields (reality_private_key / secrets) must NOT be in that allowlist.
-if grep -q 'OPERATOR_TOGGLE_KEYS=' "$NB"; then
-	if grep -A30 'OPERATOR_TOGGLE_KEYS=' "$NB" | grep -qE 'reality_private_key|ss_password|shadowtls_password|node_address'; then
+if grep -q 'OPERATOR_TOGGLE_KEYS=' $NB_SRC; then
+	if grep -hA30 'OPERATOR_TOGGLE_KEYS=' $NB_SRC | grep -qE 'reality_private_key|ss_password|shadowtls_password|node_address'; then
 		badln "C19: OPERATOR_TOGGLE_KEYS allowlist includes an identity-derived field (it must list ONLY operator toggles)"
 	else
 		okln "C19: OPERATOR_TOGGLE_KEYS is a closed allowlist of operator toggles (no identity-derived field can be pinned stale)"
@@ -142,7 +157,7 @@ if printf '%s\n' "$FU" | grep -q 'render_serve_bundle'; then
 else
 	badln "C25: flow_update does NOT call render_serve_bundle"
 fi
-if grep -q 'bundle_served_age_seconds' "$NB" && grep -q 'record_bundle_served_age' "$NB"; then
+if grep -q 'bundle_served_age_seconds' $NB_SRC && grep -q 'record_bundle_served_age' $NB_SRC; then
 	okln "C25: a bundle_served_age_seconds staleness signal is exposed (a stuck last-known-good is observable)"
 else
 	badln "C25: no bundle_served_age_seconds staleness signal (a stuck last-known-good would be silent)"
