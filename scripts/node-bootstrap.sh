@@ -172,17 +172,12 @@ AWG_FULL_TUNNEL_OPTOUT=0           # 1 = deliberately emit a full-tunnel client 
                                    # documented Selective-Growth opt-out marker. Records intent AND keeps
                                    # tests/conformance/no_full_tunnel_default.sh green.
 
-# node_exporter (host metrics) — pinned public release, loopback-only (scraped over an SSH tunnel, the
-# host firewall opens NO port for it). Plus a tiny textfile metric mycelium_dataplane_unit_active so the
-# SingBoxDown alert can fire. Pins + layout mirror infra/ansible/roles/observability + group_vars; the
-# SHA256 values are PUBLIC release checksums (committable).
-NODE_EXPORTER_VERSION="1.8.2"
-NODE_EXPORTER_DL_BASE="https://github.com/prometheus/node_exporter/releases/download"
-NODE_EXPORTER_SHA256_amd64="6809dd0b3ec45fd6e992c19071d6b5253aed3ead7bf0686885a51d85c6643c66"
-NODE_EXPORTER_SHA256_arm64="627382b9723c642411c33f48861134ebe893e70a63bcc8b3fc0619cd0bfac4be"
-NODE_EXPORTER_BIN="/usr/local/bin/node_exporter"
-NODE_EXPORTER_LISTEN="127.0.0.1:9100"
-NODE_EXPORTER_TEXTFILE_DIR="/var/lib/node_exporter/textfile"
+# node_exporter (host metrics) constants — the pinned NODE_EXPORTER_VERSION + the public release base/
+# SHA256s + the loopback listen/bin/textfile paths moved to control/lib/nb_observability.sh (RP-0009 C4),
+# together with the install/unit/metrics-generator/setup functions that are their sole users. They are
+# sourced below; DO_OBSERVABILITY (the --no-observability arg-parse flag) stays here — it is set by
+# arg-parse + propagated through the --update re-exec (orchestration), and setup_observability reads it at
+# call time from the shared sourced scope. dependency_policy.sh reads NODE_EXPORTER_VERSION from that lib.
 
 usage() { sed -n '2,/^set -euo pipefail$/p' "$NB_SELF" | sed 's/^# \{0,1\}//; s/^#$//'; }
 
@@ -261,10 +256,20 @@ fi
 # install_awg_tools/setup_amneziawg — the AmneziaWG second family + Selective-Growth split-tunnel policy,
 # with the AWG dialect + userspace-source + split-tunnel-default constants). flow_disable_two_hop is the
 # --disable-two-hop dispatch target; that case (below) resolves it at runtime in the shared sourced scope.
+# C4 adds the apply state machine + observability: nb_update_apply (verify_signed_ref/myc_fetch_artifacts/
+# render_candidate/validate_config/promote_config/rollback_config — the signed-pull / fail-closed render->
+# validate->promote->rollback spine ADR-0015, CONTROL-LOGIC + the highest-value RP-0008 Go-migration
+# earmark) and nb_observability (install_node_exporter/render_node_exporter_unit/
+# write_dataplane_metrics_generator/setup_observability + the dedicated NODE_EXPORTER_* constants — OS-glue
+# metrics wiring). The flow_* dispatchers (below) call myc_fetch_artifacts/render_candidate/validate_config/
+# promote_config/rollback_config (flow_update/flow_ack/flow_revoke) and setup_observability (flow_bootstrap);
+# those calls resolve at runtime in the shared sourced scope. The --update re-exec-from-immutable-copy guard
+# stays in flow_update (orchestration); the libs are sourced HERE (before any flow), from the immutable
+# re-exec'd copy too, so the apply state machine runs from a stable image.
 # They define functions + their dedicated constants only; the constants reference STATE_DIR (already
 # final after arg-parse, above) and the function bodies reference shared globals/helpers at call time.
 NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
-for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_two_hop nb_render_awg; do
+for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_two_hop nb_render_awg nb_update_apply nb_observability; do
 	# shellcheck source=/dev/null
 	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
 done
@@ -314,97 +319,17 @@ need_root() {
 # pick_donor) lives in control/lib/nb_donor.sh — both sourced above (RP-0009). They are WRAPPERS
 # ONLY around audited tools (ADR-0002): not one byte of key material is produced by this script.
 # ---------------------------------------------------------------------------
-# Authenticity gate for fetched artifacts (SUPPLY-CHAIN). Fast-forward-only stops history
-# rewrites but does NOT stop a brand-new malicious commit reaching every node: a single bad push
-# to a PUBLIC repo would otherwise be applied network-wide by a root timer, and "sing-box check"
-# only validates config SCHEMA, never PROVENANCE. So we require the canonical ref to carry a
-# signature from an OUT-OF-BAND operator key (never committed) and verify it BEFORE any fetched
-# code is merged/installed/executed. The verified signature IS the real "semi-auto human
-# approval" — not merely "a commit exists on origin".
+# The signed-pull / fail-closed apply state machine (ADR-0015) — the SUPPLY-CHAIN authenticity gate
+# (verify_signed_ref) and the swappable fetch step (myc_fetch_artifacts, the ONLY place that knows HOW
+# canonical artifacts arrive) moved to control/lib/nb_update_apply.sh (RP-0009 C4), sourced above, with
+# the render->validate->promote->rollback primitives (render_candidate/validate_config/promote_config/
+# rollback_config — below in the same lib). flow_update calls myc_fetch_artifacts; both verify_signed_ref
+# and myc_fetch_artifacts reference the arg-parse-set fetch/repo vars (ALLOWED_SIGNERS/INSECURE_NO_VERIFY/
+# REPO_URL/REPO_REF/CHECKOUT_DIR — left HERE, used widely) at call time from the shared sourced scope. The
+# --update re-exec-from-immutable-copy guard stays in flow_update (orchestration), so fetch+render+validate+
+# apply all still run from a stable image. This is CONTROL-LOGIC (the apply state machine), the highest-
+# value RP-0008 Go-migration earmark. Behaviour is byte-identical to the inline definitions it replaced.
 # ---------------------------------------------------------------------------
-verify_signed_ref() {
-	# verify_signed_ref REVISION — fail-closed unless REVISION carries a valid signature from the
-	# operator's out-of-band key. Honors SSH allowedSigners (preferred) or GPG. Refuses on any
-	# failure. --insecure-no-verify (testing only) is the ONLY way to bypass this.
-	local rev="$1"
-	if [ "$INSECURE_NO_VERIFY" -eq 1 ]; then
-		warn "SIGNATURE VERIFICATION DISABLED via --insecure-no-verify — fetched code is UNAUTHENTICATED."
-		warn "This is acceptable ONLY for local testing. NEVER run the network timer with this flag."
-		return 0
-	fi
-	[ -n "$ALLOWED_SIGNERS" ] \
-		|| die "no --allowed-signers given: cannot authenticate fetched artifacts (fail-closed). Ship the operator's out-of-band signing key and pass --allowed-signers, or use --insecure-no-verify for local testing only."
-	[ -e "$ALLOWED_SIGNERS" ] || die "--allowed-signers path not found: $ALLOWED_SIGNERS (fail-closed)."
-	have git || die "git required to verify the signed ref."
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would verify-commit/verify-tag $rev against $ALLOWED_SIGNERS"; return 0; fi
-
-	# Prefer SSH-signature verification (operator allowedSigners file). gitconfig is scoped to this
-	# checkout only; we do not mutate any global config.
-	local ok=0
-	# If REVISION resolves to an annotated tag, verify the tag object; otherwise verify the commit.
-	local objtype
-	objtype="$(git -C "$CHECKOUT_DIR" cat-file -t "$rev" 2>/dev/null || true)"
-	if git -C "$CHECKOUT_DIR" -c gpg.ssh.allowedSignersFile="$ALLOWED_SIGNERS" -c gpg.format=ssh \
-		verify-tag "$rev" >/dev/null 2>&1; then ok=1; fi
-	if [ "$ok" -ne 1 ] && [ "$objtype" = "commit" ] \
-		&& git -C "$CHECKOUT_DIR" -c gpg.ssh.allowedSignersFile="$ALLOWED_SIGNERS" -c gpg.format=ssh \
-			verify-commit "$rev" >/dev/null 2>&1; then ok=1; fi
-	# Fall back to GPG verification (GNUPGHOME pointed at the operator keyring) if SSH did not match.
-	if [ "$ok" -ne 1 ]; then
-		if GNUPGHOME="$ALLOWED_SIGNERS" git -C "$CHECKOUT_DIR" verify-tag "$rev" >/dev/null 2>&1; then ok=1; fi
-		if [ "$ok" -ne 1 ] && [ "$objtype" = "commit" ] \
-			&& GNUPGHOME="$ALLOWED_SIGNERS" git -C "$CHECKOUT_DIR" verify-commit "$rev" >/dev/null 2>&1; then ok=1; fi
-	fi
-	[ "$ok" -eq 1 ] \
-		|| die "signature verification FAILED for '$rev' — refusing to apply unauthenticated artifacts (fail-closed). A valid operator signature is the required approval."
-	log "signature verified for '$rev' against the operator key (out-of-band)."
-}
-
-# ---------------------------------------------------------------------------
-# fetch step — abstracted so the source is swappable (pinned git pull NOW; signed release
-# tarball LATER). This is the ONLY place that knows HOW canonical artifacts arrive.
-# ---------------------------------------------------------------------------
-myc_fetch_artifacts() {
-	# Bring CHECKOUT_DIR to the pinned canonical state. Returns 0 on success.
-	# DEFAULT IMPLEMENTATION: a pinned, fast-forward-only git fetch + a SIGNATURE-VERIFIED merge.
-	# To swap to releases later, replace the body with: download the signed tarball, verify its
-	# signature + checksum, and unpack into CHECKOUT_DIR. The signature gate (verify_signed_ref /
-	# the tarball's detached signature) MUST be preserved — it is the provenance guarantee, not an
-	# optional extra. The rest of the updater is unchanged.
-	have git || die "git required for the default fetch implementation (or swap myc_fetch_artifacts)."
-	if [ ! -d "$CHECKOUT_DIR/.git" ]; then
-		[ -n "$REPO_URL" ] || die "no checkout at $CHECKOUT_DIR and no --repo-url given (fail-closed)."
-		log "cloning canonical artifacts: $REPO_URL -> $CHECKOUT_DIR"
-		run git clone ${REPO_REF:+--branch "$REPO_REF"} "$REPO_URL" "$CHECKOUT_DIR" \
-			|| die "git clone failed."
-		# Verify the cloned ref (or HEAD) is operator-signed before anything is ever executed from it.
-		verify_signed_ref "${REPO_REF:-HEAD}"
-		return 0
-	fi
-	local ref
-	ref="$REPO_REF"
-	[ -n "$ref" ] || ref="$(git -C "$CHECKOUT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-	log "fetching canonical artifacts (ref: ${ref:-current})"
-	# Fetch ONLY updates remote-tracking refs + tags; it does NOT touch the working tree, so no
-	# fetched code runs yet. We verify the SIGNATURE on the fetched objects BEFORE merging.
-	run git -C "$CHECKOUT_DIR" fetch --prune --tags origin || die "git fetch failed."
-	# Resolve the exact revision we are about to apply. Pin --repo-ref to an IMMUTABLE SIGNED TAG;
-	# a bare branch HEAD is advanceable by any push and is verified per-commit only as a fallback.
-	local target
-	if git -C "$CHECKOUT_DIR" rev-parse -q --verify "refs/tags/${ref}^{tag}" >/dev/null 2>&1 \
-		|| git -C "$CHECKOUT_DIR" rev-parse -q --verify "refs/tags/${ref}" >/dev/null 2>&1; then
-		target="refs/tags/${ref}"          # an immutable signed tag — the recommended pin
-	else
-		target="origin/${ref:-HEAD}"       # a moving branch — verified per-commit (less preferred)
-		warn "tracking branch '$ref' (mutable): pin --repo-ref to a SIGNED TAG so the approval is immutable."
-	fi
-	# AUTHENTICITY GATE: refuse unless the target carries a valid operator signature.
-	verify_signed_ref "$target"
-	# Fast-forward ONLY: never rewrite local history; never take a force-push silently. Only after a
-	# successful signature check does the verified revision touch the working tree.
-	run git -C "$CHECKOUT_DIR" merge --ff-only "$target" \
-		|| die "fast-forward update failed (history diverged or force-pushed) — refusing (fail-closed)."
-}
 
 # ---------------------------------------------------------------------------
 # Host hardening (harden_journald/harden_sshd/harden_ufw) lives in control/lib/nb_harden.sh;
@@ -430,53 +355,17 @@ myc_fetch_artifacts() {
 # resolved at call time from the shared sourced scope.
 
 # ---------------------------------------------------------------------------
-# Render the canonical config THROUGH the existing myceliumctl pipeline, into a candidate file.
-# Echoes the candidate path on success. NEVER promotes here.
+# The render->validate->promote->rollback config primitives — render_candidate (render the canonical
+# config THROUGH the myceliumctl pipeline into a candidate; never promotes), validate_config (the fail-
+# closed `sing-box check` gate the renderer does not run itself), promote_config (atomic live-config
+# replace keeping a known-good backup), rollback_config (restore from last-known-good) — moved to
+# control/lib/nb_update_apply.sh (RP-0009 C4), sourced above, alongside verify_signed_ref/
+# myc_fetch_artifacts (the rest of the apply state machine). The flow_* dispatchers (below) call them on
+# the bootstrap/update/ack/revoke paths; those calls resolve at call time from the shared sourced scope.
+# LASTGOOD_CONFIG (read by promote/rollback) stays in the derived-state-paths block above — it is shared
+# node-state alongside STAGED_CONFIG/ACK_MARKER, which the flows themselves use. CONTROL-LOGIC (the apply
+# state machine), the highest-value RP-0008 Go-migration earmark.
 # ---------------------------------------------------------------------------
-render_candidate() {
-	local candidate="$1"
-	log "rendering candidate config via myceliumctl -> $candidate"
-	[ -x "$MYCTL" ] || die "myceliumctl not found/executable: $MYCTL"
-	[ -f "$RENDER_TEMPLATE" ] || die "renderer-compatible template missing: $RENDER_TEMPLATE"
-	[ -f "$PARAMS_JSON" ] || die "params.json missing; run write_params first."
-	[ -f "$IDENTITIES_JSON" ] || die "identities.json missing; run ensure_identity first."
-	run "$MYCTL" render-server \
-		--engine singbox \
-		--template "$RENDER_TEMPLATE" \
-		--params "$PARAMS_JSON" \
-		--state "$IDENTITIES_JSON" \
-		--out "$candidate" \
-		|| die "render-server failed (fail-closed; nothing promoted)."
-}
-
-# sing-box check is the fail-closed GATE the renderer does NOT run itself.
-validate_config() {
-	local cfg="$1"
-	log "validating candidate with 'sing-box check' (fail-closed gate)"
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] sing-box check -c $cfg"; return 0; fi
-	have "$SINGBOX_BIN" || die "sing-box binary missing; cannot validate."
-	"$SINGBOX_BIN" check -c "$cfg" || return 1
-}
-
-promote_config() {
-	# Atomically replace the live config with the candidate, keeping a known-good backup.
-	local candidate="$1"
-	need_root
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] promote $candidate -> $SINGBOX_CONFIG"; return 0; fi
-	if [ -f "$SINGBOX_CONFIG" ]; then cp -f "$SINGBOX_CONFIG" "$LASTGOOD_CONFIG"; fi
-	install -m 0644 "$candidate" "$SINGBOX_CONFIG"
-	log "promoted candidate to live config: $SINGBOX_CONFIG"
-}
-
-rollback_config() {
-	need_root
-	if [ -f "$LASTGOOD_CONFIG" ]; then
-		warn "rolling back to last known-good config (fail-closed)."
-		run install -m 0644 "$LASTGOOD_CONFIG" "$SINGBOX_CONFIG"
-	else
-		warn "no last-known-good config to roll back to; leaving the running service untouched."
-	fi
-}
 
 # ---------------------------------------------------------------------------
 # Served distribution bundle (RP-0007-b) — render_serve_bundle + bundle_served_age_seconds +
@@ -511,157 +400,17 @@ apply_singbox()   { need_root; run systemctl enable sing-box 2>/dev/null || true
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Node-local observability (Phase 0): a PINNED, checksum-verified node_exporter bound to loopback
-# (the host firewall opens NO port for it — Prometheus scrapes it over an SSH tunnel), plus a tiny
-# textfile metric `mycelium_dataplane_unit_active{engine="singbox"}` so the SingBoxDown alert can
-# fire. Pure measurement; no PII (host metrics + a 0/1 unit-state gauge). Mirrors the observability
-# Ansible role. flow_update never calls this — only flow_bootstrap does.
+# Node-local observability (Phase 0) — a PINNED, checksum-verified node_exporter bound to loopback
+# (install_node_exporter), its hardened unit (render_node_exporter_unit), the data-plane unit-active
+# textfile metric generator + timer (write_dataplane_metrics_generator), and the setup orchestration
+# (setup_observability) moved to control/lib/nb_observability.sh (RP-0009 C4), together with their
+# dedicated NODE_EXPORTER_* constants (their sole users). They are sourced above; flow_bootstrap (below)
+# calls setup_observability, resolved at call time from the shared sourced scope (the timer-driven
+# flow_update NEVER does). DO_OBSERVABILITY stays in the entrypoint (arg-parse flag, propagated through
+# the --update re-exec). OS-glue (metrics wiring); not an RP-0008 Go-migration candidate. The
+# node_exporter unit is a loopback-only host-metric reader — correctly NOT in unit_netlink_parity.sh's
+# engine-unit source list (no AF_NETLINK required). Behaviour is byte-identical to what it replaced.
 # ---------------------------------------------------------------------------
-install_node_exporter() {
-	local cur archm archkey shavar sha ver tarball url tmp got extracted
-	if [ -x "$NODE_EXPORTER_BIN" ]; then
-		cur="$("$NODE_EXPORTER_BIN" --version 2>&1 | head -n1 || true)"
-		if printf '%s' "$cur" | grep -q "$NODE_EXPORTER_VERSION"; then
-			log "node_exporter $NODE_EXPORTER_VERSION already installed; skipping."
-			return 0
-		fi
-	fi
-	archm="$(uname -m)"
-	case "$archm" in
-		x86_64)  archkey="amd64" ;;
-		aarch64) archkey="arm64" ;;
-		*) die "unsupported architecture for node_exporter: $archm (fail-closed)." ;;
-	esac
-	shavar="NODE_EXPORTER_SHA256_$archkey"; sha="${!shavar}"
-	ver="$NODE_EXPORTER_VERSION"
-	tarball="node_exporter-${ver}.linux-${archkey}.tar.gz"
-	url="$NODE_EXPORTER_DL_BASE/v${ver}/${tarball}"
-	tmp="$(mktemp -d)"
-	log "downloading node_exporter ${ver} (${archkey})"
-	if ! run curl -fsSL "$url" -o "$tmp/$tarball"; then rm -rf "$tmp"; die "node_exporter download failed (fail-closed)."; fi
-	if have sha256sum; then
-		got="$(sha256sum "$tmp/$tarball" | awk '{print $1}')"
-		[ "$got" = "$sha" ] || { rm -rf "$tmp"; die "node_exporter SHA256 mismatch (got $got, want $sha) — refusing (fail-closed)."; }
-	else
-		warn "sha256sum unavailable; cannot verify the node_exporter checksum."
-	fi
-	run tar -xzf "$tmp/$tarball" -C "$tmp"
-	extracted="$tmp/node_exporter-${ver}.linux-${archkey}/node_exporter"
-	[ -f "$extracted" ] || { rm -rf "$tmp"; die "node_exporter binary not found in the archive."; }
-	run install -m 0755 "$extracted" "$NODE_EXPORTER_BIN"
-	rm -rf "$tmp"
-	log "installed node_exporter ${ver} to $NODE_EXPORTER_BIN."
-}
-
-render_node_exporter_unit() {
-	[ "$DRY_RUN" -eq 1 ] && { log "[dry-run] would write node_exporter.service"; return 0; }
-	cat >/etc/systemd/system/node_exporter.service <<UNIT
-# Mycelium Phase 0 — node_exporter (host metrics, loopback only). Rendered by node-bootstrap.sh.
-[Unit]
-Description=Mycelium node_exporter (host metrics, loopback only)
-Documentation=https://github.com/prometheus/node_exporter
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=node_exporter
-Group=node_exporter
-ExecStart=$NODE_EXPORTER_BIN --web.listen-address=$NODE_EXPORTER_LISTEN --collector.textfile.directory=$NODE_EXPORTER_TEXTFILE_DIR
-Restart=on-failure
-RestartSec=5s
-NoNewPrivileges=true
-CapabilityBoundingSet=
-AmbientCapabilities=
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
-ProtectClock=true
-ProtectHostname=true
-ProtectProc=invisible
-PrivateDevices=true
-DevicePolicy=closed
-RestrictNamespaces=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-LockPersonality=true
-RemoveIPC=true
-UMask=0077
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-# No SystemCallFilter / MemoryDenyWriteExecute here: node_exporter's host-metric collectors use
-# syscalls an aggressive seccomp filter blocks, which SIGSYS-kills it (status=31/SYS core-dump loop).
-# The filesystem / privilege / namespace protections above remain; this is a loopback-only reader.
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-}
-
-write_dataplane_metrics_generator() {
-	[ "$DRY_RUN" -eq 1 ] && { log "[dry-run] would write the data-plane metrics generator + timer"; return 0; }
-	# The generator: write mycelium_dataplane_unit_active{engine="singbox"} atomically (temp+rename) so
-	# node_exporter never reads a half-written file. It carries ONLY a 0/1 gauge + the engine label
-	# (the canonical alert label, not PII).
-	cat >/usr/local/bin/mycelium-dataplane-metrics.sh <<'GEN'
-#!/usr/bin/env bash
-# Copyright © 2026 mindicator & silicon bags quartet.
-# SPDX-License-Identifier: AGPL-3.0-or-later
-# Mycelium — write the data-plane unit-active textfile metric for node_exporter. No PII: a 0/1 gauge.
-set -euo pipefail
-DIR="/var/lib/node_exporter/textfile"
-OUT="$DIR/mycelium_dataplane.prom"
-active=0
-systemctl is-active --quiet sing-box && active=1
-tmp="$(mktemp "$DIR/.mdp.XXXXXX")"
-{
-	echo '# HELP mycelium_dataplane_unit_active 1 if the data-plane systemd unit is active, else 0.'
-	echo '# TYPE mycelium_dataplane_unit_active gauge'
-	printf 'mycelium_dataplane_unit_active{engine="singbox"} %d\n' "$active"
-} >"$tmp"
-chmod 0644 "$tmp"
-mv -f "$tmp" "$OUT"
-GEN
-	chmod 0755 /usr/local/bin/mycelium-dataplane-metrics.sh
-	cat >/etc/systemd/system/mycelium-dataplane-metrics.service <<'UNIT'
-[Unit]
-Description=Mycelium data-plane unit-active textfile metric (writes a 0/1 gauge for node_exporter)
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/mycelium-dataplane-metrics.sh
-UNIT
-	cat >/etc/systemd/system/mycelium-dataplane-metrics.timer <<'UNIT'
-[Unit]
-Description=Refresh the Mycelium data-plane unit-active metric every 15s
-[Timer]
-OnBootSec=15s
-OnUnitActiveSec=15s
-AccuracySec=1s
-[Install]
-WantedBy=timers.target
-UNIT
-}
-
-setup_observability() {
-	[ "$DO_OBSERVABILITY" -eq 1 ] || { log "observability step skipped (--no-observability)."; return 0; }
-	log "setting up node-local observability (node_exporter + data-plane unit-active metric, loopback only)"
-	need_root
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would install node_exporter + the unit-active textfile metric"; return 0; fi
-	install_node_exporter
-	getent group node_exporter >/dev/null 2>&1 || run groupadd --system node_exporter
-	getent passwd node_exporter >/dev/null 2>&1 || run useradd --system -g node_exporter -s /usr/sbin/nologin -M -d /nonexistent node_exporter
-	run install -d -m 0750 -o root -g node_exporter "$NODE_EXPORTER_TEXTFILE_DIR"
-	render_node_exporter_unit
-	write_dataplane_metrics_generator
-	run systemctl daemon-reload
-	run /usr/local/bin/mycelium-dataplane-metrics.sh || warn "first metric write failed (will retry on the timer)."
-	run systemctl enable --now node_exporter 2>/dev/null || run systemctl restart node_exporter
-	run systemctl enable --now mycelium-dataplane-metrics.timer 2>/dev/null || warn "could not enable the metrics timer."
-	log "node_exporter on $NODE_EXPORTER_LISTEN (loopback) + mycelium_dataplane_unit_active active."
-}
 
 # ---------------------------------------------------------------------------
 # Verify listeners (best-effort; reports, does not fail the converge unless the service is dead).
