@@ -45,9 +45,11 @@ SCRIPT="$REPO_ROOT/scripts/node-bootstrap.sh"
 REAL_DONOR="$REPO_ROOT/nodes/dataplane/donor-sni-candidates.json"
 REAL_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 REAL_LIB_DIR="$REPO_ROOT/control/lib"
-# RP-0009: the orchestrator now SOURCES its leaf libs (nb_*.sh) from ARTIFACT_ROOT/control/lib. The
-# fake checkout must carry them or the (fail-closed) sourcing loop aborts before any flow runs.
-NB_LIBS="nb_identity nb_donor nb_harden nb_install"
+# RP-0009: the orchestrator now SOURCES its libs (nb_*.sh) from ARTIFACT_ROOT/control/lib. The fake
+# checkout must carry the FULL set the sourcing loop expects, or the (fail-closed) loop aborts before
+# any flow runs. C1 leaf libs + C2 render/serve control-logic libs (nb_render_params, nb_serve_bundle)
+# — keep this list in lockstep with the `for _lib in …` loop in scripts/node-bootstrap.sh.
+NB_LIBS="nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle"
 
 command -v git >/dev/null 2>&1 || { printf 'SKIP: git not available; cannot stage a fake checkout.\n'; exit 0; }
 [ -f "$SCRIPT" ]        || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$SCRIPT" >&2; exit 2; }

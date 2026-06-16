@@ -35,9 +35,15 @@ command -v jq >/dev/null 2>&1 || { printf 'FAIL: jq is required for live_artifac
 
 RT="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
+# RP-0009 C2: write_params (the live deploy source of the default-on set) moved out of the entrypoint
+# into control/lib/nb_render_params.sh, sourced by node-bootstrap.sh. Parse the <proto>_enabled flags
+# from there. (Pinning the WHOLE control-plane source — entrypoint + the params lib — also keeps the gate
+# robust if the default-on jq block is ever re-homed again.)
+WRITE_PARAMS_SRC="$REPO_ROOT/control/lib/nb_render_params.sh"
 
 [ -f "$RT" ]        || { printf 'FAIL: renderer template not found: %s\n' "$RT" >&2; exit 2; }
 [ -f "$BOOTSTRAP" ] || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$BOOTSTRAP" >&2; exit 2; }
+[ -f "$WRITE_PARAMS_SRC" ] || { printf 'FAIL: nb_render_params.sh not found: %s\n' "$WRITE_PARAMS_SRC" >&2; exit 2; }
 jq -e . "$RT" >/dev/null 2>&1 || { printf 'FAIL: renderer template is not valid JSON\n' >&2; exit 2; }
 
 fail=0
@@ -73,11 +79,11 @@ while IFS= read -r m; do
 	val="$(printf '%s' "$m" | grep -oE 'true|false' | head -n1)"
 	[ "$val" = "true" ] && actual_on="$actual_on $key"
 done <<EOF
-$(grep -oE '[a-z0-9_]+_enabled:[[:space:]]*(true|false)' "$BOOTSTRAP")
+$(grep -hoE '[a-z0-9_]+_enabled:[[:space:]]*(true|false)' "$BOOTSTRAP" "$WRITE_PARAMS_SRC")
 EOF
 
 if [ "$seen" -lt 2 ]; then
-	badln "found only $seen <proto>_enabled flags in node-bootstrap.sh write_params (expected the full set) — parse drift?"
+	badln "found only $seen <proto>_enabled flags in node-bootstrap.sh/nb_render_params.sh write_params (expected the full set) — parse drift?"
 else
 	actual_sorted="$(printf '%s\n' $actual_on | sort | tr '\n' ' ' | sed 's/^ *//; s/ *$//')"
 	if [ "$actual_sorted" = "$EXPECTED_ON" ]; then
