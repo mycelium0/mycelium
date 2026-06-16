@@ -15,9 +15,11 @@
 # entrypoint's shared globals (SINGBOX_BIN, SINGBOX_VERSION, SINGBOX_SHA256, SINGBOX_DL_BASE,
 # SINGBOX_RUN_USER, SINGBOX_RUN_GROUP, SINGBOX_ETC, SINGBOX_CONFIG, STATE_DIR, TLS_DIR, TOOLING_DIR,
 # ARTIFACT_ROOT, MYCTL, DRY_RUN) and helpers (log/warn/die/have/run/need_root) being defined at call
-# time. NB: ARTIFACT_ROOT (not REPO_ROOT) is the canonical source for install_tooling — after the
-# --update re-exec REPO_ROOT points at a tmp copy's parent that has no control/ tree.
-# Behaviour is byte-identical to the inline definitions it replaced.
+# time. NB: ARTIFACT_ROOT (not REPO_ROOT) is the canonical source for install_tooling AND install_spine
+# — after the --update re-exec REPO_ROOT points at a tmp copy's parent that has no control/ or go.mod/cmd
+# tree. install_spine additionally builds the Go spine binary onto disk: $TOOLING_DIR/bin/myceliumctl-go
+# (the compiled control CLI, inert in RP-0008 P3 chunk 1) + $TOOLING_DIR/.gocache (a node-local build
+# cache). Behaviour of the pre-existing functions is byte-identical to the inline definitions it replaced.
 
 install_singbox() {
 	log "ensuring sing-box is installed (pinned + checksum-verified)"
@@ -195,29 +197,84 @@ install_tooling() {
 	# Source the control/ tooling from ARTIFACT_ROOT (the real checkout), NOT REPO_ROOT: after the
 	# update re-exec REPO_ROOT points at the tmp copy's parent, which has no control/ tree.
 	run cp -a "$ARTIFACT_ROOT/control" "$TOOLING_DIR/" 2>/dev/null || run cp -aR "$ARTIFACT_ROOT/control" "$TOOLING_DIR/"
+	# Build + install the (inert) Go control-plane binary alongside the shell tooling. This is the one
+	# function both flow_bootstrap and flow_update already call, so the spine binary tracks every
+	# deployed rev. install_spine is non-fatal by design (RP-0008 P3 chunk 1): a missing toolchain or a
+	# failed build must never break a working update over a binary nothing yet depends on.
+	install_spine
 	# Re-point MYCTL at the installed copy if it now exists. Guard the trailing status: a missing
 	# installed copy (e.g. under --dry-run, where the cp above is a no-op) must NOT make this function
 	# return non-zero and trip `set -e` in the caller — we simply keep the existing MYCTL fallback.
+	# NB (RP-0008 P3 chunk 1): MYCTL stays the SHELL tool. The compiled myceliumctl-go is installed but
+	# non-load-bearing; a later strangler chunk adds it as an additive render path once gated equivalent.
 	if [ -x "$TOOLING_DIR/control/myceliumctl" ]; then
 		MYCTL="$TOOLING_DIR/control/myceliumctl"
 	fi
 	return 0
 }
 
+# install_spine — build + install the Go control-plane binary (myceliumctl-go, from cmd/myceliumctl) out
+# of the JUST-FETCHED source into $TOOLING_DIR/bin, so the ADR-0012 Go spine is render-time-resident for
+# the RP-0008 P3 strangler. INERT in chunk 1: nothing resolves to it for rendering yet (MYCTL stays the
+# shell tool), so a missing toolchain or a failed build only WARNs — the shell control tool, copied by
+# install_tooling just above, stays authoritative (RP-0008 strangler doctrine: any Go failure degrades TO
+# the shell, never bricks the deployed --update path; this deliberately DIVERGES from install_awg_tools'
+# die, which has no fallback). Idempotent: skips when the installed binary already self-reports the
+# deployed source rev (stamped via -ldflags -X spec.SourceRev), so a node never serves a STALE binary
+# after an --update yet does not rebuild needlessly. Called from install_tooling -> runs on BOTH bootstrap
+# and --update. Offline: the module has ZERO external deps, so GOPROXY/GOSUMDB are pinned off as a hard
+# guard (an accidental fetch fails fast instead of hanging where outbound network is unavailable). The Go toolchain is a base dep on
+# bootstrap; the timer-driven update never runs install_base_deps, so `have go` must gate the build.
+install_spine() {
+	have go || { warn "Go toolchain absent; skipping the (inert) myceliumctl-go build — the shell control tool remains authoritative."; return 0; }
+	need_root
+	local rev cur bin="$TOOLING_DIR/bin/myceliumctl-go"
+	rev="$(git -C "$ARTIFACT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+	# Idempotency: skip only when a PRESENT binary self-reports the deployed rev. The version probe is
+	# guarded so a missing/half-written/old binary can never trip `set -e` (existence test first; the
+	# version call may fail). rev=unknown (non-git/tarball deploy) -> never matches -> always rebuild (safe).
+	if [ "$rev" != unknown ] && [ -x "$bin" ]; then
+		cur="$("$bin" version 2>/dev/null)" || true
+		if printf '%s' "$cur" | grep -qF "$rev"; then
+			log "myceliumctl-go already built from rev $rev; skipping."
+			return 0
+		fi
+	fi
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "[dry-run] would build + install the Go spine: go build -o $bin ./cmd/myceliumctl (rev $rev)."
+		return 0
+	fi
+	run install -d -m 0755 "$TOOLING_DIR/bin"
+	# `if ( ... ); then` neutralises set -e for the build subshell, so a build failure lands in the warn
+	# branch instead of aborting the update. CGO_ENABLED=0 -> static pure-Go binary (no libc/gcc surprises
+	# across node distros); -trimpath strips the checkout path (reproducibility + no-PII); GOCACHE is a
+	# stable node-local cache so repeated updates are fast incremental rebuilds, touching nothing global.
+	if ( cd "$ARTIFACT_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
+			go build -trimpath -ldflags "-buildid= -X github.com/mindicator/mycelium/internal/spec.SourceRev=$rev" \
+			-o "$bin" ./cmd/myceliumctl ); then
+		log "built + installed the Go spine -> $bin (rev $rev; inert in P3 chunk 1, shell tool stays authoritative)"
+	else
+		warn "myceliumctl-go build failed (rev $rev); the node continues on the shell control tool (the chunk-1 binary is inert)."
+	fi
+	return 0
+}
+
 # install_base_deps — ensure the OS packages a from-zero node needs are present so a fresh-VPS
 # bootstrap needs no manual fixups (Audit-0004 D4): git (fetch/verify), jq (identity/params/render),
-# iptables (AmneziaWG PostUp NAT), ufw (host firewall), and curl/ca-certificates/tar/unzip
-# (download + unpack). Idempotent — apt-get install is a no-op for already-present packages.
-# flow_bootstrap-only (never the timer). apt-based hosts only; elsewhere it warns and the per-step
+# iptables (AmneziaWG PostUp NAT), ufw (host firewall), curl/ca-certificates/tar/unzip
+# (download + unpack), and golang-go (the Go toolchain that compiles the control-plane spine binary —
+# RP-0008 P3; install_spine builds from it on bootstrap). Idempotent — apt-get install is a no-op for
+# already-present packages. flow_bootstrap-only (never the timer; that is why install_spine still
+# `have go`-gates on the update path). apt-based hosts only; elsewhere it warns and the per-step
 # `have X || die` guards downstream still fail closed.
 install_base_deps() {
 	need_root
 	if ! have apt-get; then
-		warn "no apt-get on this host — install 'git jq iptables ufw curl ca-certificates tar unzip' by hand; the per-step guards fail closed if any are missing."
+		warn "no apt-get on this host — install 'git jq iptables ufw curl ca-certificates tar unzip golang-go' by hand; the per-step guards fail closed if any are missing."
 		return 0
 	fi
-	log "ensuring base packages (git jq iptables ufw curl ca-certificates tar unzip)"
+	log "ensuring base packages (git jq iptables ufw curl ca-certificates tar unzip golang-go)"
 	run env DEBIAN_FRONTEND=noninteractive apt-get update -qq || warn "apt-get update failed; installing against cached lists."
-	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git jq iptables ufw curl ca-certificates tar unzip \
-		|| die "base package install failed — install git/jq/iptables/ufw/curl/ca-certificates/tar/unzip and re-run."
+	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git jq iptables ufw curl ca-certificates tar unzip golang-go \
+		|| die "base package install failed — install git/jq/iptables/ufw/curl/ca-certificates/tar/unzip/golang-go and re-run."
 }
