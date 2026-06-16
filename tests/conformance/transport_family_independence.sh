@@ -44,11 +44,16 @@ GROUP_VARS="$REPO_ROOT/infra/ansible/group_vars/all.yml.example"
 # removed, closing RP-0003 §W5 (Audit-0004 F-002).
 TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
+# RP-0009 C3: node-bootstrap.sh sources the AmneziaWG render/bring-up from control/lib/nb_render_awg.sh.
+# render_awg0 (and the awg0.conf it writes) now live in that lib; inspect it for the "bootstrap renders
+# awg0.conf" assertion below (the runtime wiring is unchanged — the lib is sourced into the entrypoint).
+NB_RENDER_AWG="$REPO_ROOT/control/lib/nb_render_awg.sh"
 AWG_ROLE="$REPO_ROOT/infra/ansible/roles/amneziawg"
 
 [ -f "$GROUP_VARS" ] || { printf 'FAIL: group_vars example not found: %s\n' "$GROUP_VARS" >&2; exit 2; }
 [ -f "$TEMPLATE" ]   || { printf 'FAIL: sing-box template not found: %s\n' "$TEMPLATE" >&2; exit 2; }
 [ -f "$BOOTSTRAP" ]  || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$BOOTSTRAP" >&2; exit 2; }
+[ -f "$NB_RENDER_AWG" ] || { printf 'FAIL: nb_render_awg.sh not found: %s\n' "$NB_RENDER_AWG" >&2; exit 2; }
 
 fail=0
 okln()  { printf '  ok    %s\n' "$1"; }
@@ -98,11 +103,12 @@ awg_ok=1
 grep -Eq '^[[:space:]]*enable_amneziawg[[:space:]]*:' "$GROUP_VARS" || { badln "enable_amneziawg toggle missing from group_vars"; awg_ok=0; }
 [ -d "$AWG_ROLE" ] || { badln "amneziawg Ansible role missing: ${AWG_ROLE#"$REPO_ROOT"/}"; awg_ok=0; }
 # The bootstrap MUST render awg0.conf (not merely enable the unit), or a fresh node's second family
-# never comes up. Tie the gate to the render function + its config target.
-if grep -q 'render_awg0' "$BOOTSTRAP" && grep -q 'awg0.conf' "$BOOTSTRAP"; then
+# never comes up. Tie the gate to the render function + its config target. RP-0009 C3: render_awg0 +
+# awg0.conf live in control/lib/nb_render_awg.sh (sourced by node-bootstrap.sh), so scan that lib.
+if grep -q 'render_awg0' "$NB_RENDER_AWG" && grep -q 'awg0.conf' "$NB_RENDER_AWG"; then
 	: # render present
 else
-	badln "node-bootstrap.sh does not render awg0.conf (the second family would not come up on a fresh node)"
+	badln "nb_render_awg.sh does not render awg0.conf (the second family would not come up on a fresh node)"
 	awg_ok=0
 fi
 [ "$awg_ok" -eq 1 ] && okln "AmneziaWG/UDP second family wired end to end (toggle + role + bootstrap render)"
