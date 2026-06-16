@@ -142,36 +142,25 @@ AWG_BIN_DIR="/usr/local/bin"   # amneziawg-go + awg/awg-quick land here when bui
 # pins (fail-closed); only the public base URL is committed.
 SINGBOX_DL_BASE="https://github.com/SagerNet/sing-box/releases/download"
 
-# AmneziaWG userspace sources (public; built from source — kernel-independent).
-AWG_GO_REPO="https://github.com/amnezia-vpn/amneziawg-go"
-AWG_TOOLS_REPO="https://github.com/amnezia-vpn/amneziawg-tools"
-# Pinned source tags for the userspace build. There is NO upstream prebuilt amneziawg-go release, so a
-# from-zero node builds these from source (apt golang-go + build-essential). amneziawg-go matches the
-# fleet; amneziawg-tools is the current tag. Bumping these is a separate, verified change.
-AWG_GO_TAG="v0.2.18"
-AWG_TOOLS_TAG="v1.0.20260223"
+# AmneziaWG constants (RP-0009 C3): the userspace source repos + pinned tags (AWG_GO_REPO/
+# AWG_TOOLS_REPO/AWG_GO_TAG/AWG_TOOLS_TAG), the in-tunnel "dialect" (AWG_TUNNEL_*/AWG_PEER_BASE_*/
+# AWG_MTU/AWG_JC..S2/AWG_H1..H4), and the split-tunnel-on default + opt-out marker (AWG_SPLIT_TUNNEL/
+# AWG_SG_OPTOUT_MARKER) live with their functions in control/lib/nb_render_awg.sh, sourced below. They
+# are dedicated to the AmneziaWG path (used only by compute_client_allowed/render_awg0/install_awg_tools/
+# setup_amneziawg). AWG_REGION_EXCLUDE_FILE + AWG_FULL_TUNNEL_OPTOUT stay HERE: they are operator-set by
+# arg-parse and propagated through the --update re-exec (orchestration), so the lib references them at
+# call time from the shared sourced scope. AWG_BIN_DIR stays in the canonical-paths block above.
 
-# AmneziaWG canonical "dialect": the in-tunnel addressing + obfuscation knobs shared fleet-wide. Every
-# peer (server + all its clients) MUST share Jc/Jmin/Jmax/S1/S2/H1..H4 or the handshake fails. These
-# are TUNABLE, NOT secret — and are the SAME values as infra/ansible/roles/amneziawg/defaults/main.yml
-# (a node + its clients are one dialect). The render below uses them ONLY when first creating a node's
-# awg0.conf; an existing awg0.conf is never overwritten.
-AWG_TUNNEL_V4="10.13.13.1/24"      # server in-tunnel v4 (RFC1918); peers get .2, .3, …
-AWG_TUNNEL_V6="fd13:13:13::1/64"   # server in-tunnel v6 (RFC4193 ULA); used only if the node has global v6
-AWG_PEER_BASE_V4="10.13.13"
-AWG_PEER_BASE_V6="fd13:13:13::"
-AWG_MTU="1280"
-AWG_JC="4"; AWG_JMIN="40"; AWG_JMAX="70"; AWG_S1="51"; AWG_S2="102"
-AWG_H1="1148403838"; AWG_H2="1351874800"; AWG_H3="1936608092"; AWG_H4="1830553362"
-
-# --- Selective Growth: client-side split-tunnel defaults (VIS-0009; ADR-0027; closed-by-default lineage
-# ADR-0026) -------------------------------------------------------------------------------------------
+# --- Selective Growth: client-side split-tunnel operator inputs (VIS-0009; ADR-0027; closed-by-default
+# lineage ADR-0026) -----------------------------------------------------------------------------------
 # "The mycelium does not grow where it is not needed." A generated CLIENT config carries ONLY traffic
 # whose native path is impaired; natively-reachable destinations route DIRECT (split-tunnel). The
 # WireGuard-class transport is CIDR-only, so it can only APPROXIMATE this via a region-exclude
 # AllowedIPs route set (domain-aware split is the xray-class engine's job, not this path's). These
-# knobs touch ONLY the generated client config(s); the server awg0.conf is never affected.
-AWG_SPLIT_TUNNEL=1                 # 1 = split-tunnel by default (Selective Growth); 0 only with the opt-out below
+# knobs touch ONLY the generated client config(s); the server awg0.conf is never affected. The two
+# operator inputs below are set by arg-parse + propagated through the --update re-exec, so they stay in
+# the entrypoint; compute_client_allowed/render_awg0 (in control/lib/nb_render_awg.sh) read them at call
+# time. The split-tunnel-on default + the opt-out marker live with those functions in that lib.
 AWG_REGION_EXCLUDE_FILE=""         # path to a file of PRECOMPUTED region-exclude AllowedIPs CIDRs (one per
                                    # line; '#'-comments + blanks ignored). This is the route set to INSTALL —
                                    # i.e. the complement of the in-region native CIDRs against the default
@@ -182,7 +171,6 @@ AWG_REGION_EXCLUDE_FILE=""         # path to a file of PRECOMPUTED region-exclud
 AWG_FULL_TUNNEL_OPTOUT=0           # 1 = deliberately emit a full-tunnel client (0.0.0.0/0[, ::/0]) WITH the
                                    # documented Selective-Growth opt-out marker. Records intent AND keeps
                                    # tests/conformance/no_full_tunnel_default.sh green.
-AWG_SG_OPTOUT_MARKER="# selective-growth: opt-out (full-tunnel)"  # exact marker the gate look-behinds for
 
 # node_exporter (host metrics) — pinned public release, loopback-only (scraped over an SSH tunnel, the
 # host firewall opens NO port for it). Plus a tiny textfile metric mycelium_dataplane_unit_active so the
@@ -268,10 +256,15 @@ fi
 # C2 adds the render/serve CONTROL-LOGIC modules: nb_render_params (write_params + the C19 operator-
 # override seed/merge + resolve_node_address, with OPERATOR_TOGGLE_KEYS/OPERATOR_OVERRIDES) and
 # nb_serve_bundle (render_serve_bundle + bundle_served_age*, with the BUNDLE_* served-path constants).
+# C3 adds the routing/split-tunnel modules: nb_two_hop (assert_two_hop_shape + flow_disable_two_hop, the
+# two-hop egress routing policy) and nb_render_awg (compute_client_allowed/sg_allowed_join/render_awg0/
+# install_awg_tools/setup_amneziawg — the AmneziaWG second family + Selective-Growth split-tunnel policy,
+# with the AWG dialect + userspace-source + split-tunnel-default constants). flow_disable_two_hop is the
+# --disable-two-hop dispatch target; that case (below) resolves it at runtime in the shared sourced scope.
 # They define functions + their dedicated constants only; the constants reference STATE_DIR (already
 # final after arg-parse, above) and the function bodies reference shared globals/helpers at call time.
 NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
-for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle; do
+for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_two_hop nb_render_awg; do
 	# shellcheck source=/dev/null
 	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
 done
@@ -425,71 +418,11 @@ myc_fetch_artifacts() {
 # params.json (the FLAT render schema) — write_params + the C19 operator-override seed/merge +
 # resolve_node_address live in control/lib/nb_render_params.sh, sourced above (RP-0009 C2). They are
 # CONTROL-LOGIC (the operator-override allowlist + the two-hop-merge decision), earmarked for the
-# RP-0008 Go migration; assert_two_hop_shape (below; C3) stays here and is resolved at call time from
-# the shared sourced scope when write_params invokes it.
+# RP-0008 Go migration. The two-hop ROUTING POLICY — assert_two_hop_shape (the fail-closed overlay
+# shape check write_params calls before merging a present two_hop.json) and flow_disable_two_hop (the
+# --disable-two-hop remove path) — moved to control/lib/nb_two_hop.sh (RP-0009 C3), sourced above; both
+# resolve at call time from the shared sourced scope.
 # ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# assert_two_hop_shape FILE — fail-closed shape validation of a node-local two_hop.json overlay
-# (C17/C18/C21). Mirrors render_singbox.sh's fail-closed `.two_hop` guard so a malformed overlay is
-# caught at the SAME consistency bar at params-write time, not only deep in the renderer. Any failure
-# is a hard `die` (the caller has already decided the file is PRESENT, so absence is not this function's
-# concern). Checks, in order:
-#   * valid JSON object (not an array/scalar)                                  — well-formedness
-#   * non-empty via_user                                                        (C17/C18 precondition)
-#   * well-formed upstream: non-empty tag, non-empty server, integer server_port in 1..65535, non-empty
-#     sni                                                                       (C17 well-formed upstream)
-#   * via_user names an EXISTING identity (clients[].name in IDENTITIES_JSON)   (C18 unknown-user refusal)
-#   * egress upstream is DISTINCT from this ingress node — server != node_address AND sni != donor_sni
-#     (C21 ingress==egress refusal: a two-hop whose egress is the ingress itself is no second hop)
-assert_two_hop_shape() {
-	local file="$1" th ingress_addr ingress_sni
-	have jq || die "jq required to validate the two_hop overlay (fail-closed)."
-	jq -e 'type == "object"' "$file" >/dev/null 2>&1 \
-		|| die "two_hop.json ($file) is not a JSON object (fail-closed; a two-hop overlay must be an object)."
-	th="$(jq -c . "$file" 2>/dev/null)" \
-		|| die "two_hop.json ($file) is not valid JSON (fail-closed)."
-	# via_user must be present and non-empty (an unscoped egress no route selects is refused upstream too).
-	local th_via; th_via="$(printf '%s' "$th" | jq -r '.via_user // ""')"
-	[ -n "$th_via" ] || die "two_hop.json: via_user is empty (fail-closed; a two-hop must name the designated client that egresses out-of-region)."
-	# Well-formed upstream: tag, server, sni non-empty; server_port an integer in range.
-	local th_tag th_server th_sni th_port
-	th_tag="$(printf '%s' "$th" | jq -r '.tag // ""')"
-	th_server="$(printf '%s' "$th" | jq -r '.server // ""')"
-	th_sni="$(printf '%s' "$th" | jq -r '.sni // ""')"
-	th_port="$(printf '%s' "$th" | jq -r '.server_port // empty')"
-	[ -n "$th_tag" ]    || die "two_hop.json: tag is empty (fail-closed; the upstream outbound needs a tag)."
-	[ -n "$th_server" ] || die "two_hop.json: server is empty (fail-closed; the upstream needs an address)."
-	[ -n "$th_sni" ]    || die "two_hop.json: sni is empty (fail-closed; the upstream TLS needs a server_name)."
-	case "$th_port" in
-		''|*[!0-9]*) die "two_hop.json: server_port is not a positive integer ('$th_port'); must be 1..65535 (fail-closed)." ;;
-	esac
-	if [ "$th_port" -lt 1 ] || [ "$th_port" -gt 65535 ]; then
-		die "two_hop.json: server_port is out of range ('$th_port'); must be 1..65535 (fail-closed)."
-	fi
-	# C18: via_user must match an existing identity (clients[].name). An auth_user route for an unknown
-	# user renders fine but NEVER matches — a dead, unscoped egress rule. Refuse it here.
-	if [ -f "$IDENTITIES_JSON" ]; then
-		if ! jq -e --arg u "$th_via" 'any(.clients[]?; .name == $u)' "$IDENTITIES_JSON" >/dev/null 2>&1; then
-			die "two_hop.json: via_user '$th_via' is not a known client in $IDENTITIES_JSON (fail-closed; the auth_user route would never match — add the identity or fix via_user)."
-		fi
-	else
-		die "two_hop.json: cannot verify via_user '$th_via' — $IDENTITIES_JSON is missing (fail-closed; bootstrap an identity before configuring two-hop)."
-	fi
-	# C21: the egress upstream must be DISTINCT from this ingress node, or the "two hops" are one. Compare
-	# against this node's own reachable address and its donor_sni. Same host OR same SNI => die.
-	ingress_addr="$(resolve_node_address)"
-	if [ -f "$PARAMS_JSON" ] && have jq; then
-		ingress_sni="$(jq -r '.donor_sni // ""' "$PARAMS_JSON" 2>/dev/null)"
-	fi
-	if [ -n "$ingress_addr" ] && [ "$th_server" = "$ingress_addr" ]; then
-		die "two_hop.json: egress server '$th_server' is THIS node's own address (fail-closed; ingress and egress must be distinct nodes — a two-hop to itself is no second hop). See --disable-two-hop to remove the overlay."
-	fi
-	if [ -n "$ingress_sni" ] && [ "$th_sni" = "$ingress_sni" ]; then
-		die "two_hop.json: egress sni '$th_sni' equals this node's donor_sni (fail-closed; egress must be a distinct node, not the ingress SNI). See --disable-two-hop to remove the overlay."
-	fi
-	log "two_hop overlay validated (via_user='$th_via', egress tag='$th_tag', distinct from ingress)."
-}
 
 # OPERATOR-TOGGLE OVERRIDES (C19 defect 2) + write_params + resolve_node_address moved to
 # control/lib/nb_render_params.sh (RP-0009 C2), together with their dedicated OPERATOR_TOGGLE_KEYS +
@@ -567,267 +500,15 @@ rollback_config() {
 # distinguish a failed restart from a failed post-check.
 apply_singbox()   { need_root; run systemctl enable sing-box 2>/dev/null || true; run systemctl restart sing-box; }
 
-# compute_client_allowed HAS_V6 -> set SG_ALLOWED_LINES (one CIDR/line) + SG_MARKER. Selective Growth
-# (VIS-0009/ADR-0027): the generated CLIENT tunnel carries ONLY impaired-path traffic; we NEVER silently
-# full-tunnel. Resolution order:
-#   1. AWG_FULL_TUNNEL_OPTOUT=1            -> deliberate full tunnel: marker + default route(s).
-#   2. split-tunnel ON + non-empty list   -> that file's region-exclude route set, verbatim.
-#   3. split-tunnel ON + no/empty list    -> SAFE NARROW: in-tunnel range(s) only; warn loudly.
-#   4. split-tunnel OFF without opt-out    -> refuse (return 1).
-compute_client_allowed() {
-	local has_v6="$1" line v4net
-	SG_ALLOWED_LINES=""; SG_MARKER=""
-	if [ "$AWG_FULL_TUNNEL_OPTOUT" -eq 1 ]; then
-		SG_MARKER="$AWG_SG_OPTOUT_MARKER"
-		if [ "$has_v6" -eq 1 ]; then SG_ALLOWED_LINES="0.0.0.0/0
-::/0"; else SG_ALLOWED_LINES="0.0.0.0/0"; fi
-		warn "AWG_FULL_TUNNEL_OPTOUT=1 — emitting a DELIBERATE full-tunnel client (marker recorded). Prefer a region-exclude list (Selective Growth)."
-		return 0
-	fi
-	if [ "$AWG_SPLIT_TUNNEL" -eq 0 ]; then
-		warn "AWG_SPLIT_TUNNEL=0 with no AWG_FULL_TUNNEL_OPTOUT — refusing an undocumented full-tunnel client."
-		return 1
-	fi
-	if [ -n "$AWG_REGION_EXCLUDE_FILE" ] && [ -f "$AWG_REGION_EXCLUDE_FILE" ]; then
-		while IFS= read -r line; do
-			line="${line%%#*}"
-			line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-			[ -n "$line" ] || continue
-			case "$line" in
-				0.0.0.0/0|::/0) warn "region-exclude file lists a default route ($line) — that is a full tunnel; ignoring that entry."; continue ;;
-			esac
-			if [ -z "$SG_ALLOWED_LINES" ]; then SG_ALLOWED_LINES="$line"; else SG_ALLOWED_LINES="$SG_ALLOWED_LINES
-$line"; fi
-		done < "$AWG_REGION_EXCLUDE_FILE"
-		if [ -n "$SG_ALLOWED_LINES" ]; then
-			# IPv6-leak guard (ADR-0027): a region-exclude list that carries NO v6 route leaves the client's
-			# PUBLIC IPv6 outside the tunnel — the client still gets an in-tunnel v6 ULA AND the host keeps its
-			# own v6 default route, so v6 egresses DIRECT, defeating the split (impaired-path destinations leak
-			# over v6). If the list is v4-only, capture all v6 into the tunnel (::/0): the node routes it when it
-			# has global v6, otherwise it is dropped and apps fall back to (tunnelled) IPv4. Never leak v6.
-			if ! printf '%s\n' "$SG_ALLOWED_LINES" | grep -q ':'; then
-				SG_ALLOWED_LINES="$SG_ALLOWED_LINES
-::/0"
-				log "split-tunnel: region-exclude list is IPv4-only — appended ::/0 to stop an IPv6 leak."
-			fi
-			log "split-tunnel: AllowedIPs from region-exclude file $AWG_REGION_EXCLUDE_FILE (Selective Growth)."
-			return 0
-		fi
-		warn "region-exclude file $AWG_REGION_EXCLUDE_FILE yielded no usable CIDRs — falling back to the safe narrow default."
-	fi
-	v4net="$(printf '%s' "$AWG_TUNNEL_V4" | sed -E 's#\.[0-9]+/[0-9]+$#.0/24#')"
-	SG_ALLOWED_LINES="$v4net"
-	if [ "$has_v6" -eq 1 ]; then SG_ALLOWED_LINES="$SG_ALLOWED_LINES
-${AWG_PEER_BASE_V6}/64"; fi
-	warn "no region-exclude list configured (AWG_REGION_EXCLUDE_FILE unset/empty) — emitting a SAFE NARROW client (tunnel ranges only). It will NOT carry out-of-region impaired-path traffic until you supply a region-exclude AllowedIPs file. Intentional: we never silently full-tunnel."
-	return 0
-}
-
-# sg_allowed_join -> echo SG_ALLOWED_LINES as 'a, b, c' (pure bash; no paste dependency).
-sg_allowed_join() {
-	local out="" line
-	while IFS= read -r line; do
-		[ -n "$line" ] || continue
-		if [ -z "$out" ]; then out="$line"; else out="$out, $line"; fi
-	done < <(printf '%s\n' "$SG_ALLOWED_LINES")
-	printf '%s' "$out"
-}
-
-# render_awg0 — FIRST-TIME render of the AmneziaWG server config (awg0.conf) + one [Peer] per client,
-# plus a ready-to-import client config per identity. Mirrors the audited amneziawg Ansible role
-# (templates/awg0.conf.j2 + defaults). The CALLER invokes this ONLY when awg0.conf is ABSENT, so a
-# live/hand-tuned config (a node already in service) is NEVER clobbered. Per-client awg keypairs are
-# generated once (0600) and reused. The node is v4-only unless it has a global IPv6 address, in which
-# case it is dual-stack with NAT66 — matching the live fleet. No custom crypto: keys come only from
-# awg genkey|pubkey|genpsk (ADR-0002).
-render_awg0() {
-	local out="$1"
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would render $out + per-client AmneziaWG configs"; return 0; fi
-	local awg_state="$STATE_DIR/awg" clients_dir
-	clients_dir="$awg_state/clients"
-	run install -d -m 0700 "$clients_dir"
-	local spriv spub port wan has_v6 addr postup postdown
-	spriv="$(cat "$awg_state/private.key")"
-	spub="$(cat "$awg_state/public.key")"
-	port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || echo 51820)"
-	wan="$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
-	[ -n "$wan" ] || { warn "could not detect the WAN interface; using 'eth0' in awg0.conf — verify it."; wan="eth0"; }
-	has_v6=0; ip -6 addr show scope global 2>/dev/null | grep -q 'inet6' && has_v6=1
-	if [ "$has_v6" -eq 1 ]; then
-		addr="$AWG_TUNNEL_V4, $AWG_TUNNEL_V6"
-		postup="sysctl -w net.ipv4.ip_forward=1; sysctl -w net.ipv6.conf.all.forwarding=1; iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $wan -j MASQUERADE; ip6tables -t nat -A POSTROUTING -o $wan -j MASQUERADE"
-		postdown="iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $wan -j MASQUERADE; ip6tables -t nat -D POSTROUTING -o $wan -j MASQUERADE"
-	else
-		addr="$AWG_TUNNEL_V4"
-		postup="sysctl -w net.ipv4.ip_forward=1; iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $wan -j MASQUERADE"
-		postdown="iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $wan -j MASQUERADE"
-	fi
-	( umask 077; {
-		printf '[Interface]\n'
-		printf 'PrivateKey = %s\n' "$spriv"
-		printf 'Address = %s\n' "$addr"
-		printf 'ListenPort = %s\n' "$port"
-		printf 'MTU = %s\n' "$AWG_MTU"
-		printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
-		printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
-		printf 'PostUp = %s\n' "$postup"
-		printf 'PostDown = %s\n' "$postdown"
-	} > "$out" )
-	# One [Peer] per client; generate the client's keypair+psk once and emit a ready client config.
-	local node_addr; node_addr="$(resolve_node_address 2>/dev/null || printf '%s' "$NODE_ADDRESS_PLACEHOLDER")"
-	local n=2 name cpub cpriv cpsk cv6 client_allowed client_dns
-	for name in $CLIENT_NAMES; do
-		[ -f "$clients_dir/$name.private" ] || ( umask 077; awg genkey >"$clients_dir/$name.private" )
-		cpriv="$(cat "$clients_dir/$name.private")"
-		cpub="$(awg pubkey <"$clients_dir/$name.private")"
-		[ -f "$clients_dir/$name.psk" ] || ( umask 077; awg genpsk >"$clients_dir/$name.psk" )
-		cpsk="$(cat "$clients_dir/$name.psk")"
-		if [ "$has_v6" -eq 1 ]; then
-			cv6=", ${AWG_PEER_BASE_V6}${n}/128"; client_dns="1.1.1.1, 2606:4700:4700::1111"
-		else
-			cv6=""; client_dns="1.1.1.1"
-		fi
-		# Selective Growth (VIS-0009/ADR-0027): the client tunnel carries ONLY impaired-path traffic by default.
-		compute_client_allowed "$has_v6" || die "AmneziaWG client AllowedIPs unresolved — set AWG_FULL_TUNNEL_OPTOUT=1 to deliberately full-tunnel, or supply AWG_REGION_EXCLUDE_FILE."
-		client_allowed="$(sg_allowed_join)"
-		{
-			printf '\n[Peer]\n# name = %s\n' "$name"
-			printf 'PublicKey = %s\n' "$cpub"
-			printf 'PresharedKey = %s\n' "$cpsk"
-			printf 'AllowedIPs = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
-		} >> "$out"
-		( umask 077; {
-			printf '[Interface]\n'
-			printf 'PrivateKey = %s\n' "$cpriv"
-			printf 'Address = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
-			printf 'DNS = %s\n' "$client_dns"
-			printf 'MTU = %s\n' "$AWG_MTU"
-			printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
-			printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
-			printf '\n[Peer]\n'
-			printf 'PublicKey = %s\n' "$spub"
-			printf 'PresharedKey = %s\n' "$cpsk"
-			printf 'Endpoint = %s:%s\n' "$node_addr" "$port"
-			[ -n "$SG_MARKER" ] && printf '%s\n' "$SG_MARKER"
-			printf 'AllowedIPs = %s\n' "$client_allowed"
-			printf 'PersistentKeepalive = 25\n'
-		} > "$clients_dir/$name.conf" )
-		run chmod 0600 "$clients_dir/$name.conf"
-		n=$((n + 1))
-	done
-	run chmod 0600 "$out"
-	log "rendered $out + $(set -- $CLIENT_NAMES; printf '%s' "$#") AmneziaWG client config(s) under $clients_dir (0600, local — hand off out-of-band, like subscriptions)."
-}
-
 # ---------------------------------------------------------------------------
-# AmneziaWG userspace path (amneziawg-go, kernel-independent). Built from source; brought up via
-# awg-quick@ forcing the userspace implementation. Keys from awg genkey|pubkey|genpsk (ADR-0002).
-# Out-of-band of the sing-box render (AmneziaWG is NOT a sing-box inbound).
+# AmneziaWG second family — the Selective-Growth split-tunnel AllowedIPs policy (compute_client_allowed
+# + sg_allowed_join), the awg0.conf + per-client render (render_awg0), and the userspace build/bring-up
+# (install_awg_tools + setup_amneziawg) moved to control/lib/nb_render_awg.sh (RP-0009 C3), together with
+# their dedicated AmneziaWG dialect + userspace-source + split-tunnel-default constants. They are sourced
+# above; flow_bootstrap (below) calls setup_amneziawg, resolved at call time from the shared sourced
+# scope (the timer-driven flow_update NEVER does). MIXED classification: the split-tunnel AllowedIPs
+# decision is CONTROL-LOGIC (earmarked for the RP-0008 Go migration); the userspace setup is OS-glue.
 # ---------------------------------------------------------------------------
-# install_awg_tools — build + install the AmneziaWG userspace tools from pinned source when absent, so a
-# fresh-VPS bootstrap brings up the second transport family with no manual fixups (Audit-0004 D4 / F-006).
-# No upstream prebuilt amneziawg-go release exists, so this builds from source (apt golang-go +
-# build-essential). Idempotent: a no-op when awg/awg-quick/amneziawg-go are already present. Also renders
-# the custom awg-quick@.service that forces the userspace implementation (the kernel module is not used).
-# flow_bootstrap-only (called from setup_amneziawg, which the timer never runs).
-install_awg_tools() {
-	if have awg && have awg-quick && have amneziawg-go; then
-		log "AmneziaWG userspace tools already present; skipping build."
-		return 0
-	fi
-	need_root
-	if [ "$DRY_RUN" -eq 1 ]; then
-		log "[dry-run] would apt-get install golang-go build-essential, build amneziawg-go $AWG_GO_TAG + amneziawg-tools $AWG_TOOLS_TAG from source, install them, and render the userspace awg-quick@ unit."
-		return 0
-	fi
-	have apt-get || die "AmneziaWG tools absent and no apt-get to bootstrap the build toolchain — install golang-go + build-essential + the awg tools by hand, or pass --no-amneziawg."
-	log "building AmneziaWG userspace tools from pinned source (amneziawg-go $AWG_GO_TAG, amneziawg-tools $AWG_TOOLS_TAG)"
-	env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go build-essential || die "failed to install golang-go + build-essential for the AmneziaWG build."
-	local build; build="$(mktemp -d)" || die "mktemp failed for the AmneziaWG build."
-	if ! have amneziawg-go; then
-		git clone --depth 1 -b "$AWG_GO_TAG" "$AWG_GO_REPO" "$build/awg-go" || die "amneziawg-go clone ($AWG_GO_TAG) failed."
-		( cd "$build/awg-go" && go build -trimpath -o amneziawg-go . ) || die "amneziawg-go build failed (check the Go toolchain)."
-		install -m 0755 "$build/awg-go/amneziawg-go" "$AWG_BIN_DIR/amneziawg-go" || die "amneziawg-go install failed."
-		log "built + installed amneziawg-go -> $AWG_BIN_DIR/amneziawg-go"
-	fi
-	if ! have awg || ! have awg-quick; then
-		git clone --depth 1 -b "$AWG_TOOLS_TAG" "$AWG_TOOLS_REPO" "$build/awg-tools" || die "amneziawg-tools clone ($AWG_TOOLS_TAG) failed."
-		make -C "$build/awg-tools/src" >/dev/null || die "amneziawg-tools build failed."
-		make -C "$build/awg-tools/src" install >/dev/null || die "amneziawg-tools install failed."
-		log "built + installed awg + awg-quick (amneziawg-tools $AWG_TOOLS_TAG)"
-	fi
-	rm -rf "$build" 2>/dev/null || true
-	# Custom awg-quick@ unit forcing the userspace implementation (the kernel module is never used).
-	local unit="/etc/systemd/system/awg-quick@.service"
-	if [ ! -f "$unit" ]; then
-		printf '%s\n' \
-			'[Unit]' \
-			'Description=AmneziaWG (userspace) via awg-quick for %i' \
-			'After=network-online.target nss-lookup.target' \
-			'Wants=network-online.target' \
-			'' \
-			'[Service]' \
-			'Type=oneshot' \
-			'RemainAfterExit=yes' \
-			"Environment=WG_QUICK_USERSPACE_IMPLEMENTATION=$AWG_BIN_DIR/amneziawg-go" \
-			'ExecStart=/usr/bin/awg-quick up %i' \
-			'ExecStop=/usr/bin/awg-quick down %i' \
-			'' \
-			'[Install]' \
-			'WantedBy=multi-user.target' >"$unit"
-		systemctl daemon-reload 2>/dev/null || true
-		log "rendered custom awg-quick@.service (forces userspace amneziawg-go)."
-	fi
-}
-
-setup_amneziawg() {
-	[ "$DO_AMNEZIAWG" -eq 1 ] || { log "AmneziaWG step skipped (--no-amneziawg)."; return 0; }
-	log "setting up the userspace AmneziaWG path (amneziawg-go)"
-	need_root
-	install_awg_tools
-	if ! have awg || ! have awg-quick || ! have amneziawg-go; then
-		warn "AmneziaWG userspace tools not all present. Build them from source (kernel-independent):"
-		warn "  $AWG_GO_REPO        (amneziawg-go: the userspace implementation)"
-		warn "  $AWG_TOOLS_REPO     (awg / awg-quick)"
-		warn "Install them under $AWG_BIN_DIR and ensure awg-quick@ forces WG_QUICK_USERSPACE_IMPLEMENTATION."
-		# Fail-closed (Audit-0004 F-006): AmneziaWG/UDP is the Phase-0 SECOND transport family
-		# (ADR-0020 §5). Silently completing with only the REALITY family leaves the node one block away
-		# from total loss — the exact failure D2 exists to prevent. Refuse, unless the operator opted out.
-		die "AmneziaWG tools missing — refusing to report bootstrap complete with a single transport family. Install the tools above and re-run, or pass --no-amneziawg to deliberately ship a one-family node."
-	fi
-	# Identity: per-node keypair (+ optional psk). Generated once, kept local.
-	local awg_state="$STATE_DIR/awg"
-	run install -d -m 0700 "$awg_state"
-	if [ ! -f "$awg_state/private.key" ] && [ "$DRY_RUN" -eq 0 ]; then
-		( umask 077; awg genkey >"$awg_state/private.key" )
-		awg pubkey <"$awg_state/private.key" >"$awg_state/public.key"
-		awg genpsk >"$awg_state/preshared.key" 2>/dev/null || true
-		log "generated AmneziaWG per-node keypair (local, 0700 dir)."
-	fi
-	# The actual listen port is an operator/runtime value (PORTS.md canon is 51820/udp). We record it
-	# locally so the firewall step can open it; we do not hardcode a port into any committed file.
-	[ -f "$STATE_DIR/awg.port" ] || { [ "$DRY_RUN" -eq 0 ] && printf '51820\n' >"$STATE_DIR/awg.port"; }
-	# Render awg0.conf ONLY if absent — a live/hand-tuned config is never clobbered. The timer-driven
-	# --update path (flow_update) NEVER calls setup_amneziawg (only flow_bootstrap does), so this render
-	# cannot fire on an auto-pull; it runs only on an explicit bootstrap of a node whose awg0.conf does
-	# not yet exist. Rotation/edits of an existing config are a deliberate manual action.
-	local awg_conf_dir="/etc/amnezia/amneziawg" awg_conf
-	awg_conf="$awg_conf_dir/awg0.conf"
-	run install -d -m 0700 "$awg_conf_dir"
-	if [ -f "$awg_conf" ]; then
-		log "awg0.conf already present — leaving it untouched (idempotent; never clobber a live config)."
-	else
-		render_awg0 "$awg_conf"
-	fi
-	run systemctl enable awg-quick@awg0 2>/dev/null || warn "could not enable awg-quick@awg0."
-	if [ "$DRY_RUN" -eq 0 ] && [ -f "$awg_conf" ] && ! systemctl is-active --quiet awg-quick@awg0; then
-		run systemctl start awg-quick@awg0 2>/dev/null || true
-	fi
-	# Fail-closed (Audit-0004 F-006): the second family MUST be active before bootstrap reports success.
-	if [ "$DRY_RUN" -eq 0 ] && ! systemctl is-active --quiet awg-quick@awg0; then
-		die "awg-quick@awg0 is not active — the AmneziaWG/UDP second family failed to come up. Inspect 'journalctl -u awg-quick@awg0' (is amneziawg-go on PATH and the unit forcing WG_QUICK_USERSPACE_IMPLEMENTATION?). Fix and re-run, or --no-amneziawg to opt out."
-	fi
-}
 
 # ---------------------------------------------------------------------------
 # Node-local observability (Phase 0): a PINNED, checksum-verified node_exporter bound to loopback
@@ -1183,43 +864,11 @@ flow_revoke() {
 	fi
 }
 
-# flow_disable_two_hop — C21 documented remove-two-hop path: delete the node-local two_hop.json overlay,
-# regenerate params WITHOUT it, re-render + validate the server config fail-closed, promote + reload, and
-# re-render the served bundle. This is the supported way to turn two-hop OFF — no manual file surgery, and
-# every promotion path (server config + served bundle) is refreshed so nothing keeps a stale unscoped
-# egress. Idempotent: if no overlay is present, it reports so and exits 0 (nothing to disable).
-flow_disable_two_hop() {
-	log "=== disable two-hop egress overlay (remove + re-render + reload) ==="
-	need_root
-	if [ ! -f "$STATE_DIR/two_hop.json" ]; then
-		log "no two_hop.json present at $STATE_DIR — two-hop is already disabled (nothing to do)."
-		return 0
-	fi
-	[ -f "$IDENTITY_SECRETS" ] || die "no local identity; cannot re-render after disabling two-hop (bootstrap first)."
-	run rm -f "$STATE_DIR/two_hop.json"
-	log "removed the node-local two_hop overlay ($STATE_DIR/two_hop.json)."
-	# Regenerate params WITHOUT the overlay (write_params no longer finds two_hop.json -> no .two_hop key).
-	write_params
-	local candidate="$STATE_DIR/config.candidate.json"
-	render_candidate "$candidate"
-	if ! validate_config "$candidate"; then
-		rm -f "$candidate" 2>/dev/null || true
-		die "candidate failed 'sing-box check' after disabling two-hop (fail-closed; nothing promoted)."
-	fi
-	promote_config "$candidate"
-	rm -f "$candidate" 2>/dev/null || true
-	install_singbox_unit
-	if apply_singbox && verify_post_apply; then
-		# Re-render the served bundle so the served distribution reflects the now-two-hop-free config.
-		render_serve_bundle
-		log "two-hop disabled; config re-rendered + sing-box reloaded + served bundle refreshed."
-	else
-		warn "post-apply verification failed after disabling two-hop; rolling back."
-		rollback_config
-		apply_singbox || true
-		die "disable-two-hop rolled back (fail-closed) — the prior config is restored."
-	fi
-}
+# flow_disable_two_hop — the C21 documented remove-two-hop path (delete the node-local two_hop.json
+# overlay, re-render + validate + promote + reload, and refresh the served bundle) moved to
+# control/lib/nb_two_hop.sh (RP-0009 C3), sourced above. The dispatch `case` (below) calls it; that call
+# resolves at runtime from the shared sourced scope. It is CONTROL-LOGIC (routing policy), earmarked for
+# the RP-0008 Go migration.
 
 verify_post_apply() {
 	# Robust post-apply health check. ExecStartPre's "sing-box check" only validates SCHEMA; a config
