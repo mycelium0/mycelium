@@ -100,7 +100,7 @@ toggleable** via `group_vars` so an operator exposes only a chosen subset.
 | 1 | **VLESS + REALITY + XTLS-Vision (TCP)** | TCP/TLS | Highest-reachability TCP/TLS shape; borrows a real donor handshake so active probing receives a legitimate response; Vision equalises TLS record lengths against length-fingerprinting. The primary shape, carried over from [RP-0001](../proposals/0001-bootstrap-phase-0-node.md). |
 | 2 | **VLESS + REALITY + gRPC** | HTTP/2 over TLS | Wraps the stream in HTTP/2; survives some conditions that take down bare TCP-TLS, and multiplexes cleanly through HTTP/2-aware middleboxes. First TLS-family fallback. |
 | 3 | **VLESS + REALITY + XHTTP** | HTTP-framed over TLS | Modern HTTP-framed transport (successor to earlier HTTP-upgrade transports); resilient where plain streams are disrupted and friendlier to HTTP-shaped paths and CDNs. Second TLS-family fallback. |
-| 4 | **Hysteria2** | QUIC / UDP | Aggressive congestion control over QUIC; strong on lossy, throttled, or high-latency links where TCP collapses. Shipped with **Salamander obfs + H3 masquerade** (not bare QUIC) so it defeats SNI-based QUIC blocking — see the obfs note below. UDP-friendly but non-primary, since UDP is excised wholesale in some networks. |
+| 4 | **Hysteria2** | QUIC / UDP | Aggressive congestion control over QUIC; strong on lossy, throttled, or high-latency links where TCP collapses. **Salamander obfs + H3 masquerade is the intended design but is not yet wired into the deployed render path** (see the obfs note below); the inbound is off by default, so the Phase-1 renderer ships it bare (TLS + h3). UDP-friendly but non-primary, since UDP is excised wholesale in some networks. |
 | 5 | **TUIC v5** | QUIC / UDP | A second, independent QUIC/UDP shape with low-overhead multiplexing; gives a distinct QUIC fingerprint so the QUIC family is not a single point of failure. |
 | 6 | **Shadowsocks-2022 (AEAD, `2022-blake3-aes-256-gcm`)** | TCP (and UDP) | The modern AEAD-2022 construction with per-session salts; a lightweight non-VLESS shape useful as an independent fallback. (The legacy pre-2022 Shadowsocks is excluded — see below.) |
 | 7 | **ShadowTLS v3 wrapping Shadowsocks-2022** | TCP/TLS wrapper | Presents a genuine TLS handshake to a real external host in front of Shadowsocks, so the outer shape looks like ordinary TLS and answers active probing, while the inner shape stays a modern AEAD channel. |
@@ -109,25 +109,34 @@ toggleable** via `group_vars` so an operator exposes only a chosen subset.
 | 10 | **VLESS + XHTTP over genuine single-layer TLS (real certificate, non-REALITY, CDN-frontable)** | HTTP-framed over TLS | A genuine single-layer TLS shape (real certificate, not a borrowed donor handshake) carrying XHTTP — there is no TLS inside TLS, so it presents the flow profile of an ordinary HTTPS client to a real origin and removes the nested-handshake handle that single-connection classifiers key on. Frontable behind a CDN, which makes it the doctrine-clean HTTP-framed option for paths where a real certificate and origin are preferable to a donor handshake. Served on the Xray path. |
 | 11 | **VLESS + WebSocket + TLS (CDN-frontable)** | HTTP-framed over TLS | The broadest-compatibility CDN-frontable shape: a long-lived WebSocket inside ordinary TLS that traverses HTTP-aware middleboxes and CDN edges that pass WebSocket upgrades. It is the successor role to earlier HTTP-upgrade transports and the widest-reach fallback when the HTTP/2 (#2) and XHTTP (#3, #10) shapes are constrained. |
 
-**Hysteria2 ships obfuscated, not as bare QUIC.** The node template wraps inbound #4 in
-**Salamander obfuscation** (`obfs.type = salamander`) and points unauthenticated requests at an
-**H3 masquerade** site (the `obfs` and `masquerade` design, documented in
-[`protocols.md`](../../nodes/dataplane/singbox/protocols.md) row 4; the deployed sing-box template is
-[`server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json)). This
-is the QUIC shape that specifically answers **SNI-based QUIC blocking**: Salamander XOR-scrambles the
-entire QUIC
-datagram, so a filter that classifies QUIC by lifting a plaintext SNI out of the QUIC Initial /
-TLS ClientHello finds no parseable field to match — the discriminator it keys on is simply not on
-the wire. The threat is real and current: per a gfw.report study on SNI-based QUIC filtering
-(USENIX Security 2025,
+**Hysteria2's intended shape is obfuscated, not bare QUIC — but the obfs is not yet wired (deferred).**
+The intended design wraps inbound #4 in **Salamander obfuscation** (`obfs.type = salamander`) and
+points unauthenticated requests at an **H3 masquerade** site (the `obfs` and `masquerade` design,
+documented in [`protocols.md`](../../nodes/dataplane/singbox/protocols.md) row 4). **Deployment status
+(honest):** the deployed sing-box template
+[`server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json) currently
+renders Hysteria2 **bare** (TLS + `alpn: ["h3"]`, no `obfs`, no `masquerade`), and the shell renderer
+[`render_singbox.sh`](../../control/lib/render_singbox.sh) has no Salamander/masquerade logic. The
+earlier split-brain template that carried `salamander`/`masquerade` placeholder fields was inert (its
+tags were never matched by the renderer) and was removed when the renderer template became canonical
+(Audit-0005 C02). Because the Hysteria2 inbound is **off by default** and the QUIC family is non-primary
+on the operator's UDP-excising carrier (the surviving mobile shape is #10, XHTTP-over-genuine-TLS, not
+QUIC), the Salamander obfs + H3 masquerade is recorded here as a **deferred hardening: it must be wired
+into the renderer before the Hysteria2 inbound is enabled in a hostile-QUIC environment** (a Phase-2 /
+pre-enablement item). The rationale below is preserved as the design target, not a current deployment
+claim. This is the QUIC shape that specifically answers **SNI-based QUIC blocking**: Salamander
+XOR-scrambles the entire QUIC datagram, so a filter that classifies QUIC by lifting a plaintext SNI out
+of the QUIC Initial / TLS ClientHello finds no parseable field to match — the discriminator it keys on
+is simply not on the wire. The threat is real and current: per a gfw.report study on SNI-based QUIC
+filtering (USENIX Security 2025,
 [gfw.report/publications/usenixsecurity25](https://gfw.report/publications/usenixsecurity25/en/)),
 the GFW began blocking QUIC in April 2024 by inspecting the SNI field. Should the obfuscated path
-still be probed or blocked, the **H3 masquerade is the fallback** — the endpoint impersonates an
-ordinary HTTP/3 site (`alpn: ["h3"]`) rather than returning an empty or anomalous response. This
-shaping is obfuscation, **not** a confidentiality boundary (next paragraph); and consistent with the
-provisioned-but-non-primary doctrine for UDP, it does not change Hysteria2's standing — UDP shapes
-(#4, #5) remain available but are not the primary route because UDP is excised wholesale in some
-environments.
+(once wired) still be probed or blocked, the **H3 masquerade is the fallback** — the endpoint
+impersonates an ordinary HTTP/3 site (`alpn: ["h3"]`) rather than returning an empty or anomalous
+response. This shaping is obfuscation, **not** a confidentiality boundary (next paragraph); and
+consistent with the provisioned-but-non-primary doctrine for UDP, it does not change Hysteria2's
+standing — UDP shapes (#4, #5) remain available but are not the primary route because UDP is excised
+wholesale in some environments.
 
 All shaping above — padding, junk packets, header randomisation, transport framing, Salamander's
 datagram scrambling — is obfuscation, **not** a confidentiality boundary; confidentiality is held
