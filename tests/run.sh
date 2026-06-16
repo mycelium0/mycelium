@@ -46,6 +46,10 @@
 #   * bundle_go_roundtrip.sh  — a shell-rendered bundle round-trips through the authoritative Go
 #                               validator (myceliumctl validate-bundle); RP-0008 P1 / audit C11. SKIPs
 #                               where no Go toolchain is present (jq-only host/CI lane)
+#   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
+#                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
+#                               env, and the source-rev stamp + dependency-free-module invariants hold;
+#                               RP-0008 P3. SKIPs where no Go toolchain is present (jq-only host/CI lane)
 #   * engine_load_check.sh    — a representative sing-box server config, shell-rendered, actually LOADS
 #                               in the engine (`sing-box check`), and enabling vless-xhttp-tls (xhttp is
 #                               Xray-core only) is REFUSED fail-closed. SKIPs the load half where no
@@ -89,6 +93,7 @@ GATES=(
 	"tests/conformance/dependency_policy.sh"
 	"tests/conformance/bundle_region_closed_vocab.sh"
 	"tests/conformance/bundle_go_roundtrip.sh"
+	"tests/conformance/spine_binary_build.sh"
 	"tests/conformance/engine_load_check.sh"
 	"tests/conformance/active_probe_owncert.sh"
 	"tests/conformance/sub_channel_not_single_point.sh"

@@ -41,7 +41,13 @@ func run(args []string) error {
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "version", "-v", "--version":
-		fmt.Printf("myceliumctl %s\n", spec.Version)
+		// Preserve the `myceliumctl %s` prefix that downstream matchers depend on; append the
+		// build-stamped source rev when present (RP-0008 P3 — the node's idempotent spine build keys on it).
+		if spec.SourceRev != "" {
+			fmt.Printf("myceliumctl %s (rev %s)\n", spec.Version, spec.SourceRev)
+		} else {
+			fmt.Printf("myceliumctl %s\n", spec.Version)
+		}
 		return nil
 	case "identity":
 		return cmdIdentity(rest)
