@@ -121,7 +121,7 @@ render_serve_bundle() {
 		and (.endpoints | type == "array") and (.endpoints | length >= 1)
 		and (.endpoints | all((.tag | type == "string") and ((.tag | length) > 0)))
 		and (.endpoints | all(.transport_class | IN(
-			"reality-tcp","xhttp-tls","quic-udp","shadowsocks-tcp",
+			"reality-tcp","xhttp-tls","ws-tls","quic-udp","shadowsocks-tcp",
 			"shadowtls-tcp","trojan-tls","amneziawg-udp")))
 		and (.endpoints | all((.region | type == "string") and ((.region | length) > 0)))
 		and (.endpoints | all((.priority | type == "number") and (.priority >= 0) and ((.priority | floor) == .priority)))

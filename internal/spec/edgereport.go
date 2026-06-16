@@ -51,6 +51,12 @@ const (
 	// healthy and so cannot represent the blocked path unless the surviving single-TLS family is its own
 	// closed-vocab member (RP-0007-a; ADR-0010 amendment).
 	TransportClassXHTTPTLS TransportClass = "xhttp-tls"
+	// TransportClassWSTLS is the VLESS+WebSocket over GENUINE single-layer TLS family (own certificate, NO
+	// REALITY). Like xhttp-tls it is genuine single-layer TLS (not TLS-in-TLS), so it survives links where
+	// TLS-in-TLS is blocked — and unlike xhttp (an Xray-core transport), sing-box serves WebSocket natively,
+	// so this is the genuine-TLS family that is actually servable by the primary engine on a standard node
+	// (the on-device-proven Phase-1 shape; the xhttp-tls member stays for the future Xray serving path).
+	TransportClassWSTLS TransportClass = "ws-tls"
 )
 
 // IsValid reports whether the class is one of the canonical members (the unset zero value is not
@@ -59,7 +65,7 @@ func (c TransportClass) IsValid() bool {
 	switch c {
 	case TransportClassRealityTCP, TransportClassQUICUDP, TransportClassShadowsocksTCP,
 		TransportClassShadowTLSTCP, TransportClassTrojanTLS, TransportClassAmneziaWGUDP,
-		TransportClassXHTTPTLS:
+		TransportClassXHTTPTLS, TransportClassWSTLS:
 		return true
 	default:
 		return false

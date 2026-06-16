@@ -67,7 +67,7 @@ else
 fi
 
 # 5. committed bundle JSON artifacts (if any) use only closed-vocab values
-VTC='["reality-tcp","quic-udp","shadowsocks-tcp","shadowtls-tcp","trojan-tls","amneziawg-udp","xhttp-tls"]'
+VTC='["reality-tcp","quic-udp","shadowsocks-tcp","shadowtls-tcp","trojan-tls","amneziawg-udp","xhttp-tls","ws-tls"]'
 VH='["unknown","alive","degraded"]'
 fixtures="$(grep -rlE '"endpoints"[[:space:]]*:' "$REPO_ROOT/control/testdata" "$REPO_ROOT/tests" 2>/dev/null | grep -E '\.json$' || true)"
 if [ -z "$fixtures" ]; then
