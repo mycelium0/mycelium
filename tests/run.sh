@@ -99,6 +99,7 @@ GATES=(
 	"tests/conformance/sub_channel_not_single_point.sh"
 	"tests/conformance/node_two_hop_failclosed.sh"
 	"tests/conformance/no_new_control_decisions_in_bash.sh"
+	"tests/conformance/no_reserved_jq_vars.sh"
 	"tests/conformance/vocab_single_source.sh"
 	"control/selftest.sh"
 )
