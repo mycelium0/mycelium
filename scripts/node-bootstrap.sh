@@ -83,6 +83,24 @@
 
 set -euo pipefail
 
+# ===========================================================================
+# ORCHESTRATION ONLY (RP-0009). This entrypoint does arg-parse, the flow_* dispatchers
+# (bootstrap/update/ack/revoke/disable-two-hop), post-apply verify_*, and dispatch — nothing more. Every
+# render/validate/policy/merge/install concern lives in a sourced control/lib/nb_*.sh module (resolved
+# from $ARTIFACT_ROOT/control/lib so it survives the --update re-exec):
+#   nb_identity      key/uuid/shortid/secret gen + ensure_identity
+#   nb_donor         REALITY donor selection
+#   nb_harden        host hardening (journald/sshd/ufw)
+#   nb_install       package/engine install + systemd unit + restart/apply helpers
+#   nb_render_params write_params + operator-override seed/merge (control-logic; RP-0008 candidate)
+#   nb_serve_bundle  the served last-known-good bundle gate + staleness signal
+#   nb_two_hop       assert_two_hop_shape + the --disable-two-hop path (routing policy)
+#   nb_render_awg    AmneziaWG dialect/render + split-tunnel AllowedIPs + userspace setup
+#   nb_update_apply  the signed-pull -> render -> validate -> promote -> rollback apply state machine
+#   nb_observability node_exporter + the dataplane-metrics generator
+# The "no new control-decisions-in-bash" rule is enforced by tests/conformance/no_new_control_decisions_in_bash.sh.
+# ===========================================================================
+
 # ---------------------------------------------------------------------------
 # Locate ourselves and the repository checkout regardless of caller CWD.
 # ---------------------------------------------------------------------------
@@ -376,18 +394,10 @@ need_root() {
 # internal/spec.Bundle.Validate round-trip).
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# systemd service install + (re)start / reload. install_singbox_unit (the hardened sing-box unit)
-# and restart_singbox live in control/lib/nb_install.sh, sourced above (RP-0009); apply_singbox
-# stays here (it is the flow-level apply primitive the update path calls). The unit's
-# RestrictAddressFamilies incl. AF_NETLINK is kept in lockstep with the Ansible template by
-# tests/conformance/unit_netlink_parity.sh — change BOTH together (Audit-0004 F-001/F-017).
-# ---------------------------------------------------------------------------
-# apply_singbox — make the running service pick up a new config. sing-box is Type=simple with NO
-# ExecReload, so there is no real "reload": applying a config IS a restart (it briefly drops live
-# connections). We do not pretend otherwise. Returns the restart's own status so callers can
-# distinguish a failed restart from a failed post-check.
-apply_singbox()   { need_root; run systemctl enable sing-box 2>/dev/null || true; run systemctl restart sing-box; }
+# systemd service install + (re)start helpers — install_singbox_unit (the hardened sing-box unit),
+# restart_singbox, AND apply_singbox (the flow-level apply primitive the update/revoke paths call) all
+# live in control/lib/nb_install.sh, sourced above (RP-0009 C5). The unit's RestrictAddressFamilies
+# incl. AF_NETLINK is kept in lockstep with the Ansible template by unit_netlink_parity.sh.
 
 # ---------------------------------------------------------------------------
 # AmneziaWG second family — the Selective-Growth split-tunnel AllowedIPs policy (compute_client_allowed
