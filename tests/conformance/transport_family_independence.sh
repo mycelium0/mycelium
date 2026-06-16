@@ -65,6 +65,7 @@ family_of() {
 	case "$1" in
 		enable_vless_reality_vision|enable_vless_reality_grpc|enable_vless_reality_xhttp) printf 'reality-tls-tcp' ;;
 		enable_vless_xhttp_tls)                                                           printf 'xhttp-tls' ;;
+		enable_vless_ws_tls)                                                              printf 'ws-tls' ;;
 		enable_hysteria2|enable_tuic)                                                     printf 'quic-udp' ;;
 		enable_ss2022)                                                                    printf 'shadowsocks-tcp' ;;
 		enable_shadowtls)                                                                 printf 'shadowtls-tcp' ;;

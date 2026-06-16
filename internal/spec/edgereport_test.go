@@ -34,6 +34,7 @@ func TestTransportClassIsValid(t *testing.T) {
 	for _, c := range []TransportClass{
 		TransportClassRealityTCP, TransportClassQUICUDP, TransportClassShadowsocksTCP,
 		TransportClassShadowTLSTCP, TransportClassTrojanTLS, TransportClassAmneziaWGUDP,
+		TransportClassXHTTPTLS, TransportClassWSTLS,
 	} {
 		if !c.IsValid() {
 			t.Fatalf("%q should be valid", c)

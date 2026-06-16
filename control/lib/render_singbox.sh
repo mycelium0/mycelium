@@ -32,7 +32,7 @@
 # REALITY/TCP (most survivable) first, UDP/QUIC paths next, then SS/ShadowTLS,
 # Trojan last. Each token is matched against an inbound's `tag` in the template
 # and against a `<token>_enabled` flag in params.
-MYC_SB_PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp vless-xhttp-tls hysteria2 tuic shadowsocks shadowtls trojan"
+MYC_SB_PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp vless-xhttp-tls vless-ws-tls hysteria2 tuic shadowsocks shadowtls trojan"
 
 # ---------------------------------------------------------------------------
 # urltest anti-flapping calibration (C22)
@@ -160,14 +160,15 @@ myc_sb_render_server() {
 	tls_cert="$(myc_params_get "$params" '.tls_certificate_path' '/etc/mycelium/tls/fullchain.pem')"
 	tls_key="$(myc_params_get "$params" '.tls_key_path' '/etc/mycelium/tls/privkey.pem')"
 
-	# C03 fail-closed: the genuine-single-TLS xhttp-tls family presents the node's OWN certificate. Its
-	# server_name MUST be the node's own domain — never the donor SNI/localhost fallback, which would make
-	# the served cert (own domain) disagree with the SNI a client dials, a cert/SNI-mismatch active-probe
-	# tell (DISTINGUISHABLE_TRANSPORT). If xhttp-tls is enabled, require an explicit, non-donor tls_sni.
+	# C03 fail-closed: the genuine-single-TLS own-cert families (xhttp-tls AND ws-tls) present the node's
+	# OWN certificate. Their server_name MUST be the node's own domain — never the donor SNI/localhost
+	# fallback, which would make the served cert (own domain) disagree with the SNI a client dials, a
+	# cert/SNI-mismatch active-probe tell (DISTINGUISHABLE_TRANSPORT). If either own-cert family is enabled,
+	# require an explicit, non-donor tls_sni.
 	case " $enabled " in
-		*" vless-xhttp-tls "*)
+		*" vless-xhttp-tls "*|*" vless-ws-tls "*)
 			local _tls_sni_explicit; _tls_sni_explicit="$(myc_params_get "$params" '.tls_sni' '')"
-			[ -n "$_tls_sni_explicit" ] || myc_die "render-server: vless-xhttp-tls is enabled but params.tls_sni is empty — the own-cert genuine-TLS family must carry its OWN SNI (never the donor_sni/localhost fallback; that is a cert/SNI mismatch tell). Set params.tls_sni." ;;
+			[ -n "$_tls_sni_explicit" ] || myc_die "render-server: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — the own-cert family must carry its OWN SNI (never the donor_sni/localhost fallback; that is a cert/SNI mismatch tell). Set params.tls_sni." ;;
 	esac
 
 	# Protocol secrets (placeholders in params; real values from sing-box/openssl).
@@ -188,9 +189,12 @@ myc_sb_render_server() {
 	clash_secret="$(myc_params_get "$params" '.clash_secret' '')"
 
 	# Transport-shaping values.
-	local grpc_service xhttp_path xhttp_path_tls stls_handshake stls_handshake_port
+	local grpc_service xhttp_path xhttp_path_tls ws_path stls_handshake stls_handshake_port
 	grpc_service="$(myc_params_get "$params" '.grpc_service_name' 'grpc')"
 	xhttp_path="$(myc_params_get "$params" '.xhttp_path' '/')"
+	# vless-ws-tls (genuine single-layer TLS over native WebSocket) serves $ws_path. Its own per-family
+	# path so the ws-tls endpoint is not path-correlatable with the XHTTP families. Default "/ws".
+	ws_path="$(myc_params_get "$params" '.ws_path' '/ws')"
 	# C06: per-family XHTTP path. The REALITY-XHTTP inbound serves $xhttp_path; the genuine-TLS xhttp-tls
 	# inbound serves $xhttp_path_tls so the two "independent" XHTTP families can carry DISTINCT paths and
 	# are not correlatable by an identical plaintext path. Defaults to xhttp_path only when unset
@@ -200,12 +204,15 @@ myc_sb_render_server() {
 	stls_handshake_port="$(myc_params_get "$params" '.shadowtls_handshake_port' '443')"
 
 	# Per-protocol listen ports (defaults are sane, distinct values).
-	local p_vision p_grpc p_xhttp p_xhttp_tls p_hy2 p_tuic p_ss p_stls p_trojan
+	local p_vision p_grpc p_xhttp p_xhttp_tls p_ws_tls p_hy2 p_tuic p_ss p_stls p_trojan
 	p_vision="$(myc_params_get "$params" '.vless_reality_vision_port' '443')"
 	p_grpc="$(myc_params_get "$params"   '.vless_reality_grpc_port'   '8443')"
 	p_xhttp="$(myc_params_get "$params"  '.vless_reality_xhttp_port'  '2096')"
 	# vless-xhttp-tls: genuine single-layer TLS (own cert, NO reality). Canonical port 2087 (non-8443).
 	p_xhttp_tls="$(myc_params_get "$params" '.vless_xhttp_tls_port'   '2087')"
+	# vless-ws-tls: genuine single-layer TLS over native WebSocket (own cert, NO reality; SERVABLE on
+	# sing-box, unlike xhttp-tls). Canonical port 2089 (non-8443).
+	p_ws_tls="$(myc_params_get "$params"   '.vless_ws_tls_port'       '2089')"
 	p_hy2="$(myc_params_get "$params"    '.hysteria2_port'            '8444')"
 	p_tuic="$(myc_params_get "$params"   '.tuic_port'                 '8445')"
 	p_ss="$(myc_params_get "$params"     '.shadowsocks_port'          '8388')"
@@ -234,7 +241,7 @@ myc_sb_render_server() {
 	local ports_json
 	ports_json="$(jq -nc \
 		--argjson vision "$p_vision" --argjson grpc "$p_grpc" --argjson xhttp "$p_xhttp" \
-		--argjson xhttptls "$p_xhttp_tls" \
+		--argjson xhttptls "$p_xhttp_tls" --argjson wstls "$p_ws_tls" \
 		--argjson hy2 "$p_hy2" --argjson tuic "$p_tuic" --argjson ss "$p_ss" \
 		--argjson stls "$p_stls" --argjson trojan "$p_trojan" \
 		'{
@@ -242,6 +249,7 @@ myc_sb_render_server() {
 			"vless-reality-grpc":   $grpc,
 			"vless-reality-xhttp":  $xhttp,
 			"vless-xhttp-tls":      $xhttptls,
+			"vless-ws-tls":         $wstls,
 			"hysteria2":            $hy2,
 			"tuic":                 $tuic,
 			"shadowsocks":          $ss,
@@ -272,6 +280,7 @@ myc_sb_render_server() {
 		--arg grpc "$grpc_service" \
 		--arg xpath "$xhttp_path" \
 		--arg xpathtls "$xhttp_path_tls" \
+		--arg wspath "$ws_path" \
 		--arg stlshs "$stls_handshake" \
 		--arg clash_secret "$clash_secret" \
 		--argjson stlshp "$stls_handshake_port" \
@@ -315,6 +324,7 @@ myc_sb_render_server() {
 				| setport("vless-reality-grpc")
 				| setport("vless-reality-xhttp")
 				| setport("vless-xhttp-tls")
+				| setport("vless-ws-tls")
 				| setport("hysteria2")
 				| setport("tuic")
 				| setport("shadowsocks")
@@ -325,6 +335,7 @@ myc_sb_render_server() {
 				| if .tag == "vless-reality-grpc-in"   then .users = $uplain  | .transport.service_name = $grpc else . end
 				| if .tag == "vless-reality-xhttp-in"  then .users = $uplain  | .transport.path = $xpath else . end
 				| if .tag == "vless-xhttp-tls-in"      then .users = $uplain  | .transport.path = $xpathtls else . end
+				| if .tag == "vless-ws-tls-in"         then .users = $uplain  | .transport.path = $wspath else . end
 				| if .tag == "hysteria2-in"            then .users = $uhy2 else . end
 				| if .tag == "tuic-in"                 then .users = $utuic else . end
 				| if .tag == "shadowsocks-in"          then .users = $uss | .password = $sspw else . end
@@ -340,6 +351,7 @@ myc_sb_render_server() {
 				or ( .tag == "vless-reality-grpc-in"   and ($enabled | index("vless-reality-grpc")) )
 				or ( .tag == "vless-reality-xhttp-in"  and ($enabled | index("vless-reality-xhttp")) )
 				or ( .tag == "vless-xhttp-tls-in"      and ($enabled | index("vless-xhttp-tls")) )
+				or ( .tag == "vless-ws-tls-in"         and ($enabled | index("vless-ws-tls")) )
 				or ( .tag == "hysteria2-in"            and ($enabled | index("hysteria2")) )
 				or ( .tag == "tuic-in"                 and ($enabled | index("tuic")) )
 				or ( .tag == "shadowsocks-in"          and ($enabled | index("shadowsocks")) )
@@ -485,16 +497,16 @@ myc_sb_render_subscription() {
 	tls_sni="$(myc_params_get "$params" '.tls_sni' "${donor_sni:-localhost}")"
 	short_first="$(printf '%s' "$params" | jq -r '.short_ids[0] // empty')"
 
-	# C03 fail-closed: when the own-cert xhttp-tls family is in the subscription, its client Link MUST
-	# carry the node's OWN SNI — never the donor_sni/localhost fallback (a cert/SNI-mismatch tell). Require
-	# an explicit tls_sni so the subscription's xhttp-tls outbound dials the right own-cert name.
+	# C03 fail-closed: when an own-cert genuine-TLS family (xhttp-tls or ws-tls) is in the subscription, its
+	# client Link MUST carry the node's OWN SNI — never the donor_sni/localhost fallback (a cert/SNI-mismatch
+	# tell). Require an explicit tls_sni so the subscription's own-cert outbound dials the right own-cert name.
 	case " $enabled " in
-		*" vless-xhttp-tls "*)
+		*" vless-xhttp-tls "*|*" vless-ws-tls "*)
 			local _tls_sni_explicit; _tls_sni_explicit="$(myc_params_get "$params" '.tls_sni' '')"
-			[ -n "$_tls_sni_explicit" ] || myc_die "subscription: vless-xhttp-tls is enabled but params.tls_sni is empty — the own-cert genuine-TLS family must carry its OWN SNI (never the donor_sni/localhost fallback). Set params.tls_sni." ;;
+			[ -n "$_tls_sni_explicit" ] || myc_die "subscription: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — the own-cert family must carry its OWN SNI (never the donor_sni/localhost fallback). Set params.tls_sni." ;;
 	esac
 
-	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls
+	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls ws_path
 	ss_password="$(myc_params_get "$params" '.ss_password' '')"
 	trojan_password="$(myc_params_get "$params" '.trojan_password' '')"
 	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
@@ -504,6 +516,9 @@ myc_sb_render_subscription() {
 	# C06: per-family XHTTP path (see render-server). The xhttp-tls outbound dials $xhttp_path_tls; the
 	# REALITY-XHTTP outbound dials $xhttp_path. Defaults to xhttp_path when unset (back-compat).
 	xhttp_path_tls="$(myc_params_get "$params" '.xhttp_path_tls' "$xhttp_path")"
+	# vless-ws-tls dials $ws_path (native WebSocket; default "/ws"). Its own per-family path so the ws-tls
+	# endpoint is not path-correlatable with the XHTTP families.
+	ws_path="$(myc_params_get "$params" '.ws_path' '/ws')"
 
 	# Per-protocol ports (must match the server render defaults).
 	local ports_json
@@ -512,6 +527,7 @@ myc_sb_render_subscription() {
 		--argjson grpc   "$(myc_params_get "$params" '.vless_reality_grpc_port' '8443')" \
 		--argjson xhttp  "$(myc_params_get "$params" '.vless_reality_xhttp_port' '2096')" \
 		--argjson xhttptls "$(myc_params_get "$params" '.vless_xhttp_tls_port' '2087')" \
+		--argjson wstls  "$(myc_params_get "$params" '.vless_ws_tls_port' '2089')" \
 		--argjson hy2    "$(myc_params_get "$params" '.hysteria2_port' '8444')" \
 		--argjson tuic   "$(myc_params_get "$params" '.tuic_port' '8445')" \
 		--argjson ss     "$(myc_params_get "$params" '.shadowsocks_port' '8388')" \
@@ -519,7 +535,7 @@ myc_sb_render_subscription() {
 		--argjson trojan "$(myc_params_get "$params" '.trojan_port' '8447')" \
 		'{
 			"vless-reality-vision": $vision, "vless-reality-grpc": $grpc, "vless-reality-xhttp": $xhttp,
-			"vless-xhttp-tls": $xhttptls,
+			"vless-xhttp-tls": $xhttptls, "vless-ws-tls": $wstls,
 			"hysteria2": $hy2, "tuic": $tuic, "shadowsocks": $ss, "shadowtls": $stls, "trojan": $trojan
 		}')"
 
@@ -564,6 +580,7 @@ myc_sb_render_subscription() {
 				--arg grpc "$grpc_service" \
 				--arg xpath "$xhttp_path" \
 				--arg xpathtls "$xhttp_path_tls" \
+				--arg wspath "$ws_path" \
 				--arg utinterval "$MYC_URLTEST_INTERVAL" \
 				--argjson uttolerance "$MYC_URLTEST_TOLERANCE" \
 				--arg utidle "$MYC_URLTEST_IDLE_TIMEOUT" \
@@ -580,6 +597,10 @@ myc_sb_render_subscription() {
 					# vless-xhttp-tls: genuine single-layer TLS (own cert, verified by the client — NO reality donor).
 					# transport.type matches the server template ("xhttp") so there is no server/client naming mismatch.
 					"vless-xhttp-tls":      { type: "vless", tag: "vless-xhttp-tls",      server: $server, server_port: $ports["vless-xhttp-tls"],      uuid: $uuid, flow: "", packet_encoding: "xudp", tls: plain_tls(["h2","http/1.1"]), transport: { type: "xhttp", path: $xpathtls } },
+					# vless-ws-tls: genuine single-layer TLS over native WebSocket (own cert, verified — NO reality
+					# donor). transport.type "ws" matches the server template; sing-box CAN dial it (native ws),
+					# so unlike xhttp-tls this outbound is emitted on the sing-box engine, not refused.
+					"vless-ws-tls":         { type: "vless", tag: "vless-ws-tls",         server: $server, server_port: $ports["vless-ws-tls"],         uuid: $uuid, flow: "", packet_encoding: "xudp", tls: plain_tls(["http/1.1"]), transport: { type: "ws", path: $wspath, headers: { Host: $tsni } } },
 					"hysteria2":            { type: "hysteria2", tag: "hysteria2",        server: $server, server_port: $ports["hysteria2"], password: $hy2pw, tls: plain_tls(["h3"]) },
 					"tuic":                 { type: "tuic", tag: "tuic",                  server: $server, server_port: $ports["tuic"], uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: plain_tls(["h3"]) },
 					"shadowsocks":          { type: "shadowsocks", tag: "shadowsocks",    server: $server, server_port: $ports["shadowsocks"], method: "2022-blake3-aes-256-gcm", password: $sspw },

@@ -67,6 +67,9 @@ tag_to_toggle() {
 		# VLESS+XHTTP over GENUINE single-layer TLS (own cert; NO reality) — distinct from the
 		# XHTTP-in-REALITY (TLS-in-TLS) inbound above; default-off like every non-primary transport.
 		vless-xhttp-tls-in|vless-xhttp-tls)            printf 'enable_vless_xhttp_tls' ;;
+		# VLESS+WebSocket over GENUINE single-layer TLS (own cert; NO reality) — SERVABLE on sing-box
+		# (native ws transport), unlike the xhttp-tls inbound; default-off like every non-primary transport.
+		vless-ws-tls-in|vless-ws-tls)                  printf 'enable_vless_ws_tls' ;;
 		hysteria2-in|hysteria2)                        printf 'enable_hysteria2' ;;
 		tuic-v5-in|tuic-in|tuic)                       printf 'enable_tuic' ;;
 		shadowsocks-2022-in|shadowsocks-in|shadowsocks) printf 'enable_ss2022' ;;

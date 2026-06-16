@@ -42,6 +42,7 @@ myc_bundle_class_of() {
 	case "$1" in
 		vless-reality-vision|vless-reality-grpc|vless-reality-xhttp) printf 'reality-tcp' ;;
 		vless-xhttp-tls)                                            printf 'xhttp-tls' ;;
+		vless-ws-tls)                                               printf 'ws-tls' ;;
 		hysteria2|tuic)                                             printf 'quic-udp' ;;
 		shadowsocks)                                                printf 'shadowsocks-tcp' ;;
 		shadowtls)                                                  printf 'shadowtls-tcp' ;;
@@ -90,6 +91,7 @@ myc_bundle_priority_of() {
 #   $15 XPATH_TLS   xhttp path for the genuine-TLS xhttp-tls family (C06: a per-family path so an
 #                   on-path observer cannot correlate the two "independent" XHTTP families by an
 #                   identical path)
+#   $16 WS_PATH     ws path for the genuine-TLS ws-tls family (its own per-family path; default "/ws")
 #
 # The node/port/SNI live ONLY inside this opaque string (per bundle.go: the coarse class/region at
 # the typed level, the dialable detail opaquely in Link). All values are passed in already-resolved
@@ -107,10 +109,10 @@ myc_uri_encode() {
 myc_bundle_link() {
 	# C34: arity guard — a positional-count mismatch must fail loud, not silently fall through to the
 	# empty-default link (which would surface only as a downstream empty-Link die with no cause).
-	[ "$#" -eq 15 ] || myc_die "myc_bundle_link: expected 15 args, got $# (see ARG ORDER above)."
-	local proto server port uuid dsni pub sid tsni sspw hy2pw trpw tuicpw grpc xpath xpath_tls frag
+	[ "$#" -eq 16 ] || myc_die "myc_bundle_link: expected 16 args, got $# (see ARG ORDER above)."
+	local proto server port uuid dsni pub sid tsni sspw hy2pw trpw tuicpw grpc xpath xpath_tls ws_path frag
 	proto="$1"; server="$2"; port="$3"; uuid="$4"; dsni="$5"; pub="$6"; sid="$7"; tsni="$8"
-	sspw="$9"; hy2pw="${10}"; trpw="${11}"; tuicpw="${12}"; grpc="${13}"; xpath="${14}"; xpath_tls="${15}"
+	sspw="$9"; hy2pw="${10}"; trpw="${11}"; tuicpw="${12}"; grpc="${13}"; xpath="${14}"; xpath_tls="${15}"; ws_path="${16}"
 	frag="mycelium-${proto}"
 	# C07: percent-encode every dynamic value before it is interpolated into the URI. server/port are
 	# structural authority components (a hostname/integer port carry no reserved chars), so they are left
@@ -129,6 +131,7 @@ myc_bundle_link() {
 	grpc="$(myc_uri_encode "$grpc")"
 	xpath="$(myc_uri_encode "$xpath")"
 	xpath_tls="$(myc_uri_encode "$xpath_tls")"
+	ws_path="$(myc_uri_encode "$ws_path")"
 	frag="$(myc_uri_encode "$frag")"
 	case "$proto" in
 		vless-reality-vision)
@@ -146,6 +149,13 @@ myc_bundle_link() {
 			# XHTTP families can carry distinct paths and are not path-correlatable by an on-path observer.
 			printf 'vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=chrome&alpn=h2,http/1.1&type=xhttp&path=%s#%s' \
 				"$uuid" "$server" "$port" "$tsni" "$xpath_tls" "$frag" ;;
+		vless-ws-tls)
+			# genuine single-layer TLS over native WebSocket (own cert, verified — NO reality donor):
+			# security=tls, type=ws, no pbk/sid. alpn=http%2F1.1 (single ALPN, percent-encoded literal so
+			# the '/' cannot shift the query boundaries). host carries the own-cert SNI ($tsni). path is the
+			# per-family ws path ($ws_path), already percent-encoded above.
+			printf 'vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=chrome&alpn=http%%2F1.1&type=ws&host=%s&path=%s#%s' \
+				"$uuid" "$server" "$port" "$tsni" "$tsni" "$ws_path" "$frag" ;;
 		hysteria2)
 			printf 'hysteria2://%s@%s:%s?sni=%s&alpn=h3#%s' \
 				"$hy2pw" "$server" "$port" "$tsni" "$frag" ;;
@@ -268,12 +278,12 @@ myc_render_bundle() {
 	# Probe the param's EXPLICIT presence (a separate read, so the donor fallback in `tls_sni` above does
 	# not mask a missing value); refuse rather than emit a mismatched Link.
 	case " $enabled " in
-		*" vless-xhttp-tls "*)
+		*" vless-xhttp-tls "*|*" vless-ws-tls "*)
 			local _tls_sni_explicit; _tls_sni_explicit="$(myc_params_get "$params" '.tls_sni' '')"
-			[ -n "$_tls_sni_explicit" ] || myc_die "bundle: vless-xhttp-tls is enabled but params.tls_sni is empty — the own-cert genuine-TLS family must carry its OWN SNI (never fall back to donor_sni; that is a cert/SNI mismatch tell). Set params.tls_sni." ;;
+			[ -n "$_tls_sni_explicit" ] || myc_die "bundle: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — the own-cert family must carry its OWN SNI (never fall back to donor_sni; that is a cert/SNI mismatch tell). Set params.tls_sni." ;;
 	esac
 
-	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls
+	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls ws_path
 	ss_password="$(myc_params_get "$params" '.ss_password' '')"
 	trojan_password="$(myc_params_get "$params" '.trojan_password' '')"
 	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
@@ -285,6 +295,10 @@ myc_render_bundle() {
 	# two "independent" families by an identical plaintext path. xhttp_path_tls defaults to xhttp_path
 	# only when unset (back-compat); an operator running both XHTTP families should set them apart.
 	xhttp_path_tls="$(myc_params_get "$params" '.xhttp_path_tls' "$xhttp_path")"
+	# vless-ws-tls dials $ws_path (native WebSocket; default "/ws"). Its own per-family path so the ws-tls
+	# endpoint is not path-correlatable with the XHTTP families. MUST match render_singbox.sh's resolution
+	# so the served inbound and the bundle Link agree.
+	ws_path="$(myc_params_get "$params" '.ws_path' '/ws')"
 
 	# The node identity used as the endpoint credential (first client).
 	local id ipw
@@ -305,11 +319,12 @@ myc_render_bundle() {
 	tuic_pw="${ipw:-$id}"
 
 	# Per-protocol ports (MUST match the server render + subscription defaults — phase0 port canon).
-	local p_vision p_grpc p_xhttp p_xhttp_tls p_hy2 p_tuic p_ss p_stls p_trojan
+	local p_vision p_grpc p_xhttp p_xhttp_tls p_ws_tls p_hy2 p_tuic p_ss p_stls p_trojan
 	p_vision="$(myc_params_get "$params" '.vless_reality_vision_port' '443')"
 	p_grpc="$(myc_params_get "$params"   '.vless_reality_grpc_port'   '8443')"
 	p_xhttp="$(myc_params_get "$params"  '.vless_reality_xhttp_port'  '2096')"
 	p_xhttp_tls="$(myc_params_get "$params" '.vless_xhttp_tls_port'   '2087')"
+	p_ws_tls="$(myc_params_get "$params"  '.vless_ws_tls_port'        '2089')"
 	p_hy2="$(myc_params_get "$params"    '.hysteria2_port'            '8444')"
 	p_tuic="$(myc_params_get "$params"   '.tuic_port'                 '8445')"
 	p_ss="$(myc_params_get "$params"     '.shadowsocks_port'          '8388')"
@@ -322,6 +337,7 @@ myc_render_bundle() {
 			vless-reality-grpc)   printf '%s' "$p_grpc" ;;
 			vless-reality-xhttp)  printf '%s' "$p_xhttp" ;;
 			vless-xhttp-tls)      printf '%s' "$p_xhttp_tls" ;;
+			vless-ws-tls)         printf '%s' "$p_ws_tls" ;;
 			hysteria2)            printf '%s' "$p_hy2" ;;
 			tuic)                 printf '%s' "$p_tuic" ;;
 			shadowsocks)          printf '%s' "$p_ss" ;;
@@ -353,7 +369,7 @@ myc_render_bundle() {
 			myc_die "bundle: port for protocol '$proto' is out of range ('$port'); a server_port must be in 1..65535."
 		fi
 		link="$(myc_bundle_link "$proto" "$node_addr" "$port" "$id" "$donor_sni" "$pub" "$short_first" \
-			"$tls_sni" "$ss_pw" "$hy2_pw" "$trojan_pw" "$tuic_pw" "$grpc_service" "$xhttp_path" "$xhttp_path_tls")"
+			"$tls_sni" "$ss_pw" "$hy2_pw" "$trojan_pw" "$tuic_pw" "$grpc_service" "$xhttp_path" "$xhttp_path_tls" "$ws_path")"
 		[ -n "$link" ] || myc_die "bundle: produced an empty Link for protocol '$proto' (bundle.go rejects empty links)."
 
 		# Endpoint fields EXACTLY per bundle.go: tag, transport_class, region, priority, health, link.
@@ -401,6 +417,7 @@ myc_render_bundle() {
 	if ! printf '%s' "$bundle" | jq -e '
 		.endpoints | all(
 			.transport_class == "reality-tcp" or .transport_class == "xhttp-tls"
+			or .transport_class == "ws-tls"
 			or .transport_class == "quic-udp" or .transport_class == "shadowsocks-tcp"
 			or .transport_class == "shadowtls-tcp" or .transport_class == "trojan-tls"
 			or .transport_class == "amneziawg-udp"

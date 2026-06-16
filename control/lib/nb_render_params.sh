@@ -77,11 +77,11 @@ resolve_node_address() {
 # paths, short_ids) are DELIBERATELY excluded so they can never be pinned stale by an override.
 OPERATOR_TOGGLE_KEYS='[
 	"vless_reality_vision_enabled","vless_reality_grpc_enabled","vless_reality_xhttp_enabled",
-	"vless_xhttp_tls_enabled","hysteria2_enabled","tuic_enabled","shadowsocks_enabled",
+	"vless_xhttp_tls_enabled","vless_ws_tls_enabled","hysteria2_enabled","tuic_enabled","shadowsocks_enabled",
 	"shadowtls_enabled","trojan_enabled",
 	"vless_reality_vision_port","vless_reality_grpc_port","vless_reality_xhttp_port",
-	"vless_xhttp_tls_port","hysteria2_port","tuic_port","shadowsocks_port","shadowtls_port",
-	"trojan_port","xhttp_path","xhttp_path_tls","grpc_service_name","region_bucket"
+	"vless_xhttp_tls_port","vless_ws_tls_port","hysteria2_port","tuic_port","shadowsocks_port","shadowtls_port",
+	"trojan_port","xhttp_path","xhttp_path_tls","ws_path","grpc_service_name","region_bucket"
 ]'
 
 # seed_operator_overrides DEFAULTS_FILE — on the FIRST write under this logic (no overrides file yet),
@@ -210,6 +210,11 @@ write_params() {
 			# vless-xhttp-tls: XHTTP over GENUINE single-layer TLS (own cert; NO reality). Default OFF
 			# (fail-closed; rendered only when enabled). Canonical port 2087 (deliberately not 8443).
 			vless_xhttp_tls_enabled:      false, vless_xhttp_tls_port:      2087,
+			# vless-ws-tls: VLESS over native WebSocket over GENUINE single-layer TLS (own cert; NO reality).
+			# Unlike xhttp-tls this IS servable on sing-box (native ws transport). Default OFF; canonical
+			# port 2089 (deliberately not 8443). ws_path is the per-family WebSocket path (default "/ws").
+			vless_ws_tls_enabled:         false, vless_ws_tls_port:         2089,
+			ws_path: "/ws",
 			# HY2/TUIC default OFF: need a client cert pin the renderer does not yet emit (ADR-0014).
 			hysteria2_enabled:            false, hysteria2_port:            8444,
 			tuic_enabled:                 false, tuic_port:                 8445,
