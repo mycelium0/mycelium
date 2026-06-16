@@ -13,7 +13,9 @@ later. See the LICENSE file in the repository root.
 > the **watch-list** that feeds future decisions. It does not itself bind anything: it informs ADR
 > amendments and the dependency-policy version pins.
 >
-> **last-verified: 2026-06-14** (single doc-level verification date; per-row `Source` columns cite the
+> **last-verified: 2026-06-16** (2026-06-16: corrected the Hysteria2+Salamander HAVE claim against the
+> code — Salamander obfs is design-spec'd but not wired, Audit-0005 C02. Prior full sweep 2026-06-14.)
+> (single doc-level verification date; per-row `Source` columns cite the
 > primary upstream reference). Refresh cadence: **(a)** re-check every WATCH trigger on **each engine-pin
 > bump** in the dependency policy; **(b)** a **quarterly source sweep** of the public technique-tracking
 > forums and reachability-measurement reports cited below. Each refresh updates this date.
@@ -40,9 +42,9 @@ Mycelium is at the frontier on the transport **set**, but trailing on **maintena
 two structural problems that no transport fixes.
 
 The Phase-0 set already contains every distinct, currently-effective **shape** a frontier service
-deploys — REALITY+Vision, REALITY+gRPC, REALITY+XHTTP, genuine-TLS XHTTP, WS+TLS, Hysteria2+Salamander,
-TUIC, AmneziaWG, ShadowTLS — so the universality test is **substantially passed** (one real engine-gap:
-MASQUE). Consistent with the Canonical Rule (ADR-0016), this is breadth of indistinguishable shapes, **not
+deploys — REALITY+Vision, REALITY+gRPC, REALITY+XHTTP, genuine-TLS XHTTP, WS+TLS, Hysteria2 (bare; Salamander obfs
+design-spec'd but **not yet wired** — Audit-0005 C02), TUIC, AmneziaWG, ShadowTLS — so the universality
+test is **substantially passed** on shape breadth (engine gaps: MASQUE; and the Salamander QUIC-obfs wiring). Consistent with the Canonical Rule (ADR-0016), this is breadth of indistinguishable shapes, **not
 a universal bypass substrate**.
 
 The honest weaknesses are:
@@ -77,7 +79,7 @@ follows the ADR-0027 topology split (in-region ingress; out-of-region carried no
 | VLESS + REALITY + XHTTP (stream-up / stream-one / packet-up) | ADR-0010 #3, Xray | Yes — strongest HTTP-framed shape; the up/down split targets the Sept-2025 single-connection TLS-in-TLS classifier. | High | github.com/XTLS/Xray-core/discussions/4113 |
 | VLESS + XHTTP over genuine single-layer TLS (real cert, non-REALITY) | Current set (RP-0007-a); HAVE-the-design for the naive-client and the standards-track web-tunnel / HTTPT patterns | Yes — the doctrine-clean answer to TLS-in-TLS; CDN-frontable. **Not yet in the ADR-0010 table — doc gap.** | High | github.com/net4people/bbs/issues/318 |
 | VLESS + WebSocket + TLS (CDN-frontable) | Current set; covers the domain-fronting-successor role + the Outline SS-over-WS pattern | Yes, as the broadest-compatibility CDN fallback. **Not yet in the ADR-0010 table — doc gap.** | High | github.com/XTLS/Xray-core |
-| Hysteria2 + Salamander obfs + H3 masquerade | ADR-0010 #4, sing-box; `server.template.json` (salamander + masquerade + H3 + real cert); default-off per ADR-0022 | Yes where UDP survives; Salamander removes the parseable SNI. **HAVE, not a gap.** | High | github.com/apernet/hysteria |
+| Hysteria2 (bare) — Salamander obfs + H3 masquerade DESIGN-spec'd, **not yet wired** | ADR-0010 #4, sing-box; default-off per ADR-0022. Bare Hysteria2 (TLS + h3) is HAVE. The Salamander+masquerade design exists in ADR-0010 but is **NOT in the deployed render path**: `render_singbox.sh` has no obfs logic, and the placeholder-bearing `server.template.json` was inert (tags never matched) and was removed when the renderer template became canonical (Audit-0005 C02). | Bare: yes where UDP survives. Salamander (which removes the parseable SNI): **a pre-enablement GAP**, must be wired before the QUIC leg is enabled in a hostile-QUIC network. | High | github.com/apernet/hysteria |
 | TUIC v5 (QUIC) | ADR-0010 #5, sing-box; default-off | Yes — QUIC fingerprint diversity. | High | github.com/EAimTY/tuic |
 | AmneziaWG (Jc/Jmin/Jmax, S1–S2, H1–H4) | ADR-0010 #9, separate userspace awg service | **Yes — current survivor.** Obfuscated UDP lives where TCP-TLS dies (matches field observation). | High | github.com/amnezia-vpn/amneziawg-go |
 | ShadowTLS v3 (wrapping SS-2022) | ADR-0010 #7, default-OFF per ADR-0022 | Wounded (active-probe differential); keep OFF as a diversity leg, do not promote. | Med | github.com/ihciah/shadow-tls |
