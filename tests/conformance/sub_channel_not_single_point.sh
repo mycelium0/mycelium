@@ -121,8 +121,14 @@ fi
 # 2. The bundle content itself spans >=2 INDEPENDENT transport families (mirrors
 #    transport_family_independence): even one delivered bundle is not a single point of block.
 # ---------------------------------------------------------------------------
-# Source the renderer lib in a subshell-safe way: it defines myc_bundle_class_of (pure, no I/O).
+# render_bundle.sh's myc_bundle_class_of now delegates to the shared vocab accessor (control/lib/vocab.sh,
+# RP-0008 P2), which reads the Go-owned control/vocab.json. Source the same dependency chain the
+# myceliumctl entrypoint does (common.sh for myc_die, vocab.sh for myc_vocab_class_of) with MYC_ROOT
+# pointing at the real control/ so the vocab file resolves.
 # shellcheck source=/dev/null
+MYC_ROOT="$REPO_ROOT/control"
+. "$REPO_ROOT/control/lib/common.sh"
+. "$REPO_ROOT/control/lib/vocab.sh"
 . "$BUNDLE_LIB"
 
 if ! command -v myc_bundle_class_of >/dev/null 2>&1 && ! type myc_bundle_class_of >/dev/null 2>&1; then
