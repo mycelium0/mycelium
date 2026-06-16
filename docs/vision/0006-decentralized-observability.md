@@ -16,7 +16,7 @@ later. See the LICENSE file in the repository root.
 > **The one reframe that governs everything: the vantage problem.** The single most important question for
 > a resilient-access fabric is *"can a user reach a node from the network where their access is being
 > blocked?"* — and that question **cannot be answered from the operator's own clean network.** A central
-> monitor scraping the operator's fleet measures *the operator's* reachability, not the blocked user's
+> monitor scraping the operator's network measures *the operator's* reachability, not the blocked user's
 > (see [../adr/0019-node-local-reachability-health.md](../adr/0019-node-local-reachability-health.md):
 > external probing measures the monitoring host's reachability, not the node's egress, and certainly not
 > the user's ingress). The only vantage that answers the real question is **the edge — the users and nodes
@@ -159,7 +159,7 @@ point of this Vision.
 - **The interim per-operator monitor is NOT the rejected central master, and is NOT aggregate-and-forget**
   (§7). Conflating the two would either tear out all visibility or, worse, rebuild the cross-operator map.
 
-## 7. The interim (Phase 0–2): sighted at the edge of one's own fleet
+## 7. The interim (Phase 0–2): sighted at the edge of one's own network
 With no central master and no running mesh, the operator is sighted at **L0 only**, and that is correct:
 - Each node runs `node_exporter` (loopback `:9100`), `dataplane-stats` (loopback `:9550`, reading sing-box
   `clash_api` `:9090` aggregate counters), and — when configured — the reachability Monitor's loopback
@@ -176,7 +176,7 @@ With no central master and no running mesh, the operator is sighted at **L0 only
 
 ## 8. Phase path
 - **Phase 0–2 (now):** L0 local sensing (deployed) + inert schemas + each operator's own control-host
-  monitor over their own fleet. No emission, no gossip, no mesh, no cross-operator map.
+  monitor over their own network. No emission, no gossip, no mesh, no cross-operator map.
 - **Phase 2 (Measurement track):** L1 generation/emission as the network-state detector + **opt-in edge
   reporting** (§4) — the priority. Requires first: a `NoisePolicy` field, a closed `ReasonCode` enum, the
   publisher + its fail-closed gate + signature verifier + per-source caps. No off-node gossip yet.
@@ -204,7 +204,7 @@ With no central master and no running mesh, the operator is sighted at **L0 only
   region-bucket granularity, and its anti-Sybil weighting — the priority Phase-2 design thread.
 
 ## 10. Non-goals / phase discipline
-- **No cross-operator collector, ever** — not in any phase. The per-operator own-fleet monitor (§7) is the
+- **No cross-operator collector, ever** — not in any phase. The per-operator own-network monitor (§7) is the
   only collector, and only over one's own boxes.
 - **No gossip / DHT / mesh / announce-into-mesh / running aggregation in Phase 0–2** — inert schemas + L0
   only. Those are Phase 3–4.

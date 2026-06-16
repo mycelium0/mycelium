@@ -113,7 +113,7 @@ precise here.
   deploying node-local liveness/utilisation/alerts — is tracked outside this ADR.)
 - **Follow-on actions required:** annotate ROADMAP Phase-0 lines with `(see ADR-0020)`; add
   [../runbooks/reality-rotation.md](../runbooks/reality-rotation.md); bring AmneziaWG live on the one
-  node still missing it so D2 holds fleet-wide; add the static D2 family check; record the Terraform
+  node still missing it so D2 holds network-wide; add the static D2 family check; record the Terraform
   decision wherever the deploy paths are listed.
 - **What is now forbidden in Phase 0:** standing up a public always-on config-distribution endpoint;
   treating Vision+gRPC alone as "two independent shapes"; shipping automated/triggered REALITY rotation;

@@ -113,7 +113,7 @@ reviewable risk surface with its own acceptance criteria and conformance evidenc
 |---|---|---|
 | **RP-0007-a** (transport) | the genuine-TLS-XHTTP family + its mandatory cover/probe re-vet | **1 transport/behaviour shift** |
 | **RP-0007-b** (matured subscription) | the matured, self-updating per-node subscription endpoint | **1 layer/boundary shift + 1 surface shift** (honest count) |
-| **RP-0007-c** (health/failover) | per-transport health **legibility** + client-side within-node failover ordering; per-operator own-fleet dashboard | **1 behaviour shift** |
+| **RP-0007-c** (health/failover) | per-transport health **legibility** + client-side within-node failover ordering; per-operator own-network dashboard | **1 behaviour shift** |
 | **RP-0007-d** (seam + pins + client-side merge) | the bundle/health closed-vocab schema, the two Audit pins, the `xhttp-tls` enum member (single owner), the client-side merge contract | **1 config-distribution surface shift, 0 transport, 0 layer** |
 
 > **Single-owner of the closed vocabulary.** To avoid `CONFLICTING_SOURCE_OF_TRUTH`, the new
@@ -174,7 +174,7 @@ reviewable risk surface with its own acceptance criteria and conformance evidenc
 | `myceliumctl` `subscription` / `aggregate` (control spine) | `subscription` emits the matured per-node bundle; `aggregate` is a **local** helper that merges M per-node sub URLs into one local profile (writes a local file; **not** a served endpoint) | active | Go stdlib | The cluster set must live only client-side; a served aggregator would be the forbidden central map |
 | `control/lib/render_singbox.sh` + `render.sh` | Render the bundle + the new inbound; reuse the existing cert plumbing and `urltest`/`selector` failover structure | active | sing-box config | Existing renderer; reused, not replaced |
 | Stock clients (sing-box / Clash-Meta / Happ / Xray) | Consume the per-node bundle, run the native auto-update loop + native `urltest`/`leastPing` failover (the authoritative health signal); merge M per-node URLs client-side | passive | sing-box, Clash-Meta, Happ, Xray-core | ADR-0016 off-the-shelf clients; building a bespoke client breaks the §15.8 seam |
-| Per-operator own-fleet dashboard (RP-c) | Operator scrapes **their own** nodes' loopback exporters over **their own** SSH tunnels into **their own** Prometheus/Grafana; per-transport-per-region panels | active | Prometheus + Alertmanager + Grafana | ADR-0021 interim option-3; explicitly **not** a cross-operator central Prometheus ("the network map") |
+| Per-operator own-network dashboard (RP-c) | Operator scrapes **their own** nodes' loopback exporters over **their own** SSH tunnels into **their own** Prometheus/Grafana; per-transport-per-region panels | active | Prometheus + Alertmanager + Grafana | ADR-0021 interim option-3; explicitly **not** a cross-operator central Prometheus ("the network map") |
 | Reach-monitor (`:9551`) + dataplane-stats (`:9550`) | Read-only node-local L0 inputs the dashboard scrapes; `spec.TransportHealth` window is the producer contract | passive | sing-box clash_api / node_exporter | ADR-0019 node-local sensing; not a new collector |
 | `spec.EdgeReport` / `SporeEnvelope` / `DiscoveryBackend` | Declared-but-inert seam: the bundle health cell key is shaped so a Phase-2 edge signal / Phase-3 spore can later populate the same `(RegionBucket, TransportClass)` cells without a contract rewrite | deferred | none | — |
 | CDN-fronted last-resort slot | Declared **inert** low-priority bundle slot; working front is a later RP | deferred | RU-reachable CDN (**not** Cloudflare) | ADR-0014 §6: the candidate CDN is blocked/throttled on target networks; declared, not relied upon |
@@ -249,7 +249,7 @@ each workstream holds within the cap:
   version with native XHTTP is an explicit dependency-policy change (a separate decision), not a free
   assumption.
 - **Cert:** the operator's **own** wildcard real cert (genuine TLS), per ADR-0014 — a transitional
-  own-fleet convenience, with per-operator own-domain ACME as the canonical posture; **not** a REALITY
+  own-network convenience, with per-operator own-domain ACME as the canonical posture; **not** a REALITY
   donor-borrow and **not** a self-signed pin. Reuse the existing `fullchain/privkey` plumbing
   (`render_singbox.sh:124-128`).
 - **Cover/self-steal:** unauthenticated/non-XHTTP-path requests fall back to the existing loopback
@@ -296,7 +296,7 @@ advisory** and stays so across the seam (see §15.8 below).
   forward-compat** (health stays `unknown`) and is **removed from the Phase-1 DoD scenarios** until a
   later RP wires real collection. This keeps RP-0007-c honest and within its 1-behaviour-shift cap and
   avoids the forged-health dishonesty trap (VIS-0006 §6).
-- Per-operator **own-fleet** dashboard renders per-transport-per-region state (e.g. "REALITY-TCP
+- Per-operator **own-network** dashboard renders per-transport-per-region state (e.g. "REALITY-TCP
   degraded in region X, AmneziaWG alive") from the operator's own loopback exporters over their own
   SSH tunnels — **never** a cross-operator collector.
 
@@ -358,16 +358,16 @@ loopback-local computation + bundle metadata.
 The node-knowledge-about-user model is **not** expanded: the bundle carries node endpoints + coarse
 health/region only; no per-user attribution. **Cert-as-identity caveat (OPSEC):** the genuine cert
 ties a node to the operator's own domain (an identity + renewal dependency + coercion handle ADR-0014
-warns of), and a fleet-wide wildcard is a cross-node correlator. Mitigation: ADR-0014 per-node
+warns of), and a network-wide wildcard is a cross-node correlator. Mitigation: ADR-0014 per-node
 own-domain ACME as canonical; wildcard only transitional; the domain is **never** written into docs or
 the bundle vocabulary (English, no hostnames). **At-rest map (named bounded exception):** the
 `myceliumctl aggregate` helper writes a **local** merged profile that **does** enumerate the
-operator's own fleet at rest on the operator's disk — an exfiltrated/seized file yields the full
-fleet map. This is acknowledged as a **named, bounded exception** (analogous to the per-operator
-monitor's own-fleet history, ADR-0021 / VIS-0006 §7), identity-free and never transmitted. The honest
+operator's own network at rest on the operator's disk — an exfiltrated/seized file yields the full
+network map. This is acknowledged as a **named, bounded exception** (analogous to the per-operator
+monitor's own-network history, ADR-0021 / VIS-0006 §7), identity-free and never transmitted. The honest
 claim is **"no served/network artifact enumerates the cluster,"** not "no map exists." **Dashboard
 retained history:** the per-operator monitor is **not** aggregate-and-forget — it retains durable
-own-fleet history (forensic value **and** an own-boxes coercion surface); stated in THREAT-MODEL.
+own-network history (forensic value **and** an own-boxes coercion surface); stated in THREAT-MODEL.
 
 ### Temporary degradation and rollback risk
 
@@ -458,7 +458,7 @@ REALITY would collapse breadth on the local-region node — REALITY is **kept in
   client's native health-check interval**, via the **client's own probe** — **not** a server push and
   **not** a bundle-health-keyed decision (health stays `unknown`). Measured: time-to-recover ≤ one
   `urltest` cycle.
-- **AC-c2 (DoD-2, dashboard per-transport per-region):** the operator's own-fleet Grafana renders,
+- **AC-c2 (DoD-2, dashboard per-transport per-region):** the operator's own-network Grafana renders,
   per node and per coarse region bucket, a per-transport-family state panel reproducing the field
   finding shape, sourced **only** from that operator's own nodes' loopback exporters over SSH. A
   conformance/runbook check proves **no** exporter port is open on any public interface and **no**
@@ -468,7 +468,7 @@ REALITY would collapse breadth on the local-region node — REALITY is **kept in
   quarantine, or alter trust. No code path lets a band trigger actuation.
 - **AC-c4 (vantage honesty + retained-history honesty):** a runbook/doc check asserts the project does
   **not** claim in-region visibility from node-local health, and that the per-operator dashboard
-  **retains durable own-fleet history** (forensic value **and** an own-boxes coercion surface) and is
+  **retains durable own-network history** (forensic value **and** an own-boxes coercion surface) and is
   **not** aggregate-and-forget — the bounded exception named in ADR-0021 / VIS-0006 §7, **stated in
   THREAT-MODEL**. The EdgeReport seam is present and inert (schema-presence + no-emission test).
 - **AC-c5 (cap respected):** a review gate confirms RP-0007-c changes exactly one behaviour (health
@@ -541,7 +541,7 @@ REALITY would collapse breadth on the local-region node — REALITY is **kept in
   bundle-is-a-partial-view shape, the F-020 / F-022 pins, the `xhttp-tls` taxonomy member, and the
   §15.8 frozen client loop.
 - **ARCHITECTURE:** Layer 1 (new inbound + cover fallback); Layer 2 (the matured per-node endpoint +
-  the client-side merge model); the per-operator own-fleet dashboard (ADR-0021 interim).
+  the client-side merge model); the per-operator own-network dashboard (ADR-0021 interim).
 - **THREAT-MODEL:** the own-cert probe-termination surface; the at-rest aggregate-map bounded
   exception; the dashboard retained-history bounded exception; the sub-channel-is-not-a-single-point
   and region-is-not-a-location-channel invariants.
@@ -569,7 +569,7 @@ REALITY would collapse breadth on the local-region node — REALITY is **kept in
 4. **RP-0007-d (seam + merge):** publish the client-side merge recipe + the local `aggregate` helper;
    document the at-rest-map bounded exception. No served cross-node artifact at any stage.
 5. **RP-0007-c (health/failover):** surface the advisory `health=unknown` field and stand up the
-   per-operator own-fleet dashboard; client-native `urltest` is the only failover authority in Phase 1.
+   per-operator own-network dashboard; client-native `urltest` is the only failover authority in Phase 1.
 6. **Final cutover:** clients move from manual N-server profiles to the merged self-updating profile
    on their own refresh cadence; the Phase-0 static file remains a parallel cold-start path.
 7. **Across the eventual fungi transition (§15.8):** the off-the-shelf Remote-Profile /

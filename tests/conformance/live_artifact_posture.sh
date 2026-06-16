@@ -6,7 +6,7 @@
 #
 # live_artifact_posture.sh — conformance: assertions on the ACTUALLY-DEPLOYED artifacts (the renderer
 # template + the bootstrap's live default-on set), not on a superseded template. Closes the gap where
-# the GO/NO-GO evidence described a template the fleet does not deploy (Audit-0004 F-002, F-004).
+# the GO/NO-GO evidence described a template the network does not deploy (Audit-0004 F-002, F-004).
 # Author: mindicator & silicon bags quartet.
 #
 # CHECKS

@@ -18,7 +18,7 @@ import (
 func goodDigest() NodeStatusDigest {
 	return NodeStatusDigest{
 		Version: NetworkStateVersion,
-		Scope:   TrustScope{ID: "scope-1", Label: "fleet", MaxHops: 0},
+		Scope:   TrustScope{ID: "scope-1", Label: "network", MaxHops: 0},
 		Classes: []ClassHealth{
 			{Class: TransportClassRealityTCP, Health: HealthDegraded},
 			{Class: TransportClassAmneziaWGUDP, Health: HealthAlive},
@@ -31,7 +31,7 @@ func goodDigest() NodeStatusDigest {
 	}
 }
 
-// The advisory-fleet digest is a valid SporeType member (it rides a SporeEnvelope of this type).
+// The advisory-network digest is a valid SporeType member (it rides a SporeEnvelope of this type).
 func TestSporeTypeNodeStatusValid(t *testing.T) {
 	if !SporeTypeNodeStatus.IsValid() {
 		t.Fatal("node-status must be a valid spore type")

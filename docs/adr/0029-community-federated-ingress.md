@@ -77,7 +77,7 @@ The Phase-1 two-hop egress is a route-mutating change applied per node from a **
 overlay (`render_singbox.sh` reads `params.two_hop` → upstream outbound + an `auth_user` route). Its
 failure surface:
 
-- **Gated → zero blast radius for the fleet.** A node WITHOUT the overlay renders byte-identically; only a
+- **Gated → zero blast radius for the network.** A node WITHOUT the overlay renders byte-identically; only a
   node that opts in carries the egress. The overlay is node-local + never committed.
 - **Scoped, fail-closed selection.** Exactly the named `via_user` egresses out-of-region; every other client
   stays on the node's in-region `final` route (its normal exit). An **empty/absent `via_user` is refused**
