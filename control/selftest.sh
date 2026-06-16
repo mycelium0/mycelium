@@ -396,6 +396,12 @@ jq -e 'all(.outbounds[]; .tag != "trojan")' "$SB_CLIENT" >/dev/null \
 	&& ok "disabled trojan absent from client outbounds" || bad "trojan present in client"
 jq -e 'any(.outbounds[]; .type == "urltest" and .tag == "auto")' "$SB_CLIENT" >/dev/null \
 	&& ok "client has a urltest outbound" || bad "no urltest outbound"
+# C22 anti-flapping: the subscription urltest carries the widened hysteresis defaults so a single-node
+# client does not thrash between near-equal endpoints on jitter.
+jq -e '(.outbounds[] | select(.type=="urltest"))
+	| .interval=="5m" and .tolerance==150 and .idle_timeout=="30m"' "$SB_CLIENT" >/dev/null \
+	&& ok "C22 subscription urltest carries anti-flap hysteresis (interval 5m, tolerance 150, idle_timeout 30m)" \
+	|| bad "C22 subscription urltest missing anti-flap hysteresis fields"
 jq -e 'any(.outbounds[]; .type == "selector" and .tag == "mycelium")' "$SB_CLIENT" >/dev/null \
 	&& ok "client has a selector outbound" || bad "no selector outbound"
 # Priority order: vision first in both urltest and selector.
@@ -541,7 +547,7 @@ jq -n --arg priv "$PRIV" --arg pub "$PUB" --arg sid "$SID" '{
 		tag: "to-egress", server: "203.0.113.10", server_port: 443,
 		uuid: "00000000-0000-4000-8000-000000000000",
 		sni: "egress.example.invalid", ws_path: "/ws", ws_host: "egress.example.invalid",
-		fingerprint: "chrome", alpn: "http/1.1", via_user: "egress-user"
+		fingerprint: "chrome", alpn: "http/1.1", via_user: "alice"
 	}
 }' > "$TH_PARAMS"
 jq -e . "$TH_PARAMS" >/dev/null && ok "two-hop params fixture is valid JSON" || bad "two-hop params invalid"
@@ -551,7 +557,7 @@ jq -e . "$TH_PARAMS" >/dev/null && ok "two-hop params fixture is valid JSON" || 
 jq -e . "$TH_SERVER_OUT" >/dev/null && ok "two-hop server.json is valid JSON" || bad "two-hop server.json invalid"
 jq -e 'any(.outbounds[]; .tag=="to-egress" and .type=="vless" and .transport.type=="ws" and .tls.enabled==true)' "$TH_SERVER_OUT" >/dev/null \
 	&& ok "two-hop upstream outbound present (vless+ws+tls)" || bad "two-hop upstream outbound missing/malformed"
-jq -e 'any(.route.rules[]; (.auth_user // []) == ["egress-user"] and .outbound=="to-egress")' "$TH_SERVER_OUT" >/dev/null \
+jq -e 'any(.route.rules[]; (.auth_user // []) == ["alice"] and .outbound=="to-egress")' "$TH_SERVER_OUT" >/dev/null \
 	&& ok "two-hop auth_user route rule present (designated client -> upstream egress)" || bad "two-hop route rule missing"
 jq -e 'any(.outbounds[]; .tag=="to-egress") | not' "$SB_SERVER_OUT" >/dev/null \
 	&& ok "no two_hop param -> no upstream outbound (feature gated, zero blast radius)" || bad "two_hop leaked into a config without the param"
@@ -563,6 +569,58 @@ if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$TH
 	bad "two-hop with empty via_user was rendered (FAIL-OPEN) — should be refused"
 else
 	ok "two-hop with empty via_user is REFUSED (fail-closed; no unscoped egress)"
+fi
+
+# C18 fail-closed: a two-hop via_user that names a NON-EXISTENT client must be REFUSED at render-server.
+# An unknown user would emit an auth_user route rule that never matches — a dead, unscoped egress.
+TH_UNKNOWN_PARAMS="$WORK/params.singbox-twohop-unknownuser.json"; TH_UNKNOWN_OUT="$WORK/server.twohop-unknownuser.json"
+jq '.two_hop.via_user = "not-a-real-client"' "$TH_PARAMS" > "$TH_UNKNOWN_PARAMS"; rm -f "$TH_UNKNOWN_OUT"
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$TH_UNKNOWN_PARAMS" --state "$STATE" --out "$TH_UNKNOWN_OUT" >/dev/null 2>&1 && [ -s "$TH_UNKNOWN_OUT" ]; then
+	bad "C18 two-hop with an UNKNOWN via_user was rendered (the auth_user route would never match) — should be refused"
+else
+	ok "C18 two-hop with an unknown via_user is REFUSED (fail-closed; via_user must be a known client)"
+fi
+
+# C21 fail-closed: a two-hop whose EGRESS is the INGRESS itself (same server address, or same SNI as the
+# node's donor_sni) is no second hop — it must be REFUSED. Two cases: egress server == node_address, and
+# egress sni == donor_sni.
+TH_SAMEHOST_PARAMS="$WORK/params.singbox-twohop-samehost.json"; TH_SAMEHOST_OUT="$WORK/server.twohop-samehost.json"
+jq '.two_hop.server = .node_address' "$TH_PARAMS" > "$TH_SAMEHOST_PARAMS"; rm -f "$TH_SAMEHOST_OUT"
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$TH_SAMEHOST_PARAMS" --state "$STATE" --out "$TH_SAMEHOST_OUT" >/dev/null 2>&1 && [ -s "$TH_SAMEHOST_OUT" ]; then
+	bad "C21 two-hop whose egress server == this node's address was rendered — should be refused (ingress==egress)"
+else
+	ok "C21 two-hop with egress server == ingress address is REFUSED (fail-closed; hops must be distinct)"
+fi
+TH_SAMESNI_PARAMS="$WORK/params.singbox-twohop-samesni.json"; TH_SAMESNI_OUT="$WORK/server.twohop-samesni.json"
+jq '.two_hop.sni = .donor_sni' "$TH_PARAMS" > "$TH_SAMESNI_PARAMS"; rm -f "$TH_SAMESNI_OUT"
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$TH_SAMESNI_PARAMS" --state "$STATE" --out "$TH_SAMESNI_OUT" >/dev/null 2>&1 && [ -s "$TH_SAMESNI_OUT" ]; then
+	bad "C21 two-hop whose egress sni == this node's donor_sni was rendered — should be refused (ingress==egress)"
+else
+	ok "C21 two-hop with egress sni == ingress donor_sni is REFUSED (fail-closed; egress must be distinct)"
+fi
+
+# C17 fail-closed: a malformed two_hop overlay (e.g. a non-integer / out-of-range server_port, or a
+# missing upstream field) must be REFUSED at render-server — the SAME bar render_bundle now applies.
+TH_BADPORT_PARAMS="$WORK/params.singbox-twohop-badport.json"; TH_BADPORT_OUT="$WORK/server.twohop-badport.json"
+jq '.two_hop.server_port = 0' "$TH_PARAMS" > "$TH_BADPORT_PARAMS"; rm -f "$TH_BADPORT_OUT"
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$TH_BADPORT_PARAMS" --state "$STATE" --out "$TH_BADPORT_OUT" >/dev/null 2>&1 && [ -s "$TH_BADPORT_OUT" ]; then
+	bad "C17 two-hop with server_port 0 was rendered — a malformed upstream should be refused"
+else
+	ok "C17 two-hop with an out-of-range server_port is REFUSED at render-server (fail-closed)"
+fi
+
+# C17/C18 at BUNDLE-render: the bundle producer now validates the same two_hop shape so a node whose
+# params carry a malformed/unknown-user overlay does not emit a bundle for a config that cannot render.
+if "$CTL" bundle --params "$TH_UNKNOWN_PARAMS" --state "$STATE" --out "$WORK/bundle.twohop-unknown.json" >/dev/null 2>&1; then
+	bad "C17/C18 bundle rendered despite an unknown two_hop via_user (producer/server divergence)"
+else
+	ok "C17/C18 bundle refuses a malformed/unknown two_hop overlay (fail-closed; matches render-server)"
+fi
+# The happy-path two_hop overlay (known via_user, distinct + well-formed upstream) must still produce a bundle.
+if "$CTL" bundle --params "$TH_PARAMS" --state "$STATE" --out "$WORK/bundle.twohop-ok.json" >/dev/null 2>&1; then
+	ok "C17 bundle renders with a well-formed two_hop overlay (feature on, overlay valid)"
+else
+	bad "C17 bundle refused a well-formed two_hop overlay (false fail-closed)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -740,6 +798,13 @@ jq -e '(.outbounds[] | select(.type=="selector") | .default) == "auto"' "$AGG_OU
 jq -e '([.outbounds[] | select(.type=="urltest") | .outbounds[]] | sort)
 	== ([.outbounds[] | select(.type | IN("vless","hysteria2","tuic","shadowsocks","trojan")) | .tag] | sort)' "$AGG_OUT" >/dev/null \
 	&& ok "urltest covers exactly all merged proxy outbounds (cross-node auto-switch)" || bad "urltest does not cover all node proxies"
+
+# C22 anti-flapping: the aggregate urltest carries the widened hysteresis defaults (interval 5m,
+# tolerance 150ms, idle_timeout 30m) so the cross-node auto-switch does not thrash on jitter.
+jq -e '(.outbounds[] | select(.type=="urltest"))
+	| .interval=="5m" and .tolerance==150 and .idle_timeout=="30m"' "$AGG_OUT" >/dev/null \
+	&& ok "C22 aggregate urltest carries anti-flap hysteresis (interval 5m, tolerance 150, idle_timeout 30m)" \
+	|| bad "C22 aggregate urltest missing anti-flap hysteresis fields"
 
 # A parsed outbound is well-formed: the nodeA vision outbound is a vless reality outbound that
 # dials nodeA's address (proof the link was parsed into a real client outbound, not passed opaque).

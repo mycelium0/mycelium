@@ -66,6 +66,24 @@
 		respond "Not found" 404
 	}
 
+	# C24 fail-closed/neutral error surface: in the startup window before node-bootstrap renders the
+	# bundle (or if the file is missing/unreadable/oversize), file_server raises a 404/500. Without a
+	# handler that surfaces as a DEFAULT Caddy error page — an information-leaking, server-identifying
+	# response on a delivery surface that must stay neutral. handle_errors replaces ANY error with a
+	# minimal, fixed 503 + JSON-ish body and strips the Server header, so a client self-poller sees a
+	# clean "try later" instead of a stack-revealing default page. The renderer keeps the last-known-good
+	# bundle fail-closed; this only governs the genuinely-absent / error case.
+	handle_errors {
+		header {
+			-Server
+			Content-Type "application/json"
+			Cache-Control "no-store"
+			X-Content-Type-Options "nosniff"
+			Retry-After "60"
+		}
+		respond `{"error":"bundle temporarily unavailable"}` 503
+	}
+
 	log {
 		# Do not retain client PII (THREAT-MODEL: user safety #1).
 		output discard

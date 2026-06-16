@@ -106,7 +106,7 @@ P1:
 - [ ] `bundle_go_roundtrip` conformance gate: render a bundle → Unmarshal → `Validate()` passes, on the same fixtures the shell selftest uses.
 - [ ] `spec.RegionBucket` closed enum enforced in `Endpoint.Validate()` (C13); `GeneratedAt` validated as RFC-3339 UTC (C15); `TestBundleJSONRoundTrip` lands (C16).
 - [ ] `node-bootstrap.sh` served-bundle gate calls the Go validator (C10 authoritative), retaining the jq pre-check as defence-in-depth.
-- [ ] Conformance green; `no_custom_crypto`, `bundle_region_closed_vocab`, the existing 21 gates unchanged in verdict.
+- [ ] Conformance green; `no_custom_crypto`, `bundle_region_closed_vocab`, and the existing offline gates unchanged in verdict (no regression).
 
 P2:
 - [ ] `spec.ProtocolToTransportClass` is the single mapping; `myceliumctl` exposes it (and the version) via `--json`; `family_of`/`myc_bundle_class_of` consume the Go output (C12).
