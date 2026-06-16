@@ -37,18 +37,21 @@ REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 NB="$REPO_ROOT/scripts/node-bootstrap.sh"
 [ -f "$NB" ] || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$NB" >&2; exit 2; }
 
-# RP-0009 C2 decomposition: the entrypoint sources its control-logic from control/lib/nb_*.sh. The
+# RP-0009 C2/C3 decomposition: the entrypoint sources its control-logic from control/lib/nb_*.sh. The
 # render/serve groups this gate inspects (write_params + the C19 operator-override seed/merge, in
-# nb_render_params.sh; render_serve_bundle + bundle_served_age* in nb_serve_bundle.sh) now live in those
-# libs. assert_two_hop_shape + the flow_* dispatchers stay in the entrypoint. Inspect the entrypoint AND
-# the sourced libs as one logical source so the wiring assertions follow the code that moved (the runtime
-# behaviour is unchanged — everything is sourced into one shared scope on the node).
+# nb_render_params.sh; render_serve_bundle + bundle_served_age* in nb_serve_bundle.sh) live in those libs;
+# C3 then moved the two-hop ROUTING POLICY — assert_two_hop_shape + flow_disable_two_hop — into
+# nb_two_hop.sh. The flow_revoke/flow_update dispatchers stay in the entrypoint. Inspect the entrypoint
+# AND the sourced libs as one logical source so the wiring assertions follow the code that moved (the
+# runtime behaviour is unchanged — everything is sourced into one shared scope on the node).
 NB_RENDER_PARAMS="$REPO_ROOT/control/lib/nb_render_params.sh"
 NB_SERVE_BUNDLE="$REPO_ROOT/control/lib/nb_serve_bundle.sh"
+NB_TWO_HOP="$REPO_ROOT/control/lib/nb_two_hop.sh"
 [ -f "$NB_RENDER_PARAMS" ] || { printf 'FAIL: nb_render_params.sh not found: %s\n' "$NB_RENDER_PARAMS" >&2; exit 2; }
 [ -f "$NB_SERVE_BUNDLE" ]  || { printf 'FAIL: nb_serve_bundle.sh not found: %s\n'  "$NB_SERVE_BUNDLE"  >&2; exit 2; }
+[ -f "$NB_TWO_HOP" ]       || { printf 'FAIL: nb_two_hop.sh not found: %s\n'       "$NB_TWO_HOP"       >&2; exit 2; }
 # NB_SRC = the files that make up the node control plane (entrypoint + sourced control-logic libs).
-NB_SRC="$NB $NB_RENDER_PARAMS $NB_SERVE_BUNDLE"
+NB_SRC="$NB $NB_RENDER_PARAMS $NB_SERVE_BUNDLE $NB_TWO_HOP"
 
 fail=0
 okln()  { printf '  ok    %s\n' "$1"; }
