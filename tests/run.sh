@@ -39,6 +39,9 @@
 #                               listen binds loopback-only (RP-0007-b)
 #   * node_two_hop_failclosed.sh — node-bootstrap.sh wires the two-hop / operator-toggle / served-bundle
 #                               fail-closed behaviours (audit C17/C18/C19/C21/C25)
+#   * bundle_go_roundtrip.sh  — a shell-rendered bundle round-trips through the authoritative Go
+#                               validator (myceliumctl validate-bundle); RP-0008 P1 / audit C11. SKIPs
+#                               where no Go toolchain is present (jq-only host/CI lane)
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -73,6 +76,7 @@ GATES=(
 	"tests/conformance/live_artifact_posture.sh"
 	"tests/conformance/dependency_policy.sh"
 	"tests/conformance/bundle_region_closed_vocab.sh"
+	"tests/conformance/bundle_go_roundtrip.sh"
 	"tests/conformance/active_probe_owncert.sh"
 	"tests/conformance/sub_channel_not_single_point.sh"
 	"tests/conformance/node_two_hop_failclosed.sh"

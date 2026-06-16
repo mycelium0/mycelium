@@ -11,8 +11,10 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"text/tabwriter"
 	"time"
@@ -43,6 +45,8 @@ func run(args []string) error {
 		return nil
 	case "identity":
 		return cmdIdentity(rest)
+	case "validate-bundle":
+		return cmdValidateBundle(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -130,6 +134,45 @@ func cmdIdentity(args []string) error {
 	}
 }
 
+// cmdValidateBundle reads a rendered distribution bundle (a file path, or "-" for stdin), unmarshals it
+// into spec.Bundle, and runs the authoritative spec.Bundle.Validate(). It is the Go-owned round-trip
+// boundary (RP-0008 P1): the shell renderer produces the JSON; this command is the single authority on
+// whether that JSON is a structurally-valid Phase-1 bundle (version, >=1 endpoint, closed-vocab
+// transport class + region, advisory-only health == "unknown", non-empty tag/link, dated). Pure
+// read + validate: no network, no mutation. Exits non-zero on any invalid bundle.
+func cmdValidateBundle(args []string) error {
+	fs := flag.NewFlagSet("validate-bundle", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("validate-bundle: exactly one bundle FILE (or - for stdin) is required")
+	}
+	src := fs.Arg(0)
+	var (
+		data []byte
+		err  error
+	)
+	if src == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(src)
+	}
+	if err != nil {
+		return fmt.Errorf("validate-bundle: read %s: %w", src, err)
+	}
+	var b spec.Bundle
+	if err := json.Unmarshal(data, &b); err != nil {
+		return fmt.Errorf("validate-bundle: %s is not valid bundle JSON: %w", src, err)
+	}
+	if err := b.Validate(); err != nil {
+		return fmt.Errorf("validate-bundle: %s is not a valid bundle: %w", src, err)
+	}
+	fmt.Printf("ok\tvalid bundle\tversion=%d\tendpoints=%d\tgenerated_at=%s\n",
+		b.Version, len(b.Endpoints), b.GeneratedAt.UTC().Format(time.RFC3339))
+	return nil
+}
+
 func usage(w *os.File) {
 	fmt.Fprintf(w, `myceliumctl %s — Mycelium Phase 0 control CLI (Go spine).
 
@@ -140,6 +183,7 @@ Commands:
   identity add    --name NAME [--state FILE]   issue a client (UUID via the OS CSPRNG)
   identity revoke NAME|ID     [--state FILE]   revoke a client by name or id
   identity list              [--state FILE]    list clients
+  validate-bundle FILE|-                       validate a rendered distribution bundle (RP-0008 P1)
   version                                      print the spine version
   help                                         show this help
 
