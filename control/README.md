@@ -280,7 +280,11 @@ control/
 │   ├── jqlib.sh                   # jq read/edit wrappers, params parsing, state init
 │   ├── identity.sh                # identity add/revoke/list state operations
 │   ├── render.sh                  # xray engine: render-server + subscription
-│   └── render_singbox.sh          # sing-box engine: multi-protocol render + subscription
+│   ├── render_singbox.sh          # sing-box engine: multi-protocol render + subscription
+│   ├── render_bundle.sh           # typed distribution Bundle render (myceliumctl bundle)
+│   ├── render_aggregate.sh        # client-side multi-node bundle merge (myceliumctl aggregate)
+│   └── nb_*.sh                    # node-bootstrap.sh modules (RP-0009) — sourced by
+│                                  #   scripts/node-bootstrap.sh, NOT myceliumctl (see below)
 ├── params.example.json            # example params (multi-protocol placeholders only)
 ├── selftest.sh                    # offline test harness (bash + jq only; stubs xray/openssl)
 ├── testdata/
@@ -290,6 +294,30 @@ control/
 ├── state/                         # (gitignored) identity state + rendered server.json
 └── out/                           # (gitignored) generated subscription configs
 ```
+
+### `nb_*.sh` — node-bootstrap modules (RP-0009)
+
+`scripts/node-bootstrap.sh` is **orchestration only** (arg-parse + the `flow_*` dispatchers + `verify_*` +
+dispatch). Every render/validate/policy/install concern lives in a `control/lib/nb_*.sh` module it sources
+from `$ARTIFACT_ROOT/control/lib` (re-exec-safe). These are a **different sourcing context** from the
+myceliumctl libs above — node-bootstrap sources them, myceliumctl does not.
+
+| Module | Concern | Class |
+|---|---|---|
+| `nb_identity.sh` | key/uuid/shortid/secret generation + `ensure_identity` | OS-glue |
+| `nb_donor.sh` | REALITY donor selection | OS-glue |
+| `nb_harden.sh` | host hardening (journald/sshd/ufw) | OS-glue |
+| `nb_install.sh` | package/engine install, systemd unit, restart/apply helpers, `install_tooling` | OS-glue |
+| `nb_render_params.sh` | `write_params` + operator-override seed/merge | **control-logic** (RP-0008 candidate) |
+| `nb_serve_bundle.sh` | served last-known-good bundle gate + staleness signal | **control-logic** |
+| `nb_two_hop.sh` | `assert_two_hop_shape` + `--disable-two-hop` (routing policy) | **control-logic** |
+| `nb_render_awg.sh` | AmneziaWG dialect/render + split-tunnel AllowedIPs + userspace setup | mixed |
+| `nb_update_apply.sh` | signed-pull → render → validate → promote → rollback apply state machine | **control-logic** |
+| `nb_observability.sh` | node_exporter + the dataplane-metrics generator | OS-glue |
+
+The "no new control-decisions-in-bash" rule (the entrypoint may only define helpers / `flow_*` / `verify_*`)
+is enforced by `tests/conformance/no_new_control_decisions_in_bash.sh`. The **control-logic** modules are
+the front line for the Go-spine migration (RP-0008).
 
 ## Tests
 

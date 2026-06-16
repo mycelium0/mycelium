@@ -39,6 +39,10 @@
 #                               listen binds loopback-only (RP-0007-b)
 #   * node_two_hop_failclosed.sh — node-bootstrap.sh wires the two-hop / operator-toggle / served-bundle
 #                               fail-closed behaviours (audit C17/C18/C19/C21/C25)
+#   * no_new_control_decisions_in_bash.sh — scripts/node-bootstrap.sh stays orchestration-only after the
+#                               RP-0009 decomposition: every function it defines is a helper/flow_*/verify_*,
+#                               it still sources its control/lib/nb_*.sh modules, and no control-logic
+#                               function is re-inlined ("no new control-decisions-in-bash", RP-0008/RP-0009)
 #   * bundle_go_roundtrip.sh  — a shell-rendered bundle round-trips through the authoritative Go
 #                               validator (myceliumctl validate-bundle); RP-0008 P1 / audit C11. SKIPs
 #                               where no Go toolchain is present (jq-only host/CI lane)
@@ -85,6 +89,7 @@ GATES=(
 	"tests/conformance/active_probe_owncert.sh"
 	"tests/conformance/sub_channel_not_single_point.sh"
 	"tests/conformance/node_two_hop_failclosed.sh"
+	"tests/conformance/no_new_control_decisions_in_bash.sh"
 	"control/selftest.sh"
 )
 

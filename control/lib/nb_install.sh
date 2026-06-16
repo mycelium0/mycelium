@@ -180,6 +180,14 @@ UNIT
 
 restart_singbox() { need_root; run systemctl enable --now sing-box 2>/dev/null || true; run systemctl restart sing-box; }
 
+# apply_singbox — the flow-level apply primitive the update/revoke paths call to make the running
+# service pick up a new config. sing-box is Type=simple with NO ExecReload, so there is no real
+# "reload": applying a config IS a restart (it briefly drops live connections). We do not pretend
+# otherwise. Returns the restart's own status so callers can distinguish a failed restart from a
+# failed post-check. (RP-0009 C5: moved here next to restart_singbox so the entrypoint is
+# orchestration-only.)
+apply_singbox() { need_root; run systemctl enable sing-box 2>/dev/null || true; run systemctl restart sing-box; }
+
 install_tooling() {
 	log "installing control tooling to $TOOLING_DIR"
 	need_root
