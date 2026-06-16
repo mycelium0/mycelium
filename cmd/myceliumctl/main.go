@@ -47,6 +47,8 @@ func run(args []string) error {
 		return cmdIdentity(rest)
 	case "validate-bundle":
 		return cmdValidateBundle(rest)
+	case "vocab":
+		return cmdVocab(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -173,6 +175,34 @@ func cmdValidateBundle(args []string) error {
 	return nil
 }
 
+// cmdVocab emits the canonical Go-owned control-plane vocabulary (spec.NewVocab) as
+// deterministic, indented JSON on stdout: the closed transport-class / region-bucket /
+// advisory-health vocabularies and the full proto->class/port/key/scheme/engine
+// registry. It is the source the committed control/vocab.json is generated from and
+// the shell renderer reads at render time (RP-0008 P2). Output is byte-stable (fixed
+// struct field order, two-space indent, trailing newline) so the vocab_single_source
+// gate can diff the regenerated emission against the committed file. Pure: no network,
+// no mutation. The `--json` flag is accepted for forward-compatibility; JSON is the
+// only (and default) format.
+func cmdVocab(args []string) error {
+	fs := flag.NewFlagSet("vocab", flag.ContinueOnError)
+	_ = fs.Bool("json", true, "emit JSON (the only supported format)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("vocab: takes no positional arguments")
+	}
+	data, err := json.MarshalIndent(spec.NewVocab(), "", "  ")
+	if err != nil {
+		return fmt.Errorf("vocab: marshal: %w", err)
+	}
+	if _, err := os.Stdout.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("vocab: write: %w", err)
+	}
+	return nil
+}
+
 func usage(w *os.File) {
 	fmt.Fprintf(w, `myceliumctl %s — Mycelium Phase 0 control CLI (Go spine).
 
@@ -184,6 +214,7 @@ Commands:
   identity revoke NAME|ID     [--state FILE]   revoke a client by name or id
   identity list              [--state FILE]    list clients
   validate-bundle FILE|-                       validate a rendered distribution bundle (RP-0008 P1)
+  vocab                                        emit the canonical transport/region/health vocabulary as JSON (RP-0008 P2)
   version                                      print the spine version
   help                                         show this help
 

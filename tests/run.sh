@@ -50,6 +50,10 @@
 #                               in the engine (`sing-box check`), and enabling vless-xhttp-tls (xhttp is
 #                               Xray-core only) is REFUSED fail-closed. SKIPs the load half where no
 #                               sing-box binary is present (jq-only host/CI lane); the guard half runs
+#   * vocab_single_source.sh  — the proto->class table + closed transport/region/health vocab is owned in
+#                               Go (internal/spec) and control/vocab.json is in sync with `myceliumctl
+#                               vocab`; RP-0008 P2. Internal-consistency checks always run; the Go regen
+#                               diff SKIPs where no Go toolchain is present (jq-only host/CI lane)
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -90,6 +94,7 @@ GATES=(
 	"tests/conformance/sub_channel_not_single_point.sh"
 	"tests/conformance/node_two_hop_failclosed.sh"
 	"tests/conformance/no_new_control_decisions_in_bash.sh"
+	"tests/conformance/vocab_single_source.sh"
 	"control/selftest.sh"
 )
 
