@@ -26,3 +26,4 @@ migrate the system). The decision "why this way" is recorded in an ADR — see [
 | [0005](0005-inoculum-bundle-and-toolkit.md) | Inoculum: signed operator starter bundle, v0 schema, local-only toolkit | draft | not before Phase 2 |
 | [0006](0006-in-region-edge-reporting.md) | In-region edge reporting: opt-in edge reachability signal (inert EdgeReport schema now) | draft | not before Phase 2 |
 | [0007](0007-phase1-distribution-health-xhttp.md) | Phase 1: matured distribution + health/failover + an XHTTP-over-real-TLS LTE channel (Phase-0 GO signed 2026-06-15 → authorized; live status in the acceptance ledger) | active | Phase 1 (active) |
+| [0008](0008-go-spine-distribution-rendering.md) | Consolidate distribution-rendering control logic in the Go spine (strangler: typed contracts → Go-owned vocab/mapping → ported renderers; "no control-decisions-in-bash") | draft | cross-cutting (P1 Phase 1, P3 not before Phase 2) |
