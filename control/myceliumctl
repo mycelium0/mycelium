@@ -56,6 +56,8 @@ MYC_DEFAULT_OUT_BUNDLE="$MYC_ROOT/state/bundle.json"
 . "$MYC_LIB/common.sh"
 # shellcheck source=lib/jqlib.sh
 . "$MYC_LIB/jqlib.sh"
+# shellcheck source=lib/vocab.sh
+. "$MYC_LIB/vocab.sh"
 # shellcheck source=lib/identity.sh
 . "$MYC_LIB/identity.sh"
 # shellcheck source=lib/render.sh

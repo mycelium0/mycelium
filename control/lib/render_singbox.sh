@@ -27,12 +27,15 @@
 # Protocol registry
 # ---------------------------------------------------------------------------
 #
-# The canonical, priority-ordered list of protocols this engine understands.
-# Priority order doubles as the failover preference for the client selector:
-# REALITY/TCP (most survivable) first, UDP/QUIC paths next, then SS/ShadowTLS,
-# Trojan last. Each token is matched against an inbound's `tag` in the template
+# The canonical, priority-ordered list of protocols this engine understands. Priority order doubles as
+# the failover preference for the client selector: REALITY/TCP (most survivable) first, UDP/QUIC paths
+# next, then SS/ShadowTLS, Trojan last. Each token is matched against an inbound's `tag` in the template
 # and against a `<token>_enabled` flag in params.
-MYC_SB_PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp vless-xhttp-tls vless-ws-tls hysteria2 tuic shadowsocks shadowtls trojan"
+#
+# The list is the Go-owned registry (control/vocab.json, minus the standalone amneziawg dataplane), read
+# through the shared vocab accessor (RP-0008 P2) — never a hand-maintained copy. vocab.sh is sourced
+# before this lib, so the value is resolved once at source time.
+MYC_SB_PROTOS="$(myc_vocab_protos)"
 
 # ---------------------------------------------------------------------------
 # urltest anti-flapping calibration (C22)
@@ -203,21 +206,21 @@ myc_sb_render_server() {
 	stls_handshake="$(myc_params_get "$params" '.shadowtls_handshake_server' "${donor_host:-www.microsoft.com}")"
 	stls_handshake_port="$(myc_params_get "$params" '.shadowtls_handshake_port' '443')"
 
-	# Per-protocol listen ports (defaults are sane, distinct values).
+	# Per-protocol listen ports. The DEFAULT for each is the Go-owned canonical port from the registry
+	# (control/vocab.json via myc_vocab_port, RP-0008 P2) — not a second hardcoded copy of 443/8443/...;
+	# an operator override in params still wins. xhttp-tls (2087) and ws-tls (2089) are the genuine
+	# single-layer-TLS families (own cert, NO reality); ws-tls is sing-box-servable, xhttp-tls is not.
 	local p_vision p_grpc p_xhttp p_xhttp_tls p_ws_tls p_hy2 p_tuic p_ss p_stls p_trojan
-	p_vision="$(myc_params_get "$params" '.vless_reality_vision_port' '443')"
-	p_grpc="$(myc_params_get "$params"   '.vless_reality_grpc_port'   '8443')"
-	p_xhttp="$(myc_params_get "$params"  '.vless_reality_xhttp_port'  '2096')"
-	# vless-xhttp-tls: genuine single-layer TLS (own cert, NO reality). Canonical port 2087 (non-8443).
-	p_xhttp_tls="$(myc_params_get "$params" '.vless_xhttp_tls_port'   '2087')"
-	# vless-ws-tls: genuine single-layer TLS over native WebSocket (own cert, NO reality; SERVABLE on
-	# sing-box, unlike xhttp-tls). Canonical port 2089 (non-8443).
-	p_ws_tls="$(myc_params_get "$params"   '.vless_ws_tls_port'       '2089')"
-	p_hy2="$(myc_params_get "$params"    '.hysteria2_port'            '8444')"
-	p_tuic="$(myc_params_get "$params"   '.tuic_port'                 '8445')"
-	p_ss="$(myc_params_get "$params"     '.shadowsocks_port'          '8388')"
-	p_stls="$(myc_params_get "$params"   '.shadowtls_port'            '8446')"
-	p_trojan="$(myc_params_get "$params" '.trojan_port'               '8447')"
+	p_vision="$(myc_params_get "$params" '.vless_reality_vision_port' "$(myc_vocab_port vless-reality-vision)")"
+	p_grpc="$(myc_params_get "$params"   '.vless_reality_grpc_port'   "$(myc_vocab_port vless-reality-grpc)")"
+	p_xhttp="$(myc_params_get "$params"  '.vless_reality_xhttp_port'  "$(myc_vocab_port vless-reality-xhttp)")"
+	p_xhttp_tls="$(myc_params_get "$params" '.vless_xhttp_tls_port'   "$(myc_vocab_port vless-xhttp-tls)")"
+	p_ws_tls="$(myc_params_get "$params"   '.vless_ws_tls_port'       "$(myc_vocab_port vless-ws-tls)")"
+	p_hy2="$(myc_params_get "$params"    '.hysteria2_port'            "$(myc_vocab_port hysteria2)")"
+	p_tuic="$(myc_params_get "$params"   '.tuic_port'                 "$(myc_vocab_port tuic)")"
+	p_ss="$(myc_params_get "$params"     '.shadowsocks_port'          "$(myc_vocab_port shadowsocks)")"
+	p_stls="$(myc_params_get "$params"   '.shadowtls_port'            "$(myc_vocab_port shadowtls)")"
+	p_trojan="$(myc_params_get "$params" '.trojan_port'               "$(myc_vocab_port trojan)")"
 
 	# Build per-protocol users arrays from identity state (shape differs by protocol).
 	# - vless (vision): { name, uuid, flow:"xtls-rprx-vision" }
