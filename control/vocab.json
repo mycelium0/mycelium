@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "transport_classes": [
+    "reality-tcp",
+    "quic-udp",
+    "shadowsocks-tcp",
+    "shadowtls-tcp",
+    "trojan-tls",
+    "amneziawg-udp",
+    "xhttp-tls",
+    "ws-tls"
+  ],
+  "region_buckets": [
+    "unspecified"
+  ],
+  "health_values": [
+    "unknown",
+    "alive",
+    "degraded"
+  ],
+  "protos": [
+    {
+      "proto": "vless-reality-vision",
+      "class": "reality-tcp",
+      "enable_key": "vless_reality_vision_enabled",
+      "port_key": "vless_reality_vision_port",
+      "default_port": 443,
+      "scheme": "vless",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "vless-reality-grpc",
+      "class": "reality-tcp",
+      "enable_key": "vless_reality_grpc_enabled",
+      "port_key": "vless_reality_grpc_port",
+      "default_port": 8443,
+      "scheme": "vless",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "vless-reality-xhttp",
+      "class": "reality-tcp",
+      "enable_key": "vless_reality_xhttp_enabled",
+      "port_key": "vless_reality_xhttp_port",
+      "default_port": 2096,
+      "scheme": "vless",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "vless-xhttp-tls",
+      "class": "xhttp-tls",
+      "enable_key": "vless_xhttp_tls_enabled",
+      "port_key": "vless_xhttp_tls_port",
+      "default_port": 2087,
+      "scheme": "vless",
+      "engine": "xray"
+    },
+    {
+      "proto": "vless-ws-tls",
+      "class": "ws-tls",
+      "enable_key": "vless_ws_tls_enabled",
+      "port_key": "vless_ws_tls_port",
+      "default_port": 2089,
+      "scheme": "vless",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "hysteria2",
+      "class": "quic-udp",
+      "enable_key": "hysteria2_enabled",
+      "port_key": "hysteria2_port",
+      "default_port": 8444,
+      "scheme": "hysteria2",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "tuic",
+      "class": "quic-udp",
+      "enable_key": "tuic_enabled",
+      "port_key": "tuic_port",
+      "default_port": 8445,
+      "scheme": "tuic",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "shadowsocks",
+      "class": "shadowsocks-tcp",
+      "enable_key": "shadowsocks_enabled",
+      "port_key": "shadowsocks_port",
+      "default_port": 8388,
+      "scheme": "ss",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "shadowtls",
+      "class": "shadowtls-tcp",
+      "enable_key": "shadowtls_enabled",
+      "port_key": "shadowtls_port",
+      "default_port": 8446,
+      "scheme": "ss",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "trojan",
+      "class": "trojan-tls",
+      "enable_key": "trojan_enabled",
+      "port_key": "trojan_port",
+      "default_port": 8447,
+      "scheme": "trojan",
+      "engine": "sing-box"
+    },
+    {
+      "proto": "amneziawg",
+      "class": "amneziawg-udp",
+      "enable_key": "",
+      "port_key": "",
+      "default_port": 0,
+      "scheme": "",
+      "engine": "amneziawg"
+    }
+  ]
+}
