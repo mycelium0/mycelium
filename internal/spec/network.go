@@ -418,7 +418,7 @@ const (
 	SporeTypeManifest SporeType = "manifest"
 	// SporeTypeStressDigest carries a redacted, aggregated stress summary.
 	SporeTypeStressDigest SporeType = "stress-digest"
-	// SporeTypeNodeStatus carries a CLASS-AGGREGATE advisory fleet-awareness digest (a NodeStatusDigest):
+	// SporeTypeNodeStatus carries a CLASS-AGGREGATE advisory network-awareness digest (a NodeStatusDigest):
 	// per-class transport health within a coarse scope, k-floored and TTL-bounded — NEVER a per-node row
 	// or a stable node identifier (ADR-0030). Inert in Phase 0-2.
 	SporeTypeNodeStatus SporeType = "node-status"
@@ -624,17 +624,17 @@ type ClassHealth struct {
 	Health HealthValue    `json:"health"` // advisory health for this class (alive/degraded/unknown)
 }
 
-// NodeStatusDigest is the INERT, typed shape of the advisory fleet-awareness digest (ADR-0030) — the
+// NodeStatusDigest is the INERT, typed shape of the advisory network-awareness digest (ADR-0030) — the
 // CLASS-AGGREGATE projection a self-healing node may emit so an operator's other nodes can sense coarse
-// fleet weather. By CONSTRUCTION it carries NO node identifier, NO per-node row, NO stable cross-digest
+// network weather. By CONSTRUCTION it carries NO node identifier, NO per-node row, NO stable cross-digest
 // correlator, and NO precise region: those are forbidden because the rejected per-node design (a stable
-// node_ref + a per-node health vector) lets an observer reconstruct the fleet map (ADR-0030,
+// node_ref + a per-node health vector) lets an observer reconstruct the network map (ADR-0030,
 // THREAT-MODEL asset #5). The stable own-node handle lives ONLY in the operator-local, never-transmitted
-// fleet cache. Health is ADVISORY and never actuates trust (ADR-0025). The digest is the class-aggregate
+// network cache. Health is ADVISORY and never actuates trust (ADR-0025). The digest is the class-aggregate
 // payload; a SporeEnvelope of type SporeTypeNodeStatus carries the signature (ADR-0002/0014) when wrapped.
 //
 // PHASE DISCIPLINE: inert in Phase 0-2. Nothing emits, signs, merges, coarsens, or consumes it yet; the
-// shape exists now so the future Advisory-Fleet-Awareness build (a cross-cutting Measurement & Immunity
+// shape exists now so the future Advisory-Network-Awareness build (a cross-cutting Measurement & Immunity
 // increment) cannot drift back to the unsafe per-node form — the type itself makes a per-node row
 // unrepresentable.
 type NodeStatusDigest struct {
@@ -648,7 +648,7 @@ type NodeStatusDigest struct {
 	ExpiresAt    time.Time     `json:"expires_at"`    // RFC 3339, UTC — replay-bounded TTL
 }
 
-// Validate checks the advisory-fleet digest's safety invariants (ADR-0030), pure (no I/O): a supported
+// Validate checks the advisory-network digest's safety invariants (ADR-0030), pure (no I/O): a supported
 // schema version; a valid coarse scope; at least one per-class cell, each with a known transport class
 // and a known advisory health; a region that — until the closed-vocabulary hardening ADR lands — must be
 // RegionUnspecified (REGION_COARSENESS); a non-negative aggregation floor the sample count MEETS

@@ -530,7 +530,7 @@ note "sing-box two-hop egress (ADR-0029): params.two_hop -> upstream outbound + 
 # When params declare a two_hop upstream, the rendered SERVER config must gain a vless+ws+tls outbound to
 # that out-of-region node AND an auth_user route rule sending the designated client through it (in-region
 # ingress -> out-of-region egress). With NO two_hop param the config is unchanged: the feature is gated, so
-# every node without it renders byte-identically (zero blast radius for the fleet).
+# every node without it renders byte-identically (zero blast radius for the network).
 TH_PARAMS="$WORK/params.singbox-twohop.json"
 TH_SERVER_OUT="$WORK/server.singbox-twohop.json"
 jq -n --arg priv "$PRIV" --arg pub "$PUB" --arg sid "$SID" '{

@@ -57,7 +57,7 @@ This RP does **not** propose a behaviour change. It is a structure change: extra
 - **Files in diff (estimate):** ~12 (the entrypoint + ~10 new libs + the suite registration), staged across chunks.
 
 - [ ] Within cap — single-step.
-- [x] Exceeds cap → **declared multi-phase**. A single-commit explosion of a 2130-line live-fleet script is exactly the big-bang the audit warns against. Extract **one module group per chunk**, each landing suite-green + node-verified, behaviour byte-identical, before the next.
+- [x] Exceeds cap → **declared multi-phase**. A single-commit explosion of a 2130-line live-network script is exactly the big-bang the audit warns against. Extract **one module group per chunk**, each landing suite-green + node-verified, behaviour byte-identical, before the next.
 
   **Chunks (each a commit, suite-green + node-verified):**
   - **C1 — scaffold + leaf libs:** establish `control/lib/` sourcing in the entrypoint; extract the pure leaves first (`identity.sh`, `donor.sh`, `harden.sh`, `install.sh`) — lowest risk, no flow change.
@@ -85,7 +85,7 @@ Effect: indistinguishability/survivability **unchanged** (byte-identical artifac
 - **Sourcing order / shared state:** functions share globals (paths, `STATE_DIR`, params); extraction must preserve the shared-variable contract. Mitigated by behaviour-equivalence testing + the existing selftest, which exercises the full render/flow surface.
 - **Rollback risk:** low — each chunk is an isolated, revertible commit; behaviour-preserving.
 - **No new attack surface, no de-anonymisation, no decentralisation impact** — pure structure.
-- **Temporary degradation:** none expected (no behaviour change); the fleet auto-pulls, and node-bootstrap.sh changes take two `--update` cycles, so each chunk must be node-verified before push.
+- **Temporary degradation:** none expected (no behaviour change); the network auto-pulls, and node-bootstrap.sh changes take two `--update` cycles, so each chunk must be node-verified before push.
 
 ## 7. Acceptance Criteria
 
@@ -104,8 +104,8 @@ Effect: indistinguishability/survivability **unchanged** (byte-identical artifac
 
 ## 9. Migration Strategy
 
-Strangler, behaviour-preserving, one module group per chunk (C1→C5 above). For each chunk: extract the function group verbatim into a `control/lib/*.sh`; `source` it from the entrypoint at the existing call sites; run `control/selftest.sh` + `tests/run.sh` (must stay green) + the byte-identical fixture diff; node-verify the flow the chunk touches; commit. No chunk changes behaviour. The control-logic libs, once bounded, are handed to RP-0008 for the Go port (this RP cuts the monolith; RP-0008 moves the logic up a layer). Rollout is the normal fleet `--update`; because node-bootstrap.sh changes take two cycles, each chunk is node-verified before push.
+Strangler, behaviour-preserving, one module group per chunk (C1→C5 above). For each chunk: extract the function group verbatim into a `control/lib/*.sh`; `source` it from the entrypoint at the existing call sites; run `control/selftest.sh` + `tests/run.sh` (must stay green) + the byte-identical fixture diff; node-verify the flow the chunk touches; commit. No chunk changes behaviour. The control-logic libs, once bounded, are handed to RP-0008 for the Go port (this RP cuts the monolith; RP-0008 moves the logic up a layer). Rollout is the normal network `--update`; because node-bootstrap.sh changes take two cycles, each chunk is node-verified before push.
 
 ## 10. Rollback / Fallback
 
-Each chunk is a single revertible commit with byte-identical behaviour, so rollback is `git revert` of one chunk with zero state/key/IP migration. If a chunk's node verification reveals a sourcing/re-exec issue, revert that chunk (the entrypoint falls back to the previous structure) — the fleet keeps running the prior immutable copy until the fix lands. Fail-closed is preserved throughout: the signed-pull/validate/promote/rollback path (`update_apply.sh`) keeps its existing fail-closed semantics; a refactor that cannot prove byte-identical output does not ship.
+Each chunk is a single revertible commit with byte-identical behaviour, so rollback is `git revert` of one chunk with zero state/key/IP migration. If a chunk's node verification reveals a sourcing/re-exec issue, revert that chunk (the entrypoint falls back to the previous structure) — the network keeps running the prior immutable copy until the fix lands. Fail-closed is preserved throughout: the signed-pull/validate/promote/rollback path (`update_apply.sh`) keeps its existing fail-closed semantics; a refactor that cannot prove byte-identical output does not ship.

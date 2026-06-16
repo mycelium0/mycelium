@@ -66,7 +66,7 @@ the maintainer ("no central position"). Two forces pull against it:
      forensic history**; and the hard problems are only *bounded*, not solved (Sybil poisoning,
      cumulative cross-snapshot disclosure).
    - Impact on survivability: degrades gracefully; no single target yields the fabric.
-3. **Per-operator monitor over one's OWN fleet, dissolving into the mesh later (the pragmatic interim, adopted as Phase-0–2 form of option 2).**
+3. **Per-operator monitor over one's OWN network, dissolving into the mesh later (the pragmatic interim, adopted as Phase-0–2 form of option 2).**
    - Pros: works today with mature tooling; holds no *cross-operator* map; per-operator private.
    - Cons: holds a single-operator node view + durable per-own-node history (not aggregate-and-forget);
      blind to in-region blocking. Acceptable as a bounded, per-operator interim — **not** as the end state.
@@ -78,7 +78,7 @@ and aggregate-and-forget; **no cross-operator central collector is built in any 
 - **Sensing is node-local and loopback (L0), the redaction is at the source (L1), aggregation is scoped and
   ephemeral (fungi, L1.5/L2), and the only wider view is the off-network publisher of already-redacted
   aggregates (L3)** — the layers and phase gating are pinned in VIS-0006.
-- **The only collector permitted is a per-operator monitor over that operator's OWN fleet** (loopback
+- **The only collector permitted is a per-operator monitor over that operator's OWN network** (loopback
   exporters reached over the operator's own SSH tunnels). It is explicitly **not** the rejected
   cross-operator coordinator, and it is explicitly **not** aggregate-and-forget — it retains durable
   per-own-node history. This is a deliberate, bounded exception for an operator's own boxes.
@@ -96,7 +96,7 @@ and aggregate-and-forget; **no cross-operator central collector is built in any 
 - **Negative / cost (named honestly, not soft-pedalled):**
   - **Durable forensic history is deliberately lost** in the mesh model ("what did region X look like three
     weeks ago"). For a connectivity-resilience project this is a genuine operational loss, mitigated only by
-    the per-operator interim monitor's own-fleet history.
+    the per-operator interim monitor's own-network history.
   - **Approximation** (sketch + noise) makes small-scale figures (resilience index, network size) imprecise;
     needs a stated accuracy floor / larger buckets.
   - **Sybil poisoning is bounded, not solved**, and cumulative cross-snapshot disclosure is unsolved

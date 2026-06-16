@@ -16,7 +16,7 @@ later. See the LICENSE file in the repository root.
 > replaced, new ones appear. But that exact convenience is also the project's three forbidden things in
 > one object: a **single point of block** (cut the sub domain and every user's updates stop — and a
 > cold-start user with no working server is stranded), a **global map** (whoever holds the URL sees the
-> whole fleet — the adversary's most valuable prize, [../THREAT-MODEL.md](../THREAT-MODEL.md)), and a
+> whole network — the adversary's most valuable prize, [../THREAT-MODEL.md](../THREAT-MODEL.md)), and a
 > **coercion target** (seize the issuer, get every node and every user). Mycelium cannot ship that and
 > stay Mycelium. The resolution — the operator's insight — is to stop treating the subscription as a
 > *document served from one place* and treat it as a **living, partial, per-user view of the mesh that

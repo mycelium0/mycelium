@@ -159,7 +159,7 @@ version-pin / inert knob hardening; 1 = config-render seam; 2 = inert schema onl
 | Inter-packet timing / token-bucket pacing | Broken by 2025–26 traffic-analysis attacks at an unacceptable cost; orthogonal to the load-bearing RTT / TLS-in-TLS threats. | gfw.report |
 | `x-hwid` / device-ID headers | A stable per-device identifier = user de-anonymization; software-not-a-paid-service has no device accounting (VIS-0007 S0). | github.com/XTLS/Xray-core |
 | Centralized management panel as backend | The exact single-point-of-block / global-map / coercion anti-pattern VIS-0007 dissolves; steal only the per-node render. | (panel projects) |
-| SIP008 (SS-specific subscription) | The fleet is VLESS+REALITY / AWG; the XTLS JSON + Clash export already meet the typed-subscription need. | github.com/shadowsocks/shadowsocks-org |
+| SIP008 (SS-specific subscription) | The network is VLESS+REALITY / AWG; the XTLS JSON + Clash export already meet the typed-subscription need. | github.com/shadowsocks/shadowsocks-org |
 | Single-vendor soft-DRM link wrapping | Single-vendor soft-DRM + bespoke key wrapping (ADR-0002); the Inoculum signed-and-TTL'd bundle is the standard-primitive equivalent. | (vendor docs) |
 | TCP-fragment + fake-TTL desync (as a node feature) | Client / endpoint behavior against local DPI; Mycelium is node software, not a client (ADR-0016). | github.com/XTLS/Xray-core |
 | Hysteria2 "brutal" congestion control as anti-throttle | A custom congestion-control algorithm is the most legible behavioral fingerprint (FOCI'25, ~100% separability) → use BBR, not brutal. | github.com/apernet/hysteria |
