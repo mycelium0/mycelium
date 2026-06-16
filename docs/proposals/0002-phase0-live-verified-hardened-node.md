@@ -21,7 +21,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** RP-0002
 - **Date:** 2026-06-12
 - **Author:** mindicator & silicon bags quartet
-- **Status:** draft
+- **Status:** landed (Phase-0 DoD met on live nodes + operator GO signed 2026-06-15; see [docs/phase0-acceptance-ledger.md](../phase0-acceptance-ledger.md))
 - **Phase:** Phase 0 (single deploy-ready, multi-protocol node)
 - **Related documents:**
   [RP-0001](0001-bootstrap-phase-0-node.md) (scaffold this builds on);

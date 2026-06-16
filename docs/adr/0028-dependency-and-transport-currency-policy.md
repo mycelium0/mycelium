@@ -44,7 +44,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** ADR-0028
 - **Date:** 2026-06-14
 - **Author:** mindicator & silicon bags quartet
-- **Status:** proposed
+- **Status:** accepted
 - **Layer(s):** data plane (transport stack currency), touching infra (supply chain / CI) — cross-cutting track
 - **Phase:** Phase 0 (version-pin hardening of existing shapes; see [../ROADMAP.md](../ROADMAP.md))
 - **Related:** [ADR-0002](0002-no-custom-cryptography.md), [ADR-0010](0010-phase0-transport-set.md),

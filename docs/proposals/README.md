@@ -19,11 +19,11 @@ migrate the system). The decision "why this way" is recorded in an ADR — see [
 ## Current records
 | ID | Title | Status | Phase |
 |---|---|---|---|
-| [0001](0001-bootstrap-phase-0-node.md) | Bootstrap node Phase 0 (VLESS+REALITY + cover) | draft | Phase 0 |
-| [0002](0002-phase0-live-verified-hardened-node.md) | Phase 0: scaffold → live, verified, hardened single node | draft | Phase 0 |
-| [0003](0003-network-rollout-signed-self-updating.md) | Network rollout: canonical bootstrap → signed, self-updating network | draft | cross-cutting deploy/bootstrap |
+| [0001](0001-bootstrap-phase-0-node.md) | Bootstrap node Phase 0 (VLESS+REALITY + cover) | landed | Phase 0 |
+| [0002](0002-phase0-live-verified-hardened-node.md) | Phase 0: scaffold → live, verified, hardened single node | landed | Phase 0 |
+| [0003](0003-network-rollout-signed-self-updating.md) | Network rollout: canonical bootstrap → signed, self-updating network | active | cross-cutting deploy/bootstrap |
 | [0004](0004-network-weather-explorer-publisher.md) | Network-weather explorer: off-network publisher + static site | draft | cross-cutting Measurement track |
 | [0005](0005-inoculum-bundle-and-toolkit.md) | Inoculum: signed operator starter bundle, v0 schema, local-only toolkit | draft | not before Phase 2 |
 | [0006](0006-in-region-edge-reporting.md) | In-region edge reporting: opt-in edge reachability signal (inert EdgeReport schema now) | draft | not before Phase 2 |
 | [0007](0007-phase1-distribution-health-xhttp.md) | Phase 1: matured distribution + health/failover + an XHTTP-over-real-TLS LTE channel (Phase-0 GO signed 2026-06-15 → authorized; live status in the acceptance ledger) | active | Phase 1 (active) |
-| [0008](0008-go-spine-distribution-rendering.md) | Consolidate distribution-rendering control logic in the Go spine (strangler: typed contracts → Go-owned vocab/mapping → ported renderers; "no control-decisions-in-bash") | draft | cross-cutting (P1 Phase 1, P3 not before Phase 2) |
+| [0008](0008-go-spine-distribution-rendering.md) | Consolidate distribution-rendering control logic in the Go spine (strangler: typed contracts → Go-owned vocab/mapping → ported renderers; "no control-decisions-in-bash") | active | cross-cutting (P1 Phase 1, P3 not before Phase 2) |
