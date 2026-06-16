@@ -126,6 +126,19 @@ myc_sb_render_server() {
 	[ -n "$enabled" ] || myc_die "render-server: no protocols enabled in params (set at least one <proto>_enabled: true)"
 	myc_log "render-server (singbox): enabled protocols: $enabled"
 
+	# ENGINE-COMPATIBILITY fail-closed (BEFORE emitting any config): the `xhttp` transport is
+	# Xray-core ONLY. sing-box does not implement it — `sing-box check` rejects a config carrying
+	# `transport.type: "xhttp"` with FATAL "unknown transport type: xhttp", which would crash
+	# sing-box on load. The vless-xhttp-tls inbound in the template uses exactly that transport, so
+	# enabling vless-xhttp-tls on the sing-box engine would render a config sing-box cannot serve.
+	# Refuse LOUDLY here instead of shipping a config that crashes the live service. (The template
+	# inbound is intentionally kept for the future Xray serving path — a separate RP; the guard is
+	# what prevents the crash on the sing-box engine.)
+	case " $enabled " in
+		*" vless-xhttp-tls "*)
+			myc_die "render-server: vless-xhttp-tls is enabled but the sing-box engine cannot serve it — the xhttp transport is Xray-core only (sing-box rejects transport.type \"xhttp\" with 'unknown transport type: xhttp' and would crash on load). Do NOT enable vless-xhttp-tls on the sing-box engine; it will be served via the Xray engine in a future RP." ;;
+	esac
+
 	# REALITY material is required as soon as any vless-reality-* protocol is on.
 	local need_reality priv donor_sni donor_host short_ids_json
 	need_reality=0
@@ -453,6 +466,16 @@ myc_sb_render_subscription() {
 	enabled="$(myc_sb_enabled_list "$params")"
 	[ -n "$enabled" ] || myc_die "subscription: no protocols enabled in params"
 	myc_log "subscription (singbox): enabled protocols: $enabled"
+
+	# ENGINE-COMPATIBILITY fail-closed (mirror of the render-server guard): the `xhttp` transport is
+	# Xray-core ONLY. A sing-box CLIENT cannot DIAL it either — a sing-box outbound with
+	# `transport.type: "xhttp"` is rejected with "unknown transport type: xhttp". So a sing-box
+	# subscription must NOT emit a vless-xhttp-tls outbound. Refuse loudly here rather than hand a
+	# client a config sing-box cannot load. (xhttp-tls will be served/dialed via Xray in a future RP.)
+	case " $enabled " in
+		*" vless-xhttp-tls "*)
+			myc_die "subscription: vless-xhttp-tls is enabled but the sing-box engine cannot dial it — the xhttp transport is Xray-core only (a sing-box client rejects transport.type \"xhttp\"). Do NOT enable vless-xhttp-tls on the sing-box engine; it will be served via the Xray engine in a future RP." ;;
+	esac
 
 	# Shared connection parameters (clients dial node_address on each protocol port).
 	local node_addr donor_sni pub tls_sni short_first
