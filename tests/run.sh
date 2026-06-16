@@ -42,6 +42,10 @@
 #   * bundle_go_roundtrip.sh  — a shell-rendered bundle round-trips through the authoritative Go
 #                               validator (myceliumctl validate-bundle); RP-0008 P1 / audit C11. SKIPs
 #                               where no Go toolchain is present (jq-only host/CI lane)
+#   * engine_load_check.sh    — a representative sing-box server config, shell-rendered, actually LOADS
+#                               in the engine (`sing-box check`), and enabling vless-xhttp-tls (xhttp is
+#                               Xray-core only) is REFUSED fail-closed. SKIPs the load half where no
+#                               sing-box binary is present (jq-only host/CI lane); the guard half runs
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -77,6 +81,7 @@ GATES=(
 	"tests/conformance/dependency_policy.sh"
 	"tests/conformance/bundle_region_closed_vocab.sh"
 	"tests/conformance/bundle_go_roundtrip.sh"
+	"tests/conformance/engine_load_check.sh"
 	"tests/conformance/active_probe_owncert.sh"
 	"tests/conformance/sub_channel_not_single_point.sh"
 	"tests/conformance/node_two_hop_failclosed.sh"

@@ -932,27 +932,37 @@ fi
 note "C06 — per-family XHTTP path (reality-xhttp vs xhttp-tls carry DISTINCT paths)"
 # ---------------------------------------------------------------------------
 # The two XHTTP families must be able to carry different plaintext paths so an on-path observer cannot
-# correlate them by an identical path. Set xhttp_path and xhttp_path_tls apart, enable BOTH families,
-# render the server config, and assert each inbound serves its own path.
+# correlate them by an identical path. NOTE the engine split: the `xhttp` transport is Xray-core only,
+# so the sing-box ENGINE cannot SERVE the xhttp-tls family (the render-guard refuses it — see the
+# "engine-compat" case below) and the xhttp-tls path is asserted via the bundle Link (the xhttp-tls
+# deliverable, consumed by an Xray client in a future RP). The sing-box reality-xhttp family IS served,
+# so its distinct path is asserted against the rendered sing-box SERVER config.
 C06_PARAMS="$WORK/c06.params.json"
 C06_SERVER="$WORK/c06.server.json"
-jq '. + { vless_xhttp_tls_enabled: true, vless_xhttp_tls_port: 2087,
-          xhttp_path: "/reality-xhttp-path", xhttp_path_tls: "/owncert-tls-path",
+# Per-family paths set apart. xhttp-tls stays DISABLED for the sing-box server render (the engine cannot
+# serve xhttp — the bundle below still carries the xhttp-tls Link with its own path).
+jq '. + { xhttp_path: "/reality-xhttp-path", xhttp_path_tls: "/owncert-tls-path",
           tls_sni: "tls.example.invalid" }' "$SB_PARAMS" > "$C06_PARAMS"
 "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$C06_PARAMS" \
 	--state "$STATE" --out "$C06_SERVER" 2>/dev/null
+# The served reality-xhttp inbound carries the reality path; the template's xhttp-tls inbound (kept for
+# the future Xray serving path) is path-distinct from it at the template level (own SENTINEL path slot).
 if jq -e '(.inbounds[] | select(.tag=="vless-reality-xhttp-in") | .transport.path) == "/reality-xhttp-path"' "$C06_SERVER" >/dev/null 2>&1 \
-   && jq -e '(.inbounds[] | select(.tag=="vless-xhttp-tls-in") | .transport.path) == "/owncert-tls-path"' "$C06_SERVER" >/dev/null 2>&1; then
-	ok "C06 reality-xhttp and xhttp-tls inbounds serve DISTINCT per-family paths"
+   && jq -e '(.inbounds[] | select(.tag=="vless-xhttp-tls-in") | .transport.path) | (. != null)' "$SB_TEMPLATE" >/dev/null 2>&1; then
+	ok "C06 served reality-xhttp inbound carries its distinct path; the template keeps a path-distinct xhttp-tls inbound (future Xray serving path)"
 else
-	bad "C06 the two XHTTP families share a path (path correlation between 'independent' families)"
+	bad "C06 the served reality-xhttp path is wrong, or the template lost the path-distinct xhttp-tls inbound"
 fi
-# The bundle Links also carry the per-family paths distinctly.
+# The bundle Links carry the per-family paths distinctly (this is where xhttp-tls is delivered, since the
+# sing-box engine cannot serve it). Enable BOTH families for the BUNDLE only (render_bundle.sh emits the
+# xhttp-tls Link for an Xray client; it is NOT a sing-box server render, so the engine guard does not apply).
+C06_BUNDLE_PARAMS="$WORK/c06.bundle.params.json"
+jq '. + { vless_xhttp_tls_enabled: true, vless_xhttp_tls_port: 2087 }' "$C06_PARAMS" > "$C06_BUNDLE_PARAMS"
 C06_BUNDLE="$WORK/c06.bundle.json"
-"$CTL" bundle --params "$C06_PARAMS" --state "$STATE" --out "$C06_BUNDLE" 2>/dev/null
+"$CTL" bundle --params "$C06_BUNDLE_PARAMS" --state "$STATE" --out "$C06_BUNDLE" 2>/dev/null
 if jq -e 'any(.endpoints[]; .transport_class=="reality-tcp" and (.link | contains("path=%2Freality-xhttp-path")))' "$C06_BUNDLE" >/dev/null 2>&1 \
    && jq -e 'any(.endpoints[]; .transport_class=="xhttp-tls" and (.link | contains("path=%2Fowncert-tls-path")))' "$C06_BUNDLE" >/dev/null 2>&1; then
-	ok "C06 bundle Links carry the per-family paths distinctly"
+	ok "C06 bundle Links carry the per-family paths distinctly (reality-xhttp vs xhttp-tls)"
 else
 	bad "C06 bundle Links do not carry distinct per-family paths"
 fi
@@ -973,6 +983,29 @@ if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$C0
 	bad "C03 server rendered xhttp-tls with NO tls_sni (cert/SNI mismatch tell)"
 else
 	ok "C03 server refuses xhttp-tls with empty tls_sni (fail-closed)"
+fi
+
+# ---------------------------------------------------------------------------
+note "engine-compat — vless-xhttp-tls is REFUSED on the sing-box engine (xhttp is Xray-core only)"
+# ---------------------------------------------------------------------------
+# The `xhttp` transport is implemented by Xray-core ONLY. sing-box rejects a config carrying
+# transport.type "xhttp" with FATAL "unknown transport type: xhttp" and would CRASH on load. The
+# template's vless-xhttp-tls inbound uses exactly that transport, so enabling vless-xhttp-tls on the
+# sing-box engine must FAIL CLOSED at render — a loud refusal, never a crash-on-load config. (Even with
+# a valid tls_sni present, so this is the engine-compat guard, NOT the C03 own-cert-SNI check above.)
+# The template inbound stays for the future Xray serving path; the render-guard is what prevents the crash.
+XHT_PARAMS="$WORK/params.singbox-xhttptls.json"; XHT_OUT="$WORK/server.singbox-xhttptls.json"; rm -f "$XHT_OUT"
+jq '. + { vless_xhttp_tls_enabled: true, vless_xhttp_tls_port: 2087, xhttp_path_tls: "/owncert-tls", tls_sni: "tls.example.invalid" }' "$SB_PARAMS" > "$XHT_PARAMS"
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$XHT_PARAMS" --state "$STATE" --out "$XHT_OUT" >/dev/null 2>&1 && [ -s "$XHT_OUT" ]; then
+	bad "vless-xhttp-tls was RENDERED on the sing-box engine (would crash sing-box: 'unknown transport type: xhttp')"
+else
+	ok "vless-xhttp-tls is REFUSED on the sing-box engine (fail-closed; xhttp transport is Xray-core only)"
+fi
+# The same xhttp-tls subscription render must also fail closed (a sing-box CLIENT cannot dial xhttp).
+if "$CTL" subscription --engine singbox --params "$XHT_PARAMS" --state "$STATE" --out "$WORK/subs.xhttptls" >/dev/null 2>&1; then
+	bad "vless-xhttp-tls subscription was emitted on the sing-box engine (a sing-box client cannot dial xhttp)"
+else
+	ok "vless-xhttp-tls subscription is REFUSED on the sing-box engine (fail-closed; client cannot dial xhttp)"
 fi
 
 # ---------------------------------------------------------------------------
