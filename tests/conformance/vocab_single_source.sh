@@ -114,6 +114,27 @@ else
 	badln "a proto has an out-of-range port or an engine/keys mismatch"
 fi
 
+# --- Step 1b: the shell renderer CONSUMES the file and keeps NO inline copy of the table (RP-0008 P2).
+# This is what makes "Go owns it, the shell reads a file" enforceable: render_bundle.sh must read
+# control/vocab.json AND must not re-introduce a hand-maintained proto->class case statement. We assert
+# the wire class literals never appear as `printf '<class>'` shell statements there (comments naming a
+# class are fine; an emitted class string is the old table form).
+RB="$REPO_ROOT/control/lib/render_bundle.sh"
+if [ -f "$RB" ]; then
+	if grep -Eq 'MYC_VOCAB|vocab\.json' "$RB"; then
+		okln "render_bundle.sh reads the Go-owned vocab file (consumes Go, not an inline table)"
+	else
+		badln "render_bundle.sh does not reference control/vocab.json — it is not consuming the Go source"
+	fi
+	if grep -Eq "printf '(reality-tcp|quic-udp|shadowsocks-tcp|shadowtls-tcp|trojan-tls|amneziawg-udp|xhttp-tls|ws-tls)'" "$RB"; then
+		badln "render_bundle.sh still emits a transport class as a shell literal (an inline proto->class table survived)"
+	else
+		okln "render_bundle.sh keeps no inline proto->class table (no class emitted as a shell literal)"
+	fi
+else
+	badln "render_bundle.sh not found: $RB"
+fi
+
 # --- Step 2: drift catch — regenerate from Go and assert byte-identical (skips without Go). ----------
 GO=""
 if command -v go >/dev/null 2>&1; then

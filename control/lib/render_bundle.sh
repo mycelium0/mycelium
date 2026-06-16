@@ -34,22 +34,39 @@ MYC_BUNDLE_VERSION=1
 # priority >= 0, so this large value is still a valid (if last-ranked) priority.
 MYC_BUNDLE_PRIORITY_UNRANKED=9999
 
-# myc_bundle_class_of PROTO -> the closed-vocab transport CLASS for a protocol token, matching
-# internal/spec/edgereport.go (TransportClass*) and tests/conformance family_of(). One family per
-# protocol; the three vless-reality-* shapes collapse to the single reality-tcp family (same
-# handshake surface — ADR-0010/0020), exactly as the spec taxonomy requires.
+# MYC_VOCAB -> the Go-owned control vocabulary file (control/vocab.json, emitted by `myceliumctl
+# vocab` from internal/spec). The proto->class table and the closed transport-class vocabulary are
+# READ from here, never re-declared in this shell (RP-0008 P2): Go owns them and the
+# vocab_single_source gate keeps the committed file byte-identical to the Go emission. Overridable for
+# tests; ships to nodes with the rest of control/ via install_tooling.
+MYC_VOCAB="${MYC_VOCAB:-$MYC_ROOT/vocab.json}"
+
+# _MYC_VOCAB_CLASSMAP caches the "proto<TAB>class" rows from MYC_VOCAB so the file is parsed once per
+# render. myc_vocab_load is fail-closed: a missing/empty/unreadable vocab file is a hard error, never a
+# silent fall-back to an inline copy of the table (the inline copy is exactly what P2 removed).
+_MYC_VOCAB_CLASSMAP=""
+myc_vocab_load() {
+	[ -n "$_MYC_VOCAB_CLASSMAP" ] && return 0
+	[ -f "$MYC_VOCAB" ] || myc_die "render-bundle: control/vocab.json not found ($MYC_VOCAB) — the Go-owned transport vocabulary is required (RP-0008 P2)."
+	_MYC_VOCAB_CLASSMAP="$(jq -r '.protos[] | "\(.proto)\t\(.class)"' "$MYC_VOCAB" 2>/dev/null)" \
+		|| myc_die "render-bundle: could not read the proto->class map from $MYC_VOCAB."
+	[ -n "$_MYC_VOCAB_CLASSMAP" ] || myc_die "render-bundle: $MYC_VOCAB has an empty proto registry."
+	return 0
+}
+
+# myc_bundle_class_of PROTO -> the closed-vocab transport CLASS for a protocol token, looked up from the
+# Go-owned registry in MYC_VOCAB (internal/spec, TransportClass*). One family per protocol; the three
+# vless-reality-* shapes collapse to the single reality-tcp family (same handshake surface,
+# ADR-0010/0020). An unregistered proto yields the empty string, exactly as before.
 myc_bundle_class_of() {
-	case "$1" in
-		vless-reality-vision|vless-reality-grpc|vless-reality-xhttp) printf 'reality-tcp' ;;
-		vless-xhttp-tls)                                            printf 'xhttp-tls' ;;
-		vless-ws-tls)                                               printf 'ws-tls' ;;
-		hysteria2|tuic)                                             printf 'quic-udp' ;;
-		shadowsocks)                                                printf 'shadowsocks-tcp' ;;
-		shadowtls)                                                  printf 'shadowtls-tcp' ;;
-		trojan)                                                     printf 'trojan-tls' ;;
-		amneziawg)                                                  printf 'amneziawg-udp' ;;
-		*)                                                          printf '' ;;
-	esac
+	local target="$1" p c
+	myc_vocab_load
+	while IFS="$(printf '\t')" read -r p c; do
+		[ "$p" = "$target" ] && { printf '%s' "$c"; return 0; }
+	done <<MYC_VOCAB_EOF
+$_MYC_VOCAB_CLASSMAP
+MYC_VOCAB_EOF
+	printf ''
 }
 
 # myc_bundle_priority_of PROTO -> the 0-based order index of PROTO in MYC_SB_PROTOS (lower = more
@@ -414,14 +431,14 @@ myc_render_bundle() {
 	if ! printf '%s' "$bundle" | jq -e '.endpoints | all((.link | length) > 0)' >/dev/null 2>&1; then
 		myc_die "bundle: an empty Link leaked (bundle.go rejects empty links)."
 	fi
-	if ! printf '%s' "$bundle" | jq -e '
-		.endpoints | all(
-			.transport_class == "reality-tcp" or .transport_class == "xhttp-tls"
-			or .transport_class == "ws-tls"
-			or .transport_class == "quic-udp" or .transport_class == "shadowsocks-tcp"
-			or .transport_class == "shadowtls-tcp" or .transport_class == "trojan-tls"
-			or .transport_class == "amneziawg-udp"
-		)' >/dev/null 2>&1; then
+	# The closed transport-class vocabulary is the Go-owned list in MYC_VOCAB (.transport_classes),
+	# not an inline copy: every endpoint's class must be a member (RP-0008 P2).
+	myc_vocab_load
+	local _vtc
+	_vtc="$(jq -c '.transport_classes' "$MYC_VOCAB" 2>/dev/null)"
+	[ -n "$_vtc" ] || myc_die "render-bundle: could not read .transport_classes from $MYC_VOCAB."
+	if ! printf '%s' "$bundle" | jq -e --argjson v "$_vtc" \
+		'.endpoints | all((.transport_class) as $tc | ($v | index($tc)) != null)' >/dev/null 2>&1; then
 		myc_die "bundle: a transport_class outside the closed vocab leaked."
 	fi
 
