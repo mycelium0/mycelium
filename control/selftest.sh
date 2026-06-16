@@ -815,6 +815,179 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+note "C07 — URI percent-encoding round-trip (adversarial Link values survive bundle->aggregate)"
+# ---------------------------------------------------------------------------
+# A dynamic value spliced into a Link (here the XHTTP path) must be percent-encoded by the producer
+# (render_bundle.sh @uri) and percent-decoded by the consumer (render_aggregate.sh urldecode) so a
+# value carrying URI delimiters round-trips EXACTLY. Use an adversarial path "/api?x=1#frag&y=2": its
+# '?' would otherwise open a query, its '#' a fragment, its '&'/'=' shift query boundaries — exactly
+# the producer/re-parser disagreement C07 describes. Build two bundles with this path, merge them,
+# and assert the merged xhttp outbound's transport.path is byte-for-byte the original.
+C07_ADV_PATH='/api?x=1#frag&y=2'
+C07_PARAMS_A="$WORK/c07.paramsA.json"
+C07_PARAMS_B="$WORK/c07.paramsB.json"
+C07_BUNDLE_A="$WORK/c07.bundleA.json"
+C07_BUNDLE_B="$WORK/c07.bundleB.json"
+C07_MERGED="$WORK/c07.merged.json"
+# Enable ONLY the reality-xhttp family (carries the path), shadowtls off (non-aggregatable), so the
+# merge succeeds and the path is the value under test. Two distinct node addresses + labels.
+jq --arg p "$C07_ADV_PATH" '
+	{ engine, node_address: "c07a.example.invalid", region_bucket: "bucket-c07a",
+	  reality_private_key, reality_public_key, short_ids, donor_sni, donor_host,
+	  tls_sni, grpc_service_name, xhttp_path: $p,
+	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096 }
+' "$SB_PARAMS" > "$C07_PARAMS_A"
+jq --arg p "$C07_ADV_PATH" '
+	{ engine, node_address: "c07b.example.invalid", region_bucket: "bucket-c07b",
+	  reality_private_key, reality_public_key, short_ids, donor_sni, donor_host,
+	  tls_sni, grpc_service_name, xhttp_path: $p,
+	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096 }
+' "$SB_PARAMS" > "$C07_PARAMS_B"
+"$CTL" bundle --params "$C07_PARAMS_A" --state "$STATE" --out "$C07_BUNDLE_A" 2>/dev/null
+"$CTL" bundle --params "$C07_PARAMS_B" --state "$STATE" --out "$C07_BUNDLE_B" 2>/dev/null
+# The Link must be percent-encoded by the producer: the raw '?' / '#' / '&' MUST NOT appear inside the
+# query (the path value is encoded). Assert the encoded form is present (proves @uri ran).
+if jq -e '.endpoints[] | select(.transport_class=="reality-tcp") | .link | contains("path=%2Fapi%3Fx%3D1")' "$C07_BUNDLE_A" >/dev/null 2>&1; then
+	ok "C07 producer percent-encodes the adversarial path in the Link (@uri)"
+else
+	bad "C07 producer did NOT percent-encode the adversarial path (raw delimiters would shift query boundaries)"
+fi
+"$CTL" aggregate --bundle "$C07_BUNDLE_A" --name c07a --bundle "$C07_BUNDLE_B" --name c07b --out "$C07_MERGED" 2>/dev/null
+jq -e . "$C07_MERGED" >/dev/null && ok "C07 merged profile is valid JSON" || bad "C07 merged profile invalid"
+# The decisive round-trip: the consumer must decode the path back to the EXACT original (delimiters and
+# all). If percent-encoding or decoding were missing/asymmetric, this would differ.
+C07_GOT="$(jq -r '.outbounds[] | select(.tag=="c07a.vless-reality-xhttp") | .transport.path' "$C07_MERGED" 2>/dev/null)"
+if [ "$C07_GOT" = "$C07_ADV_PATH" ]; then
+	ok "C07 round-trip: adversarial path survives bundle->aggregate EXACTLY ('$C07_GOT')"
+else
+	bad "C07 round-trip BROKEN: path '$C07_GOT' != original '$C07_ADV_PATH' (producer/parser disagree)"
+fi
+
+# ---------------------------------------------------------------------------
+note "C06 — per-family XHTTP path (reality-xhttp vs xhttp-tls carry DISTINCT paths)"
+# ---------------------------------------------------------------------------
+# The two XHTTP families must be able to carry different plaintext paths so an on-path observer cannot
+# correlate them by an identical path. Set xhttp_path and xhttp_path_tls apart, enable BOTH families,
+# render the server config, and assert each inbound serves its own path.
+C06_PARAMS="$WORK/c06.params.json"
+C06_SERVER="$WORK/c06.server.json"
+jq '. + { vless_xhttp_tls_enabled: true, vless_xhttp_tls_port: 2087,
+          xhttp_path: "/reality-xhttp-path", xhttp_path_tls: "/owncert-tls-path",
+          tls_sni: "tls.example.invalid" }' "$SB_PARAMS" > "$C06_PARAMS"
+"$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$C06_PARAMS" \
+	--state "$STATE" --out "$C06_SERVER" 2>/dev/null
+if jq -e '(.inbounds[] | select(.tag=="vless-reality-xhttp-in") | .transport.path) == "/reality-xhttp-path"' "$C06_SERVER" >/dev/null 2>&1 \
+   && jq -e '(.inbounds[] | select(.tag=="vless-xhttp-tls-in") | .transport.path) == "/owncert-tls-path"' "$C06_SERVER" >/dev/null 2>&1; then
+	ok "C06 reality-xhttp and xhttp-tls inbounds serve DISTINCT per-family paths"
+else
+	bad "C06 the two XHTTP families share a path (path correlation between 'independent' families)"
+fi
+# The bundle Links also carry the per-family paths distinctly.
+C06_BUNDLE="$WORK/c06.bundle.json"
+"$CTL" bundle --params "$C06_PARAMS" --state "$STATE" --out "$C06_BUNDLE" 2>/dev/null
+if jq -e 'any(.endpoints[]; .transport_class=="reality-tcp" and (.link | contains("path=%2Freality-xhttp-path")))' "$C06_BUNDLE" >/dev/null 2>&1 \
+   && jq -e 'any(.endpoints[]; .transport_class=="xhttp-tls" and (.link | contains("path=%2Fowncert-tls-path")))' "$C06_BUNDLE" >/dev/null 2>&1; then
+	ok "C06 bundle Links carry the per-family paths distinctly"
+else
+	bad "C06 bundle Links do not carry distinct per-family paths"
+fi
+
+# ---------------------------------------------------------------------------
+note "C03 — xhttp-tls own-cert SNI is mandatory (no donor_sni fallback)"
+# ---------------------------------------------------------------------------
+# When the own-cert xhttp-tls family is enabled but tls_sni is empty, both the bundle and the server
+# render MUST fail closed (never present own cert while claiming the donor SNI).
+C03_PARAMS="$WORK/c03.params.json"
+jq 'del(.tls_sni) | . + { vless_xhttp_tls_enabled: true, vless_xhttp_tls_port: 2087 }' "$SB_PARAMS" > "$C03_PARAMS"
+if "$CTL" bundle --params "$C03_PARAMS" --state "$STATE" --out "$WORK/c03.bundle.json" >/dev/null 2>&1; then
+	bad "C03 bundle rendered an xhttp-tls endpoint with NO tls_sni (would claim donor SNI on its own cert)"
+else
+	ok "C03 bundle refuses xhttp-tls with empty tls_sni (fail-closed; no donor-SNI fallback)"
+fi
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$C03_PARAMS" --state "$STATE" --out "$WORK/c03.server.json" >/dev/null 2>&1; then
+	bad "C03 server rendered xhttp-tls with NO tls_sni (cert/SNI mismatch tell)"
+else
+	ok "C03 server refuses xhttp-tls with empty tls_sni (fail-closed)"
+fi
+
+# ---------------------------------------------------------------------------
+note "N4 — bundle refuses an empty first-identity UUID (no vless://@server link)"
+# ---------------------------------------------------------------------------
+# A first client with an empty id would splice into the Link as 'vless://@server:port' — non-dialable
+# yet passing the non-empty-Link + Validate checks. The bundle MUST fail closed before building links.
+N4_STATE="$WORK/identities.emptyid.json"
+printf '{"clients":[{"name":"emptyid","id":"","password":""}]}\n' > "$N4_STATE"
+if "$CTL" bundle --params "$SB_PARAMS" --state "$N4_STATE" --out "$WORK/n4.bundle.json" >/dev/null 2>&1; then
+	bad "N4 bundle rendered with an empty clients[0].id (would emit vless://@server:port)"
+else
+	ok "N4 bundle refuses an empty clients[0].id (fail-closed before building any Link)"
+fi
+
+# ---------------------------------------------------------------------------
+note "C09 — non-numeric / out-of-range port fails closed (never server_port:0)"
+# ---------------------------------------------------------------------------
+# A non-numeric or zero/over-range port must be refused at bundle render, never degraded to port 0.
+C09_PARAMS="$WORK/c09.params.json"
+jq '.hysteria2_port = "not-a-port"' "$SB_PARAMS" > "$C09_PARAMS"
+if "$CTL" bundle --params "$C09_PARAMS" --state "$STATE" --out "$WORK/c09.bundle.json" >/dev/null 2>&1; then
+	bad "C09 bundle rendered with a non-numeric port (should fail closed, never degrade to 0)"
+else
+	ok "C09 bundle refuses a non-numeric port (fail-closed; never server_port:0)"
+fi
+C09_PARAMS0="$WORK/c09.params0.json"
+jq '.tuic_port = 0' "$SB_PARAMS" > "$C09_PARAMS0"
+if "$CTL" bundle --params "$C09_PARAMS0" --state "$STATE" --out "$WORK/c09.bundle0.json" >/dev/null 2>&1; then
+	bad "C09 bundle rendered with port 0 (out of range 1..65535)"
+else
+	ok "C09 bundle refuses port 0 (out of range 1..65535)"
+fi
+# C09 on the aggregate side: a Link with a 0 port must be refused (never emit a server_port:0 outbound).
+C09_AGG_BUNDLE="$WORK/c09.aggbundle.json"
+"$CTL" bundle --params "$AGG_P1" --state "$STATE" --out "$C09_AGG_BUNDLE" 2>/dev/null
+# Force one endpoint's Link to carry a :0 port, then try to aggregate it with a healthy node.
+C09_BADPORT="$WORK/c09.badport.json"
+jq '.endpoints |= [.[0]] | .endpoints[0].link = "vless://uuid@c09.example.invalid:0?encryption=none&security=reality&sni=s&fp=chrome&pbk=k&sid=1&type=tcp#mycelium-vless-reality-vision" | .endpoints[0].transport_class = "reality-tcp"' "$C09_AGG_BUNDLE" > "$C09_BADPORT"
+if "$CTL" aggregate --bundle "$C09_BADPORT" --name bad --bundle "$AGG_B1" --name good --out "$WORK/c09.aggout.json" >/dev/null 2>&1; then
+	bad "C09 aggregate accepted a Link with port 0 (should refuse, never emit server_port:0)"
+else
+	ok "C09 aggregate refuses a Link with port 0 (fail-closed)"
+fi
+
+# ---------------------------------------------------------------------------
+note "C26 — aggregate asserts scheme is known and matches transport_class"
+# ---------------------------------------------------------------------------
+# An endpoint whose Link scheme contradicts its declared transport_class is a conflicting source of
+# truth (e.g. an ss:// Link tagged reality-tcp). The aggregate MUST refuse it fail-closed.
+C26_BUNDLE="$WORK/c26.bundle.json"
+"$CTL" bundle --params "$AGG_P1" --state "$STATE" --out "$C26_BUNDLE" 2>/dev/null
+C26_MISMATCH="$WORK/c26.mismatch.json"
+# Keep one endpoint, force its transport_class to disagree with its (vless) scheme.
+jq '.endpoints |= [.[0]] | .endpoints[0].transport_class = "shadowsocks-tcp"' "$C26_BUNDLE" > "$C26_MISMATCH"
+if "$CTL" aggregate --bundle "$C26_MISMATCH" --name a --bundle "$AGG_B1" --name b --out "$WORK/c26.out.json" >/dev/null 2>&1; then
+	bad "C26 aggregate accepted a scheme/transport_class mismatch (vless link tagged shadowsocks-tcp)"
+else
+	ok "C26 aggregate refuses a scheme/transport_class mismatch (fail-closed)"
+fi
+# An unknown scheme is also refused.
+C26_BADSCHEME="$WORK/c26.badscheme.json"
+jq '.endpoints |= [.[0]] | .endpoints[0].link = "wireguard://k@c26.example.invalid:51820#mycelium-x"' "$C26_BUNDLE" > "$C26_BADSCHEME"
+if "$CTL" aggregate --bundle "$C26_BADSCHEME" --name a --bundle "$AGG_B1" --name b --out "$WORK/c26.bs.json" >/dev/null 2>&1; then
+	bad "C26 aggregate accepted an unknown URI scheme"
+else
+	ok "C26 aggregate refuses an unknown URI scheme (fail-closed)"
+fi
+
+# ---------------------------------------------------------------------------
+note "C27 — aggregate rejects a non-ASCII node label (homoglyph collision guard)"
+# ---------------------------------------------------------------------------
+# A non-ASCII --name (e.g. a Cyrillic homoglyph) must be refused outright, not folded to '_'.
+if "$CTL" aggregate --bundle "$AGG_B1" --name "$(printf 'n\xc3\xb6deA')" --bundle "$AGG_B2" --name nodeB --out "$WORK/c27.out.json" >/dev/null 2>&1; then
+	bad "C27 aggregate accepted a non-ASCII node label (homoglyph tag-collision risk)"
+else
+	ok "C27 aggregate refuses a non-ASCII node label (ASCII whitelist; fail-closed)"
+fi
+
+# ---------------------------------------------------------------------------
 note "Summary"
 printf 'passed: %d   failed: %d\n' "$PASS" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
