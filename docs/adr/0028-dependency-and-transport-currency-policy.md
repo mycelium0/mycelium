@@ -15,7 +15,7 @@ later. See the LICENSE file in the repository root.
 > engine), and a **living landscape annex** that holds the evidence and watch-list. Saved as
 > `docs/adr/0028-dependency-and-transport-currency-policy.md`.
 >
-> **Scope note.** This ADR records a **policy**, not a fleet change. The version floors below are
+> **Scope note.** This ADR records a **policy**, not a network change. The version floors below are
 > **migration targets**: they declare the floor the repository's pins should move toward and the
 > conformance that detects drift. Actually **bumping a live pin** is a separate, careful deploy —
 > staged on **one node first** with the dependency-policy `Verification:` block and the conformance
@@ -102,7 +102,7 @@ engine to serve it on.
 - **Affected asset:** ingress reachability and, through indistinguishability, user identity/location
   — a detectable handshake undermines every shape sharing that address.
 - **Fundamental trade-off:** indistinguishability ↔ adaptation speed / false-migration risk.
-  Chasing every upstream tag risks a bad pin reaching the fleet; never moving lets the shapes age
+  Chasing every upstream tag risks a bad pin reaching the network; never moving lets the shapes age
   into detectability. The resolution is to **separate the policy (floors + cadence, recorded here)
   from the act (a staged, one-node-first deploy under [../dependency-policy.md](../dependency-policy.md))**,
   so the target is declared and audited while the bump stays careful.
@@ -120,11 +120,11 @@ engine to serve it on.
      review's central finding (currency is load-bearing) is not actionable.
 
 2. **Declare floors and force-bump all live pins to them now** — record the floors and immediately
-   migrate the fleet to satisfy them in one move.
+   migrate the network to satisfy them in one move.
    - Pros: the deployed set is current the moment the ADR lands.
-   - Cons: collapses the policy and the act; a single unvetted bump touching the whole fleet is
+   - Cons: collapses the policy and the act; a single unvetted bump touching the whole network is
      exactly the staged-update anti-pattern [../dependency-policy.md](../dependency-policy.md) §3–§4
-     forbids; one bad pin becomes a fleet-wide outage or a fleet-wide new signature.
+     forbids; one bad pin becomes a network-wide outage or a network-wide new signature.
    - Impact on indistinguishability / survivability: high blast radius; trades a slow detectability
      risk for an acute deployment risk.
 
@@ -240,7 +240,7 @@ any automatic upgrade: detection is gated; the remedy is the staged one-node-fir
   engine-asymmetry finding is recorded and actionable (an operator knows which engine carries which
   hardening); pin drift is caught offline; the landscape evidence lives in one maintained annex
   instead of churning ADRs; the policy is separated from the act, so the floors can be declared
-  without forcing a risky fleet move.
+  without forcing a risky network move.
 - **Negative / cost:** the floors and the annex must be kept honest — a stale annex or a floor that
   has drifted past upstream is itself misleading; one new offline gate and one runbook probe to
   maintain; the quarterly sweep is recurring effort.
@@ -260,7 +260,7 @@ any automatic upgrade: detection is gated; the remedy is the staged one-node-fir
   one-node-first deploys per [../dependency-policy.md](../dependency-policy.md). The **act** of
   satisfying each floor on live nodes is tracked separately, not by this ADR.
 - **What is now forbidden:** treating transport-version currency as optional once a load-bearing
-  floor is declared; bumping a live pin **fleet-wide in one move** to satisfy a floor (the bump is
+  floor is declared; bumping a live pin **network-wide in one move** to satisfy a floor (the bump is
   staged, one node first, with a `Verification:` block); claiming any version bump here beats the
   destination-AS download-throughput throttle or the cross-layer RTT fingerprint (those are
   answered only at the routing/topology layer — [ADR-0027](0027-selective-growth-and-in-region-ingress.md));

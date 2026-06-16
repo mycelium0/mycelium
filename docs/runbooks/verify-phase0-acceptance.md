@@ -20,7 +20,7 @@ later. See the LICENSE file in the repository root.
 > `*.local.md`).
 
 ## Preconditions
-- The fleet is healthy: on each node `systemctl is-active sing-box` and `systemctl is-active
+- The network is healthy: on each node `systemctl is-active sing-box` and `systemctl is-active
   awg-quick@awg0` are `active`, and the `mycelium-update.timer` is active.
 - `bash tests/run.sh` is green on the deployed `--repo-ref` (the offline gates describe the deployed
   artifact, per Audit-0004 F-002).
@@ -116,7 +116,7 @@ the sanctioned Ansible path — the reproducibility guarantee. (The AF_NETLINK, 
 and AmneziaWG-fail-closed fixes from Audit-0004 make this path safe to run from zero.)
 
 **Steps.**
-1. Provision a fresh VPS (a spare IP in an AS not already used by the fleet — see
+1. Provision a fresh VPS (a spare IP in an AS not already used by the network — see
    [node-as-inventory.md](node-as-inventory.md)).
 2. Fill a gitignored inventory + `group_vars` `*.local` with the node's real values; run the Ansible
    play (`infra/ansible`).

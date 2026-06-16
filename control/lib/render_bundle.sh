@@ -191,7 +191,7 @@ myc_bundle_link() {
 # C30 — PER-NODE SCOPE (NOT a network map). This producer emits THIS ONE node's OWN subscription: the
 # endpoints are this single node's enabled transports, dialing this node's address. It is the matured,
 # self-replenishing form of the per-node hand-rendered subscription (RP-0007-b), and nothing more. It
-# is NOT a fleet/topology map, NOT a cross-node aggregate, and carries NO node-id/issuer/signature — by
+# is NOT a network/topology map, NOT a cross-node aggregate, and carries NO node-id/issuer/signature — by
 # design (bundle.go schema). The invariant is "every node serves its OWN bundle"; a served cross-node
 # aggregator would be a forbidden topology centralisation + single point of block. The only place
 # multiple nodes' bundles meet is the LOCAL, at-rest `aggregate` merge an operator runs over THEIR OWN

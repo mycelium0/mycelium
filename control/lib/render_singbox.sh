@@ -374,7 +374,7 @@ myc_sb_render_server() {
 	# declare a `two_hop` upstream, append a VLESS+WS+TLS outbound to that out-of-region node plus an
 	# auth_user route rule, so a designated client egresses through it (in-region ingress -> out-of-region
 	# egress, carried node-to-node — never user-direct). Gated on the param being present, so every node
-	# WITHOUT `two_hop` renders byte-identically (no-op for the whole fleet; zero blast radius).
+	# WITHOUT `two_hop` renders byte-identically (no-op for the whole network; zero blast radius).
 	local two_hop
 	two_hop="$(printf '%s' "$params" | jq -c '.two_hop // empty' 2>/dev/null)"
 	if [ -n "$two_hop" ]; then

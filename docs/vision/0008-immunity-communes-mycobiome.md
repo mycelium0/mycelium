@@ -176,7 +176,7 @@ A Commune possesses its own: **trust roots; governance; update policy; bridge po
 observability policy; fungi quorum; acceptable-use rules.** **Global Mycelium does not own Communes.
 Communes are first-class entities.** This is the natural home for the per-operator trust root
 ([ADR-0014](../adr/0014-per-operator-node-credentials.md)) and the per-Commune observability policy
-(VIS-0006): the Commune is the boundary inside which "the operator's own fleet" already lives today.
+(VIS-0006): the Commune is the boundary inside which "the operator's own network" already lives today.
 
 ## 7. Commune Genetics
 

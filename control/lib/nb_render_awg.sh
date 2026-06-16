@@ -31,11 +31,11 @@ AWG_GO_REPO="https://github.com/amnezia-vpn/amneziawg-go"
 AWG_TOOLS_REPO="https://github.com/amnezia-vpn/amneziawg-tools"
 # Pinned source tags for the userspace build. There is NO upstream prebuilt amneziawg-go release, so a
 # from-zero node builds these from source (apt golang-go + build-essential). amneziawg-go matches the
-# fleet; amneziawg-tools is the current tag. Bumping these is a separate, verified change.
+# network; amneziawg-tools is the current tag. Bumping these is a separate, verified change.
 AWG_GO_TAG="v0.2.18"
 AWG_TOOLS_TAG="v1.0.20260223"
 
-# AmneziaWG canonical "dialect": the in-tunnel addressing + obfuscation knobs shared fleet-wide. Every
+# AmneziaWG canonical "dialect": the in-tunnel addressing + obfuscation knobs shared network-wide. Every
 # peer (server + all its clients) MUST share Jc/Jmin/Jmax/S1/S2/H1..H4 or the handshake fails. These
 # are TUNABLE, NOT secret — and are the SAME values as infra/ansible/roles/amneziawg/defaults/main.yml
 # (a node + its clients are one dialect). The render below uses them ONLY when first creating a node's
@@ -132,7 +132,7 @@ sg_allowed_join() {
 # (templates/awg0.conf.j2 + defaults). The CALLER invokes this ONLY when awg0.conf is ABSENT, so a
 # live/hand-tuned config (a node already in service) is NEVER clobbered. Per-client awg keypairs are
 # generated once (0600) and reused. The node is v4-only unless it has a global IPv6 address, in which
-# case it is dual-stack with NAT66 — matching the live fleet. No custom crypto: keys come only from
+# case it is dual-stack with NAT66 — matching the live network. No custom crypto: keys come only from
 # awg genkey|pubkey|genpsk (ADR-0002).
 render_awg0() {
 	local out="$1"

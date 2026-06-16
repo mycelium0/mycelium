@@ -19,8 +19,8 @@
 #     No transmission of any kind — the merge never leaves the operator's device. This is the
 #     hard invariant of this command.
 #   * It is NOT a central cross-node endpoint. There is no service that aggregates across nodes,
-#     no authority that holds the fleet's endpoints, nothing for an adversary to block once to
-#     take the fleet down. A served cross-node aggregator WOULD be a single point of block and a
+#     no authority that holds the network's endpoints, nothing for an adversary to block once to
+#     take the network down. A served cross-node aggregator WOULD be a single point of block and a
 #     forbidden centralisation of topology; this is the opposite — every node still serves its
 #     OWN bundle independently, and the operator stitches their own copies together at rest.
 #   * The bound on the at-rest merged profile (one device holding the operator's M nodes) is
