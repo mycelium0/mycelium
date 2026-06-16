@@ -52,6 +52,33 @@ func (h HealthValue) IsValid() bool {
 	}
 }
 
+// RegionBucket is a COARSE, closed-vocabulary region label for a bundle endpoint. It exists so the
+// bundle does not become a precise-location map (a node must never emit something like
+// "us-ca-sf-aws-1a", which would be an enumeration/de-anonymisation surface — Audit-0005 C13). In
+// Phase 1 the ONLY permitted value is RegionUnspecified: the bundle carries no region information at
+// all. A finer, still-coarse vocabulary (e.g. continent-scale buckets) is a deliberate Phase-2
+// expansion that adds members here behind the measurement track — never an open string. Wire values
+// are the lowercase strings below. (RP-0008: this vocabulary is owned in Go; the shell renderer
+// defaults `.region_bucket // "unspecified"` and the bundle_go_roundtrip gate enforces this on
+// rendered output.)
+type RegionBucket string
+
+const (
+	// RegionUnspecified is the zero-information bucket and the ONLY value permitted in Phase 1.
+	RegionUnspecified RegionBucket = "unspecified"
+)
+
+// IsValid reports whether the region bucket is one of the canonical members. In Phase 1 that is
+// exactly RegionUnspecified; the closed set widens only by a Phase-2 expansion (RP-0008).
+func (r RegionBucket) IsValid() bool {
+	switch r {
+	case RegionUnspecified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Endpoint is one selectable entry in a distribution bundle: a coarse transport CLASS (the closed
 // ADR-0010/0020 family taxonomy, NOT a node/endpoint/port/SNI leak — those live opaquely in Link), a
 // coarse region bucket, a client selection-order hint, an advisory health label, and the opaque
@@ -61,16 +88,16 @@ func (h HealthValue) IsValid() bool {
 type Endpoint struct {
 	Tag            string         `json:"tag"`             // client-facing label for this endpoint; non-empty
 	TransportClass TransportClass `json:"transport_class"` // coarse family (closed vocab)
-	Region         string         `json:"region"`          // opaque COARSE region bucket (no precise geo/ASN)
+	Region         RegionBucket   `json:"region"`          // COARSE closed-vocab region bucket (Phase 1: only "unspecified")
 	Priority       int            `json:"priority"`        // selection-order hint (lower = preferred); >= 0
 	Health         HealthValue    `json:"health"`          // advisory only; Phase 1 requires HealthUnknown
 	Link           string         `json:"link"`            // opaque dialable client config (e.g. vless:// URL); non-empty
 }
 
-// Validate checks one endpoint: non-empty tag, a known transport class, a non-empty coarse region, a
-// non-negative priority, a known health value that (in Phase 1) is HealthUnknown, and a non-empty link.
-// Pure: same input, same verdict, no I/O. Like EdgeReport.Validate it cannot by itself prove the region
-// bucket is coarse (a Phase-2 closed-vocabulary-hardening step), only that the structure holds.
+// Validate checks one endpoint: non-empty tag, a known transport class, a known coarse region bucket
+// (Phase 1: only RegionUnspecified — the closed vocabulary that keeps the bundle from becoming a
+// precise-location map, Audit-0005 C13), a non-negative priority, a known health value that (in
+// Phase 1) is HealthUnknown, and a non-empty link. Pure: same input, same verdict, no I/O.
 func (e *Endpoint) Validate() error {
 	if e.Tag == "" {
 		return fmt.Errorf("%w: tag", ErrEmptyField)
@@ -80,6 +107,13 @@ func (e *Endpoint) Validate() error {
 	}
 	if e.Region == "" {
 		return fmt.Errorf("%w: region", ErrEmptyField)
+	}
+	if !e.Region.IsValid() {
+		// Closed-vocab enforcement (C13): a too-precise region (e.g. "us-ca-sf-aws-1a") is an
+		// enumeration surface. Phase-1 bundles carry only the coarse "unspecified" bucket; a finer
+		// vocabulary is a deliberate Phase-2 expansion (RP-0008), never an open string.
+		return fmt.Errorf("%w: region %q (Phase-1 bundles carry only the coarse %q bucket)",
+			ErrUnknownEnum, e.Region, RegionUnspecified)
 	}
 	if e.Priority < 0 {
 		return fmt.Errorf("endpoint %q: priority must be >= 0, got %d", e.Tag, e.Priority)
@@ -116,6 +150,12 @@ func (b *Bundle) Validate() error {
 	}
 	if len(b.Endpoints) == 0 {
 		return fmt.Errorf("%w: endpoints", ErrEmptyField)
+	}
+	if b.GeneratedAt.IsZero() {
+		// C15: a zero generation time is a missing/garbled timestamp (an unset time.Time, or a wire
+		// value JSON could not parse as RFC-3339). A bundle without a real GeneratedAt cannot have its
+		// freshness reasoned about, so reject it rather than serve an undated artifact.
+		return fmt.Errorf("%w: generated_at", ErrEmptyField)
 	}
 	for i := range b.Endpoints {
 		if err := b.Endpoints[i].Validate(); err != nil {

@@ -11,7 +11,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** RP-0008
 - **Date:** 2026-06-16
 - **Author:** mindicator & silicon bags quartet
-- **Status:** draft
+- **Status:** draft — **P1 (typed Go boundary contracts) implemented** (`myceliumctl validate-bundle`, the `bundle_go_roundtrip` gate, the `RegionBucket` closed enum, `GeneratedAt` validation, the JSON round-trip tests); P2 (Go-owned vocab/mapping/version) and P3 (ported renderers) not started
 - **Phase:** cross-cutting (control-plane consolidation); P1 may land during Phase 1, P3 not before Phase 2
 - **Related documents:** Audit-0005 (C33 umbrella; C11, C12, C13, C14, C10; N1 root-cause); RP-0007 (the Phase-1 build whose bash renderers this migrates); RP-0002 §W7 (the original `render-server`/`subscription` "not yet ported" stub); ADR-0025 (no-global-abuse-oracle — the C13 region-vocab closure rides on it); ADR-0029 (community-federated ingress / two-hop, whose `via_user` routing decision P3 moves out of bash)
 
