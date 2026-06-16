@@ -94,11 +94,14 @@ seed_operator_overrides() {
 	local seeded='{}'
 	if [ -f "$PARAMS_JSON" ]; then
 		# Keep only allowlisted keys whose PRIOR value differs from the freshly-generated default.
+		# NB: the jq slurpfile var is `base`, NOT `def` — `def` is a jq KEYWORD, and jq 1.6 (still shipped
+		# on some nodes) fails to parse `$def` ("unexpected def, expecting IDENT"), which silently broke
+		# this merge on those nodes while newer jq (1.7+) tolerated it.
 		seeded="$(jq -n \
 			--slurpfile prev "$PARAMS_JSON" \
-			--slurpfile def "$defaults_file" \
+			--slurpfile base "$defaults_file" \
 			--argjson keys "$OPERATOR_TOGGLE_KEYS" \
-			'($prev[0] // {}) as $p | ($def[0] // {}) as $d
+			'($prev[0] // {}) as $p | ($base[0] // {}) as $d
 			 | reduce $keys[] as $k ({};
 				 if ($p|has($k)) and ($p[$k] != $d[$k]) then . + { ($k): $p[$k] } else . end)' \
 			2>/dev/null || printf '{}')"
@@ -120,11 +123,14 @@ merge_operator_overrides() {
 	jq -e 'type == "object"' "$OPERATOR_OVERRIDES" >/dev/null 2>&1 \
 		|| die "operator overrides file $OPERATOR_OVERRIDES is not a JSON object (fail-closed; fix or remove it)."
 	local merged
+	# NB: the jq slurpfile var is `base`, NOT `def` — `def` is a jq KEYWORD; jq 1.6 fails to parse `$def`
+	# ("unexpected def, expecting IDENT"), which silently failed this merge on jq-1.6 nodes (the update
+	# died here every tick and rolled back) while jq 1.7+ accepted it. Keep all jq var names non-reserved.
 	merged="$(jq -n \
-		--slurpfile def "$defaults_file" \
+		--slurpfile base "$defaults_file" \
 		--slurpfile ovr "$OPERATOR_OVERRIDES" \
 		--argjson keys "$OPERATOR_TOGGLE_KEYS" \
-		'($def[0] // {}) as $d | ($ovr[0] // {}) as $o
+		'($base[0] // {}) as $d | ($ovr[0] // {}) as $o
 		 | reduce $keys[] as $k ($d;
 			 if ($o|has($k)) then . + { ($k): $o[$k] } else . end)' \
 		2>/dev/null)" \
