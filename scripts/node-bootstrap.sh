@@ -48,6 +48,9 @@
 #     --update         fetch + re-render + validate + apply-with-rollback (the timer runs this)
 #     --update --staged  stage a validated candidate; do not apply until --ack
 #     --ack            promote a staged candidate (operator's explicit approval)
+#     --revoke NAME    revoke a client (NAME|ID) + re-render + reload + refresh the served bundle
+#     --disable-two-hop  remove the node-local two_hop.json overlay, re-render + reload + refresh the
+#                        served bundle (the supported way to turn two-hop OFF; no manual file surgery)
 #
 #   options:
 #     --repo-url URL       canonical artifact source (default: the pinned public repo remote)
@@ -100,7 +103,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -203,6 +206,7 @@ while [ "$#" -gt 0 ]; do
 		--update)          MODE="update"; shift ;;
 		--ack)             MODE="ack"; shift ;;
 		--revoke)          MODE="revoke"; REVOKE_NAME="${2:?--revoke needs a client NAME or ID}"; shift 2 ;;
+		--disable-two-hop) MODE="disable-two-hop"; shift ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;
@@ -259,6 +263,14 @@ RENDER_TEMPLATE="$ARTIFACT_ROOT/nodes/dataplane/singbox/server.template.renderer
 LASTGOOD_CONFIG="$STATE_DIR/config.lastgood.json"
 STAGED_CONFIG="$STATE_DIR/config.staged.json"
 ACK_MARKER="$STATE_DIR/config.staged.ack"
+# C19: operator-set TOGGLE overrides, persisted SEPARATELY from identity-derived fields. write_params
+# regenerates the identity-derived fields every run (keys/secrets/ports/paths from local identity), but
+# an operator who turns a transport ON (e.g. setting the hysteria2 enable flag) must NOT have that
+# silently reverted to default-OFF on the next --update. This 0600 file records ONLY the operator-settable
+# toggles (the *_enable* flags + the few operator-tunable knobs); it is merged ON TOP of the regenerated
+# defaults so an operator enablement survives every re-render. Local-only / gitignored; absent on a node
+# whose operator never overrode anything (then defaults apply, byte-identically to today).
+OPERATOR_OVERRIDES="$STATE_DIR/operator-overrides.json"
 
 # Served distribution bundle (RP-0007-b). The node renders its typed Bundle (internal/spec/bundle.go)
 # via `myceliumctl bundle`, then SERVES it (e.g. via the caddy role's loopback bundle vhost) so a
@@ -269,6 +281,12 @@ ACK_MARKER="$STATE_DIR/config.staged.ack"
 BUNDLE_DIR="/etc/mycelium/bundle"
 BUNDLE_SERVED="$BUNDLE_DIR/bundle.json"           # the file the server serves (last-known-good)
 BUNDLE_CANDIDATE="$STATE_DIR/bundle.candidate.json"
+# C25 staleness signal: a tiny metrics file recording how old the SERVED bundle is (seconds since its
+# mtime) at the last render attempt. A stuck last-known-good (fail-closed fallback that keeps serving an
+# old bundle while fresh renders keep failing) is otherwise SILENT — only a warn, no age. This file lets a
+# node-local exporter/operator observe the skew (a Prometheus-textfile-style `bundle_served_age_seconds N`
+# line) without adding any daemon. Local-only / gitignored.
+BUNDLE_SERVED_AGE_FILE="$STATE_DIR/bundle_served_age_seconds.prom"
 
 # myceliumctl entrypoint: prefer the installed tooling copy; fall back to the in-repo (checkout) one.
 MYCTL="$TOOLING_DIR/control/myceliumctl"
@@ -861,6 +879,139 @@ resolve_node_address() {
 	return 0
 }
 
+# ---------------------------------------------------------------------------
+# assert_two_hop_shape FILE — fail-closed shape validation of a node-local two_hop.json overlay
+# (C17/C18/C21). Mirrors render_singbox.sh's fail-closed `.two_hop` guard so a malformed overlay is
+# caught at the SAME consistency bar at params-write time, not only deep in the renderer. Any failure
+# is a hard `die` (the caller has already decided the file is PRESENT, so absence is not this function's
+# concern). Checks, in order:
+#   * valid JSON object (not an array/scalar)                                  — well-formedness
+#   * non-empty via_user                                                        (C17/C18 precondition)
+#   * well-formed upstream: non-empty tag, non-empty server, integer server_port in 1..65535, non-empty
+#     sni                                                                       (C17 well-formed upstream)
+#   * via_user names an EXISTING identity (clients[].name in IDENTITIES_JSON)   (C18 unknown-user refusal)
+#   * egress upstream is DISTINCT from this ingress node — server != node_address AND sni != donor_sni
+#     (C21 ingress==egress refusal: a two-hop whose egress is the ingress itself is no second hop)
+assert_two_hop_shape() {
+	local file="$1" th ingress_addr ingress_sni
+	have jq || die "jq required to validate the two_hop overlay (fail-closed)."
+	jq -e 'type == "object"' "$file" >/dev/null 2>&1 \
+		|| die "two_hop.json ($file) is not a JSON object (fail-closed; a two-hop overlay must be an object)."
+	th="$(jq -c . "$file" 2>/dev/null)" \
+		|| die "two_hop.json ($file) is not valid JSON (fail-closed)."
+	# via_user must be present and non-empty (an unscoped egress no route selects is refused upstream too).
+	local th_via; th_via="$(printf '%s' "$th" | jq -r '.via_user // ""')"
+	[ -n "$th_via" ] || die "two_hop.json: via_user is empty (fail-closed; a two-hop must name the designated client that egresses out-of-region)."
+	# Well-formed upstream: tag, server, sni non-empty; server_port an integer in range.
+	local th_tag th_server th_sni th_port
+	th_tag="$(printf '%s' "$th" | jq -r '.tag // ""')"
+	th_server="$(printf '%s' "$th" | jq -r '.server // ""')"
+	th_sni="$(printf '%s' "$th" | jq -r '.sni // ""')"
+	th_port="$(printf '%s' "$th" | jq -r '.server_port // empty')"
+	[ -n "$th_tag" ]    || die "two_hop.json: tag is empty (fail-closed; the upstream outbound needs a tag)."
+	[ -n "$th_server" ] || die "two_hop.json: server is empty (fail-closed; the upstream needs an address)."
+	[ -n "$th_sni" ]    || die "two_hop.json: sni is empty (fail-closed; the upstream TLS needs a server_name)."
+	case "$th_port" in
+		''|*[!0-9]*) die "two_hop.json: server_port is not a positive integer ('$th_port'); must be 1..65535 (fail-closed)." ;;
+	esac
+	if [ "$th_port" -lt 1 ] || [ "$th_port" -gt 65535 ]; then
+		die "two_hop.json: server_port is out of range ('$th_port'); must be 1..65535 (fail-closed)."
+	fi
+	# C18: via_user must match an existing identity (clients[].name). An auth_user route for an unknown
+	# user renders fine but NEVER matches — a dead, unscoped egress rule. Refuse it here.
+	if [ -f "$IDENTITIES_JSON" ]; then
+		if ! jq -e --arg u "$th_via" 'any(.clients[]?; .name == $u)' "$IDENTITIES_JSON" >/dev/null 2>&1; then
+			die "two_hop.json: via_user '$th_via' is not a known client in $IDENTITIES_JSON (fail-closed; the auth_user route would never match — add the identity or fix via_user)."
+		fi
+	else
+		die "two_hop.json: cannot verify via_user '$th_via' — $IDENTITIES_JSON is missing (fail-closed; bootstrap an identity before configuring two-hop)."
+	fi
+	# C21: the egress upstream must be DISTINCT from this ingress node, or the "two hops" are one. Compare
+	# against this node's own reachable address and its donor_sni. Same host OR same SNI => die.
+	ingress_addr="$(resolve_node_address)"
+	if [ -f "$PARAMS_JSON" ] && have jq; then
+		ingress_sni="$(jq -r '.donor_sni // ""' "$PARAMS_JSON" 2>/dev/null)"
+	fi
+	if [ -n "$ingress_addr" ] && [ "$th_server" = "$ingress_addr" ]; then
+		die "two_hop.json: egress server '$th_server' is THIS node's own address (fail-closed; ingress and egress must be distinct nodes — a two-hop to itself is no second hop). See --disable-two-hop to remove the overlay."
+	fi
+	if [ -n "$ingress_sni" ] && [ "$th_sni" = "$ingress_sni" ]; then
+		die "two_hop.json: egress sni '$th_sni' equals this node's donor_sni (fail-closed; egress must be a distinct node, not the ingress SNI). See --disable-two-hop to remove the overlay."
+	fi
+	log "two_hop overlay validated (via_user='$th_via', egress tag='$th_tag', distinct from ingress)."
+}
+
+# ---------------------------------------------------------------------------
+# OPERATOR-TOGGLE OVERRIDES (C19 defect 2). write_params regenerates the FLAT params from the LOCAL
+# identity + canonical ports every run, so any operator-set toggle (e.g. enabling a transport) would be
+# silently reverted to its default on each --update. To preserve operator intent WITHOUT making the
+# whole params file operator-owned (the keys/secrets/ports MUST stay identity-derived + canonical), we
+# persist ONLY the operator-settable toggle subset in a dedicated 0600 overrides file and merge it ON
+# TOP of the regenerated defaults.
+#
+# OPERATOR_TOGGLE_KEYS is the closed allowlist of keys an operator may override (the *_enabled flags +
+# the handful of operator-tunable knobs). Identity-derived fields (keys, secrets, node_address, cert
+# paths, short_ids) are DELIBERATELY excluded so they can never be pinned stale by an override.
+OPERATOR_TOGGLE_KEYS='[
+	"vless_reality_vision_enabled","vless_reality_grpc_enabled","vless_reality_xhttp_enabled",
+	"vless_xhttp_tls_enabled","hysteria2_enabled","tuic_enabled","shadowsocks_enabled",
+	"shadowtls_enabled","trojan_enabled",
+	"vless_reality_vision_port","vless_reality_grpc_port","vless_reality_xhttp_port",
+	"vless_xhttp_tls_port","hysteria2_port","tuic_port","shadowsocks_port","shadowtls_port",
+	"trojan_port","xhttp_path","xhttp_path_tls","grpc_service_name","region_bucket"
+]'
+
+# seed_operator_overrides DEFAULTS_FILE — on the FIRST write under this logic (no overrides file yet),
+# capture any operator toggles that DIFFER from the freshly-generated defaults from the PRIOR params.json
+# (so an operator who enabled a transport before this change is not reverted on the upgrade). If there is
+# no prior params or nothing differs, write an empty {} so subsequent reads are stable. Idempotent.
+seed_operator_overrides() {
+	local defaults_file="$1"
+	[ -f "$OPERATOR_OVERRIDES" ] && return 0
+	local seeded='{}'
+	if [ -f "$PARAMS_JSON" ]; then
+		# Keep only allowlisted keys whose PRIOR value differs from the freshly-generated default.
+		seeded="$(jq -n \
+			--slurpfile prev "$PARAMS_JSON" \
+			--slurpfile def "$defaults_file" \
+			--argjson keys "$OPERATOR_TOGGLE_KEYS" \
+			'($prev[0] // {}) as $p | ($def[0] // {}) as $d
+			 | reduce $keys[] as $k ({};
+				 if ($p|has($k)) and ($p[$k] != $d[$k]) then . + { ($k): $p[$k] } else . end)' \
+			2>/dev/null || printf '{}')"
+		[ -n "$seeded" ] || seeded='{}'
+	fi
+	( umask 077; printf '%s\n' "$seeded" | jq . >"$OPERATOR_OVERRIDES" ) \
+		|| die "could not write operator overrides file $OPERATOR_OVERRIDES (fail-closed)."
+	if [ "$seeded" != '{}' ]; then
+		log "operator overrides seeded from prior params (preserving operator-set toggles across --update): $OPERATOR_OVERRIDES"
+	fi
+}
+
+# merge_operator_overrides DEFAULTS_FILE — merge the persisted operator toggles ON TOP of the freshly
+# generated defaults, in place. Only allowlisted keys are honoured (a stray key in the overrides file is
+# IGNORED, never injected), so the overrides file can never smuggle an identity-derived field.
+merge_operator_overrides() {
+	local defaults_file="$1"
+	[ -f "$OPERATOR_OVERRIDES" ] || return 0
+	jq -e 'type == "object"' "$OPERATOR_OVERRIDES" >/dev/null 2>&1 \
+		|| die "operator overrides file $OPERATOR_OVERRIDES is not a JSON object (fail-closed; fix or remove it)."
+	local merged
+	merged="$(jq -n \
+		--slurpfile def "$defaults_file" \
+		--slurpfile ovr "$OPERATOR_OVERRIDES" \
+		--argjson keys "$OPERATOR_TOGGLE_KEYS" \
+		'($def[0] // {}) as $d | ($ovr[0] // {}) as $o
+		 | reduce $keys[] as $k ($d;
+			 if ($o|has($k)) then . + { ($k): $o[$k] } else . end)' \
+		2>/dev/null)" \
+		|| die "could not merge operator overrides into params (fail-closed)."
+	[ -n "$merged" ] && printf '%s' "$merged" | jq -e . >/dev/null 2>&1 \
+		|| die "operator-override merge produced invalid JSON (fail-closed)."
+	printf '%s\n' "$merged" >"$defaults_file"
+	log "params: applied operator-set toggle overrides on top of regenerated defaults (C19: operator enablement preserved across --update)."
+}
+
 write_params() {
 	log "writing params.json (local-only render input) from node identity + canonical ports"
 	need_root
@@ -943,17 +1094,34 @@ write_params() {
 			shadowtls_enabled:            false, shadowtls_port:            8446,
 			trojan_enabled:               false, trojan_port:               8447
 		}' >"$tmp"
+	# C19 (defect 2): preserve operator-set toggles across regeneration. The block above is the
+	# identity-derived + canonical DEFAULT. seed_operator_overrides captures (once) any pre-existing
+	# operator enablement from the prior params; merge_operator_overrides then re-applies the persisted
+	# operator toggles ON TOP of these defaults so an enablement set on a previous run is NOT reverted by
+	# this --update. Only the allowlisted toggle keys are honoured; identity-derived fields stay as
+	# regenerated. A node whose operator never overrode anything keeps an empty {} and renders identically.
+	seed_operator_overrides "$tmp"
+	merge_operator_overrides "$tmp"
 	# Optional two-hop egress overlay (ADR-0029): a node acting as an in-region INGRESS for an
 	# out-of-region egress drops a local-only two_hop.json into STATE_DIR; merge it into params so the
 	# renderer (render_singbox.sh) emits the upstream outbound + auth_user route. Node-local + never
 	# committed -> survives the fetch/re-render cycle; absent on every other node -> params render
 	# byte-identically (gated, zero blast radius). See render_singbox.sh `.two_hop` handling.
-	if [ -f "$STATE_DIR/two_hop.json" ] && jq -e . "$STATE_DIR/two_hop.json" >/dev/null 2>&1; then
+	#
+	# C19 FAIL-CLOSED: an ABSENT two_hop.json means the feature is OFF (fine — every other node). But a
+	# PRESENT-yet-malformed two_hop.json (invalid JSON, wrong shape, or empty via_user) is operator error
+	# that MUST hard-fail here, never silently write params WITHOUT the overlay. Writing fail-OPEN would
+	# diverge from render_singbox.sh (which is fail-CLOSED on the same overlay): params would advertise a
+	# node with no egress while the operator believes the egress is live. So: present => it must be a
+	# well-formed object with a non-empty via_user and a well-formed upstream, or we `die`.
+	if [ -f "$STATE_DIR/two_hop.json" ]; then
+		assert_two_hop_shape "$STATE_DIR/two_hop.json"
 		if jq --slurpfile th "$STATE_DIR/two_hop.json" '.two_hop = $th[0]' "$tmp" >"$tmp.th"; then
 			mv -f "$tmp.th" "$tmp"
 			log "params: merged node-local two_hop egress overlay (ADR-0029 in-region ingress)."
 		else
-			rm -f "$tmp.th"; warn "two_hop.json present but failed to merge — params written WITHOUT two-hop."
+			rm -f "$tmp.th" "$tmp"
+			die "two_hop.json is present but could not be merged into params (fail-closed; refusing to write params WITHOUT the operator's two-hop overlay). Fix or remove $STATE_DIR/two_hop.json (see --disable-two-hop)."
 		fi
 	fi
 	mv -f "$tmp" "$PARAMS_JSON"; chmod 0600 "$PARAMS_JSON"
@@ -1031,6 +1199,42 @@ rollback_config() {
 # "unknown", non-empty link — C10), so a structurally-broken bundle never reaches the served path
 # fail-open relative to the Go type.
 # ---------------------------------------------------------------------------
+
+# bundle_served_age_seconds — echo the age (seconds since mtime) of the SERVED bundle, or empty if none.
+# Portable across GNU/BSD stat (Linux nodes use GNU; the macOS test host uses BSD).
+bundle_served_age_seconds() {
+	[ -f "$BUNDLE_SERVED" ] || { printf ''; return 0; }
+	local mtime now
+	mtime="$(stat -c %Y "$BUNDLE_SERVED" 2>/dev/null || stat -f %m "$BUNDLE_SERVED" 2>/dev/null || printf '')"
+	[ -n "$mtime" ] || { printf ''; return 0; }
+	now="$(date +%s 2>/dev/null || printf '')"
+	[ -n "$now" ] || { printf ''; return 0; }
+	local age=$(( now - mtime ))
+	[ "$age" -lt 0 ] && age=0
+	printf '%s' "$age"
+}
+
+# record_bundle_served_age STALE_FLAG — write the staleness metric file (Prometheus textfile style) and,
+# when STALE_FLAG=1 (a fail-closed fallback kept the last-known-good), emit a loud age signal so a stuck
+# stale bundle is OBSERVABLE, not just warned about once. Best-effort: never fails the caller.
+record_bundle_served_age() {
+	local stale_flag="${1:-0}" age
+	[ "$DRY_RUN" -eq 1 ] && return 0
+	age="$(bundle_served_age_seconds)"
+	[ -n "$age" ] || return 0
+	{
+		printf '# HELP bundle_served_age_seconds Age (seconds) of the served distribution bundle at last render attempt.\n'
+		printf '# TYPE bundle_served_age_seconds gauge\n'
+		printf 'bundle_served_age_seconds %s\n' "$age"
+		printf '# HELP bundle_served_stale Whether the served bundle is a kept last-known-good (1) vs freshly promoted (0).\n'
+		printf '# TYPE bundle_served_stale gauge\n'
+		printf 'bundle_served_stale %s\n' "$stale_flag"
+	} >"$BUNDLE_SERVED_AGE_FILE" 2>/dev/null || true
+	if [ "$stale_flag" = "1" ]; then
+		warn "served bundle is now a STALE last-known-good: bundle_served_age_seconds=$age (a fresh render kept failing — investigate; metric at $BUNDLE_SERVED_AGE_FILE)."
+	fi
+}
+
 render_serve_bundle() {
 	[ -x "$MYCTL" ] || { warn "myceliumctl not found; skipping bundle render (sub channel unaffected)."; return 0; }
 	[ -f "$PARAMS_JSON" ] || { warn "params.json missing; skipping bundle render."; return 0; }
@@ -1048,6 +1252,7 @@ render_serve_bundle() {
 		rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
 		if [ -f "$BUNDLE_SERVED" ]; then
 			warn "bundle render failed; keeping the last-known-good served bundle ($BUNDLE_SERVED) — fail-closed."
+			record_bundle_served_age 1
 			return 0
 		fi
 		die "bundle render failed and there is no last-known-good served bundle (fail-closed; nothing valid to serve)."
@@ -1074,6 +1279,7 @@ render_serve_bundle() {
 		rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
 		if [ -f "$BUNDLE_SERVED" ]; then
 			warn "freshly rendered bundle failed validation; keeping the last-known-good served bundle — fail-closed."
+			record_bundle_served_age 1
 			return 0
 		fi
 		die "freshly rendered bundle failed validation and there is no last-known-good to fall back to (fail-closed)."
@@ -1084,6 +1290,9 @@ render_serve_bundle() {
 	run mkdir -p "$BUNDLE_DIR"
 	run install -m 0644 "$BUNDLE_CANDIDATE" "$BUNDLE_SERVED"
 	rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
+	# Fresh promotion: the served bundle is now current (stale=0, age ~0). Record the metric so an operator
+	# can distinguish a healthy fresh serve from a stuck last-known-good.
+	record_bundle_served_age 0
 	log "served bundle updated (validated): $BUNDLE_SERVED ($(jq '.endpoints | length' "$BUNDLE_SERVED" 2>/dev/null || echo '?') endpoint(s))."
 	log "serve it over HTTPS with a profile-update-interval header so clients self-poll (see roles/caddy: caddy_serve_bundle)."
 }
@@ -1794,12 +2003,56 @@ flow_revoke() {
 	rm -f "$candidate" 2>/dev/null || true
 	install_singbox_unit
 	if apply_singbox && verify_post_apply; then
-		log "revoked '$REVOKE_NAME'; config re-rendered + sing-box reloaded — the client's UUID is gone from every inbound. Other clients' links are unchanged."
+		# C25: the served distribution bundle embeds the FIRST identity's UUID as the endpoint credential.
+		# Revoking that identity without re-rendering leaves the served bundle's Link pointing at a dead
+		# UUID. Re-render the served bundle on this promotion path too (fail-closed: keeps last-known-good
+		# if the fresh render does not validate), so the served distribution never advertises a revoked
+		# credential.
+		render_serve_bundle
+		log "revoked '$REVOKE_NAME'; config re-rendered + sing-box reloaded + served bundle refreshed — the client's UUID is gone from every inbound. Other clients' links are unchanged."
 	else
 		warn "post-apply verification failed after revoke; rolling back."
 		rollback_config
 		apply_singbox || true
 		die "revoke rolled back (fail-closed) — the prior config (with the client) is restored."
+	fi
+}
+
+# flow_disable_two_hop — C21 documented remove-two-hop path: delete the node-local two_hop.json overlay,
+# regenerate params WITHOUT it, re-render + validate the server config fail-closed, promote + reload, and
+# re-render the served bundle. This is the supported way to turn two-hop OFF — no manual file surgery, and
+# every promotion path (server config + served bundle) is refreshed so nothing keeps a stale unscoped
+# egress. Idempotent: if no overlay is present, it reports so and exits 0 (nothing to disable).
+flow_disable_two_hop() {
+	log "=== disable two-hop egress overlay (remove + re-render + reload) ==="
+	need_root
+	if [ ! -f "$STATE_DIR/two_hop.json" ]; then
+		log "no two_hop.json present at $STATE_DIR — two-hop is already disabled (nothing to do)."
+		return 0
+	fi
+	[ -f "$IDENTITY_SECRETS" ] || die "no local identity; cannot re-render after disabling two-hop (bootstrap first)."
+	run rm -f "$STATE_DIR/two_hop.json"
+	log "removed the node-local two_hop overlay ($STATE_DIR/two_hop.json)."
+	# Regenerate params WITHOUT the overlay (write_params no longer finds two_hop.json -> no .two_hop key).
+	write_params
+	local candidate="$STATE_DIR/config.candidate.json"
+	render_candidate "$candidate"
+	if ! validate_config "$candidate"; then
+		rm -f "$candidate" 2>/dev/null || true
+		die "candidate failed 'sing-box check' after disabling two-hop (fail-closed; nothing promoted)."
+	fi
+	promote_config "$candidate"
+	rm -f "$candidate" 2>/dev/null || true
+	install_singbox_unit
+	if apply_singbox && verify_post_apply; then
+		# Re-render the served bundle so the served distribution reflects the now-two-hop-free config.
+		render_serve_bundle
+		log "two-hop disabled; config re-rendered + sing-box reloaded + served bundle refreshed."
+	else
+		warn "post-apply verification failed after disabling two-hop; rolling back."
+		rollback_config
+		apply_singbox || true
+		die "disable-two-hop rolled back (fail-closed) — the prior config is restored."
 	fi
 }
 
@@ -1861,11 +2114,17 @@ verify_listen_ports() {
 # ---------------------------------------------------------------------------
 # Dispatch.
 # ---------------------------------------------------------------------------
-case "$MODE" in
-	bootstrap) flow_bootstrap ;;
-	update)    flow_update ;;
-	ack)       flow_ack ;;
-	revoke)    flow_revoke ;;
-	*) die "unknown mode: $MODE" ;;
-esac
+# MYC_NB_NO_DISPATCH=1 lets a test SOURCE this script to exercise the pure helpers (assert_two_hop_shape,
+# seed/merge_operator_overrides, bundle_served_age_seconds) WITHOUT running a root-requiring flow. It is
+# never set in production; the normal invocation leaves it unset and dispatches as before.
+if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
+	case "$MODE" in
+		bootstrap)       flow_bootstrap ;;
+		update)          flow_update ;;
+		ack)             flow_ack ;;
+		revoke)          flow_revoke ;;
+		disable-two-hop) flow_disable_two_hop ;;
+		*) die "unknown mode: $MODE" ;;
+	esac
+fi
 exit 0

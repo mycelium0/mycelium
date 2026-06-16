@@ -34,6 +34,26 @@
 # and against a `<token>_enabled` flag in params.
 MYC_SB_PROTOS="vless-reality-vision vless-reality-grpc vless-reality-xhttp vless-xhttp-tls hysteria2 tuic shadowsocks shadowtls trojan"
 
+# ---------------------------------------------------------------------------
+# urltest anti-flapping calibration (C22)
+# ---------------------------------------------------------------------------
+# The client `urltest` outbound (subscription + aggregate) auto-selects the lowest-latency endpoint. With
+# a tight tolerance and a short interval it THRASHES between near-equal endpoints on ordinary jitter, and
+# auto-rotation that flaps becomes its own blocking signal (THREAT-MODEL §6.1.6/§6.1.8). sing-box urltest
+# supports three hysteresis knobs; we set all three to anti-flap defaults (single source of truth, used by
+# BOTH the subscription render below and render_aggregate.sh):
+#   * interval (5m): how often urltest re-probes. Wider than the old 3m so transient jitter between probes
+#     does not drive a switch; still responsive enough to notice a genuinely dead endpoint within minutes.
+#   * tolerance (150ms): the NEW endpoint must beat the current one by >150ms before urltest switches.
+#     Widened from 50ms (which flips on sub-perceptible latency noise) into the audit's 100-200ms band, so
+#     two endpoints within ~150ms of each other are treated as equivalent and the client stays put.
+#   * idle_timeout (30m): how long an unused endpoint's last result is trusted before a forced re-probe.
+#     Set well above the interval so a momentarily idle endpoint is not re-ranked on stale data.
+# Calibration rationale lives here so a future change is a single, reviewed edit.
+MYC_URLTEST_INTERVAL="5m"
+MYC_URLTEST_TOLERANCE=150
+MYC_URLTEST_IDLE_TIMEOUT="30m"
+
 # myc_sb_proto_enabled PARAMS_JSON PROTO -> 0 if enabled, 1 otherwise.
 # A protocol is enabled when params.<proto>_enabled is exactly true. The dash in a
 # token maps to an underscore in the params flag name (jq keys avoid dashes here).
@@ -338,6 +358,44 @@ myc_sb_render_server() {
 		# exactly which client egresses out-of-region; everyone else stays on the in-region final route.
 		local th_via; th_via="$(printf '%s' "$two_hop" | jq -r '.via_user // ""')"
 		[ -n "$th_via" ] || myc_die "render-server: params.two_hop.via_user is empty — refusing an unscoped two-hop egress (set the designated client name)."
+		# C17 fail-closed: the overlay must be a well-formed upstream — non-empty tag/server/sni and an
+		# integer server_port in 1..65535. A malformed upstream (e.g. server_port 0) would otherwise be
+		# spliced into a non-dialable outbound. Validate the shape at the SAME bar render_bundle applies.
+		printf '%s' "$two_hop" | jq -e 'type == "object"' >/dev/null 2>&1 \
+			|| myc_die "render-server: params.two_hop is not an object (fail-closed)."
+		local th_tag th_srv th_sn th_pt
+		th_tag="$(printf '%s' "$two_hop" | jq -r '.tag // ""')"
+		th_srv="$(printf '%s' "$two_hop" | jq -r '.server // ""')"
+		th_sn="$(printf '%s' "$two_hop" | jq -r '.sni // ""')"
+		th_pt="$(printf '%s' "$two_hop" | jq -r '.server_port // empty')"
+		[ -n "$th_tag" ] || myc_die "render-server: params.two_hop.tag is empty (fail-closed; the upstream outbound needs a tag)."
+		[ -n "$th_srv" ] || myc_die "render-server: params.two_hop.server is empty (fail-closed; the upstream needs an address)."
+		[ -n "$th_sn" ]  || myc_die "render-server: params.two_hop.sni is empty (fail-closed; the upstream TLS needs a server_name)."
+		case "$th_pt" in
+			''|*[!0-9]*) myc_die "render-server: params.two_hop.server_port is not a positive integer ('$th_pt'); must be 1..65535 (fail-closed)." ;;
+		esac
+		if [ "$th_pt" -lt 1 ] || [ "$th_pt" -gt 65535 ]; then
+			myc_die "render-server: params.two_hop.server_port is out of range ('$th_pt'); must be 1..65535 (fail-closed)."
+		fi
+		# C18 fail-closed: via_user MUST name an EXISTING client (clients[].name). The auth_user route rule
+		# below keys on this exact name; an unknown user renders fine but the rule NEVER matches — a dead,
+		# unscoped egress whose designated traffic silently falls through to the in-region final route.
+		if ! printf '%s' "$clients" | jq -e --arg u "$th_via" 'any(.[]; .name == $u)' >/dev/null 2>&1; then
+			myc_die "render-server: params.two_hop.via_user '$th_via' is not a known client (fail-closed; the auth_user route would never match — add the identity or fix via_user)."
+		fi
+		# C21 fail-closed: the egress upstream must be DISTINCT from this ingress node, or the "two hops"
+		# collapse to one. Refuse when the upstream server equals this node's own address OR the upstream
+		# SNI equals this node's donor_sni (same host or same TLS identity => not a second hop). Reuses the
+		# th_srv/th_sn read above.
+		local ingress_addr ingress_sni
+		ingress_addr="$(printf '%s' "$params" | jq -r '.node_address // ""')"
+		ingress_sni="$(printf '%s' "$params" | jq -r '.donor_sni // ""')"
+		if [ -n "$th_srv" ] && [ -n "$ingress_addr" ] && [ "$th_srv" = "$ingress_addr" ]; then
+			myc_die "render-server: params.two_hop.server '$th_srv' is THIS node's own address — refusing a two-hop whose egress is the ingress (fail-closed; ingress and egress must be distinct nodes)."
+		fi
+		if [ -n "$th_sn" ] && [ -n "$ingress_sni" ] && [ "$th_sn" = "$ingress_sni" ]; then
+			myc_die "render-server: params.two_hop.sni '$th_sn' equals this node's donor_sni — refusing a two-hop whose egress shares the ingress SNI (fail-closed; egress must be a distinct node)."
+		fi
 		rendered="$(printf '%s' "$rendered" | jq --argjson th "$two_hop" '
 			.outbounds += [{
 				type: "vless", tag: $th.tag, server: $th.server,
@@ -483,6 +541,9 @@ myc_sb_render_subscription() {
 				--arg grpc "$grpc_service" \
 				--arg xpath "$xhttp_path" \
 				--arg xpathtls "$xhttp_path_tls" \
+				--arg utinterval "$MYC_URLTEST_INTERVAL" \
+				--argjson uttolerance "$MYC_URLTEST_TOLERANCE" \
+				--arg utidle "$MYC_URLTEST_IDLE_TIMEOUT" \
 				--argjson ports "$ports_json" \
 				--argjson enabled "$enabled_json" \
 				'
@@ -515,7 +576,7 @@ myc_sb_render_subscription() {
 						$proxies
 						+ $detours
 						+ [
-							{ type: "urltest", tag: "auto", outbounds: $tags, url: "https://www.gstatic.com/generate_204", interval: "3m", tolerance: 50 },
+							{ type: "urltest", tag: "auto", outbounds: $tags, url: "https://www.gstatic.com/generate_204", interval: $utinterval, tolerance: $uttolerance, idle_timeout: $utidle },
 							{ type: "selector", tag: "mycelium", outbounds: (["auto"] + $tags), default: "auto" },
 							{ type: "direct", tag: "direct" },
 							{ type: "block", tag: "block" }
@@ -661,8 +722,12 @@ myc_sb_emit_clash() {
 			printf '  - name: "mycelium-auto"\n'
 			printf '    type: url-test\n'
 			printf '    url: "https://www.gstatic.com/generate_204"\n'
-			printf '    interval: 180\n'
-			printf '    tolerance: 50\n'
+			# C22 anti-flapping (Clash-Meta url-test): interval in SECONDS (300=5m), tolerance in ms (150),
+			# lazy so an idle group is not re-probed on stale data — the Clash-Meta analogue of the sing-box
+			# MYC_URLTEST_* hysteresis defaults; keeps the client from thrashing between near-equal endpoints.
+			printf '    interval: 300\n'
+			printf '    tolerance: 150\n'
+			printf '    lazy: true\n'
 			printf '    proxies: [ %s ]\n' "$names_clean"
 			printf '  - name: "mycelium"\n'
 			printf '    type: select\n'

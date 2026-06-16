@@ -343,15 +343,22 @@ myc_render_aggregate() {
 	# Assemble the final sing-box client profile: every proxy outbound, then ONE urltest "auto"
 	# over ALL of them, then ONE selector ("mycelium", default through "auto"), then direct/block —
 	# the SAME outbound layout render_singbox.sh's subscription emits, just spanning several nodes.
+	# C22 anti-flapping: reuse the SAME urltest hysteresis defaults the subscription render uses
+	# (render_singbox.sh MYC_URLTEST_* — single source of truth), so the cross-node auto-switch does not
+	# thrash between near-equal endpoints on jitter (THREAT-MODEL §6.1.6/§6.1.8). render_aggregate.sh
+	# already sources render_singbox.sh, so these constants are in scope.
 	local profile
 	profile="$(jq -nc \
 		--argjson proxies "$outbounds_json" \
 		--argjson tags "$tags_json" \
+		--arg utinterval "$MYC_URLTEST_INTERVAL" \
+		--argjson uttolerance "$MYC_URLTEST_TOLERANCE" \
+		--arg utidle "$MYC_URLTEST_IDLE_TIMEOUT" \
 		'{
 			outbounds: (
 				$proxies
 				+ [
-					{ type: "urltest", tag: "auto", outbounds: $tags, url: "https://www.gstatic.com/generate_204", interval: "3m", tolerance: 50 },
+					{ type: "urltest", tag: "auto", outbounds: $tags, url: "https://www.gstatic.com/generate_204", interval: $utinterval, tolerance: $uttolerance, idle_timeout: $utidle },
 					{ type: "selector", tag: "mycelium", outbounds: (["auto"] + $tags), default: "auto" },
 					{ type: "direct", tag: "direct" },
 					{ type: "block", tag: "block" }
