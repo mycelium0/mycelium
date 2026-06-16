@@ -30,7 +30,9 @@
 #      sits BELOW a documented floor; it NEVER invents a floor the repo does not declare, and a
 #      component with no declared floor is reported as "no floor declared — skipped" (not failed).
 #      Pins inspected (only those that exist today):
-#        * node_exporter_version  in scripts/node-bootstrap.sh  (NODE_EXPORTER_VERSION="...")
+#        * node_exporter_version  in control/lib/nb_observability.sh  (NODE_EXPORTER_VERSION="...")
+#          (RP-0009 C4 carved the node_exporter wiring + its pin out of scripts/node-bootstrap.sh into
+#          this sourced lib; the scan follows the constant to its new home)
 #        * singbox_version / xray_version / node_exporter_version in the tracked Ansible
 #          group_vars example (infra/ansible/group_vars/all.yml.example)
 #      Floors are read from the policy ADR via a stable, greppable grammar (see FLOOR GRAMMAR).
@@ -73,7 +75,9 @@ REPO_ROOT="$(cd -P "$HERE/../.." && pwd)"
 
 ADR_GLOB_DIR="$REPO_ROOT/docs/adr"
 LANDSCAPE_DOC="$REPO_ROOT/docs/reference/transport-technique-landscape.md"
-BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
+# RP-0009 C4: the node_exporter pin (NODE_EXPORTER_VERSION) moved out of scripts/node-bootstrap.sh into
+# the sourced lib control/lib/nb_observability.sh; scan it there, with identical intent.
+BOOTSTRAP="$REPO_ROOT/control/lib/nb_observability.sh"
 GROUP_VARS="$REPO_ROOT/infra/ansible/group_vars/all.yml.example"
 
 fail=0
@@ -211,11 +215,11 @@ _add_pin() {
 "
 }
 
-# node-bootstrap.sh — NODE_EXPORTER_VERSION="x.y.z"
+# control/lib/nb_observability.sh — NODE_EXPORTER_VERSION="x.y.z" (RP-0009 C4 home of the pin)
 if [ -f "$BOOTSTRAP" ]; then
 	v="$(grep -E '^[[:space:]]*NODE_EXPORTER_VERSION=' "$BOOTSTRAP" 2>/dev/null \
 		| head -n1 | sed -E 's/.*NODE_EXPORTER_VERSION=["'"'"']?([^"'"'"']+)["'"'"']?.*/\1/')"
-	_add_pin node_exporter "$v" "scripts/node-bootstrap.sh"
+	_add_pin node_exporter "$v" "control/lib/nb_observability.sh"
 fi
 
 # tracked Ansible group_vars example — singbox_version / xray_version / node_exporter_version
