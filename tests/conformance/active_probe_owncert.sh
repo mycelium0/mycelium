@@ -101,10 +101,16 @@ while IFS= read -r tag; do
 	port="$(jq -r --arg t "$tag" '.inbounds[]? | select(.tag == $t) | .listen_port // empty' "$TEMPLATE")"
 
 	# (a) serves its OWN certificate (not a donor/reality cover that borrows a third party's handshake).
-	if [ -n "$cert" ] && [ -n "$key" ]; then
+	# C29: assert the cert/key paths are NON-WHITESPACE, not merely non-empty — a path of only spaces/tabs
+	# passes `-n` yet is no path at all (sing-box would fail to load it). Strip surrounding whitespace and
+	# require something remains. NOTE: actual file existence/validity on disk stays a DEPLOY-TIME check
+	# (this gate is offline + inspect-only on the template; the files do not exist at gate time).
+	cert_trimmed="$(printf '%s' "$cert" | tr -d '[:space:]')"
+	key_trimmed="$(printf '%s' "$key" | tr -d '[:space:]')"
+	if [ -n "$cert_trimmed" ] && [ -n "$key_trimmed" ]; then
 		okln "$tag: serves its own certificate_path + key_path (own-cert, not a donor/reality cover)"
 	else
-		badln "$tag: missing own certificate_path/key_path (cert='$cert' key='$key') — an own-cert TLS inbound that borrows a donor handshake is a reality-cover masquerade (fail-closed)"
+		badln "$tag: missing or whitespace-only own certificate_path/key_path (cert='$cert' key='$key') — an own-cert TLS inbound that borrows a donor handshake (or names no real cert path) is a reality-cover masquerade (fail-closed)"
 	fi
 
 	# (b) listen_port is NOT the confirmed mobile-tell port 8443.

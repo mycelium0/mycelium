@@ -76,12 +76,42 @@ myc_agg_link_outbound() {
 		# --- pure-jq URI parsing helpers (operate only on the passed string) ---
 		def after($sep): if (. | contains($sep)) then (./ $sep)[1:] | join($sep) else "" end;
 		def before($sep): (./ $sep)[0];
-		# parse "k=v&k2=v2" into an object {k:v,...}
+		# C07: percent-decode one URI component (the inverse of render_bundle.sh @uri). jq has no
+		# built-in URI-decode, so decode %XX byte-by-byte: split on "%", keep the first chunk literal,
+		# and for every following chunk turn its leading two hex digits into the byte they encode and
+		# keep the rest of the chunk literal. Producer and parser thus agree on every value exactly —
+		# a value like "/api?x=1#frag" survives encode->splice->parse->decode unchanged (C07 round-trip).
+		# (jq tonumber does not parse hex, so the two hex digits are converted via an explicit nibble map.)
+		def hexval: {"0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
+		             "a":10,"b":11,"c":12,"d":13,"e":14,"f":15,
+		             "A":10,"B":11,"C":12,"D":13,"E":14,"F":15}[.];
+		def urldecode:
+			(. // "") as $s
+			| if ($s | contains("%") | not) then $s
+			else
+				($s | split("%")) as $parts
+				| ($parts[0]) +
+				  ( $parts[1:]
+					| map(
+						if (test("^[0-9A-Fa-f]{2}")) then
+							( ((.[0:1] | hexval) * 16) + (.[1:2] | hexval) ) as $code
+							| ([$code] | implode) + .[2:]
+						else
+							# not a valid %XX escape — keep the stray % literal (defensive)
+							"%" + .
+						end
+					)
+					| join("")
+				  )
+			end;
+		# parse "k=v&k2=v2" into an object {k: <decoded v>,...}. Keys are producer-controlled literals
+		# (never encoded), so only the VALUE is percent-decoded. An empty value (k=) is preserved so the
+		# parser and producer agree on the param set (C26: do not silently drop empty query params).
 		def query_to_obj:
 			if (. == "") then {}
 			else
 				split("&")
-				| map(select(length > 0) | { (before("=")): (after("=")) })
+				| map(select(length > 0) | { (before("=")): (after("=") | urldecode) })
 				| add // {}
 			end;
 
@@ -90,11 +120,20 @@ myc_agg_link_outbound() {
 		| ($main | after("://")) as $rest        # userinfo@host:port[?query]
 		| ($rest | before("?")) as $authority    # userinfo@host:port
 		| ($rest | after("?")  | query_to_obj) as $q
-		| ($authority | (if contains("@") then before("@") else "" end)) as $userinfo
+		# C07: $userinfo / $host are percent-decoded AFTER the structural split. The producer encodes
+		# every reserved char (@, :, etc.) inside a value, so splitting on the literal @/: delimiters is
+		# safe; we decode the extracted token back to its true value here.
+		| ($authority | (if contains("@") then before("@") else "" end)) as $userinfo_raw
 		| ($authority | (if contains("@") then after("@") else . end)) as $hostport
-		# host:port — split on the first colon (our links carry hostnames, no IPv6 literals).
-		| ($hostport | before(":")) as $host
+		# host:port — split on the first colon. C28 DECISION (Phase-1, recorded): IPv6 literals are
+		# UNSUPPORTED here on purpose — Mycelium Links carry hostnames (node_address), never a bare
+		# "[::1]:443" authority, so bracket-aware splitting is deliberately out of scope for Phase-1. A
+		# bracketed IPv6 authority would mis-split; if a future phase emits IPv6-literal Links this must
+		# grow bracket handling. Until then this is the explicit accepted limitation, not an oversight.
+		| ($hostport | before(":")) as $host_raw
 		| ($hostport | after(":")) as $portstr
+		| ($host_raw | urldecode) as $host
+		| ($userinfo_raw | urldecode) as $userinfo
 		| ($portstr | tonumber? // 0) as $port
 		# build the outbound by scheme (the tls block is inlined per scheme below)
 		| (
@@ -122,9 +161,11 @@ myc_agg_link_outbound() {
 				         utls: { enabled: true, fingerprint: "chrome" },
 				         alpn: (($q.alpn // "h3") | split(",")) } }
 			elif $scheme == "tuic" then
-				# tuic://uuid:password@host:port
-				($userinfo | before(":")) as $uuid
-				| ($userinfo | after(":")) as $pw
+				# tuic://uuid:password@host:port — split the RAW userinfo on the literal ":" (the producer
+				# percent-encodes any ":" inside either half, so the first ":" is the real delimiter), then
+				# percent-decode each half back to its true value (C07).
+				($userinfo_raw | before(":") | urldecode) as $uuid
+				| ($userinfo_raw | after(":") | urldecode) as $pw
 				| { type: "tuic", tag: $tag, server: $host, server_port: $port,
 				    uuid: $uuid, password: $pw, congestion_control: ($q.congestion_control // "bbr"),
 				    tls: { enabled: true, server_name: ($q.sni // ""),
@@ -142,8 +183,10 @@ myc_agg_link_outbound() {
 				# (N1: yield null so the fail-closed path in the caller rejects this endpoint loudly.)
 				if (($q.plugin // "") == "shadow-tls") then null
 				else
-					($userinfo | before(":")) as $method
-					| ($userinfo | after(":")) as $pw
+					# Split the RAW userinfo on the literal ":" (method is the unreserved cipher name;
+					# the producer percent-encodes any ":" inside the password), then decode each half (C07).
+					($userinfo_raw | before(":") | urldecode) as $method
+					| ($userinfo_raw | after(":") | urldecode) as $pw
 					| { type: "shadowsocks", tag: $tag, server: $host, server_port: $port,
 					    method: $method, password: $pw }
 				end
@@ -200,10 +243,19 @@ myc_render_aggregate() {
 		# Validate the input is a bundle.go-shaped Bundle (fail-closed on anything else).
 		myc_agg_assert_bundle "$file" "$label"
 
-		# Sanitise the label into a tag-safe namespace token (the per-node prefix). Empty or
-		# whitespace-only labels are impossible here (the caller defaults them), but guard anyway.
+		# C27: reject any NON-ASCII label outright rather than fold it. A unicode label (e.g. a Cyrillic
+		# "nоde1" homoglyph of "node1") would otherwise be mapped char-by-char to "_" by a permissive
+		# sanitiser and could collide with, or visually impersonate, an ASCII label — a homoglyph tag
+		# collision. The namespace token must be drawn from the ASCII whitelist [A-Za-z0-9._-] only; fail
+		# closed on anything else so the operator picks an unambiguous --name. (NFC normalisation would
+		# still leave confusable scripts; the simplest robust choice is ASCII-only.)
+		case "$label" in
+			*[!A-Za-z0-9._-]*)
+				myc_die "aggregate: node label '$label' contains a character outside the ASCII whitelist [A-Za-z0-9._-] — non-ASCII/whitespace labels are refused (homoglyph tag-collision risk). Use an ASCII --name." ;;
+		esac
+		# Within the whitelist, the label is already tag-safe; default an empty one to a stable token.
 		local safe_label
-		safe_label="$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')"
+		safe_label="$label"
 		[ -n "$safe_label" ] || safe_label="node${idx}"
 
 		# Labels MUST be unique across inputs, or two nodes would share a namespace and their tags
@@ -214,12 +266,13 @@ myc_render_aggregate() {
 		seen_labels="${seen_labels}${safe_label} "
 
 		# Walk this node's endpoints in order; build one namespaced outbound per endpoint.
-		local n_ep ep_i raw_tag short_tag ns_tag link outbound
+		local n_ep ep_i raw_tag short_tag ns_tag link outbound ep_class scheme ob_port
 		n_ep="$(jq '.endpoints | length' "$file")"
 		ep_i=0
 		while [ "$ep_i" -lt "$n_ep" ]; do
 			raw_tag="$(jq -r --argjson i "$ep_i" '.endpoints[$i].tag' "$file")"
 			link="$(jq -r --argjson i "$ep_i" '.endpoints[$i].link' "$file")"
+			ep_class="$(jq -r --argjson i "$ep_i" '.endpoints[$i].transport_class' "$file")"
 
 			# Namespace the tag: "<label>.<endpoint-tag-without-mycelium-prefix>". Stripping the shared
 			# "mycelium-" prefix keeps the namespaced tag readable (e.g. "nodeA.vless-reality-vision").
@@ -236,9 +289,39 @@ myc_render_aggregate() {
 					myc_die "aggregate: endpoint link is a ShadowTLS share-link (node '$safe_label', tag '$raw_tag') which cannot be reconstructed into a dialable client outbound from its Link alone (the v3 handshake password/version are not in the Link). Re-export this node via its served subscription, which carries the full shadowtls detour; the aggregate refuses it fail-closed rather than emit a broken bare-Shadowsocks outbound." ;;
 			esac
 
+			# C26: assert the Link's URI scheme is one we recognise AND that it is consistent with the
+			# endpoint's declared transport_class. A mismatch (e.g. an ss:// Link tagged transport_class
+			# reality-tcp) is a CONFLICTING_SOURCE_OF_TRUTH between the declared family and the actual
+			# protocol — refuse it fail-closed rather than emit an outbound that contradicts its own class.
+			scheme="${link%%://*}"
+			case "$scheme" in
+				vless|hysteria2|tuic|ss|trojan) : ;;
+				*) myc_die "aggregate: endpoint link has an unrecognised scheme '$scheme' (node '$safe_label', tag '$raw_tag') — expected one of vless/hysteria2/tuic/ss/trojan." ;;
+			esac
+			# scheme -> the set of transport_class values that scheme may legitimately carry (mirrors
+			# render_bundle.sh myc_bundle_class_of + internal/spec TransportClass*).
+			case "$scheme:$ep_class" in
+				vless:reality-tcp|vless:xhttp-tls) : ;;
+				hysteria2:quic-udp|tuic:quic-udp) : ;;
+				ss:shadowsocks-tcp|ss:shadowtls-tcp) : ;;
+				trojan:trojan-tls) : ;;
+				*) myc_die "aggregate: endpoint scheme '$scheme' is inconsistent with its declared transport_class '$ep_class' (node '$safe_label', tag '$raw_tag') — the Link protocol and the typed family disagree (a conflicting source of truth)." ;;
+			esac
+
 			outbound="$(myc_agg_link_outbound "$ns_tag" "$link")"
 			if [ -z "$outbound" ] || [ "$outbound" = "null" ] || ! printf '%s' "$outbound" | jq -e . >/dev/null 2>&1; then
 				myc_die "aggregate: could not parse endpoint link into a client outbound (node '$safe_label', tag '$raw_tag'). Unsupported scheme?"
+			fi
+
+			# C09 fail-closed: the parsed outbound MUST carry a server_port in 1..65535. A missing or
+			# non-numeric port in the Link parses to 0 (the jq `tonumber? // 0` floor); routing that into
+			# this explicit check turns a silently-degraded port:0 into a loud refusal (never emit port 0).
+			ob_port="$(printf '%s' "$outbound" | jq -r '.server_port // 0')"
+			case "$ob_port" in
+				''|*[!0-9]*) myc_die "aggregate: endpoint link has a non-numeric port (node '$safe_label', tag '$raw_tag') — could not parse endpoint link into a dialable outbound." ;;
+			esac
+			if [ "$ob_port" -lt 1 ] || [ "$ob_port" -gt 65535 ]; then
+				myc_die "aggregate: endpoint link port '$ob_port' is out of range 1..65535 (node '$safe_label', tag '$raw_tag') — could not parse endpoint link into a dialable outbound."
 			fi
 
 			outbounds_json="$(printf '%s' "$outbounds_json" | jq -c --argjson ob "$outbound" '. + [$ob]')"

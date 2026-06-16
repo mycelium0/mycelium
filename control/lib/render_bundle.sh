@@ -28,6 +28,12 @@
 # rejects any other value, so this is pinned here and Go-verified on a node.
 MYC_BUNDLE_VERSION=1
 
+# C34: named priority sentinel for a protocol absent from the MYC_SB_PROTOS registry. It is far larger
+# than any real index so an unregistered protocol always sorts LAST in the selector/urltest order
+# (defensive — a known protocol always has a real 0-based index). Bundle.Validate only requires
+# priority >= 0, so this large value is still a valid (if last-ranked) priority.
+MYC_BUNDLE_PRIORITY_UNRANKED=9999
+
 # myc_bundle_class_of PROTO -> the closed-vocab transport CLASS for a protocol token, matching
 # internal/spec/edgereport.go (TransportClass*) and tests/conformance family_of(). One family per
 # protocol; the three vless-reality-* shapes collapse to the single reality-tcp family (same
@@ -58,22 +64,72 @@ myc_bundle_priority_of() {
 		fi
 		idx=$((idx + 1))
 	done
-	printf '9999'
+	printf '%s' "$MYC_BUNDLE_PRIORITY_UNRANKED"
 }
 
-# myc_bundle_link PROTO SERVER PORT UUID DSNI PUB SID TSNI SSPW HY2PW TRPW TUICPW GRPC XPATH
+# myc_bundle_link PROTO SERVER PORT UUID DSNI PUB SID TSNI SSPW HY2PW TRPW TUICPW GRPC XPATH XPATH_TLS
 # -> the per-endpoint dialable client config STRING (a share-link URI) for PROTO. This is the
 # Bundle's opaque Link: the same connection coordinates the sing-box/Clash subscription dials,
 # rendered as the standard scheme:// URI a client imports. Never empty for a known protocol.
 #
+# ARG ORDER (15 positional, all already-resolved by the caller; C34 arity-guarded below):
+#   $1  PROTO       protocol token (e.g. vless-reality-vision)
+#   $2  SERVER      node address
+#   $3  PORT        per-protocol port
+#   $4  UUID        endpoint credential (first identity)
+#   $5  DSNI        donor SNI (REALITY families only)
+#   $6  PUB         REALITY public key
+#   $7  SID         REALITY shortId
+#   $8  TSNI        own-cert TLS SNI (xhttp-tls / hysteria2 / tuic / trojan)
+#   $9  SSPW        Shadowsocks / ShadowTLS inner password
+#   $10 HY2PW       Hysteria2 password
+#   $11 TRPW        Trojan password
+#   $12 TUICPW      TUIC password
+#   $13 GRPC        gRPC service name
+#   $14 XPATH       xhttp path for the REALITY-XHTTP family (C06)
+#   $15 XPATH_TLS   xhttp path for the genuine-TLS xhttp-tls family (C06: a per-family path so an
+#                   on-path observer cannot correlate the two "independent" XHTTP families by an
+#                   identical path)
+#
 # The node/port/SNI live ONLY inside this opaque string (per bundle.go: the coarse class/region at
 # the typed level, the dialable detail opaquely in Link). All values are passed in already-resolved
 # (the caller reuses the subscription's resolution) so there is ONE source of connection truth.
+# myc_uri_encode VALUE -> VALUE percent-encoded per RFC-3986 (jq @uri): every character outside the
+# unreserved set [A-Za-z0-9-_.~] becomes %XX. C07: applied to every DYNAMIC value spliced into a Link
+# so a value like "/api?x=1#frag" cannot shift the URI's ?/#/&/=/@/: boundaries. The structural
+# delimiters of the URI itself (the literal scheme://, the @, the host:port colon, ?, &, =, #) are
+# written by the printf template and are NEVER passed through this function, so they stay literal.
+# render_aggregate.sh's parser @uri-DECODES every parsed value, so the value round-trips exactly.
+myc_uri_encode() {
+	printf '%s' "$1" | jq -sRr '@uri'
+}
+
 myc_bundle_link() {
-	local proto server port uuid dsni pub sid tsni sspw hy2pw trpw tuicpw grpc xpath frag
+	# C34: arity guard — a positional-count mismatch must fail loud, not silently fall through to the
+	# empty-default link (which would surface only as a downstream empty-Link die with no cause).
+	[ "$#" -eq 15 ] || myc_die "myc_bundle_link: expected 15 args, got $# (see ARG ORDER above)."
+	local proto server port uuid dsni pub sid tsni sspw hy2pw trpw tuicpw grpc xpath xpath_tls frag
 	proto="$1"; server="$2"; port="$3"; uuid="$4"; dsni="$5"; pub="$6"; sid="$7"; tsni="$8"
-	sspw="$9"; hy2pw="${10}"; trpw="${11}"; tuicpw="${12}"; grpc="${13}"; xpath="${14}"
+	sspw="$9"; hy2pw="${10}"; trpw="${11}"; tuicpw="${12}"; grpc="${13}"; xpath="${14}"; xpath_tls="${15}"
 	frag="mycelium-${proto}"
+	# C07: percent-encode every dynamic value before it is interpolated into the URI. server/port are
+	# structural authority components (a hostname/integer port carry no reserved chars), so they are left
+	# literal; every credential, SNI, key, path, service-name and the fragment is encoded. jq @uri turns
+	# a trailing %0a into nothing here because jq -sRr keeps the raw bytes; the values never contain a
+	# newline (params are single-line jq strings).
+	uuid="$(myc_uri_encode "$uuid")"
+	dsni="$(myc_uri_encode "$dsni")"
+	pub="$(myc_uri_encode "$pub")"
+	sid="$(myc_uri_encode "$sid")"
+	tsni="$(myc_uri_encode "$tsni")"
+	sspw="$(myc_uri_encode "$sspw")"
+	hy2pw="$(myc_uri_encode "$hy2pw")"
+	trpw="$(myc_uri_encode "$trpw")"
+	tuicpw="$(myc_uri_encode "$tuicpw")"
+	grpc="$(myc_uri_encode "$grpc")"
+	xpath="$(myc_uri_encode "$xpath")"
+	xpath_tls="$(myc_uri_encode "$xpath_tls")"
+	frag="$(myc_uri_encode "$frag")"
 	case "$proto" in
 		vless-reality-vision)
 			printf 'vless://%s@%s:%s?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp#%s' \
@@ -86,8 +142,10 @@ myc_bundle_link() {
 				"$uuid" "$server" "$port" "$dsni" "$pub" "$sid" "$xpath" "$frag" ;;
 		vless-xhttp-tls)
 			# genuine single-layer TLS (own cert, verified — NO reality donor): security=tls, no pbk/sid.
+			# C06: use the per-family path ($xpath_tls), NOT the REALITY-XHTTP path ($xpath), so the two
+			# XHTTP families can carry distinct paths and are not path-correlatable by an on-path observer.
 			printf 'vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=chrome&alpn=h2,http/1.1&type=xhttp&path=%s#%s' \
-				"$uuid" "$server" "$port" "$tsni" "$xpath" "$frag" ;;
+				"$uuid" "$server" "$port" "$tsni" "$xpath_tls" "$frag" ;;
 		hysteria2)
 			printf 'hysteria2://%s@%s:%s?sni=%s&alpn=h3#%s' \
 				"$hy2pw" "$server" "$port" "$tsni" "$frag" ;;
@@ -95,7 +153,8 @@ myc_bundle_link() {
 			printf 'tuic://%s:%s@%s:%s?sni=%s&alpn=h3&congestion_control=bbr#%s' \
 				"$uuid" "$tuicpw" "$server" "$port" "$tsni" "$frag" ;;
 		shadowsocks)
-			# ss://method:password@host:port (userinfo unencoded; sing-box/Clash accept this form).
+			# ss://method:password@host:port (C07: password percent-encoded so a reserved char in the
+			# secret cannot shift the @/: authority boundaries; the aggregate parser @uri-decodes it back).
 			printf 'ss://2022-blake3-aes-256-gcm:%s@%s:%s#%s' \
 				"$sspw" "$server" "$port" "$frag" ;;
 		shadowtls)
@@ -153,21 +212,47 @@ myc_render_bundle() {
 	node_addr="$(myc_params_get "$params" '.node_address')"
 	donor_sni="$(myc_params_get "$params" '.donor_sni' '')"
 	pub="$(myc_params_get "$params" '.reality_public_key' '')"
+	# tls_sni is the SNI the genuine-TLS (own-cert) families dial. It keeps the donor_sni/localhost
+	# fallback HERE so the non-xhttp-tls own-cert families (hysteria2/tuic/trojan) resolve identically to
+	# the subscription producer (render_singbox.sh) — the two producers of the same client config must
+	# not diverge (CONFLICTING_SOURCE_OF_TRUTH). The xhttp-tls family is the ONE exception: it is
+	# fail-closed below via a separate explicit-presence probe, never this fallback.
 	tls_sni="$(myc_params_get "$params" '.tls_sni' "${donor_sni:-localhost}")"
 	short_first="$(printf '%s' "$params" | jq -r '.short_ids[0] // empty')"
 
-	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path
+	# C03 fail-closed: the xhttp-tls (own-cert genuine-TLS) family REQUIRES its own tls_sni. Never fall
+	# back to donor_sni/localhost for it — that would present a cert for the node's own domain while the
+	# share-link claims the donor SNI, a DISTINGUISHABLE_TRANSPORT cert/SNI-mismatch tell on a probe.
+	# Probe the param's EXPLICIT presence (a separate read, so the donor fallback in `tls_sni` above does
+	# not mask a missing value); refuse rather than emit a mismatched Link.
+	case " $enabled " in
+		*" vless-xhttp-tls "*)
+			local _tls_sni_explicit; _tls_sni_explicit="$(myc_params_get "$params" '.tls_sni' '')"
+			[ -n "$_tls_sni_explicit" ] || myc_die "bundle: vless-xhttp-tls is enabled but params.tls_sni is empty — the own-cert genuine-TLS family must carry its OWN SNI (never fall back to donor_sni; that is a cert/SNI mismatch tell). Set params.tls_sni." ;;
+	esac
+
+	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls
 	ss_password="$(myc_params_get "$params" '.ss_password' '')"
 	trojan_password="$(myc_params_get "$params" '.trojan_password' '')"
 	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
 	shadowtls_password="$(myc_params_get "$params" '.shadowtls_password' '')"
 	grpc_service="$(myc_params_get "$params" '.grpc_service_name' 'grpc')"
 	xhttp_path="$(myc_params_get "$params" '.xhttp_path' '/')"
+	# C06 INVARIANT: the REALITY-XHTTP family (xhttp_path) and the genuine-TLS xhttp-tls family
+	# (xhttp_path_tls) MUST be able to carry DISTINCT paths so an on-path observer cannot correlate the
+	# two "independent" families by an identical plaintext path. xhttp_path_tls defaults to xhttp_path
+	# only when unset (back-compat); an operator running both XHTTP families should set them apart.
+	xhttp_path_tls="$(myc_params_get "$params" '.xhttp_path_tls' "$xhttp_path")"
 
 	# The node identity used as the endpoint credential (first client).
 	local id ipw
-	id="$(printf '%s' "$clients" | jq -r '.[0].id')"
+	id="$(printf '%s' "$clients" | jq -r '.[0].id // ""')"
 	ipw="$(printf '%s' "$clients" | jq -r '.[0].password // ""')"
+	# N4 fail-closed: an empty/null first-client id would splice into the Link as `vless://@server:port`
+	# — a non-dialable endpoint that still passes the non-empty-Link check and Bundle.Validate (Link is
+	# non-empty). Refuse before building any link so a malformed identity can never produce a
+	# valid-looking but undialable bundle.
+	[ -n "$id" ] || myc_die "bundle: first identity has an empty id (clients[0].id) — cannot build a dialable endpoint credential. Re-add the identity with a valid UUID."
 
 	# Per-identity password falls back to the shared protocol secret (subscription parity).
 	local hy2_pw ss_pw stls_pw trojan_pw tuic_pw
@@ -216,8 +301,17 @@ myc_render_bundle() {
 		prio="$(myc_bundle_priority_of "$proto")"
 		port="$(myc_bundle_port_of "$proto")"
 		[ -n "$port" ] || myc_die "bundle: no port resolved for protocol '$proto'."
+		# C09 fail-closed: a port MUST be an integer in 1..65535. A missing/non-numeric/out-of-range port
+		# would otherwise be spliced raw into the Link (e.g. server:0), producing a non-dialable endpoint
+		# that still passes the non-empty checks. Refuse it here rather than emit an invalid port.
+		case "$port" in
+			''|*[!0-9]*) myc_die "bundle: port for protocol '$proto' is not a positive integer ('$port'); a server_port must be in 1..65535." ;;
+		esac
+		if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+			myc_die "bundle: port for protocol '$proto' is out of range ('$port'); a server_port must be in 1..65535."
+		fi
 		link="$(myc_bundle_link "$proto" "$node_addr" "$port" "$id" "$donor_sni" "$pub" "$short_first" \
-			"$tls_sni" "$ss_pw" "$hy2_pw" "$trojan_pw" "$tuic_pw" "$grpc_service" "$xhttp_path")"
+			"$tls_sni" "$ss_pw" "$hy2_pw" "$trojan_pw" "$tuic_pw" "$grpc_service" "$xhttp_path" "$xhttp_path_tls")"
 		[ -n "$link" ] || myc_die "bundle: produced an empty Link for protocol '$proto' (bundle.go rejects empty links)."
 
 		# Endpoint fields EXACTLY per bundle.go: tag, transport_class, region, priority, health, link.

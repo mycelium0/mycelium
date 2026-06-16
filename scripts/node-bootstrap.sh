@@ -1025,9 +1025,11 @@ rollback_config() {
 # overwritten with an invalid one. The first-ever bootstrap has no last-known-good, so a failure
 # there is a hard error (nothing valid to serve).
 #
-# Authoritative validation (internal/spec.Bundle.Validate) is Go-side; this shell gate enforces the
-# same coarse invariants `myceliumctl bundle` already asserts (>=1 endpoint, every health "unknown",
-# every link non-empty), so a structurally-broken bundle never reaches the served path.
+# Authoritative validation (internal/spec.Bundle.Validate) is Go-side; this shell gate enforces EVERY
+# branch that Bundle.Validate + Endpoint.Validate check (version, >=1 endpoint, and per endpoint:
+# non-empty tag, transport_class in the closed vocab, non-empty region, integer priority >= 0, health
+# "unknown", non-empty link — C10), so a structurally-broken bundle never reaches the served path
+# fail-open relative to the Go type.
 # ---------------------------------------------------------------------------
 render_serve_bundle() {
 	[ -x "$MYCTL" ] || { warn "myceliumctl not found; skipping bundle render (sub channel unaffected)."; return 0; }
@@ -1051,11 +1053,20 @@ render_serve_bundle() {
 		die "bundle render failed and there is no last-known-good served bundle (fail-closed; nothing valid to serve)."
 	fi
 
-	# Coarse structural validation (mirrors bundle.go.Validate's shape; the authoritative round-trip is
-	# the Go check). A candidate that fails here must NOT replace the served file.
+	# Structural validation mirroring internal/spec.Bundle.Validate + Endpoint.Validate (bundle.go) —
+	# the authoritative round-trip is the Go check, but this jq gate must enforce EVERY branch Go does so
+	# the served path is not fail-open relative to the type (C10). Per Endpoint.Validate: non-empty tag,
+	# transport_class in the closed vocab, non-empty region, priority an integer >= 0, health == unknown
+	# (Phase-1), non-empty link. Per Bundle.Validate: version == NetworkStateVersion (1), >= 1 endpoint.
 	if ! jq -e '
 		(.version == 1)
 		and (.endpoints | type == "array") and (.endpoints | length >= 1)
+		and (.endpoints | all((.tag | type == "string") and ((.tag | length) > 0)))
+		and (.endpoints | all(.transport_class | IN(
+			"reality-tcp","xhttp-tls","quic-udp","shadowsocks-tcp",
+			"shadowtls-tcp","trojan-tls","amneziawg-udp")))
+		and (.endpoints | all((.region | type == "string") and ((.region | length) > 0)))
+		and (.endpoints | all((.priority | type == "number") and (.priority >= 0) and ((.priority | floor) == .priority)))
 		and (.endpoints | all(.health == "unknown"))
 		and (.endpoints | all((.link | type == "string") and ((.link | length) > 0)))
 		and (.generated_at | type == "string")
