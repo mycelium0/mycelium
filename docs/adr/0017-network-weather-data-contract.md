@@ -27,7 +27,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** ADR-0017
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
-- **Status:** proposed
+- **Status:** accepted
 - **Layer(s):** observability / measurement, control plane (cross-cutting)
 - **Phase:** cross-cutting; schemas inert from Phase 0; running publisher deferred to a later phase (RP-0004)
 - **Related:** VIS-0005 (network-weather explorer — the source of this contract), VIS-0003 (the redacted

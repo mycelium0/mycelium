@@ -28,7 +28,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** ADR-0018
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
-- **Status:** proposed
+- **Status:** accepted
 - **Layer(s):** observability / measurement, control plane (node role assignment), cross-cutting
 - **Phase:** cross-cutting; the schema is inert in Phase 0-2, the opt-in telemetry path RUNS from
   **Phase 2** (the Measurement track — running emission is not Phase-0 behaviour; see

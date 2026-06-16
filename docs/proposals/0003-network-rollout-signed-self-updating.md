@@ -24,7 +24,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** RP-0003
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
-- **Status:** draft
+- **Status:** active (partially built — W5 template-collapse + the `--update`/`--staged`/`--ack` engine + the systemd units landed; **W1 signed-release pipeline still unarmed** (nodes run `--insecure-no-verify`), W3 fleet-wide update timer not yet installed, W6 supply-chain gates pending)
 - **Phase:** cross-cutting deploy/bootstrap track (binds Phase 0 nodes into a managed network; see [../ROADMAP.md](../ROADMAP.md))
 - **Related documents:**
   [RP-0002](0002-phase0-live-verified-hardened-node.md) (the live, verified, hardened single node this network is built from);

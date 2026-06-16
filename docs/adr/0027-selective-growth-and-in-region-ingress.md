@@ -53,7 +53,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** ADR-0027
 - **Date:** 2026-06-14
 - **Author:** mindicator & silicon bags quartet
-- **Status:** proposed
+- **Status:** accepted
 - **Layer(s):** routing/orchestration (split-tunnel default + ingress/egress placement), data plane
   (generated client config route sets; the node-to-node egress carriage), infra (the manual two-hop
   deployment shape); cross-cutting reachability track
