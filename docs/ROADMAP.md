@@ -117,6 +117,14 @@ attack surface that breadth introduces.
 
 ## Phase 1 — Config distribution + health + failover maturity (≈ 4–6 weeks)
 
+> **Status: CLOSED — GO-signed 2026-06-17** (Phase-1 → Phase-2 transition authorized). The distinctive
+> deliverables (genuine single-layer TLS, the two-hop in-region-ingress → out-of-region-egress topology,
+> multiplexed REALITY, the self-replenishing subscription seam) were proven on the operator's live
+> restrictive link on both LTE and Wi-Fi. Authoritative status + on-device evidence + named deferrals
+> (Xray-XHTTP serving path, observability dashboard, Hysteria2/Salamander) are in the
+> [Phase-1 acceptance ledger](phase1-acceptance-ledger.md). The **pre-Phase-2 research** is the next gate
+> before the Phase-2 detector/measurement track opens.
+
 **Goal.** The multi-protocol node from Phase 0 already speaks several transport "dialects"; Phase 1
 makes the **distribution, health, and failover** around them mature. The config distribution
 endpoint captures all enabled transports with priority ordering and health metadata, standard
