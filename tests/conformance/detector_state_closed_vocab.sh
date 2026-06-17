@@ -87,6 +87,14 @@ if [ "$n_members" = "5" ]; then
 else
 	badln "ConnState has $n_members declared values (want 5: unknown + clean/throttled/blocked/shutdown)"
 fi
+# DetectReason is also a closed, fingerprint-free vocabulary: pin its member count so any future
+# reason is a deliberate, gate-visible change (currently 9: unknown + none + 7 causes).
+n_reasons="$(det_code | grep -cE '^[[:space:]]*Reason[A-Za-z]+[[:space:]]+DetectReason[[:space:]]*=[[:space:]]*"')"
+if [ "$n_reasons" = "9" ]; then
+	ok "DetectReason has exactly its 9 declared members (closed cause vocabulary; no silent drift)"
+else
+	badln "DetectReason has $n_reasons declared values (want 9: unknown + none + 7 causes); update this gate deliberately if the vocab changed"
+fi
 
 # 3. AdvisoryHealth projection exists and is LOSSY (the privacy contract)
 if det_code | grep -qE 'func \(s ConnState\) AdvisoryHealth\(\) HealthValue'; then
