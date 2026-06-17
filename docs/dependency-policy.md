@@ -61,3 +61,28 @@ changes) ADR. The RP must establish:
 - Abandoned upstream as a security boundary.
 - Silent update of a crypto/transport dependency without a `Verification:` entry and without
   running conformance (`no_custom_crypto`, netsim adversary scenarios).
+
+## 8. Version currency / floors (ADR-0028, ADR-0031)
+Currency is not housekeeping here — it is **load-bearing for indistinguishability**. An aged TLS
+fingerprint, a non-PQ handshake, or a missing post-handshake mimicry is itself a detection signal,
+so a transport-stack element pinned **below its declared floor is a detectability defect** that
+MUST be recorded and scheduled, never treated as optional.
+- **Honor the declared floors.** [adr/0028-dependency-and-transport-currency-policy.md](adr/0028-dependency-and-transport-currency-policy.md)
+  carries machine-readable `floor:` lines (sing-box, Xray-core for post-handshake mimicry / PQ
+  REALITY, AmneziaWG 2.0-class, uTLS); the offline gate `dependency_policy.sh` FAILS a recorded pin
+  that is below any floor, and checks that the [reference/transport-technique-landscape.md](reference/transport-technique-landscape.md)
+  annex carries a `last-verified:` line. Keep that annex fresh — stale past one quarter is a defect.
+- **No fork to meet a floor.** Currency means **adopting vetted upstream primitives faster** —
+  never forking, hand-rolling, or patching a crypto/transport primitive to satisfy a floor (binds
+  [adr/0002-no-custom-cryptography.md](adr/0002-no-custom-cryptography.md) / `no_custom_crypto`).
+- **Stage a live bump one-node-first.** Bump a live engine pin **staged, one node first**, with a
+  `Verification:` block and a conformance run — never the whole network in one move (the
+  prior-outage lesson). Every engine-pin bump re-checks the floors **and** the landscape annex in
+  the **same** change.
+- **Respect engine asymmetry.** Serve a hardening shape on the engine that actually carries it: PQ
+  REALITY and post-handshake mimicry are **Xray-only**, AmneziaWG 2.0 is **awg-only**. Never enable
+  PQ REALITY or assume post-handshake parity on sing-box before upstream parity is confirmed
+  ([adr/0010-phase0-transport-set.md](adr/0010-phase0-transport-set.md) engine-asymmetry note).
+- **Reuse is one-way into AGPL.** Any adopted/wrapped upstream is licence-checked one-way-compatible
+  into AGPL-3.0-or-later (MIT/BSD/Apache-2.0, LGPL/GPL-with-linking); Mycelium stays AGPL and retains
+  upstream notices ([adr/0031-build-vs-reuse-compose-proven-patterns.md](adr/0031-build-vs-reuse-compose-proven-patterns.md)).
