@@ -71,6 +71,9 @@
 #                               scoring layer that never actuates (AC-4): its non-test sources import
 #                               no net*/os*/syscall package and no internal/reach|detect, and consume
 #                               the typed internal/spec Verdict/DecayPolicy. OFFLINE
+#   * version_changelog_sync.sh — internal/spec.Version (the single-source spine version) equals the
+#                               newest CHANGELOG heading, so a version bump and its changelog entry
+#                               can never drift apart (development.md §1.2 version hygiene). OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -117,6 +120,7 @@ GATES=(
 	"tests/conformance/detector_state_closed_vocab.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
+	"tests/conformance/version_changelog_sync.sh"
 	"control/selftest.sh"
 )
 
