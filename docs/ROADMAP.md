@@ -208,6 +208,8 @@ core of the adaptation layer.
 > pre-Phase-2 research proves a specific gap the closed set cannot cover. And — **compose proven patterns,
 > do not reinvent**: where a mature primitive fits a Phase-2/3+ need, ADOPT/WRAP it rather than build from
 > scratch (build-vs-reuse principle below).
+>
+> **Phase-2 deliverables (operator directive, 2026-06-17):** alongside the adaptivity loop ([RP-0010](proposals/0010-phase2-adaptivity.md)), Phase 2 also (a) **continues the shell → Go migration** ([RP-0008](proposals/0008-go-spine-distribution-rendering.md) P3 — chunks 2+), and (b) **packages a release with a minimal deployment/management CLI for the fungi role** ([RP-0011](proposals/0011-phase2-fungi-packaging-and-cli.md)) so other operators can stand up a fungi and **anastomosis can be tested at the Phase-2 → 3 boundary**. The constrained introduction mechanism ("a fungi MAY introduce, MUST NOT enumerate"; double-opt-in, 1–2-hop depth, TTL, no neighbour-list sharing) ships in Phase 2; the live bridge runtime is Phase 3–4.
 
 **Scope.**
 - **Network-state detector.** Classifies the channel state from signals: handshake timeouts,
