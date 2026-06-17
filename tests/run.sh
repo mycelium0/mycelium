@@ -58,6 +58,11 @@
 #                               Go (internal/spec) and control/vocab.json is in sync with `myceliumctl
 #                               vocab`; RP-0008 P2. Internal-consistency checks always run; the Go regen
 #                               diff SKIPs where no Go toolchain is present (jq-only host/CI lane)
+#   * detector_state_closed_vocab.sh — the Phase-2 connectivity-state detector schema (RP-0010 Plane 2)
+#                               keeps its CLOSED vocabulary {clean/throttled/blocked/shutdown}, its
+#                               AdvisoryHealth() projection stays LOSSY (impaired states collapse to one
+#                               advisory value), and NO transmitted artifact embeds the fine ConnState —
+#                               only the coarse advisory HealthValue is emittable (ADR-0030). OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -101,6 +106,7 @@ GATES=(
 	"tests/conformance/no_new_control_decisions_in_bash.sh"
 	"tests/conformance/no_reserved_jq_vars.sh"
 	"tests/conformance/vocab_single_source.sh"
+	"tests/conformance/detector_state_closed_vocab.sh"
 	"control/selftest.sh"
 )
 
