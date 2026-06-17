@@ -10,7 +10,7 @@ later. See the LICENSE file in the repository root.
 ## Metadata
 - **ID:** RP-0010
 - **Slug:** `phase2-adaptivity`
-- **Status:** **DRAFT — proposed** (Phase-2 work; gated behind the signed Phase-1 GO, which is recorded in [phase1-acceptance-ledger.md](../phase1-acceptance-ledger.md))
+- **Status:** **ACTIVE — implementation started** (Phase-2 work, unblocked by the signed Phase-1 GO in [phase1-acceptance-ledger.md](../phase1-acceptance-ledger.md)); the chunk breakdown and progress are in **Implementation chunks** below.
 - **Phase:** Phase 2 (Adaptation layer and self-tuning)
 - **Type:** single-workstream RP with three planes (detect / adapt / measure)
 - **Related:** [ROADMAP.md](../ROADMAP.md) Phase 2 + the "Phase 2 = adaptivity, not new protocols" scope discipline; [ADR-0031](../adr/0031-build-vs-reuse-compose-proven-patterns.md) (the ADOPT/WRAP/BUILD verdicts this RP executes); [ADR-0010](../adr/0010-phase0-transport-set.md) (closed transport set); [ADR-0019](../adr/0019-node-local-reachability-health.md) (node-local reachability health); [ADR-0030](../adr/0030-advisory-network-awareness.md) (class-aggregate advisory; advisory-never-actuates); [ADR-0027](../adr/0027-selective-growth-and-in-region-ingress.md) (the destination-AS throughput-collapse signature); [ADR-0012](../adr/0012-go-primary-control-plane-language.md) + [RP-0008](0008-go-spine-distribution-rendering.md) (Go spine); `internal/reach` (Monitor/Registry/Prober → `spec.TransportHealth`), `internal/spec.DecayPolicy`.
@@ -58,3 +58,15 @@ The selection is driven by the **ADOPTed Physarum/Tero-2010 control law**, expre
 - Telemetry is itself a signal — events are class-aggregate, TTL-bound, advisory-only ([ADR-0030](../adr/0030-advisory-network-awareness.md)); the honest boundary (managed, not absolute; topology-graph axis, not anonymity) is recorded there.
 - Rotation is observable — rate limits + hysteresis keep it from becoming its own beacon.
 - ML, if added, **amplifies** the heuristics and must never replace them: the detector and self-tuner must work without it (ROADMAP Phase-2 note).
+
+## Implementation chunks
+
+Gates-first, inert-schema-before-behaviour (the discipline that carried Phase 1). Each chunk is node-verified (`go test` on a Go node) and lands with its conformance gate.
+
+- **C1 — detector schema (LANDED).** `internal/spec/detector.go`: the closed `ConnState` {clean/throttled/blocked/shutdown}; the lossy `AdvisoryHealth()` projection to the coarse advisory `HealthValue` (the OPSEC boundary — only the projection is emittable, ADR-0030); the closed `DetectReason` cause vocabulary; the node-local `DetectorSignal` input (incl. `ConnectOK` vs `HandshakeOK`, which lets a classifier separate shutdown from blocked) and the `Verdict` output (carrying the opaque `(class,path)` key the self-tuner needs). All pure (Validate only). Gate `detector_state_closed_vocab.sh` enforces the closed vocab + the never-transmitted boundary by construction (glob over the spec sources). INERT — no classifier runs yet.
+- **C2 — the classifier (`internal/detect`).** The pure `DetectorSignal -> Verdict` logic over a window, with anti-flap hysteresis; measurable precision/recall on a labelled-incident corpus (AC-2). Consumes the WRAP'd `internal/reach` signal (AC-6).
+- **C3 — the self-tuner.** The `(class, path)` weight reinforce/decay on `spec.DecayPolicy` (AC-3): a blocked shape fades without teardown and re-promotes on recovery.
+- **C4 — actuation (auto-rotation).** On a degradation `Verdict`, rotate within the closed set via the Phase-0/1 candidate → validate (`sing-box check`) → promote → verify → rollback path, rate-limited (AC-1, AC-5).
+- **C5 — advisory emit (rides ADR-0030).** The emit-only class-aggregate `NodeStatusDigest` (k-floored, TTL) built from `AdvisoryHealth()` projections — never the fine state (AC-4).
+
+Continuing in parallel through Phase 2 (per the ROADMAP): RP-0008 P3 (the bundle renderer to Go) and RP-0011 (the fungi packaging/CLI).
