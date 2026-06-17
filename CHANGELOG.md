@@ -39,7 +39,7 @@ truth for the version is `internal/spec.Version`.
 - The shell renderers consume the Go-owned vocabulary: `render_bundle.sh` (proto→class +
   closed-vocab list), `render_singbox.sh` (`MYC_SB_PROTOS` + per-proto default ports), via the new
   `control/lib/vocab.sh`; `OPERATOR_TOGGLE_KEYS` is gate-policed against the registry (RP-0008 P2).
-- Terminology swept repo-wide: "fleet" → "network"/"population".
+- Terminology swept repo-wide to consistent network/population vocabulary.
 
 ### Notes
 - During the 0.x alpha the SemVer minor digit tracks the lifecycle phase (0.1.x = Phase 1); patch
