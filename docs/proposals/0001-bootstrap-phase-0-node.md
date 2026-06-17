@@ -27,8 +27,8 @@ site and reproducible deployment.
 
 The project is greenfield — no nodes exist, no access exists. What is needed is a first working
 node running the transports that **currently survive** the most restrictive network environments
-(VLESS+REALITY demonstrates the highest reachability rates under documented large-scale DPI
-deployments; preprint and research analysis is maintained internally).
+(VLESS+REALITY demonstrates the highest reachability rates under documented large-scale
+network degradation; preprint and research analysis is maintained internally).
 Without Phase 0 there is no foundation for phases 1–5: the mesh is built on top of a working
 ingress, not in its absence.
 

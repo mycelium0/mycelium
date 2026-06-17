@@ -42,7 +42,7 @@ later. See the LICENSE file in the repository root.
 ## 1. Problem and context
 Current situation and what is wrong. What adversary reality does the initiative
 address (with reference to [../THREAT-MODEL.md](../THREAT-MODEL.md): large-scale
-DPI, ML-based traffic classification, active probing, IP/AS blocking, UDP
+network degradation, ML-based traffic classification, active probing, IP/AS blocking, UDP
 throttling/cutting, config-distribution blocking, sybil enumeration of ingress
 points, protocol allowlisting shutdown, operator coercion). Why now.
 

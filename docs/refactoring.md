@@ -551,7 +551,7 @@ Required findings:
 ### 6.1.6. Network-persistence Lens — indistinguishability, sybil/enumeration, AS diversity (domain, mandatory)
 
 Checks the project's key property: **does the system maintain reachability** under a
-realistic adversary (large-scale DPI, ML-based traffic classification, AS-level
+realistic adversary (large-scale behavioral-layer blocking, ML-based traffic classification, AS-level
 blocking, UDP/QUIC cutting, ingress enumeration).
 
 Checked:

@@ -38,7 +38,7 @@ significant choice that touches the transport protocol matrix and the external s
 set — the exact triggers that require an ADR ([ADR-0001](0001-record-architecture-decisions.md)).
 Leaving it implicit invites ad-hoc per-deployment drift and re-litigation.
 
-- **Adversary model** (see [../THREAT-MODEL.md](../THREAT-MODEL.md)): DPI signature matching,
+- **Adversary model** (see [../THREAT-MODEL.md](../THREAT-MODEL.md)): behavioral-layer signature matching,
   ML-based traffic classification, active probing, IP/AS-level blocking, and UDP/QUIC throttling
   or full UDP removal. No single transport answers all of these at once — TCP/TLS shapes survive
   active probing well but share a fate under AS-level blocking; QUIC/UDP shapes excel on lossy
@@ -150,7 +150,7 @@ only by the audited upstream primitives ([ADR-0002](0002-no-custom-cryptography.
 | **Plain Shadowsocks (pre-2022)** | Lacks the AEAD-2022 construction; easier to fingerprint and superseded by Shadowsocks-2022 (#6). |
 | **Plain WireGuard** | An unobfuscated, easily-identified UDP handshake; superseded by AmneziaWG (#9), which keeps the same audited core but is not trivially fingerprinted. |
 | **OpenVPN** | Recognisable handshake and packet structure; superseded by the modern set. |
-| **L2TP/IPsec, PPTP, SSTP, IKEv2** | Legacy VPN protocols with well-known fingerprints and weaker survivability under DPI; offer nothing the modern set does not. |
+| **L2TP/IPsec, PPTP, SSTP, IKEv2** | Legacy VPN protocols with well-known fingerprints and weaker survivability under behavioral-layer detection; offer nothing the modern set does not. |
 
 ### Engine decision
 

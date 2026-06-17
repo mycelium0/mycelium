@@ -48,7 +48,7 @@ situation.**
 Record the following where applicable:
 
 - **Adversary model.** What network adversary capability does this decision address
-  (DPI signature / ML traffic classification / active probing / IP/AS blocking /
+  (behavioral-layer detection signature / ML traffic classification / active probing / IP/AS blocking /
   UDP throttling or cutting / config-distribution blocking / sybil enumeration of
   ingress points / traffic correlation / operator coercion). Reference
   [../THREAT-MODEL.md](../THREAT-MODEL.md).

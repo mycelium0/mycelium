@@ -46,7 +46,7 @@ treated as a security boundary. Competing forces:
      (see [../dependency-policy.md](../dependency-policy.md)).
 
 2. **Custom obfuscation crypto layer / bespoke handshake** (rejected).
-   - Cons: vulnerabilities, ML-DPI fingerprint, legal risk without benefit.
+   - Cons: vulnerabilities, ML-classification fingerprint, legal risk without benefit.
 
 3. **No explicit policy** (rejected) — leads to ad-hoc custom cryptography at the point of
    implementation.

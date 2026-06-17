@@ -26,7 +26,7 @@ The playbook applies these roles to the `mycelium_nodes` host group:
 | `observability` | Installs pinned `node_exporter`, bound to loopback only. |
 
 The primary transport is **VLESS + XTLS-Vision + REALITY**: ordinary HTTPS to a real donor site,
-selected for high reachability on high-interference networks under advanced DPI and active
+selected for high reachability on high-interference networks under advanced network degradation and active
 probing (see [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) §Layer 1). With the **sing-box** engine you can
 additionally expose any subset of gRPC/XHTTP REALITY, Hysteria2, TUIC, Shadowsocks-2022, ShadowTLS,
 and Trojan — each behind its own `enable_*` toggle (see §1a below). Legacy, easily-fingerprinted
@@ -263,6 +263,6 @@ Hand a fetched `./out/subscriptions/<host>/<client>.singbox.json` to an off-the-
 
 ## 8. Network framing note
 
-Throughout these roles "adversary", "network interference", "DPI", "active probing", and
+Throughout these roles "adversary", "network interference", "network degradation", "active probing", and
 "reachability/resilience" are used per the project glossary. The objective is **statistical
 indistinguishability** from legitimate HTTPS, not any specific deployment scenario.

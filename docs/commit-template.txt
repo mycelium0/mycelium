@@ -41,7 +41,7 @@
 #
 # Verification: write the ACTUAL command(s) you ran and what you observed —
 # not "tests pass" in the abstract. Good examples:
-#   * make test-antidpi  → cover-site probe returns donor site, ClientHello in range
+#   * make test-degradation  → cover-site probe returns donor site, ClientHello in range
 #   * make netsim SCENARIO=rst_injection  → detector flips, recovery < 2m
 #   * conformance: no_pii + no_custom_crypto + no_hardcoded_secrets_endpoints green
 #   * go test ./control/...  (unit + contract)

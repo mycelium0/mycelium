@@ -78,7 +78,7 @@ loop) and must build *on top of* this, not be smuggled into Phase 0 ([../ROADMAP
      operator-chosen anchors; nothing new is exposed on the wire; the node can finally see which of its
      channels is alive.
 
-3. **Build the Phase-2 classifying network-state detector now (state = clean/throttled/DPI-blocked/shutdown, plus auto-rotation).**
+3. **Build the Phase-2 classifying network-state detector now (state = clean/throttled/blocked/shutdown, plus auto-rotation).**
    - Pros: closes the operator's pain end-to-end (detect *and* route around).
    - Cons: a **phase violation** ([../ROADMAP.md](../ROADMAP.md) Phase 2 + Scope discipline) — channel-state
      classification needs labelled incidents and anti-flap design, auto-rotation needs rate-limits and
@@ -124,7 +124,7 @@ Specifically, what becomes **canon**:
 - **Impact on observability/measurements:** adds the first node-produced signal — per-anchor/per-transport
   `TransportHealth`. It is **fast-class, routing-bound only** (concept 7); it is *not* a `StressSignal`
   (that is the medium-class, aggregation-floored, shareable summary — out of scope here).
-- **Follow-on actions required:** Phase 2 — channel-state classification (`clean/throttled/DPI-blocked/shutdown`)
+- **Follow-on actions required:** Phase 2 — channel-state classification (`clean/throttled/blocked/shutdown`)
   and the auto-rotation loop consume this; the Measurement track — a future opt-in digest
   ([ADR-0018](0018-fungi-role-and-opt-in-publish.md)) may aggregate it under a floor. Each is its own ADR/RP.
 - **What is now forbidden:** in Phase 0 this component must **not** classify channel state, rotate or

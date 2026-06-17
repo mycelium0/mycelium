@@ -11,11 +11,11 @@ Brief definitions of project terms. For deeper treatment see
 [ARCHITECTURE.md](ARCHITECTURE.md), [THREAT-MODEL.md](THREAT-MODEL.md),
 and [research/](research/).
 
-## Network interference and DPI
+## Network degradation and interference
 
-- **DPI** (Deep Packet Inspection) — deep analysis of packets to classify or block traffic by
+- **Behavioral-layer detection** — deep analysis of packets to classify or block traffic by
   signature or statistical fingerprint.
-- **Transit-layer inspection appliances** — large-scale DPI hardware deployed at traffic
+- **Transit-layer interference** — large-scale interference applied at traffic
   exchange points; inspects and blocks traffic in transit.
 - **ML-based traffic classification** — identifying "this is a VPN" from flow statistics
   (sizes / timings / entropy) rather than a fixed signature; the answer is statistical

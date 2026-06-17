@@ -31,8 +31,9 @@ endpoint parameters the node exposes (see [`docs/ARCHITECTURE.md`](../ARCHITECTU
 [`docs/proposals/0001-bootstrap-phase-0-node.md`](../proposals/0001-bootstrap-phase-0-node.md)).
 
 The objective throughout is **statistical indistinguishability** from ordinary HTTPS/QUIC to a real
-site. "Adversary", "network interference", "DPI", "active probing", "AS-level blocking", and
-"reachability/resilience" are used per the project glossary — no deployment scenario is named.
+site. "Adversary", "network degradation", "network interference", "active probing", "AS-level
+blocking", and "reachability/resilience" are used per the project glossary — no deployment scenario
+is named.
 
 > **Key-handling invariant.** REALITY **private** keys and client UUIDs are generated *on the
 > node* at deploy time and **never** leave it. Only the REALITY **public** key and the rendered
