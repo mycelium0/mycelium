@@ -26,7 +26,7 @@ later. See the LICENSE file in the repository root.
 
 This document is the primary development reference for the Mycelium project. It establishes
 code standards, architectural layers and their boundaries, hard prohibitions, layer-specific
-rules, git workflow, testing (including anti-DPI / obfuscation and network-condition simulation),
+rules, git workflow, testing (including network-degradation-resistance / obfuscation and network-condition simulation),
 security, observability/measurement, CI/CD, agentic-development requirements, and documentation
 policy.
 
@@ -116,7 +116,7 @@ requires explicit justification; the language for any new service is recorded in
   constants (this is critical for network-persistence work: SNIs, donor names, detector
   timeouts, rotation limits — everything must be configurable; see §2.2).
 - **Cross-service string identifiers are centralised** (transport names `vless_reality`,
-  `amneziawg`, ...; link states `clean/throttled/dpi_blocked/shutdown`; control-plane message
+  `amneziawg`, ...; link states `clean/throttled/blocked/shutdown`; control-plane message
   types) — one source of truth, not scattered literals.
 - No "arbitrary timeout" — numeric network parameters are named and tied to a
   measurement or design decision.
@@ -354,7 +354,7 @@ defect: the sources diverge and produce conflicting diagnoses/policy
 |---|---|
 | Client identities/keys, issuance/revocation | Layer 2 (identity/keys) |
 | Active transport configuration of a node | Layer 2 (config) |
-| Current link diagnosis (`clean/throttled/dpi_blocked/shutdown`) | Layer 2 (detector) |
+| Current link diagnosis (`clean/throttled/blocked/shutdown`) | Layer 2 (detector) |
 | Policy "which transport lives where" | Layer 2 (policy), distributed in config bundle |
 | Node registry and reachability/health | Layer 4 (Phase 3: coordinator; Phase 4+: DHT/gossip) |
 | Ingress→egress path selection | Layer 3 (routing) |
@@ -443,7 +443,7 @@ two fresh IPs in sequence (both a resource concern and an exposure concern).
 
 ### 4.2. Layer 2. Control plane + adaptation layer
 
-- **The network-state detector** produces the diagnosis `clean / throttled / dpi_blocked /
+- **The network-state detector** produces the diagnosis `clean / throttled / blocked /
   shutdown` from signals (handshake timeouts, RST injection, post-connect throughput
   collapse, probe failure, loss/jitter). The detector must be **deterministic and
   measurable**: the same signals produce the same verdict; precision/recall are measured
@@ -540,7 +540,7 @@ mycelium/
     unit/
     contract/
     integration/
-    conformance/            (incl. anti-DPI / obfuscation / no-PII)
+    conformance/            (incl. network-degradation-resistance / obfuscation / no-PII)
     netsim/                 (network-condition simulation: RST, throttling, loss, shutdown)
   scripts/
   tools/
@@ -604,7 +604,7 @@ For architecturally significant changes a PR must contain:
 - description of the problem;
 - list of affected layers/components;
 - updated contracts (config bundle / envelope / telemetry / discovery);
-- tests (including, where relevant, anti-DPI/obfuscation conformance and netsim, §8);
+- tests (including, where relevant, network-degradation-resistance/obfuscation conformance and netsim, §8);
 - updated documentation;
 - **threat-model impact** — does the change affect THREAT-MODEL assets (user identity/
   location, ingress reachability, operators, mesh map) and how; does it introduce new
@@ -639,11 +639,11 @@ in place of a full new audit.
   parameters; Layer 3 → Layer 4: reading reachability).
 - **Conformance** — does the component obey Mycelium invariants (see §7.4): no-PII,
   no-hardcoded-secrets/endpoints, no-custom-crypto, envelope discipline, idempotency,
-  rotation anti-flapping, anti-DPI/obfuscation invariants.
+  rotation anti-flapping, network-degradation-resistance/obfuscation invariants.
 - **Netsim (network-condition simulation)** — behaviour under network-interference conditions (§7.3).
-- **Anti-DPI / obfuscation** — statistical indistinguishability (§7.2).
+- **Network-degradation-resistance / obfuscation** — statistical indistinguishability (§7.2).
 
-### 7.2. Anti-DPI / obfuscation conformance
+### 7.2. Network-degradation-resistance / obfuscation conformance
 
 Because "indistinguishability over obfuscation" is a project principle, it is verified by
 tests, not by eye:
@@ -657,7 +657,7 @@ tests, not by eye:
   update accidentally breaks mimicry.
 - **Statistical stream shape (best-effort)**: for each transport — verify that packet
   size/timing distributions remain within the "looks like HTTPS/QUIC" corridor and do not
-  reveal a VPN signature. This is the symmetric answer to the adversary's ML-based DPI.
+  reveal a VPN signature. This is the symmetric answer to the adversary's ML-based behavioural-layer detection.
 - **Obfuscation parameters are applied**: a test that the AmneziaWG junk / padding
   parameters selected by Layer 2 actually reach Layer 1 and change the observable shape.
 
@@ -666,14 +666,14 @@ These checks may require real sockets/containers — see §7.5.
 ### 7.3. Netsim: network-condition simulation
 
 The adaptation layer (Layer 2) must be verifiable under controlled network-interference conditions. Minimum
-netsim scenario set (via tc/netem, proxy faults, test DPI emulator):
+netsim scenario set (via tc/netem, proxy faults, behavioural-layer-blocking emulator):
 
 - **TCP RST injection** on the handshake of the selected transport → the detector must
-  produce `dpi_blocked`, the loop must switch to a fallback **within the defined SLO**,
+  produce `blocked`, the loop must switch to a fallback **within the defined SLO**,
   without human intervention;
 - **Post-connect throttling** (AS-level pattern "data dies": handshake succeeds, throughput
   collapses) → diagnosis `throttled`, correct migration;
-- **Handshake timeouts / drops** → `dpi_blocked`/`shutdown` at the defined thresholds;
+- **Handshake timeouts / drops** → `blocked`/`shutdown` at the defined thresholds;
 - **Loss/jitter** (UDP-unfriendly network) → graceful degradation to a TCP/TLS path, not
   failure;
 - **Full shutdown of the selected transport** → client recovers on a working endpoint
@@ -705,12 +705,12 @@ Each component must pass the conformance suite verifying the invariants in §2.2
 
 ### 7.5. Local profile for socket/Docker-bound tests
 
-Some anti-DPI and netsim tests require real sockets, netem, or Docker. Such checks are
+Some network-degradation-resistance and netsim tests require real sockets, netem, or Docker. Such checks are
 **not** considered failed simply because a standard sandbox prohibits bind/connect/Docker.
 They are run in a local developer environment and the result is recorded in the RP report.
 Examples (names are illustrative; updated as implementation progresses):
 
-- `make test-antidpi` (active cover-site probe + ClientHello profile);
+- `make test-degradation` (active cover-site probe + ClientHello profile);
 - `make netsim SCENARIO=rst_injection|throttle|shutdown|flapping`;
 - `docker compose -f tests/netsim/compose.yml up --build` before the run.
 
@@ -718,7 +718,7 @@ Examples (names are illustrative; updated as implementation progresses):
 
 - every new component — unit + contract tests;
 - every new contract (config bundle/envelope/telemetry/discovery/adapter) — contract tests;
-- every new transport adapter — anti-DPI conformance (§7.2) + adapter-contract;
+- every new transport adapter — network-degradation-resistance conformance (§7.2) + adapter-contract;
 - every change to the detector/rotation loop — netsim scenarios (§7.3) with a measurable
   SLO + regression on labelled incidents (precision/recall);
 - every regression bug — regression test;
@@ -861,7 +861,7 @@ Stage 3:
 - secret scan (gitleaks/trufflehog) — no keys/endpoints in diff
 
 Stage 4 (local/self-hosted profile, §7.5):
-- anti-DPI conformance (cover-site probe, ClientHello profile)
+- network-degradation-resistance conformance (cover-site probe, ClientHello profile)
 - netsim scenarios (rst/throttle/shutdown/flapping) with SLO verification
 
 Stage 5:
@@ -881,7 +881,7 @@ Merge is blocked if:
 - documentation is not updated (§12);
 - there are unresolved S0/S1 findings from a related audit.
 
-Anti-DPI and netsim suite (Stage 4), which require sockets/Docker, are not treated as failed
+Network-degradation-resistance and netsim suite (Stage 4), which require sockets/Docker, are not treated as failed
 due to sandbox limitations — they are run locally and recorded in the RP report (§7.5). Where
 a self-hosted runner is available, they are also merge-blockers.
 
@@ -1019,7 +1019,7 @@ Rules for development:
 ### 14.2. New transport (Layer 1) checklist
 - [ ] Connected via adapter contract, no core edits (§2.2 item 7)
 - [ ] Cover/anti-probing configured; probe returns a legitimate response
-- [ ] Anti-DPI conformance passed (probe + ClientHello profile + stream shape, §7.2)
+- [ ] Network-degradation-resistance conformance passed (probe + ClientHello profile + stream shape, §7.2)
 - [ ] Obfuscation parameters are adapter inputs, not constants (§4.1)
 - [ ] Netsim: block of this transport → correct diagnosis + fallback within SLO (§7.3)
 - [ ] Per-transport metrics published (§9.2)
@@ -1038,7 +1038,7 @@ Rules for development:
 - [ ] Problem and scope are clearly described
 - [ ] Contracts updated
 - [ ] Docs updated (including THREAT-MODEL if the threat model or collected data changes)
-- [ ] Tests updated (incl. conformance / anti-DPI / netsim, where relevant)
+- [ ] Tests updated (incl. conformance / network-degradation-resistance / netsim, where relevant)
 - [ ] Audit passed ([refactoring.md](refactoring.md))
 - [ ] No unresolved S0/S1 findings
 - [ ] No new single point of blocking/identity exposure introduced (redundancy preserved)

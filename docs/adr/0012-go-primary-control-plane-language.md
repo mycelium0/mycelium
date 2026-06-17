@@ -47,7 +47,7 @@ compiled binary ("control agents — Go or Rust", [../development.md](../develop
 - **Adversary model.** The control plane must be **as survivable as the data plane** — management
   must not be easier to block than traffic ([../THREAT-MODEL.md](../THREAT-MODEL.md)). The
   implementation language affects our ability to ship a robust single binary that drives sing-box,
-  runs a correct fail-closed adaptation loop under DPI / active probing / IP-AS blocking / UDP
+  runs a correct fail-closed adaptation loop under behavioral-layer detection / active probing / IP-AS blocking / UDP
   throttling, and is operated reliably by non-experts.
 - **Affected asset.** Ingress reachability and operators (operational simplicity → fewer failures →
   better availability); indirectly user safety, via correct idempotent, anti-flap behaviour.

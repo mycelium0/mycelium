@@ -532,7 +532,7 @@ mitigated by collapsing to one source and tying tags to the keep-list. A reconci
 silently changes a port/inbound → the before/after render diff + `sing-box check` +
 `phase0_port_canon` gate catch it. Wrong file kept editable → enforce "exactly one" in
 review (optionally a tiny check that the alias is a pointer). **Threat-model:**
-*Signature-based DPI* (the rendered transport shape is unchanged); *Active probing* (the
+*Signature-based detection* (the rendered transport shape is unchanged); *Active probing* (the
 firewall opens exactly the enabled ports — no extraneous open port from tag mismatch).
 
 ---

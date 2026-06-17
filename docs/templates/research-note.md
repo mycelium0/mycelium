@@ -17,8 +17,8 @@ later. See the LICENSE file in the repository root.
 >
 > **Cadence.** By agreement of the Measurements track: periodically (e.g.
 > quarterly) **or** immediately upon a major blocking event — a large-scale
-> block of an entire transport/application class, a new detection family in
-> large-scale DPI appliances, or a shift in the network restriction model
+> block of an entire transport/application class, a new behavioral-layer
+> detection family in large-scale network degradation, or a shift in the network restriction model
 > (blacklist→allowlist, blocking→active attack).
 >
 > **What makes a note "real".** Every conclusion is tied to a source or
@@ -78,7 +78,7 @@ incidents, etc.):
 
 ## 4. Impact on the network interference detector
 What changes in the channel diagnosis. Specifically, per state
-`clean / throttled / DPI-blocked / shutdown`:
+`clean / throttled / blocked / shutdown`:
 - new or refined signal (handshake timeout, RST injection, throughput collapse
   after connect, probe failure, loss/jitter);
 - proposed threshold/weight adjustment — **as a hypothesis to verify**, not as a
