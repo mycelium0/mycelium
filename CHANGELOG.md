@@ -11,6 +11,41 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.1.1] — 2026-06-17
+### Added
+- `internal/spec/transport.go`: Go-owned canonical transport registry (proto→class, default
+  ports, params keys, scheme, engine) + closed transport/region/health vocabularies + `Vocab`
+  aggregate. `myceliumctl vocab` emits it deterministically; committed `control/vocab.json` is the
+  artifact the shell renderer reads (RP-0008 P2). The shell stops being a second source of truth
+  for the transport taxonomy.
+- `myceliumctl version` now appends the build-stamped source revision (`-ldflags -X
+  spec.SourceRev`) when present, preserving the `myceliumctl <ver>` prefix.
+- node-bootstrap `install_spine`: builds + installs the Go control binary
+  (`$TOOLING_DIR/bin/myceliumctl-go`) from the deployed source on bootstrap and update — inert in
+  this phase (the shell tool stays authoritative), warn-not-die, idempotent on the stamped source
+  rev (RP-0008 P3 chunk 1).
+- `ws-tls` transport class (VLESS+WebSocket over genuine single-layer TLS) is first-class and
+  sing-box-servable (the on-device-proven Phase-1 genuine-TLS shape).
+- Conformance gates: `vocab_single_source`, `spine_binary_build`, `no_reserved_jq_vars`.
+
+### Fixed
+- `merge_operator_overrides` / `seed_operator_overrides` named a jq variable `def` (a jq keyword);
+  jq 1.6 fails to parse `$def`, so a jq-1.6 node's every `--update` died at the operator-override
+  merge and rolled back. Renamed to `base`; added the `no_reserved_jq_vars` static gate.
+- `sub_channel_not_single_point` sourced `render_bundle.sh` standalone after it began delegating to
+  the shared vocab accessor; the gate now sources the same dependency chain.
+
+### Changed
+- The shell renderers consume the Go-owned vocabulary: `render_bundle.sh` (proto→class +
+  closed-vocab list), `render_singbox.sh` (`MYC_SB_PROTOS` + per-proto default ports), via the new
+  `control/lib/vocab.sh`; `OPERATOR_TOGGLE_KEYS` is gate-policed against the registry (RP-0008 P2).
+- Terminology swept repo-wide: "fleet" → "network"/"population".
+
+### Notes
+- During the 0.x alpha the SemVer minor digit tracks the lifecycle phase (0.1.x = Phase 1); patch
+  increments per landed increment, with a git tag at phase close. Per-build identity is
+  `internal/spec.SourceRev` (the git rev stamped into the binary).
+
 ## [0.1.0] — 2026-06-12
 ### Added
 - Go module and the ADR-0012 layout: `internal/spec` (shared typed schemas), `cmd/myceliumctl`,
