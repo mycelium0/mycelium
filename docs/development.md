@@ -163,9 +163,18 @@ erodes audit discipline):
   version and the README header.
 - A draft entry goes into the `## [X.Y.Z]` section at the **top** of `CHANGELOG.md`;
   history is append-only below.
+- **Bump-per-chunk — the obligation, not just the three-point sync.** Every change that lands a
+  unit of Go spine work (`internal/**`, `cmd/**`) bumps the runtime version **in the same
+  commit**. During the 0.x alpha the scheme is `0.<phase>.<patch>`: the MINOR tracks the
+  lifecycle phase (0.1.x = Phase 1, 0.2.x = Phase 2, …) and one PATCH lands per phase increment
+  (chunk); a `v0.<phase>.<patch>` git tag marks a phase close. *Forgetting to bump a feature
+  chunk* — not three-point drift — is the failure this rule exists to prevent.
 
-Code review checks: if a version file is touched, the README header and CHANGELOG entry
-must be in the diff (CI gate `version-hygiene`).
+Enforcement: the offline gate `version_changelog_sync` asserts `internal/spec.Version` equals
+the newest `## [X.Y.Z]` CHANGELOG heading (the const and the changelog can never drift apart);
+CI additionally checks that a touched version file carries its README + CHANGELOG edits in the
+diff. Neither gate can prove a chunk *should* have bumped — that stays the bump-per-chunk
+discipline above, enforced at review.
 
 The platform (root) version and the version table in the root `README.md` are updated only
 when a **platform-level** bump is warranted (an RP introducing a new public surface or new

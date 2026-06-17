@@ -387,7 +387,7 @@ that it is contributed under the AGPL-3.0-or-later terms.
 - [ ] Unit + contract tests; for transport/detector/rotation — network-degradation and/or netsim with SLO (§4.2).
 - [ ] Socket/netem/Docker tests run locally and reflected in `Verification:` (§7.5).
 - [ ] Documentation updated in the same change; THREAT-MODEL updated if what is collected about users changed (§5).
-- [ ] version-hygiene: touched a version constant → README header + CHANGELOG in the same commit.
+- [ ] version-hygiene (§1.2): a change that lands Go spine work (`internal/**`, `cmd/**`) bumps `internal/spec.Version` (`0.<phase>.<patch>`, one patch per landed chunk) **and** adds a CHANGELOG entry in the **same** commit — `version_changelog_sync` (const == newest CHANGELOG heading) stays green.
 - [ ] Commit(s) per [commit-template.txt](commit-template.txt): type-prefix subject, RP/ADR in a trailer (`Refs:`/`Implements:`), `Verification:` block present, no AI/tool/model attribution anywhere in the message or trailers.
 - [ ] PR contains threat-model impact and an indication of whether an event audit is needed (§6.1).
 - [ ] Copyright header added to new source / significant markdown files (§8).
