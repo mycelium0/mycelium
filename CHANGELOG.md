@@ -11,6 +11,19 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.1] — 2026-06-17
+### Added
+- `internal/tune` (RP-0010 C3): the self-tuner — the Physarum/Tero-2010 reinforce-and-evaporate
+  control law expressed on `spec.DecayPolicy`, as a per-(transport-class, path) `Weight`. Each good
+  connectivity `Verdict` reinforces the weight; it decays continuously by `HalfLife` toward
+  `RetentionFloor`, so a blocked shape fades WITHOUT teardown and re-promotes automatically when the
+  block lifts (`RetentionFloor` is scar memory — a repeatedly-blocked shape settles low but is never
+  forgotten). A `Hysteresis` band damps the promote/demote flag. `NewWeight` is fail-closed; the
+  weight is a ranking input only and NEVER actuates (ADR-0025 / AC-4). Gate `tuner_pure_advisory`
+  enforces the package imports only `internal/spec` + pure stdlib (no net/os/syscall, no
+  internal/reach|detect). Still inert: nothing consumes the ranking yet (auto-rotation is a later
+  chunk).
+
 ## [0.2.0] — 2026-06-17
 ### Added
 - **Phase 2 (adaptivity) opens — the connectivity-state detector, detect plane (RP-0010).** This
