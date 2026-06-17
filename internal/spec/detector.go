@@ -130,6 +130,10 @@ const (
 	// ReasonUnreachable — not even a transport-layer connection could be opened
 	// (the shutdown / black-hole cause).
 	ReasonUnreachable DetectReason = "unreachable"
+	// ReasonDegradedWindow — the fast-class success-ratio window is sustainedly
+	// poor without a single fresh signature being dominant (aggregate degradation
+	// rather than one attributable event).
+	ReasonDegradedWindow DetectReason = "degraded-window"
 )
 
 // IsValid reports whether the reason is one of the canonical members. ReasonNone
@@ -139,7 +143,7 @@ func (r DetectReason) IsValid() bool {
 	switch r {
 	case ReasonNone, ReasonHandshakeTimeout, ReasonConnectionReset,
 		ReasonThroughputCollapse, ReasonActiveProbeFailure,
-		ReasonSingleStreamDegradation, ReasonUnreachable:
+		ReasonSingleStreamDegradation, ReasonUnreachable, ReasonDegradedWindow:
 		return true
 	default:
 		return false

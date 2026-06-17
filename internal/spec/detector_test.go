@@ -51,7 +51,7 @@ func TestDetectReasonIsValid(t *testing.T) {
 	for _, r := range []DetectReason{
 		ReasonNone, ReasonHandshakeTimeout, ReasonConnectionReset,
 		ReasonThroughputCollapse, ReasonActiveProbeFailure,
-		ReasonSingleStreamDegradation, ReasonUnreachable,
+		ReasonSingleStreamDegradation, ReasonUnreachable, ReasonDegradedWindow,
 	} {
 		if !r.IsValid() {
 			t.Fatalf("DetectReason %q must be valid", r)
