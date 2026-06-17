@@ -200,6 +200,15 @@ migration (phase 2). UDP paths are provisioned but not relied upon as the primar
 (migrating VLESS-TCP → REALITY/gRPC/CDN), the node does **itself in minutes**. This is the
 core of the adaptation layer.
 
+> **Scope discipline (operator directive, 2026-06-17).** Phase 2 is **ADAPTIVITY, not new
+> transports.** The transport *set* is already universal and closed ([ADR-0010](adr/0010-phase0-transport-set.md));
+> Phase 1's on-device proof confirmed the existing shapes are sufficient ([phase1-acceptance-ledger.md](phase1-acceptance-ledger.md)).
+> Phase 2 makes the node adapt the **route and behaviour** (detect → adapt → self-tune), not grow the
+> protocol list. Adding/studying new protocols is explicitly **out of scope** for Phase 2 unless the
+> pre-Phase-2 research proves a specific gap the closed set cannot cover. And — **compose proven patterns,
+> do not reinvent**: where a mature primitive fits a Phase-2/3+ need, ADOPT/WRAP it rather than build from
+> scratch (build-vs-reuse principle below).
+
 **Scope.**
 - **Network-state detector.** Classifies the channel state from signals: handshake timeouts,
   TCP RST injection, throughput collapse after a successful connect (the AS-level "data dies"
@@ -483,6 +492,35 @@ block** future implementation:
 The rule: early phases anticipate the future with **inert interfaces**, never with early runtime
 behaviour. Each phase's Definition of Done stays coherent and self-contained — a phase is done when its
 own DoD is met, not when a later phase's mechanism is half-built inside it.
+
+## Build-vs-reuse: compose proven patterns, do not reinvent (2026-06-17)
+
+Mycelium is viable as an **engineering composition of proven patterns**, not as novel network biology.
+Every building block this roadmap needs already has battle-tested prior art; reimplementing them from
+scratch lowers the odds. The "fungal" vocabulary stays a **metaphor** for local rules, decay, redundancy,
+and scoped trust — never a justification for uncontrolled self-organisation. The rule: where a mature
+primitive fits a need, **ADOPT or WRAP** it (license permitting — AGPL-3.0-or-later) rather than BUILD.
+
+Indicative prior art per need (the per-component ADOPT/WRAP/BUILD/DEFER decisions are pinned in the
+build-vs-reuse ADR, informed by the pre-Phase-2 research):
+
+- **P2P substrate** (Phase 3+ peer identity, multi-transport, NAT traversal, hole-punching, relays) — libp2p.
+- **Store-carry-forward "spores"** (signed TTL-bounded bootstrap/route/trust/revocation artifacts, NOT the
+  data path) — DTN / Bundle Protocol v7 (RFC 9171) thinking; Briar for carrier-agnostic sync.
+- **Encrypted self-healing mesh overlay** (Phase 4/5) — Yggdrasil / cjdns.
+- **Mature anonymous overlay + the telemetry lesson** — I2P (direct health/latency measurement is a
+  deanonymisation minefield → indirect/profile-based only; binds [ADR-0025](adr/0025-no-global-abuse-oracle.md)/[ADR-0030](adr/0030-advisory-network-awareness.md)).
+- **Volunteer/federated blocking-resistant edges** (ADR-0029) — Tor Snowflake (and its real costs: broker,
+  onboarding, abuse, measurement).
+- **Local-rule adaptation** (Phase 2 self-tuning) — Physarum/slime-mold work is *optimisation heuristics*
+  (exploration budget, reinforcement, decay, local gradients), **not** a deployable routing protocol; take
+  the rules, add the threat model / privacy / sybil-resistance ourselves.
+
+**The default conflict to respect everywhere:** self-organisation and blocking-resistance fight by default —
+discovery creates an enumeration surface, health telemetry a fingerprinting/deanon oracle, rotation an
+observable signal, volunteers sybil/abuse/legal risk. In an ordinary mesh visibility is a feature; in this
+one it is a vulnerability. This is *why* the trajectory above is scoped → federated → open-mesh, never
+open-mesh-first.
 
 ## Immunity, Communes, and sovereign defense across the phases
 
