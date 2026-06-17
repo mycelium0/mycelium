@@ -60,6 +60,20 @@ provider, or place is load-bearing; losing any subset degrades gracefully rather
    a deliberate fallback with a documented metadata trade-off, chosen explicitly per ADR-0026, never a
    default. Ingress contributors are kept distinct from egress operators.
 
+5. **Anastomosis between communes — fungi may introduce, must not enumerate (amended 2026-06-17).** A
+   commune's fungi (the population-coordinator role — [ADR-0018](0018-fungi-role-and-opt-in-publish.md),
+   specified in [RP-0011](../proposals/0011-phase2-fungi-packaging-and-cli.md)) may *initiate fusion* between
+   two other fungi: with **double opt-in**, it hands each a scoped, TTL-bounded invitation (a spore) to form a
+   **direct** bridge, then steps away — the bridge **survives the introducer's departure** (the introducer is
+   never a permanent route). This is bounded by construction to avoid an auto-clique / structure leak: **max
+   introduction depth 1–2 hops, max degree per fungi, TTL on invitations, no neighbour-list sharing, no
+   automatic transitive trust, no "friend-of-friend is trusted".** A new bridge starts **thin** and earns
+   thickness only from observed good behaviour (anti population-on-population attack); a captured node/fungi is
+   **contained** (no malicious propagation along anastomoses) — see [ADR-0031](0031-build-vs-reuse-compose-proven-patterns.md).
+   The invariant: **a fungi MAY introduce; a fungi MUST NOT enumerate** (the federation analogue of ADR-0030's
+   "advisory, never a map"). The live bridge runtime is Phase 3–4; Phase 2 ships only the package, CLI, and the
+   constrained introduction *mechanism* ([RP-0011](../proposals/0011-phase2-fungi-packaging-and-cli.md)).
+
 ## Consequences
 
 - **First instance is Phase-1:** an operator-contributed in-region ingress that relays to an out-of-region
