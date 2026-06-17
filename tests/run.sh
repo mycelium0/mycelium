@@ -63,6 +63,10 @@
 #                               AdvisoryHealth() projection stays LOSSY (impaired states collapse to one
 #                               advisory value), and NO transmitted artifact embeds the fine ConnState —
 #                               only the coarse advisory HealthValue is emittable (ADR-0030). OFFLINE
+#   * detector_pure_no_probe.sh — the Phase-2 classifier (internal/detect, RP-0010 Plane 2) is PURE and
+#                               adds no new probing surface (AC-6): its non-test sources import no
+#                               net*/os*/syscall package and no internal/reach, and they consume the
+#                               typed internal/spec signal. OFFLINE (reads import blocks, no toolchain)
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -107,6 +111,7 @@ GATES=(
 	"tests/conformance/no_reserved_jq_vars.sh"
 	"tests/conformance/vocab_single_source.sh"
 	"tests/conformance/detector_state_closed_vocab.sh"
+	"tests/conformance/detector_pure_no_probe.sh"
 	"control/selftest.sh"
 )
 
