@@ -11,6 +11,31 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.0] — 2026-06-17
+### Added
+- **Phase 2 (adaptivity) opens — the connectivity-state detector, detect plane (RP-0010).** This
+  release marks the two detect-plane chunks that landed under the Phase-1 version; the version line
+  moves to the Phase-2 `0.2.x` track, and subsequent chunks bump the patch individually.
+- `internal/spec/detector.go` (RP-0010 C1): the inert, node-local detector schema — the closed
+  `ConnState` {clean/throttled/blocked/shutdown}; its lossy `AdvisoryHealth()` projection to the
+  coarse advisory `HealthValue` (the OPSEC boundary — only the projection is emittable, k-floored,
+  ADR-0030; impaired states collapse to one value); the closed `DetectReason` cause vocabulary; the
+  `DetectorSignal` input and `Verdict` output; pure `Validate` throughout. Gate
+  `detector_state_closed_vocab` keeps the vocab closed and enforces, by construction, that no
+  transmitted artifact embeds the fine `ConnState`/`DetectReason`.
+- `internal/detect` (RP-0010 C2): the connectivity-state classifier — `Classify`, a pure
+  signature-priority function, plus a stateful `Detector` with a success-ratio hysteresis dead-zone
+  (route-flap damping) and an anti-flap confirmation count. A held impaired state is never latched:
+  once its boolean fault flag clears it is capped at aggregate degradation, so a recovered path
+  climbs back out. `New` is fail-closed; decisions are deterministic and measured by a
+  labelled-incident corpus (per-class precision/recall). Gate `detector_pure_no_probe` enforces the
+  classifier adds no new probe surface (imports only `internal/spec` + pure stdlib; AC-6).
+- `spec.ReasonDegradedWindow` for aggregate (non-point-signature) degradation.
+
+### Note
+- The detector is INERT in this release: nothing calls it in production yet (the `internal/reach`
+  → signal wiring, the self-tuner, and auto-rotation are later RP-0010 chunks).
+
 ## [0.1.1] — 2026-06-17
 ### Added
 - `internal/spec/transport.go`: Go-owned canonical transport registry (proto→class, default
