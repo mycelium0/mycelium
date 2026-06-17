@@ -501,8 +501,8 @@ scratch lowers the odds. The "fungal" vocabulary stays a **metaphor** for local 
 and scoped trust — never a justification for uncontrolled self-organisation. The rule: where a mature
 primitive fits a need, **ADOPT or WRAP** it (license permitting — AGPL-3.0-or-later) rather than BUILD.
 
-Indicative prior art per need (the per-component ADOPT/WRAP/BUILD/DEFER decisions are pinned in the
-build-vs-reuse ADR, informed by the pre-Phase-2 research):
+Indicative prior art per need (the per-component ADOPT/WRAP/BUILD/DEFER decisions are pinned in
+[ADR-0031](adr/0031-build-vs-reuse-compose-proven-patterns.md), informed by the pre-Phase-2 research):
 
 - **P2P substrate** (Phase 3+ peer identity, multi-transport, NAT traversal, hole-punching, relays) — libp2p.
 - **Store-carry-forward "spores"** (signed TTL-bounded bootstrap/route/trust/revocation artifacts, NOT the
