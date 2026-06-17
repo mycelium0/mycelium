@@ -15,7 +15,7 @@ understand risk before it materialises.
 
 A large-scale network operator (the adversary) with the following capabilities:
 
-- **Transit-layer inspection appliances (large-scale DPI at exchange points)** — inspection and
+- **Behavioral-layer detection and blocking at exchange points** — inspection and
   blocking at the network backbone.
 - **AS-level blocking** — cuts all traffic to "tainted" autonomous systems wholesale (observed
   pattern: handshake succeeds, data dies). IP and AS diversity is not optional.
@@ -62,7 +62,7 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 
 | Attack | Where it strikes | Project mitigation |
 |---|---|---|
-| Signature-based DPI | data plane | REALITY/Vision; indistinguishability from HTTPS |
+| Signature-based behavioral detection | data plane | REALITY/Vision; indistinguishability from HTTPS |
 | TLS-in-TLS detection (nested-TLS-record heuristic) | data plane | Run **two structurally different TLS families**: the REALITY shapes (nested TLS-in-TLS) AND a genuine single-layer own-cert family (`xhttp-tls`, port 2087). A path that drops the TLS-in-TLS pattern still leaves the single-TLS family reachable, and vice-versa (see the dedicated subsection below; ARCHITECTURE.md Layer 1; ADR-0010; RP-0007) |
 | ML-based flow classification | data plane | Statistical traffic shaping beyond protocol mimicry; auto A/B obfuscation tuning |
 | Active probing | data plane / node | Donor site returns a legitimate response; every exposed port is REALITY/donor-fronted, no plaintext banners. Phase-0 minimal-exposure posture is REALITY-on-443; the bash bootstrap default additionally exposes REALITY+gRPC on 8443 (same family, also donor-fronted) for client failover — a deliberate, recorded two-port default (ADR-0022), not extraneous services |

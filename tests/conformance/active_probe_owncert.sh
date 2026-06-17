@@ -12,7 +12,7 @@
 # WHY THIS GATE (ADR-0010, RP-0007 §AC-a3, threat DISTINGUISHABLE_TRANSPORT / S0)
 #   The new VLESS+XHTTP-over-genuine-TLS inbound is single-layer HTTPS: the node presents its OWN
 #   publicly-valid certificate (per ADR-0014), NOT a REALITY donor-borrowed handshake. That is the
-#   whole point — TLS-in-TLS (XHTTP framing inside REALITY) is DPI-blocked on some mobile links; a
+#   whole point — TLS-in-TLS (XHTTP framing inside REALITY) is blocked on some mobile links; a
 #   genuine single-TLS endpoint survives. But "own cert, no reality" must be shaped CORRECTLY or it
 #   becomes a tell: an own-cert TLS inbound that looks like a reality cover (donor handshake), or one
 #   that squats on a confirmed-fingerprinted port (8443), or one that collides with the REALITY-XHTTP

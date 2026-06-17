@@ -93,7 +93,7 @@ parity is unconfirmed or absent. This is exactly the situation
 hatch exists for, but it must be **recorded** so an operator who needs a given hardening knows which
 engine to serve it on.
 
-- **Adversary model** (see [../THREAT-MODEL.md](../THREAT-MODEL.md)): passive DPI signature matching
+- **Adversary model** (see [../THREAT-MODEL.md](../THREAT-MODEL.md)): passive behavioral-layer signature matching
   and ML traffic classification (an aged TLS fingerprint or a non-PQ handshake is the signal), and
   **active probing** (the post-handshake differential). This ADR addresses the *currency* dimension
   of those detectors; it does **not** address — and must not be read as addressing — the destination-AS

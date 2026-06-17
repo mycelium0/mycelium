@@ -111,7 +111,7 @@ Typical composition:
    not made.
 2. **Code** in the correct layer, without violating boundaries (§1.1).
 3. **Tests alongside the change** (§4): unit + contract at a minimum; transport/detector/rotation —
-   plus anti-DPI conformance and/or netsim.
+   plus network-degradation conformance and/or netsim.
 4. **Documentation in the same change** (§5): code without updated documentation is not done
    (development.md §12.3).
 5. **Commit(s)** per [commit-template.txt](commit-template.txt): a type-prefix subject, a
@@ -196,7 +196,7 @@ A test goes **in the same change** as the code. Categories:
 - **Conformance (gate-suite, §7.4)** — `no_pii`, `no_hardcoded_secrets_endpoints`,
   `no_custom_crypto`, `envelope_discipline`, `idempotency`, `rotation_safety`,
   `transport_adapter_contract`.
-- **Anti-DPI / obfuscation (§7.2)** — active probing of the cover site returns the real donor
+- **Network-degradation / obfuscation (§7.2)** — active probing of the cover site returns the real donor
   site; ClientHello profile within upstream corridor; statistical flow shape resembles HTTPS/QUIC;
   obfuscation parameters chosen by layer 2 actually reach layer 1.
 - **Netsim (§7.3)** — behaviour under controlled network interference (tc/netem, RST injection,
@@ -204,14 +204,14 @@ A test goes **in the same change** as the code. Categories:
   incidents (detector precision/recall).
 
 Minimum per §7.6: every new component — unit + contract; every new contract — contract; every
-transport adapter — anti-DPI conformance + adapter-contract; every detector/rotation change —
+transport adapter — network-degradation conformance + adapter-contract; every detector/rotation change —
 netsim with SLO; every regression bug — regression test; everything that touches user data —
 `no_pii`.
 
-> **Socket/Docker/netem tests (§7.5).** Some anti-DPI and netsim suite tests open real sockets,
+> **Socket/Docker/netem tests (§7.5).** Some network-degradation and netsim suite tests open real sockets,
 > netem, or Docker. They **must not** be treated as failing merely because a standard sandbox
 > blocks bind/connect/Docker. Run them in your local dev environment
-> (`make test-antidpi`, `make netsim SCENARIO=...`,
+> (`make test-degradation`, `make netsim SCENARIO=...`,
 > `docker compose -f tests/netsim/compose.yml up --build`) and record this in the RP report
 > and in the commit's `Verification:` block.
 
@@ -252,7 +252,7 @@ For architecturally significant changes:
 - description of the problem;
 - list of affected layers/components;
 - updated contracts (config distribution / envelope / telemetry / discovery / adapter);
-- tests (including, where relevant, anti-DPI conformance and netsim);
+- tests (including, where relevant, network-degradation conformance and netsim);
 - updated documentation;
 - **threat-model impact** — does the change affect assets in THREAT-MODEL (user identity/location,
   traffic content, ingress reachability, operators, network map) and how; does it introduce new
@@ -384,7 +384,7 @@ that it is contributed under the AGPL-3.0-or-later terms.
 - [ ] No hardcoded endpoints/keys/donors/SNI (`no_hardcoded_secrets_endpoints`).
 - [ ] No custom or modified cryptography (`no_custom_crypto`).
 - [ ] No silent emergency path and no hidden network channels (§7.3).
-- [ ] Unit + contract tests; for transport/detector/rotation — anti-DPI and/or netsim with SLO (§4.2).
+- [ ] Unit + contract tests; for transport/detector/rotation — network-degradation and/or netsim with SLO (§4.2).
 - [ ] Socket/netem/Docker tests run locally and reflected in `Verification:` (§7.5).
 - [ ] Documentation updated in the same change; THREAT-MODEL updated if what is collected about users changed (§5).
 - [ ] version-hygiene: touched a version constant → README header + CHANGELOG in the same commit.

@@ -14,11 +14,15 @@
 #
 #     * the word "censor" / "censorship" / "censoring" (any case)
 #     * the word "circumvent" / "circumvention" (any case)
+#     * the apparatus acronyms "DPI" / "TSPU" / "ТСПУ" — name the PHENOMENON
+#       (network degradation), never the filtering box (whole word, any case)
 #     * a country name from the small denylist below (whole word, any case)
 #
 #   Approved neutral vocabulary (NOT flagged): persistent private network, network
-#   adversary, network interference, DPI, blocking, AS-level blocking, active probing,
-#   throttling, indistinguishability, adversary, reachability, resilience, persistence.
+#   adversary, network interference, network degradation, forced degradation, network
+#   stability attacks, behavioral-layer detection, blocking, AS-level blocking, active
+#   probing, throttling, indistinguishability, adversary, reachability, resilience,
+#   persistence.
 #
 # WHAT IS EXCLUDED
 #   * .git/                 — version-control internals, not source.
@@ -44,8 +48,14 @@ SELF_NAME="$(basename "${BASH_SOURCE[0]}")"
 _ignored() { git -C "$REPO_ROOT" check-ignore -q -- "$1" 2>/dev/null; }
 
 # --- Forbidden vocabulary ---------------------------------------------------
-# Substring patterns (catch inflections like censorship / circumvention).
-FORBIDDEN_SUBSTR='censor|circumvent'
+# Substring patterns (catch inflections like censorship / circumvention; ТСПУ is the
+# Cyrillic apparatus acronym, matched as a substring because word boundaries are
+# unreliable around multibyte text in the C locale).
+FORBIDDEN_SUBSTR='censor|circumvent|ТСПУ'
+
+# Apparatus acronyms — name the PHENOMENON ("network degradation"), never the filtering
+# box. Whole-word, case-insensitive (so "DPI"/"dpi"/"Dpi" all trip, but substrings do not).
+FORBIDDEN_WORDS='DPI|TSPU'
 
 # Country denylist — matched as whole words (case-insensitive). Comprehensive: a deploy
 # jurisdiction or node location must never leak into the tree, so this covers UN member
@@ -88,11 +98,17 @@ while IFS= read -r -d '' f; do
 	# Skip binary files (grep -I treats them as non-matching; we also pre-filter).
 	if grep -Iq . "$f" 2>/dev/null; then :; else continue; fi
 
-	# 1) Forbidden substrings (censor*/circumvent*).
+	# 1) Forbidden substrings (censor*/circumvent*/ТСПУ).
 	while IFS=: read -r lineno text; do
 		[ -n "${lineno:-}" ] || continue
 		report "$rel" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
 	done < <(grep -IinE "$FORBIDDEN_SUBSTR" "$f" 2>/dev/null || true)
+
+	# 1b) Apparatus acronyms (DPI/TSPU), whole word.
+	while IFS=: read -r lineno text; do
+		[ -n "${lineno:-}" ] || continue
+		report "$rel" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
+	done < <(grep -IinwE "$FORBIDDEN_WORDS" "$f" 2>/dev/null || true)
 
 	# 2) Country names (whole word).
 	while IFS=: read -r lineno text; do

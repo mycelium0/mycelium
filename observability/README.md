@@ -170,13 +170,13 @@ primary engine's node-side systemd-textfile health metric.
 
 The two blackbox modules are designed to be compared:
 
-- **TCP connects, TLS fails** → handshake-layer interference (DPI / active probing / RST
+- **TCP connects, TLS fails** → handshake-layer interference (network degradation / active probing / RST
   injection). Rotating SNI / donor / port often helps; rotate IP/AS if it persists.
 - **TCP also fails** → AS-level blocking. The IP/AS itself is the problem — rotate it.
 - **node_exporter also down** → it is a host outage, not a network event. Fix the host first.
 
 This triage is exactly what the **Phase-2 adaptation layer** automates: the network-state
-detector classifies the channel as `clean / throttled / DPI-blocked / shutdown` from these same
+detector classifies the channel as `clean / throttled / blocked / shutdown` from these same
 probe-success, byte-counter, and reachability signals, and the auto-rotation loop acts on the
 verdict. Phase 0 ships the measurements and the manual runbook; Phase 2 closes the loop.
 

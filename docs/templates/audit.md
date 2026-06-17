@@ -57,8 +57,8 @@ later. See the LICENSE file in the repository root.
 
 | Lens | Score | Verdict |
 |---|---:|---|
-| **Security / Threat** — user security as functional requirement №1 against an adaptive adversary: fail-closed under DPI/ML/probe/IP-AS/UDP-drop/domain-block/sybil/coercion, no leak path opened by a fallback, secrets and keys never widened in scope, explicit invariants on every critical flow, measurability of detector decisions (precision/recall), absence of "magic" branching instead of a contract. | N / 10 | … |
-| **Network-persistence** — survival of connectivity under blocking and rotation: formalised channel-state transitions (`clean / throttled / DPI-blocked / shutdown`), idempotency of repeated rotation commands, **anti-flapping and bounded recovery time** (no oscillation), local node autonomy when the control plane is unreachable, restart-survival of the persistence path. | N / 10 | … |
+| **Security / Threat** — user security as functional requirement №1 against an adaptive adversary: fail-closed under behavioral-layer detection/ML/probe/IP-AS/UDP-drop/domain-block/sybil/coercion, no leak path opened by a fallback, secrets and keys never widened in scope, explicit invariants on every critical flow, measurability of detector decisions (precision/recall), absence of "magic" branching instead of a contract. | N / 10 | … |
+| **Network-persistence** — survival of connectivity under blocking and rotation: formalised channel-state transitions (`clean / throttled / blocked / shutdown`), idempotency of repeated rotation commands, **anti-flapping and bounded recovery time** (no oscillation), local node autonomy when the control plane is unreachable, restart-survival of the persistence path. | N / 10 | … |
 | **Anonymity / Privacy** — minimisation of metadata and de-anonymisation surface: no new correlation handle across nodes/flows, telemetry carries no identifying or locating signal, public contracts (config distribution / telemetry / control) do not expose topology or membership, observability does not weaken the anonymity set. | N / 10 | … |
 | **Operational-resilience** (mandatory for routing/control/discovery changes, phase transitions, and post-incident audits) — runtime/processes/fault tolerance: clear boundary between substrate-OS and node-agent (the agent does not substitute the kernel/systemd/firewall), node process lifecycle (start/running/degraded/failed/recovered), supervision and restart strategy, isolation of hardware/network faults from domain semantics, timeout/cancel/retry taxonomy at the network edge. | N / 10 | … |
 | **McConnell** — construction quality and maintainability: locality of changes, clear names, no divergence between code ↔ README ↔ ADR ↔ RP ↔ CHANGELOG ↔ runbook, tests alongside the change, migration and rollback present, version bump reflects real blast-radius, no stale comments used as boundary definitions. | N / 10 | … |
@@ -83,7 +83,7 @@ later. See the LICENSE file in the repository root.
 - **Scenarios / flows:** <config delivery / auto-rotation on block / egress-route migration / node onboarding / bootstrap>
 - **Documentation:** <links to ARCHITECTURE/THREAT-MODEL/ROADMAP/ADR/RP/runbook>
 - **Observability / failure modes:** <which detector/rotation signals were checked; netsim adversary scenarios>
-- **Adversary model tested against:** <DPI/ML/probe/IP-AS/UDP-drop/domain-block/sybil/coercion>
+- **Adversary model tested against:** <behavioral-layer detection/ML/probe/IP-AS/UDP-drop/domain-block/sybil/coercion>
 
 ## Findings
 

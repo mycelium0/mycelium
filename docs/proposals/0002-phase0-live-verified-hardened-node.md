@@ -97,8 +97,8 @@ gaps and produce the live, verified, hardened node that the DoD demands — and 
   paths. No user PII is stored anywhere.
 - **Flows:** one-command deploy-from-zero; per-protocol bring-up under systemd;
   cover-site / donor handshake; credential issue/revoke without redeploy; PII-safe
-  health signalling; post-deploy active-probe + per-protocol reachability + anti-DPI
-  smoke verification; rollback by teardown/redeploy.
+  health signalling; post-deploy active-probe + per-protocol reachability +
+  anti-degradation smoke verification; rollback by teardown/redeploy.
 - **Schemas / formats:** no new format. Reconcile the SS-2022/TUIC credential
   conventions and converge the two divergent sing-box templates so what `selftest.sh`
   validates is what gets deployed.
@@ -115,7 +115,7 @@ gaps and produce the live, verified, hardened node that the DoD demands — and 
 | `cover` (`nodes/cover`) | Benign origin for handshake-less hits; reconciles sing-box↔origin fallback wiring | active | Caddy | Web server; no custom HTTP stack. |
 | `identity` / `myceliumctl` | Generates key material via sanctioned generators, renders per-node config + subscription, revokes a credential without redeploy; CLI contract converged with the role | active | sing-box / xray / openssl / awg | Thin orchestration over sanctioned generators only (ADR-0002); no byte invention. |
 | `observability` | Installs the node-side stats exporter + textfile gauge; PII-safe metrics, alerts, blackbox probes | active | Prometheus / Alertmanager / blackbox / node_exporter | Standard monitoring stack; no custom telemetry pipeline. |
-| `tests/conformance` | Offline 9-gate suite + post-deploy live gates (cover-site, per-protocol reachability, anti-DPI smoke, revoke/recovery) | active / test-only | system shell / openssl | Verification harness; no third-party tool fits the bespoke checks. |
+| `tests/conformance` | Offline 9-gate suite + post-deploy live gates (cover-site, per-protocol reachability, anti-degradation smoke, revoke/recovery) | active / test-only | system shell / openssl | Verification harness; no third-party tool fits the bespoke checks. |
 | `control-agent` skeleton (`myceliumd`/`myceliumctl` in Go) | W7: typed config model + health + thin CLI parity (the spine) | active | Go ([ADR-0012](../adr/0012-go-primary-control-plane-language.md)) | Establishes the compiled spine; the interference detector / auto-rotation logic stays deferred to Phase 2. |
 | `coordinator` (network registry / rerouting) | Not built here | deferred | none | Activates in a later RP (Phase 3); inert in Phase 0. |
 
@@ -151,7 +151,7 @@ shape** — the work reconciles and exercises existing contracts, it does not re
 
   Phase breakdown: W1 provision+harden → W2 per-protocol live bring-up + key generation →
   W3 cover-site/REALITY donor → W4 observability/health → W5 post-deploy conformance &
-  anti-DPI smoke → W6 runbooks/rollback/docs → W7 Go control-agent skeleton (the spine,
+  anti-degradation smoke → W6 runbooks/rollback/docs → W7 Go control-agent skeleton (the spine,
   [ADR-0012](../adr/0012-go-primary-control-plane-language.md)). W1 is a prerequisite for all
   others; W2–W4 proceed against the live node; W5 gates exposure; W6 lands the operational
   record; W7 stands up the compiled spine **after** the node is live and verified ("spine
@@ -200,7 +200,7 @@ Specifically:
   `control/selftest.sh`). The only live gate, `tests/conformance/cover_site_probe.sh`, is
   excluded from `run.sh` and is invoked incorrectly (positional args) in
   `docs/runbooks/deploy-node.md`. There is no per-protocol reachability gate, no
-  anti-DPI/first-packet smoke check, and no automated revoke/recovery assertion.
+  anti-degradation/first-packet smoke check, and no automated revoke/recovery assertion.
 - **Hardening.** The systemd sandbox and UFW posture are strong, but SSH has no managed
   `sshd_config` and the no-logs/RAM-only posture is a target in `SECURITY.md §4.2`, not an
   enforced state (journald writes to disk).
@@ -217,7 +217,7 @@ runbooks that match the code. Effect on the four template axes:
   (newly verified) a donor-matching post-handshake message sequence; the cover origin
   serves a benign, link-clean static page; active probing of any non-enabled port gets no
   answer and no banner. The deploy gate blocks exposure on a red probe. (Threat-model rows
-  *Signature-based DPI*, *Active probing*.)
+  *Signature-based detection*, *Active probing*.)
 - **Survivability / path redundancy.** Two or more transport shapes are reachable
   simultaneously and per-protocol `group_vars` toggling removes exactly one inbound while
   the rest keep working — the Phase 0 form of path redundancy. (Single IP/AS remains a
@@ -404,7 +404,7 @@ genuine-cert path (W3.4) unblocks dropping `insecure: true` in W2.3.
 checklist and the `s_client` ALPN check; vet post-handshake fidelity before deploy. Cover
 page tells (broken links, non-static, project wording) → static + link-clean + neutral, no
 forms. **Threat-model:** *Active probing* (donor response, no extraneous ports/banners);
-*Signature-based DPI* (REALITY/Vision donor fidelity); *Operator coercion* (`output
+*Signature-based detection* (REALITY/Vision donor fidelity); *Operator coercion* (`output
 discard`, no client PII in cover logs).
 
 ---
@@ -460,7 +460,7 @@ compromise* (no client attribution to exfiltrate).
 
 ---
 
-### W5 — Post-deploy conformance & anti-DPI / indistinguishability smoke verification
+### W5 — Post-deploy conformance & anti-degradation / indistinguishability smoke verification
 **Goal.** A fail-closed verification gate that proves the live node meets the DoD before it
 is handed any subscriptions.
 
@@ -473,7 +473,7 @@ is handed any subscriptions.
    a QUIC/UDP liveness probe for Hysteria2/TUIC, an AmneziaWG handshake check for the UDP
    path. Reuse the observability split (`mycelium_tcp_connect` vs
    `mycelium_tls_handshake`) to separate AS-blocking from handshake interference.
-3. **Anti-DPI / first-packet smoke checks (new):**
+3. **Anti-degradation / first-packet smoke checks (new):**
    - *First-packet entropy/printable audit* — capture the node's first client→server bytes
      and confirm they would not be classed as fully-encrypted (set-bits-per-byte outside
      the ~3.4–4.6 band, or a TLS-record/printable prefix present). Passes by construction
@@ -492,7 +492,7 @@ is handed any subscriptions.
    re-deploy is idempotent (keys reused, not rotated); and that `Restart=on-failure`
    recovers a killed service.
 6. **Wire the gate fail-closed into bootstrap:** a node that fails the active-probe /
-   anti-DPI smoke checks must **not** be handed subscriptions. Today the runbook only
+   anti-degradation smoke checks must **not** be handed subscriptions. Today the runbook only
    *recommends* the probe; make a red probe block exposure.
 
 **Definition of Done.** Every Phase 0 DoD item is checkably true on the live node:
@@ -504,8 +504,8 @@ excluded legacy transport present. The deploy gate refuses exposure on a red pro
 **Verification.**
 - `tests/run.sh` green (all offline gates).
 - `tests/conformance/cover_site_probe.sh --node … --donor …` green (now correctly invoked).
-- Per-protocol reachability gate green for every enabled transport; anti-DPI first-packet
-  audit reports exempt (not blockable) for each enabled transport; no extraneous
+- Per-protocol reachability gate green for every enabled transport; anti-degradation
+  first-packet audit reports exempt (not blockable) for each enabled transport; no extraneous
   port/banner answers.
 - REALITY post-handshake sequence matches the vetted donor.
 - Revoke test: revoked UUID is rejected, a peer UUID still authenticates; killed service
@@ -518,7 +518,7 @@ to a user until W5 is green.
 **Risks + mitigations.** Probe false-confidence (cert matches but post-handshake differs)
 → add the W5.4 fidelity assertion, don't rely on cert identity alone. Self-probes must
 target only benign/operator-controlled endpoints and look like ordinary handshakes — never
-user-chosen destinations. **Threat-model:** *Active probing* and *Signature-based DPI* /
+user-chosen destinations. **Threat-model:** *Active probing* and *Signature-based detection* /
 *ML-based flow classification* (first-packet + post-handshake + length checks);
 *Knowledge minimisation* (revoke verified; no user data logged by the probes).
 
@@ -530,7 +530,7 @@ user-chosen destinations. **Threat-model:** *Active probing* and *Signature-base
 **Steps.**
 1. Update `docs/runbooks/deploy-node.md` end-to-end to the corrected, ordered procedure
    (W1→W5), including the fixed `cover_site_probe.sh` invocation and the per-protocol /
-   anti-DPI / revoke verification steps as numbered checks.
+   anti-degradation / revoke verification steps as numbered checks.
 2. Author a **key/donor rotation drill** runbook (neutral wording): rotate REALITY keypair
    / short_ids / client UUIDs and the donor/cover, entirely on the sanctioned generators
    (no new crypto), with a fail-closed note that rotation must not silently downgrade
@@ -688,7 +688,7 @@ transport surface; W5 re-verifies indistinguishability after the migration).
 - [ ] PII-safety holds: no client IPs/destinations/identity attribution in any metric or
   log; node_exporter loopback-only; cover log discards.
 - [ ] Per-protocol post-deploy reachability gate green for every enabled transport;
-  anti-DPI first-packet audit reports each enabled transport as exempt (not blockable);
+  anti-degradation first-packet audit reports each enabled transport as exempt (not blockable);
   no extraneous ports/banners answer.
 - [ ] REALITY post-handshake sequence matches the vetted donor (W3.2/W5.4).
 - [ ] Recovery verified: revoked UUID rejected while peers authenticate; `Restart=on-failure`
@@ -698,7 +698,7 @@ transport surface; W5 re-verifies indistinguishability after the migration).
 
 > netsim/netem adversary scenarios (`rst_injection`, `as_blackhole`, `udp_drop`) exercise
 > the *detector/rotation* response, which is `deferred` to a later phase. Phase 0's live
-> adversary check is `active_probe` (the cover-site / anti-DPI gates above); the netem
+> adversary check is `active_probe` (the cover-site / anti-degradation gates above); the netem
 > block→recover scenarios are explicitly out of scope here (see Non-goals).
 
 ### Non-goals (deferred to later phases — not in this RP)
@@ -720,14 +720,14 @@ transport surface; W5 re-verifies indistinguishability after the migration).
 
 ## 8. Documentation changes
 - [ ] [../runbooks/deploy-node.md](../runbooks/deploy-node.md) — corrected end-to-end W1→W5
-  procedure; fixed `cover_site_probe.sh` invocation; per-protocol / anti-DPI / revoke
+  procedure; fixed `cover_site_probe.sh` invocation; per-protocol / anti-degradation / revoke
   verification steps; donor-vetting step.
 - [ ] `docs/runbooks/rotate-keys.md` (new) and updates to `rotate-ip-as.md` — neutral
   key/donor rotation drill on sanctioned generators, fail-closed against silent
   indistinguishability downgrade.
 - [ ] [../THREAT-MODEL.md](../THREAT-MODEL.md) — note the live first-packet/post-handshake
-  anti-DPI checks under *Active probing* / *Signature-based DPI*; confirm the no-logs/RAM
-  posture under *Operator coercion* / *Knowledge minimisation*.
+  anti-degradation checks under *Active probing* / *Signature-based detection*; confirm the
+  no-logs/RAM posture under *Operator coercion* / *Knowledge minimisation*.
 - [ ] [../ROADMAP.md](../ROADMAP.md) — flip Phase 0 DoD from pending to met (only after W5
   green); record that automated migration/rotation remains Phase 2.
 - [ ] [0001-bootstrap-phase-0-node.md](0001-bootstrap-phase-0-node.md) §7 — check the
@@ -781,7 +781,7 @@ There is no running system to migrate — this is a first bring-up — so "migra
   (sing-box primary or Xray alternative, not both); no parallel contract release is
   needed.
 - **Fail-closed behaviour during rollback.** No silent security bypass: a node that fails
-  W5 (cover-site / anti-DPI / per-protocol reachability) is **never** handed subscriptions;
+  W5 (cover-site / anti-degradation / per-protocol reachability) is **never** handed subscriptions;
   rollback never disables the no-logs posture or downgrades indistinguishability to "get
   something working." If a rotation or redeploy cannot be verified green, the safe state is
   *not exposed*, not *exposed-but-unverified*. This honours requirement №1 (operator/user

@@ -12,7 +12,7 @@ Author: mindicator & silicon bags quartet
 This directory holds the **primary transport** of a Mycelium Phase 0 node: an Xray-core inbound
 speaking VLESS with the XTLS-Vision flow, wrapped in REALITY. The design goal is **statistical
 indistinguishability** from ordinary TLS 1.3 traffic to a real, popular external site. To a network
-adversary running DPI or active probing, a connection to this node is meant to be
+adversary running behavioral-layer detection or active probing, a connection to this node is meant to be
 indistinguishable from a genuine browser session to that external donor site.
 
 ## License note (why there is no header in the `.json`)

@@ -60,7 +60,7 @@ that step, the metaphor risks becoming decoration: "fungal vocabulary sprinkled 
 mesh", which buys nothing and hides where the real contracts live.
 
 The adversary reality this addresses (see [../THREAT-MODEL.md](../THREAT-MODEL.md)) is not a single
-block but *rotation pressure*: large-scale DPI and ML traffic classification, IP/AS blocking, UDP
+block but *rotation pressure*: large-scale network degradation and ML traffic classification, IP/AS blocking, UDP
 throttling, protocol allowlisting, active probing, sybil enumeration of ingress points, weaponised
 revocation, and operator coercion — applied continuously, so that any specific block, port, SNI, or
 protocol is burned and replaced on a regular cadence. A network designed around any one transport

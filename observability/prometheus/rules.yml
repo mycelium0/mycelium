@@ -104,7 +104,7 @@ groups:
       - alert: HighHandshakeFailureRate
         # Fraction of successful TLS-handshake probes to the node's public :443 over the last
         # 10 minutes. A sustained drop below 50% means clients increasingly cannot complete the
-        # REALITY handshake — i.e. POSSIBLE NETWORK INTERFERENCE (DPI / active probing / RST
+        # REALITY handshake — i.e. POSSIBLE NETWORK INTERFERENCE (network degradation / active probing / RST
         # injection) rather than a host fault. Treated as the trigger for IP/AS rotation.
         expr: avg_over_time(probe_success{job="blackbox_handshake"}[10m]) < 0.5
         for: 10m

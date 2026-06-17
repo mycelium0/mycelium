@@ -112,7 +112,7 @@ The forces this finding puts in tension:
 
 - **Adversary model.** A **destination-AS / subnet, download-direction throughput degradation** of
   out-of-region egress ranges, applied to out-of-region hosters/CDNs as a **class** ([../THREAT-MODEL.md](../THREAT-MODEL.md)
-  — destination/AS-keyed throughput throttling, distinct from DPI handshake-shape blocking and from UDP
+  — destination/AS-keyed throughput throttling, distinct from behavioral-layer handshake-shape blocking and from UDP
   cutting). Secondarily, **operator/third-party coercion**: a TLS-terminating front is a compelled-logging
   surface that links source address to destination hostnames.
 - **Affected asset.** Ingress reachability (the surviving path must be an in-region one the filter does not
@@ -165,7 +165,7 @@ loosen ADR-0026's contract requirement for the automated form.
    - Pros: no second node needed; a single-hop deployment.
    - Cons: the filter is **destination-AS / subnet keyed, not handshake-shape keyed** — it degrades the
      out-of-region **destination range** regardless of how the first bytes look; obfuscation that defeats a
-     DPI handshake classifier does **not** move the destination out of the throttled class. This spends
+     handshake-shape classifier does **not** move the destination out of the throttled class. This spends
      effort on the wrong layer.
    - Impact on survivability: poor against this specific filter — wrong instrument for a destination-keyed
      throughput degradation.

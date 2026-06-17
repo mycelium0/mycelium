@@ -48,10 +48,10 @@ TLS-in-TLS-blocking mobile carrier — single-operator, the §15.8 seam for VIS-
 
 ### Field findings (LTE, load-bearing)
 
-On the operator's restrictive mobile carrier, **every TLS-in-TLS shape is DPI-blocked to EU nodes** —
+On the operator's restrictive mobile carrier, **every TLS-in-TLS shape is blocked to EU nodes** —
 VLESS+Vision/TCP, VLESS+gRPC, and **VLESS+REALITY+XHTTP (XHTTP framed _inside_ REALITY is still
-TLS-in-TLS)**. Large-scale DPI now detects TLS-in-TLS (~80% per 2025-26 research); REALITY / Vision /
-gRPC **are** TLS-in-TLS. What **survives** the same hostile link is **VLESS+XHTTP over genuine,
+TLS-in-TLS)**. Behavioural-layer detection now identifies TLS-in-TLS (~80% per 2025-26 research);
+REALITY / Vision / gRPC **are** TLS-in-TLS. What **survives** the same hostile link is **VLESS+XHTTP over genuine,
 single-layer TLS** (a real cert — **not** REALITY): single-layer HTTPS that evades the TLS-in-TLS
 classifier. A commercial peer's dedicated mobile servers that survive are exactly this single-TLS
 shape; their gRPC+REALITY servers fail on the same link. gRPC on the non-standard **port 8443** is a

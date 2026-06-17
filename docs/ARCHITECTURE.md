@@ -53,7 +53,7 @@ subset and keeps the exposed surface minimal.
 
 | Transport | Basis | Strength | Where it breaks | Role |
 |---|---|---|---|---|
-| **VLESS + REALITY + XTLS-Vision (TCP)** | TCP/TLS, borrows the handshake of a real donor site | Best survivability against DPI + active probing; Vision equalises TLS record lengths | Targeted blocking events aimed at VLESS-TCP-TLS | **Primary** |
+| **VLESS + REALITY + XTLS-Vision (TCP)** | TCP/TLS, borrows the handshake of a real donor site | Best survivability against network degradation + active probing; Vision equalises TLS record lengths | Targeted blocking events aimed at VLESS-TCP-TLS | **Primary** |
 | **VLESS + REALITY + gRPC** | HTTP/2 wrapper over TLS | Survives some conditions that take down bare TCP-TLS; multiplexes through HTTP/2-aware middleboxes | Higher latency cost | First TLS-family fallback |
 | **VLESS + REALITY + XHTTP** | HTTP-framed transport over TLS | Resilient where plain streams are disrupted; friendlier to HTTP-shaped paths and CDNs | Higher framing overhead | Second TLS-family fallback |
 | **VLESS + XHTTP over genuine TLS** (family `xhttp-tls`, port `2087`) | HTTP-framed transport over a **single, genuine** TLS 1.3 session terminated by the node's **OWN** certificate (NO REALITY donor) | A structurally **distinct** family from the REALITY shapes: it is real single-layer TLS, so it survives paths where the TLS-record-inside-TLS pattern (the REALITY families nest TLS inside TLS) is specifically detected and dropped. Own-cert means the SNI and certificate are the operator's own and consistent. | A genuine cert/SNI is a server-attributable identifier; depends on a clean own-cert reputation. Default-OFF. | TLS-in-TLS-blocked-path fallback (own-cert, distinct from the REALITY families) |
@@ -102,7 +102,7 @@ coordinator; phases 4–5 — distributed consensus over gossip.
 - **Identity and keys:** issuance and revocation of node/client identities, rotation of
   REALITY parameters, config distribution and updates via the config distribution endpoint
   (Phase 0: out-of-band hand-off, no public always-on endpoint — ADR-0020 §1; matured endpoint is Phase 1).
-- **Network-state detector:** diagnoses the channel state as `clean / throttled / DPI-blocked /
+- **Network-state detector:** diagnoses the channel state as `clean / throttled / blocked /
   shutdown` from signals (handshake timeouts, TCP RST injection, throughput collapse after a
   successful connect, probing failures, rising loss/jitter).
 - **Auto-rotation loop:** on a block event — rotate transport/port/SNI, regenerate REALITY

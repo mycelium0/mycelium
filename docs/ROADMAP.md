@@ -215,7 +215,7 @@ core of the adaptation layer.
 - **Network-state detector.** Classifies the channel state from signals: handshake timeouts,
   TCP RST injection, throughput collapse after a successful connect (the AS-level "data dies"
   pattern), active-probing failures, rising loss/jitter. States:
-  `clean / throttled / DPI-blocked / shutdown`.
+  `clean / throttled / blocked / shutdown`.
 - **Auto-rotation loop.** On a block event: rotate transport/port/SNI, regenerate REALITY
   parameters, bring up/switch to a fresh IP, fall back to CDN-fronted path as last resort. All
   without human intervention, with rate limits and rollback.
