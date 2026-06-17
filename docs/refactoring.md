@@ -420,7 +420,11 @@ Red flags:
 - a node knows the complete real map of the mesh (it should only know the needed ingress);
 - swapping one core transport engine for another requires changes across all layers;
 - a config distribution endpoint becomes a source of truth about connections it
-  should not hold.
+  should not hold;
+- a fetch path drops the `myc_fetch_artifacts` signature + checksum gate, or scatters fetch logic
+  out of that single swappable step (ADR-0015);
+- a served cross-node weather aggregator or any queryable network-state endpoint appears — emit-only
+  is the contract (ADR-0030, `NO_SERVED_AGGREGATOR`).
 
 ```text
 Parnas Lens: N / 10
@@ -456,7 +460,10 @@ Red flags:
 - "another service because it's easier";
 - the temporary phase 3 coordinator silently becomes permanently required;
 - a component name is decorative and does not encode the component's role or failure mode;
-- `temporary` without a trigger-to-remove.
+- `temporary` without a trigger-to-remove;
+- two deploy-path defaults (bootstrap vs Ansible/`group_vars`) are "reconciled" in a way that widens
+  exposure — the conservative Vision-only Ansible default is an INTENTIONAL divergence, not a
+  `CONFLICTING_SOURCE_OF_TRUTH` to fix (ADR-0022).
 
 ```text
 Brooks Lens: N / 10
@@ -492,7 +499,9 @@ Red flags:
   consent;
 - a broad `except` that swallows a critical failure in the network-state detector;
 - a "smart" heuristic instead of an explicit transport-selection policy declaration;
-- an extra layer that owns nothing.
+- an extra layer that owns nothing;
+- an architectural layer-**plane** and a **Commune** (a who/society) get conflated — "plane" names a
+  layer (data / control / routing / discovery), "Commune" names a population + its fungi (ADR-0023).
 
 ```text
 Dijkstra Lens: N / 10

@@ -76,7 +76,17 @@ When in doubt, open an RP: a redundant RP is cheaper than irreversible drift.
 (`0007-vless-reality-as-primary-transport.md`). Templates live in
 [templates/](templates/): [adr.md](templates/adr.md),
 [refactoring-proposal.md](templates/refactoring-proposal.md),
-[audit.md](templates/audit.md).
+[audit.md](templates/audit.md). A duplicate or gap in a sequence is a defect.
+
+**ADR discipline** (ADR-0001, ADR-0013, ADR-0016): never delete or retroactively rewrite an
+**accepted** ADR — supersede or deprecate it with a *new* ADR and a status marker, so the decision
+trail stays auditable. Author every ADR/RP as **"mindicator & silicon bags quartet"** (never a
+specific model/tool name). A change that adds a new mycelial/living-network **canon term** must also
+add its GLOSSARY entry and, where the term implies behaviour, cite the phase ADR/Vision that gates
+it — reviewers reject a canon word that names no contract (`mycelial_terms_defined`). Treat the
+name, marks, trust roots, and bootstrap seeds as **community-owned** shared identity: from Phase 1–2,
+shared-identity and network-update/merge decisions are taken by community consensus, not a single
+maintainer (`no_operated_network_claim`).
 
 > **Rule:** every architecturally significant commit references an RP or an ADR in a **trailer**
 > (`Refs: RP-NNNN` / `Implements: ADR-NNNN`), never in the subject (development.md §6.2). The

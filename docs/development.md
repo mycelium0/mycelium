@@ -329,6 +329,23 @@ These are not recommendations. Violation is a development defect at severity S0/
    telemetry channel, a node contacting a third-party service not declared in its passport)
    — these expand the attack surface and de-anonymise users. S0/S1 depending on context.
 
+10. **Behaviour ahead of its phase / premature mesh.** Ship, run, or auto-enable no DHT,
+    gossip/anti-entropy, distributed registry, announce-into-mesh, global-topology exchange, or
+    autonomous cord promotion before its ROADMAP phase (ADR-0013 phase discipline; VIS-0003 §4).
+    A Phase-0-2 spec type whose backing behaviour is unauthorized stays **inert by construction**:
+    pure data + `Validate()`, importing no `net` / `os` / `os/exec` / DHT package, exposing no
+    server or goroutine entrypoint, and `DiscoveryBackend` Announce/Find/ReportStress stay no-op
+    stubs. "Not yet wired" must never be one careless import from "accidentally live" — the
+    `internal/detect` and `internal/tune` purity gates enforce exactly this for the Phase-2
+    detector/tuner. S0/S1.
+
+11. **Shipping "everything on."** The default data-plane posture is **minimal exposure** — an
+    operator-chosen subset, never the full transport matrix. A fresh `node-bootstrap.sh` node
+    defaults-on EXACTLY {`vless_reality_vision`, `vless_reality_grpc`} (ADR-0022) and no other
+    always-on ingress; widening the default set is a lockstep change (ADR-0022 + THREAT-MODEL port
+    posture + `live_artifact_posture.sh`, in one commit). An advertised obfuscation/shape whose
+    render path does not yet exist is likewise forbidden — wire it before enabling its inbound.
+
 #### Permitted (how layers communicate):
 - through **contracts** (config-bundle format, control-plane envelope, telemetry schema,
   transport adapter, discovery API);
@@ -483,6 +500,20 @@ two fresh IPs in sequence (both a resource concern and an exposure concern).
   (the anonymity trilemma, THREAT-MODEL) and communicated honestly.
 - Layer 3 does **not** maintain the node registry (Layer 4) and does **not** diagnose links
   (Layer 2); it *reads* from them and *selects* paths.
+- **Closed default posture** (ADR-0026): the shipped default is closed — no open relay, no public
+  egress by default, no unknown third-party transit, no bridge without explicit policy, no topology
+  sharing; untrusted scopes are rate-limited, suspicious behaviour quarantined, and local/community
+  traffic is preferred over external transit (`no_default_egress_or_relay` lens / `OPEN_RELAY_OR_DEFAULT_EGRESS`).
+- **In-region ingress, node-carried egress** (ADR-0027): place ingress in-region; carry out-of-region
+  egress **node-to-node** (an anastomosis hop), **never** user-direct to an out-of-region node and
+  **never** through a TLS-terminating third-party front (which leaks source address + destination
+  hostnames). The Phase-1 two-hop egress is node-local (never committed), scoped, and fail-closed —
+  an absent/empty `via_user` is refused at render; only the named client routes out-of-region
+  (`node_two_hop_failclosed`).
+- **Split-tunnel by default** (ADR-0027): generated client configs carry only the traffic that needs
+  the tunnel; a full-tunnel default (`0.0.0.0/0, ::/0`) is forbidden — a CIDR-only engine
+  (AmneziaWG) still ships a documented region-exclude set, and full-tunnel requires an explicit
+  `--full-tunnel` marker (`no_full_tunnel_default`).
 
 ### 4.4. Layer 4. Discovery and membership
 
@@ -804,6 +835,29 @@ through them (THREAT-MODEL §"Legal and operational security"). Consequences for
   jurisdiction is required (outside the scope of code, but it affects defaults: what is
   collected and stored).
 
+### 8.7. Update path and node identity (ADR-0014, ADR-0015)
+
+The self-update path and node credentials are supply-chain surface of the first order (a
+poisoned update equals network-wide compromise):
+- **Provenance before execution.** Verify the operator's signature on the pinned ref (SSH
+  `allowedSigners` or GPG, established out-of-band) **before** any fetched code merges, installs,
+  or executes; an unverifiable ref is refused. The network-update timer runs **only** in
+  signature-verifying mode — `--insecure-no-verify` is a local-test escape hatch, never a deployed
+  posture. All artifact-fetch logic stays in the single swappable `myc_fetch_artifacts` step; a
+  replacement (signed tarball, OS packages) MUST preserve the provenance gate (`node_update_artifact_root`).
+- **No shared key material.** Never copy a private key or node key material between operators or
+  distribute it network-wide. Per-node credentials (REALITY keypair, AmneziaWG keypair, and a
+  self-signed cert only if that transport is enabled) are generated **locally at bootstrap**; the
+  bootstrap never fetches shared key material.
+- **Certificate pinning, never blanket trust.** For self-signed Hysteria2/TUIC, pin the certificate
+  by SHA-256 (cert / SPKI) in the per-node client config; `insecure: true` is forbidden
+  (`no_insecure_tls`). TLS is transport security only — **never** node identity; membership is
+  decided by the inviter-vouched trust layer, never by a certificate.
+- **Stable identity across updates.** `--update` re-renders from the **local pinned identity** — it
+  never regenerates per-node identity or the once-pinned donor SNI; it rolls back to last-known-good
+  on any validation or post-apply failure, and treats a byte-identical candidate as a no-op (no
+  needless engine restart).
+
 ---
 
 ## 9. Observability and Measurement (feeding the adaptation layer)
@@ -848,6 +902,41 @@ Every decision made by the auto-rotation loop must be explainable through the me
 (which signal produced the diagnosis, why that fallback was chosen). "Magic" branching without
 a measurable basis must not exist — this is a Cormen/Dijkstra-lens requirement at audit
 ([refactoring.md](refactoring.md)).
+
+### 9.5. Local health vs. advisory weather (ADR-0021, ADR-0030)
+
+Two strictly separate things. **Local health** (§9.1–9.2) is operational and stays on the node;
+**advisory weather** is the only thing that may ever cross to another node, and it is fiercely
+constrained because telemetry is itself a fingerprint / topology-map surface:
+- **Loopback-only health.** A node's health/metrics exporters bind loopback **only**; the host
+  firewall opens no exporter port on any public interface — off-loopback health is an enumeration
+  surface (`live_artifact_posture`, `no_dataplane_pii`).
+- **No cross-operator collector — ever.** Never build a cross-operator central collector, scrape
+  coordinator, node directory, or discovery service in ANY phase; the only sanctioned collector is
+  a **per-operator** monitor over that operator's OWN loopback exporters (ADR-0021;
+  `no_operated_network_claim`).
+- **Weather is opt-in fungi-only.** A node emits weather digests only if its operator explicitly
+  opts into the fungi (cache-custodian) niche — **off by default**, individually revertible, never
+  inferred; a non-fungi node emits **zero** digests.
+- **Per-CLASS aggregate only.** Anything emitted is a per-CLASS aggregate (a `NodeStatusDigest`:
+  TransportClass × HealthValue, order-of-magnitude buckets not exact counts, opaque non-geographic
+  scope, TTL-bounded, per-operator-signed) — **never** a per-node row, per-node health vector, or
+  stable per-node correlator. The Go shape makes a per-node row unrepresentable; keep it that way.
+- **Omit, never zero.** A cell below the aggregation floor *k* is **omitted entirely** — never shown
+  as 0, imputed, or blurred near-zero (a shown zero discloses the cell exists). `Validate()` enforces
+  `sample_count ≥ min_aggregate`.
+- **Opaque, non-geographic scope.** Every published scope-id is opaque and reversible to nothing —
+  never a country, location code, ASN, region, or any geo-bearing value; size figures are
+  order-of-magnitude buckets, lifecycle a distribution summing to 100%, never raw counts.
+- **Aggregate-and-forget; emit-only.** A fungi applies the floor + noise **at the source** then
+  forgets the raw inputs — it retains no raw observations, no node list, no topology, no per-edge
+  weights, and never opens a queryable weather endpoint. Successive snapshots must not, in
+  aggregate, disclose more than any single one (stable buckets + stable opaque scope-ids).
+
+The fine connectivity-state detector value (`clean/throttled/blocked/shutdown`, `internal/spec`
+`ConnState`) is **node-local and never transmitted**; only its lossy `AdvisoryHealth()` projection
+to the coarse `HealthValue` is emittable, inside the digest above (the `detector_state_closed_vocab`
+gate enforces the boundary).
 
 ---
 
@@ -1082,18 +1171,8 @@ The following states are architecturally inadmissible (development defects, even
 ## 16. Closing Rule
 
 Mycelium must evolve as a contract-driven, loosely coupled, observable, verifiable, and
-**user-safe by construction** system.
-
-Any change that:
-- invents crypto or transports instead of standing on audited foundations,
-- logs or collects PII,
-- hardcodes endpoints/keys/donors,
-- blurs layer boundaries or breaks ownership,
-- creates a single point of blocking or de-anonymisation,
-- bypasses auto-rotation limits or policy,
-- destroys traceability,
-- or is not reflected in documentation (including the threat model),
-
-is a development defect, **even if it "works."** The value of the project lies in people's
-sustained, private, reliable connectivity and in their safety; code that improves a metric at
-the cost of any invariant above is a regression, not progress.
+**user-safe by construction** system. The hard prohibitions are §2.2; the inadmissible end-states
+are catalogued in §15 (each keyed to a §7.4-of-[refactoring.md](refactoring.md) finding ID and
+severity). Any change that violates one is a development defect **even if it "works"** — the value
+of the project is people's sustained, private, reliable connectivity and their safety, so code that
+improves a metric at the cost of any of those invariants is a regression, not progress.
