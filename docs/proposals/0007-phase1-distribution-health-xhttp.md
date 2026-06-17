@@ -9,7 +9,7 @@ later. See the LICENSE file in the repository root.
 
 - **ID:** RP-0007
 - **Slug:** `phase1-distribution-health-xhttp-tls`
-- **Status:** **ACTIVE — Phase 1 authorized** (Phase-0 GO signed 2026-06-15). Live phase/DoD status is tracked in the acceptance ledger; this proposal does not snapshot it.
+- **Status:** **LANDED — Phase 1 closed, GO-signed 2026-06-17.** The Phase-1 → Phase-2 transition is authorized; the distinctive deliverables (genuine single-layer TLS, the two-hop in-region-ingress topology, multiplexed REALITY, the self-replenishing subscription seam) were proven on the operator's live restrictive link on both LTE and Wi-Fi. Authoritative phase/DoD status + the on-device evidence live in the acceptance ledger ([../phase1-acceptance-ledger.md](../phase1-acceptance-ledger.md)); this proposal does not snapshot the verdict. Named deferrals carried to Phase 2: the Xray-XHTTP serving path, the observability dashboard/alerting, and Hysteria2/Salamander.
 - **Phase:** Phase 1 (gated behind a signed Phase-0 GO; ROADMAP Phase-transition principle)
 - **Type:** pre-declared **multi-phase / multi-workstream RP** (§13.3.2) — four workstreams (a, b, c, d), each with its own acceptance criteria and conformance evidence
 - **Supersedes / relates to:** matures the Phase-0 out-of-band hand-rendered subscription (ADR-0020 §1); is the §15.8 seam the fungi layer (VIS-0007) later sits behind; consumes the inert EdgeReport schema (RP-0006); fences the signed cross-node bundle to the Inoculum (RP-0005, Phase 2)
