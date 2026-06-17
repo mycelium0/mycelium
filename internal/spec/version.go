@@ -10,8 +10,12 @@
 package spec
 
 // Version is the Mycelium control-plane spine version (SemVer). It is the single
-// runtime source of truth reported by both myceliumctl and myceliumd.
-const Version = "0.1.0"
+// runtime source of truth reported by both myceliumctl and myceliumd. During the 0.x
+// alpha the MINOR digit tracks the lifecycle PHASE (0.0.x = Phase 0, 0.1.x = Phase 1,
+// 0.2.x = Phase 2, …); the PATCH increments per landed phase increment, and a git tag
+// (v0.1.N) marks a phase close. 1.0.0 is reserved for the first stable public release.
+// Per-build identity is SourceRev (below), not this hand-bumped const.
+const Version = "0.1.1"
 
 // SourceRev is the source revision the binary was built from. It is empty for a plain
 // `go build` and is stamped at build time via the linker
