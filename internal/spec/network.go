@@ -555,10 +555,12 @@ func (d *DecayPolicy) Validate() error {
 	if d.HalfLife <= 0 {
 		return fmt.Errorf("decay policy: half_life must be > 0, got %s", d.HalfLife)
 	}
-	if d.Hysteresis < 0 || d.Hysteresis > 1 {
+	// The !(x>=0 && x<=1) form also rejects NaN (a NaN bound would otherwise pass and silently
+	// poison every consumer that decays against this policy).
+	if !(d.Hysteresis >= 0 && d.Hysteresis <= 1) {
 		return fmt.Errorf("%w: hysteresis %v not in [0,1]", ErrOutOfRange, d.Hysteresis)
 	}
-	if d.RetentionFloor < 0 || d.RetentionFloor > 1 {
+	if !(d.RetentionFloor >= 0 && d.RetentionFloor <= 1) {
 		return fmt.Errorf("%w: retention_floor %v not in [0,1]", ErrOutOfRange, d.RetentionFloor)
 	}
 	return nil

@@ -67,6 +67,10 @@
 #                               adds no new probing surface (AC-6): its non-test sources import no
 #                               net*/os*/syscall package and no internal/reach, and they consume the
 #                               typed internal/spec signal. OFFLINE (reads import blocks, no toolchain)
+#   * tuner_pure_advisory.sh  — the Phase-2 self-tuner (internal/tune, RP-0010 Plane 3) is a PURE
+#                               scoring layer that never actuates (AC-4): its non-test sources import
+#                               no net*/os*/syscall package and no internal/reach|detect, and consume
+#                               the typed internal/spec Verdict/DecayPolicy. OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -112,6 +116,7 @@ GATES=(
 	"tests/conformance/vocab_single_source.sh"
 	"tests/conformance/detector_state_closed_vocab.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
+	"tests/conformance/tuner_pure_advisory.sh"
 	"control/selftest.sh"
 )
 
