@@ -35,9 +35,10 @@
 #     tool. Documentation credit is carried at the doc level
 #     (mindicator & silicon bags quartet); it does not appear in git history.
 #     An AI-attribution footer is an audit-trail violation, not a style nit.
-#   * version-hygiene (§1.2): if this commit bumps a component __version__ /
-#     version constant, the SAME commit must update that component's README
-#     header and its CHANGELOG entry.
+#   * version-hygiene (§1.2): a commit that lands Go spine work (internal/**,
+#     cmd/**) MUST bump internal/spec.Version (0.<phase>.<patch>, one patch per
+#     landed chunk) AND add a CHANGELOG entry in this same commit; the
+#     version_changelog_sync gate asserts the const == newest CHANGELOG heading.
 #
 # Verification: write the ACTUAL command(s) you ran and what you observed —
 # not "tests pass" in the abstract. Good examples:
