@@ -30,7 +30,7 @@ after the ledger flipped to GO). For the live state, read the ledger, not this f
 
 > **D1 caveat.** D1 passed over a **REALITY node in the local region** with client-side
 > multi-endpoint failover — it does **not** pre-demonstrate the not-yet-built genuine-TLS-XHTTP shape
-> on the blocked EU path. RP-a's LTE reachability proof for the new shape is kept **independent** of
+> on the blocked out-of-region path. RP-a's LTE reachability proof for the new shape is kept **independent** of
 > the D1 sign-off and is **not** treated as already demonstrated by it.
 
 Every workstream below carries an explicit no-start-before-GO gate; scope is written in
@@ -48,7 +48,7 @@ TLS-in-TLS-blocking mobile carrier — single-operator, the §15.8 seam for VIS-
 
 ### Field findings (LTE, load-bearing)
 
-On the operator's restrictive mobile carrier, **every TLS-in-TLS shape is blocked to EU nodes** —
+On the operator's restrictive mobile carrier, **every TLS-in-TLS shape is blocked to out-of-region nodes** —
 VLESS+Vision/TCP, VLESS+gRPC, and **VLESS+REALITY+XHTTP (XHTTP framed _inside_ REALITY is still
 TLS-in-TLS)**. Behavioural-layer detection now identifies TLS-in-TLS (~80% per 2025-26 research);
 REALITY / Vision / gRPC **are** TLS-in-TLS. What **survives** the same hostile link is **VLESS+XHTTP over genuine,
@@ -219,7 +219,7 @@ each workstream holds within the cap:
 - The Phase-0 subscription is **out-of-band, hand-rendered, deliberately not self-updating**
   (ADR-0020 §1): a rotated port/SNI/shortId or a newly enabled transport requires a **manual
   re-import**.
-- **REALITY / TLS-in-TLS is blocked on the operator's mobile carrier** to EU nodes; there is **no
+- **REALITY / TLS-in-TLS is blocked on the operator's mobile carrier** to out-of-region nodes; there is **no
   non-REALITY single-TLS shape** in the stack to fail over to on that path.
 - The closed transport vocabulary **folds** Vision/gRPC/XHTTP into one `reality-tcp` family
   (`edgereport.go:36-37`); `transport_family_independence.sh` `family_of()` classifies
