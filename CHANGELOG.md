@@ -11,6 +11,32 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.4] — 2026-06-19
+### Added
+- `myceliumctl rotate-record FILE|-` (RP-0012 C4c): folds an apply outcome into the rotation state via the
+  pure `rotate.RecordOutcome` — on a rollback it spends the per-window rollback budget and latches the
+  planner to hold for `CooldownAfterRollback` (no rollback thrash). Validates limits (fail-closed); clock
+  from the system when `now` is zero. Pure read + compute.
+- LIVE rotation in `control/lib/nb_rotate_apply.sh` + `scripts/node-bootstrap.sh --rotate --apply-rotation`
+  (RP-0012 C4c), behind a TRIPLE GATE: dry-run is still the default; the live promote→verify→rollback path
+  is reached only when `--apply-rotation` (`ROTATE_APPLY=1`) is set AND the node is ARMED (the node-local
+  sentinel `$STATE_DIR/rotate-live.enabled`, placed via `--rotate-arm`, never committed — so an auto-pull
+  can never actuate a node). The live path validates first against a temp params copy, then PERSISTS the
+  rotation through the operator-overrides overlay (snapshot taken) so it survives `write_params`/`--update`,
+  re-renders the authoritative config, and runs the existing `promote_config → apply_singbox →
+  verify_post_apply` with `rollback_config` on failure. Every failure edge REVERTS the overlay (and records
+  the rollback) so a rolled-back rotation cannot re-apply on the next tick — no persistent self-outage.
+  `flow_rotate` is still reached only by the explicit `--rotate` dispatch (never `flow_bootstrap`/
+  `flow_update`); the unattended timer is C4c-2 and ships disabled.
+### Changed
+- Gate `rotate_dry_run_default` → `rotate_apply_gated` (RP-0012 C4c): now enforces the full triple gate
+  (dry-run default · `promote_config` confined to the live path · live reachable only under
+  `ROTATE_APPLY` + `rotate_live_armed`, with `ROTATE_APPLY` defaulting to 0), the no-implicit-actuation
+  rule (`flow_rotate` appears only in the `rotate)` dispatch), the overlay snapshot+revert (no persistent
+  self-outage), and the no-auto-arm rule. `apply_rotation_to_params` / `persist_rotation_to_overlay` /
+  `revert_rotation_overlay` / `record_rotation_rollback` / `rotate_apply_live` added to the
+  `no_new_control_decisions_in_bash` denylist (control-logic stays in the sourced lib).
+
 ## [0.2.3] — 2026-06-18
 ### Added
 - `myceliumctl rotate-plan FILE|-` (RP-0012 C4b): the shell-invocable boundary of the Plane-3 ADAPT

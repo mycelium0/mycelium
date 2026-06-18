@@ -72,7 +72,7 @@ else
 fi
 
 # 3. Direct regression guard: known control-logic functions must NOT be (re)defined in the entrypoint.
-DENY="write_params render_candidate render_serve_bundle render_awg0 validate_config promote_config rollback_config assert_two_hop_shape compute_client_allowed seed_operator_overrides merge_operator_overrides myc_fetch_artifacts setup_amneziawg setup_observability apply_rotation_to_params"
+DENY="write_params render_candidate render_serve_bundle render_awg0 validate_config promote_config rollback_config assert_two_hop_shape compute_client_allowed seed_operator_overrides merge_operator_overrides myc_fetch_artifacts setup_amneziawg setup_observability apply_rotation_to_params persist_rotation_to_overlay revert_rotation_overlay record_rotation_rollback rotate_apply_live rotate_abort_revert"
 reinlined=""
 for d in $DENY; do
 	grep -qE "^${d}\(\)" "$NB" && reinlined="$reinlined $d"

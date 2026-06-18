@@ -51,9 +51,17 @@
 #     --revoke NAME    revoke a client (NAME|ID) + re-render + reload + refresh the served bundle
 #     --disable-two-hop  remove the node-local two_hop.json overlay, re-render + reload + refresh the
 #                        served bundle (the supported way to turn two-hop OFF; no manual file surgery)
-#     --rotate         DRY-RUN a rotation plan (RP-0012 C4b): apply the plan's params delta to a temp
-#                        copy, render + validate (sing-box check); NEVER promotes. Plan path: ROTATE_PLAN
-#                        (default $STATE_DIR/rotate_plan.json), produced by `myceliumctl rotate-plan`.
+#     --rotate         apply a rotation plan (RP-0012). DEFAULT = DRY-RUN: apply the plan's params delta
+#                        to a temp copy, render + validate (sing-box check); promotes NOTHING. Plan path:
+#                        ROTATE_PLAN (default $STATE_DIR/rotate_plan.json), from `myceliumctl rotate-plan`.
+#     --rotate --apply-rotation
+#                      LIVE apply (C4c) — persist the rotation via the operator-overrides overlay,
+#                        re-render, then promote -> verify -> rollback-on-failure (reverting the overlay).
+#                        Requires the node to be ARMED (--rotate-arm); on an un-armed node it falls back
+#                        to dry-run. NEVER reached by flow_bootstrap/flow_update; the timer ships disabled.
+#     --rotate-arm / --rotate-disarm
+#                      place / remove the node-local live-rotation arm sentinel ($STATE_DIR/rotate-live.enabled,
+#                        never committed). A node actuates a live rotation only while armed.
 #
 #   options:
 #     --repo-url URL       canonical artifact source (default: the pinned public repo remote)
@@ -88,7 +96,8 @@ set -euo pipefail
 
 # ===========================================================================
 # ORCHESTRATION ONLY (RP-0009). This entrypoint does arg-parse, the flow_* dispatchers
-# (bootstrap/update/ack/revoke/disable-two-hop/rotate), post-apply verify_*, and dispatch — nothing more. Every
+# (bootstrap/update/ack/revoke/disable-two-hop/rotate; the rotate-arm/disarm helpers live in nb_rotate_apply),
+# post-apply verify_*, and dispatch — nothing more. Every
 # render/validate/policy/merge/install concern lives in a sourced control/lib/nb_*.sh module (resolved
 # from $ARTIFACT_ROOT/control/lib so it survives the --update re-exec):
 #   nb_identity      key/uuid/shortid/secret gen + ensure_identity
@@ -100,7 +109,7 @@ set -euo pipefail
 #   nb_two_hop       assert_two_hop_shape + the --disable-two-hop path (routing policy)
 #   nb_render_awg    AmneziaWG dialect/render + split-tunnel AllowedIPs + userspace setup
 #   nb_update_apply  the signed-pull -> render -> validate -> promote -> rollback apply state machine
-#   nb_rotate_apply  the --rotate dry-run executor seam (RP-0012 C4b: plan -> params delta -> render -> validate; never promotes)
+#   nb_rotate_apply  the --rotate executor seam (RP-0012: dry-run by default; gated live promote->verify->rollback under --apply-rotation + arm sentinel; rotate_arm/disarm)
 #   nb_observability node_exporter + the dataplane-metrics generator
 # The "no new control-decisions-in-bash" rule is enforced by tests/conformance/no_new_control_decisions_in_bash.sh.
 # ===========================================================================
@@ -125,10 +134,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | rotate
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | rotate | rotate-arm | rotate-disarm
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
+ROTATE_APPLY=0             # with --rotate: 0 = dry-run (default), 1 = LIVE apply (also requires the node arm sentinel)
 ASSUME_YES=0
 DO_HARDEN=1
 DO_AMNEZIAWG=1
@@ -213,6 +223,9 @@ while [ "$#" -gt 0 ]; do
 		--revoke)          MODE="revoke"; REVOKE_NAME="${2:?--revoke needs a client NAME or ID}"; shift 2 ;;
 		--disable-two-hop) MODE="disable-two-hop"; shift ;;
 		--rotate)          MODE="rotate"; shift ;;
+		--apply-rotation)  ROTATE_APPLY=1; shift ;;
+		--rotate-arm)      MODE="rotate-arm"; shift ;;
+		--rotate-disarm)   MODE="rotate-disarm"; shift ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;
@@ -703,6 +716,8 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		revoke)          flow_revoke ;;
 		disable-two-hop) flow_disable_two_hop ;;
 		rotate)          flow_rotate ;;
+		rotate-arm)      rotate_arm ;;
+		rotate-disarm)   rotate_disarm ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
 fi
