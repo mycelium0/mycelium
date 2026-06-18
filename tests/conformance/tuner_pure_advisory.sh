@@ -114,6 +114,9 @@ for f in $nontest; do
 	else
 		ok "$rel reads no wall clock and launches no goroutine/channel (deterministic, no background actuation)"
 	fi
+	if strip_comments "$f" | grep -qE '^[[:space:]]*(import[[:space:]]+)?\.[[:space:]]+"'; then
+		badln "$rel uses a dot-import (symbols enter scope unprefixed, evading the determinism token bans)"
+	fi
 done
 if [ "$imports_spec" = "1" ]; then
 	ok "the tuner consumes internal/spec (the typed Verdict + DecayPolicy)"
