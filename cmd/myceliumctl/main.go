@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/mindicator/mycelium/internal/identity"
+	"github.com/mindicator/mycelium/internal/rotate"
 	"github.com/mindicator/mycelium/internal/spec"
 )
 
@@ -55,6 +56,8 @@ func run(args []string) error {
 		return cmdValidateBundle(rest)
 	case "vocab":
 		return cmdVocab(rest)
+	case "rotate-plan":
+		return cmdRotatePlan(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -178,6 +181,53 @@ func cmdValidateBundle(args []string) error {
 	}
 	fmt.Printf("ok\tvalid bundle\tversion=%d\tendpoints=%d\tgenerated_at=%s\n",
 		b.Version, len(b.Endpoints), b.GeneratedAt.UTC().Format(time.RFC3339))
+	return nil
+}
+
+// cmdRotatePlan reads a node-local rotation PlanInput as JSON (a FILE argument or - for stdin), runs
+// the pure rotation planner (internal/rotate, RP-0012), and writes the resulting RotationPlan as
+// indented JSON on stdout. It is the shell-invocable boundary of the Plane-3 ADAPT decision: a
+// Go-bearing node assembles the PlanInput (active member + its local verdict + the local tuner
+// ranking + limits + state) and this returns the hold/rotate plan. The planner is pure and never
+// reads the clock; this CLI boundary fills PlanInput.Now from the system clock when the caller leaves
+// it zero. No network, no mutation. (Applying a plan is the shell flow_rotate, dry-run by default.)
+func cmdRotatePlan(args []string) error {
+	fs := flag.NewFlagSet("rotate-plan", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("rotate-plan: exactly one PlanInput FILE (or - for stdin) is required")
+	}
+	src := fs.Arg(0)
+	var (
+		data []byte
+		err  error
+	)
+	if src == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(src)
+	}
+	if err != nil {
+		return fmt.Errorf("rotate-plan: read %s: %w", src, err)
+	}
+	var in rotate.PlanInput
+	if err := json.Unmarshal(data, &in); err != nil {
+		return fmt.Errorf("rotate-plan: %s is not valid PlanInput JSON: %w", src, err)
+	}
+	if in.Now.IsZero() {
+		in.Now = time.Now().UTC()
+	}
+	plan, err := rotate.Plan(in)
+	if err != nil {
+		return fmt.Errorf("rotate-plan: %w", err)
+	}
+	out, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("rotate-plan: marshal plan: %w", err)
+	}
+	fmt.Println(string(out))
 	return nil
 }
 

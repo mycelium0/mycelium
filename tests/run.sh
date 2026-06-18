@@ -79,6 +79,10 @@
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
+#   * rotate_dry_run_default.sh — the --rotate executor seam (control/lib/nb_rotate_apply.sh, RP-0012
+#                               C4b) is DRY-RUN only: flow_rotate never calls promote_config, reuses the
+#                               existing render_candidate/validate_config path, and nothing auto-arms it
+#                               on a timer/cron (the live loop is C4c, gated). OFFLINE
 #   * version_changelog_sync.sh — internal/spec.Version (the single-source spine version) equals the
 #                               newest CHANGELOG heading, so a version bump and its changelog entry
 #                               can never drift apart (development.md §1.2 version hygiene). OFFLINE
@@ -130,6 +134,7 @@ GATES=(
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
+	"tests/conformance/rotate_dry_run_default.sh"
 	"tests/conformance/version_changelog_sync.sh"
 	"control/selftest.sh"
 )

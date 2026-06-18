@@ -48,12 +48,12 @@ func DefaultRotationLimits() spec.RotationLimits {
 // PlanInput is everything the planner needs for one decision. Every field is node-LOCAL: there is
 // deliberately no field for a peer / global / digest signal (AC-4).
 type PlanInput struct {
-	Active        spec.RotationCandidate   // the currently-active transport member (its tuner weight is the incumbent)
-	ActiveVerdict spec.Verdict             // the node's own detector verdict for the active member
-	Ranked        []spec.RotationCandidate // the node's own tuner-ranked candidate members (with weights + promote flags)
-	Limits        spec.RotationLimits      // the rotation policy
-	State         spec.RotationState       // between-tick memory
-	Now           time.Time                // injected clock (never read internally)
+	Active        spec.RotationCandidate   `json:"active"`         // the currently-active transport member (its tuner weight is the incumbent)
+	ActiveVerdict spec.Verdict             `json:"active_verdict"` // the node's own detector verdict for the active member
+	Ranked        []spec.RotationCandidate `json:"ranked"`         // the node's own tuner-ranked candidate members (with weights + promote flags)
+	Limits        spec.RotationLimits      `json:"limits"`         // the rotation policy
+	State         spec.RotationState       `json:"state"`          // between-tick memory
+	Now           time.Time                `json:"now"`            // injected clock (never read internally)
 }
 
 // impaired reports whether a connectivity state warrants considering a rotation (anything but a
