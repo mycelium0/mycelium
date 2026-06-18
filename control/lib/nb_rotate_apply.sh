@@ -53,6 +53,52 @@ rotate_disarm() {
 	log "rotation: node DISARMED ($(_rotate_sentinel) removed); --apply-rotation now falls back to dry-run."
 }
 
+# --- the unattended rotation loop (RP-0012 C4c-2): SHIPS DISABLED ------------------------------------
+# The auto-apply timer is the autonomous half of the loop. It is installed + enabled ONLY by the explicit
+# rotate_enable_loop (--rotate-enable-loop) — NEVER by flow_bootstrap / flow_update / install_tooling, so an
+# auto-pull can never arm it (rotate_apply_gated.sh pins this). Even once enabled, each tick only ACTUATES
+# while the node is armed (rotate-arm) AND a rotate_plan.json is present; on an un-armed node every tick is
+# a harmless dry-run. Producing fresh plans from on-node signals is the MEASURE-plane chunk (later); until
+# then the loop applies whatever rotate_plan.json a producer has written (the no-op short-circuit makes a
+# repeated identical plan a zero-restart no-op). Arming the loop is a separate, individually-revertible
+# operator decision taken AFTER the RP-0012 §6 go/no-go.
+ROTATE_LOOP_INTERVAL="${ROTATE_LOOP_INTERVAL:-5min}"
+
+rotate_enable_loop() {
+	need_root
+	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would install + enable mycelium-rotate.timer (every $ROTATE_LOOP_INTERVAL)"; return 0; fi
+	cat >/etc/systemd/system/mycelium-rotate.service <<UNIT
+[Unit]
+Description=Mycelium auto-rotation apply (RP-0012; gated by --apply-rotation + the node arm sentinel)
+[Service]
+Type=oneshot
+ExecStart=$NB_SELF --rotate --apply-rotation --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
+UNIT
+	cat >/etc/systemd/system/mycelium-rotate.timer <<UNIT
+[Unit]
+Description=Run the Mycelium auto-rotation apply every $ROTATE_LOOP_INTERVAL
+[Timer]
+OnBootSec=$ROTATE_LOOP_INTERVAL
+OnUnitActiveSec=$ROTATE_LOOP_INTERVAL
+AccuracySec=30s
+[Install]
+WantedBy=timers.target
+UNIT
+	run systemctl daemon-reload
+	run systemctl enable --now mycelium-rotate.timer || die "rotation: could not enable mycelium-rotate.timer (fail-closed)."
+	warn "rotation: mycelium-rotate.timer ENABLED — this node will AUTONOMOUSLY apply rotation plans every $ROTATE_LOOP_INTERVAL."
+	warn "rotation: it actuates ONLY while armed (--rotate-arm) with a rotate_plan.json present; disable with '$0 --rotate-disable-loop'."
+}
+
+rotate_disable_loop() {
+	need_root
+	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would disable + remove mycelium-rotate.timer"; return 0; fi
+	run systemctl disable --now mycelium-rotate.timer 2>/dev/null || true
+	rm -f /etc/systemd/system/mycelium-rotate.timer /etc/systemd/system/mycelium-rotate.service
+	run systemctl daemon-reload
+	log "rotation: mycelium-rotate.timer DISABLED + removed; the node no longer auto-rotates."
+}
+
 # --- registry-sourced toggle keys (single source of truth: control/vocab.json; §2.2 #8) --------------
 # The proto -> enable_key / port_key mapping is OWNED by the Go transport registry, emitted to the
 # committed control/vocab.json (.protos[].enable_key / .port_key). We READ it (jq, available on every
