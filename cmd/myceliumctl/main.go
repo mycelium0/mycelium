@@ -58,6 +58,8 @@ func run(args []string) error {
 		return cmdVocab(rest)
 	case "rotate-plan":
 		return cmdRotatePlan(rest)
+	case "rotate-record":
+		return cmdRotateRecord(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -231,6 +233,66 @@ func cmdRotatePlan(args []string) error {
 	return nil
 }
 
+// rotateRecordInput is the JSON cmdRotateRecord consumes: the persisted between-tick RotationState,
+// the rotation limits, whether the just-applied rotation was rolled back, and the clock. It is the
+// executor's feedback channel into the pure rotate.RecordOutcome (which spends the rollback budget and
+// latches the planner to hold once the budget is exhausted). Kept tiny + flat so the shell flow_rotate
+// can assemble it with jq.
+type rotateRecordInput struct {
+	State      spec.RotationState  `json:"state"`
+	Limits     spec.RotationLimits `json:"limits"`
+	RolledBack bool                `json:"rolled_back"`
+	Now        time.Time           `json:"now"`
+}
+
+// cmdRotateRecord folds an apply outcome back into the rotation state (RP-0012 C4c): it reads a
+// rotateRecordInput as JSON (FILE or - for stdin), runs the pure rotate.RecordOutcome, and writes the
+// updated RotationState as JSON on stdout. The executor (flow_rotate) calls this after a LIVE rotation
+// attempt — on a rollback it spends the per-window rollback budget and, once the budget is exhausted,
+// latches the planner into a hold for CooldownAfterRollback so a valid-schema-but-breaks-service
+// candidate cannot thrash. RecordOutcome does not validate its limits, so this boundary does (fail-closed)
+// — bad limits would silently mis-size the latch window. The clock is filled from the system clock when
+// the caller leaves Now zero. Pure read + compute: no network, no mutation.
+func cmdRotateRecord(args []string) error {
+	fs := flag.NewFlagSet("rotate-record", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("rotate-record: exactly one input FILE (or - for stdin) is required")
+	}
+	src := fs.Arg(0)
+	var (
+		data []byte
+		err  error
+	)
+	if src == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(src)
+	}
+	if err != nil {
+		return fmt.Errorf("rotate-record: read %s: %w", src, err)
+	}
+	var in rotateRecordInput
+	if err := json.Unmarshal(data, &in); err != nil {
+		return fmt.Errorf("rotate-record: %s is not valid input JSON: %w", src, err)
+	}
+	if err := in.Limits.Validate(); err != nil {
+		return fmt.Errorf("rotate-record: %w", err)
+	}
+	if in.Now.IsZero() {
+		in.Now = time.Now().UTC()
+	}
+	next := rotate.RecordOutcome(in.State, in.Limits, in.RolledBack, in.Now)
+	out, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		return fmt.Errorf("rotate-record: marshal state: %w", err)
+	}
+	fmt.Println(string(out))
+	return nil
+}
+
 // cmdVocab emits the canonical Go-owned control-plane vocabulary (spec.NewVocab) as
 // deterministic, indented JSON on stdout: the closed transport-class / region-bucket /
 // advisory-health vocabularies and the full proto->class/port/key/scheme/engine
@@ -271,6 +333,8 @@ Commands:
   identity list              [--state FILE]    list clients
   validate-bundle FILE|-                       validate a rendered distribution bundle (RP-0008 P1)
   vocab                                        emit the canonical transport/region/health vocabulary as JSON (RP-0008 P2)
+  rotate-plan FILE|-                           plan a node-local transport rotation: PlanInput JSON -> RotationPlan JSON (RP-0012)
+  rotate-record FILE|-                         fold an apply outcome into the rotation state: {state,limits,rolled_back,now} -> RotationState JSON (RP-0012)
   version                                      print the spine version
   help                                         show this help
 
