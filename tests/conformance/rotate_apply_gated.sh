@@ -49,7 +49,8 @@ ok "executor lib present: control/lib/nb_rotate_apply.sh"
 
 # 0. The seam defines its functions.
 for fn in flow_rotate rotate_apply_dryrun rotate_apply_live apply_rotation_to_params \
-          persist_rotation_to_overlay revert_rotation_overlay rotate_live_armed rotate_arm rotate_disarm; do
+          persist_rotation_to_overlay revert_rotation_overlay rotate_live_armed rotate_arm rotate_disarm \
+          rotate_enable_loop rotate_disable_loop; do
 	if grep -qE "^${fn}\(\)" "$LIB"; then ok "defines ${fn}()"; else badln "nb_rotate_apply.sh does not define ${fn}()"; fi
 done
 
@@ -173,20 +174,39 @@ else
 	badln "_rotation_enable_key does not read enable_key from the registry — re-deriving the rule duplicates the source of truth (§2.2 #8)"
 fi
 
-# 5. NO AUTO-ARM — nothing schedules --rotate/--apply-rotation/flow_rotate via a timer/cron in scripts or
-#    libs (the unattended loop is a separate, explicit opt-in; the timer ships disabled).
-armed=""
-while IFS= read -r f; do
-	[ -f "$f" ] || continue
-	if grep -nE '\.timer|systemctl[[:space:]]+enable|crontab|cron\.d|OnCalendar|OnUnitActiveSec' "$f" 2>/dev/null \
-		| grep -qE -- '--rotate|--apply-rotation|flow_rotate'; then
-		armed="$armed $(basename "$f")"
-	fi
-done < <(printf '%s\n' "$NB" "$REPO_ROOT"/control/lib/*.sh)
-if [ -z "$armed" ]; then
-	ok "nothing auto-arms --rotate (no timer/cron schedules a live rotation)"
+# 5. SHIPS DISABLED — the unattended mycelium-rotate.timer is installed/enabled ONLY by the explicit
+#    rotate_enable_loop, NEVER by an auto-run path (flow_bootstrap / flow_update / install_tooling) or a
+#    cron. (The timer's OWN ExecStart legitimately runs `--rotate --apply-rotation` — that is its job once
+#    enabled; what must not happen is auto-ENABLING it.)
+# 5a. no auto-run context installs/enables the rotate timer.
+auto_offenders=""
+fnbody flow_bootstrap "$NB" | nocom | grep -q 'mycelium-rotate' && auto_offenders="$auto_offenders flow_bootstrap"
+fnbody flow_update "$NB"    | nocom | grep -q 'mycelium-rotate' && auto_offenders="$auto_offenders flow_update"
+fnbody install_tooling "$REPO_ROOT/control/lib/nb_install.sh" 2>/dev/null | nocom | grep -q 'mycelium-rotate' && auto_offenders="$auto_offenders install_tooling"
+if [ -z "$auto_offenders" ]; then
+	ok "no auto-run path (flow_bootstrap/flow_update/install_tooling) references the rotate timer (ships disabled)"
 else
-	badln "rotation appears auto-armed via a timer/cron in:$armed — the unattended loop must be explicitly enabled, never auto-armed"
+	badln "the rotate timer is referenced by auto-run path(s):$auto_offenders — it must be enabled only by --rotate-enable-loop"
+fi
+# 5b. every `systemctl enable ... mycelium-rotate` site is inside rotate_enable_loop (the explicit opt-in).
+total_enable="$( { nocom < "$NB"; for L in "$REPO_ROOT"/control/lib/*.sh; do nocom < "$L"; done; } | grep -cE 'systemctl[[:space:]]+enable[^|]*mycelium-rotate')"
+loop_enable="$(fnbody rotate_enable_loop "$LIB" | nocom | grep -cE 'systemctl[[:space:]]+enable[^|]*mycelium-rotate')"
+if [ "${loop_enable:-0}" -ge 1 ] && [ "${total_enable:-0}" -eq "${loop_enable:-0}" ]; then
+	ok "the rotate timer is enabled ONLY inside rotate_enable_loop ($loop_enable/$total_enable sites)"
+else
+	badln "rotate-timer enable found outside rotate_enable_loop ($total_enable total vs $loop_enable in the loop) — autonomy must be an explicit opt-in"
+fi
+# 5c. disable path exists (the opt-in is individually revertible).
+if fnbody rotate_disable_loop "$LIB" | nocom | grep -qE 'systemctl[[:space:]]+disable[^|]*mycelium-rotate'; then
+	ok "rotate_disable_loop disables the timer (the opt-in is revertible)"
+else
+	badln "rotate_disable_loop does not disable the timer"
+fi
+# 5d. no cron schedules a live rotation.
+if { nocom < "$NB"; for L in "$REPO_ROOT"/control/lib/*.sh; do nocom < "$L"; done; } | grep -E 'crontab|cron\.d|/etc/cron' | grep -qE -- '--rotate|flow_rotate'; then
+	badln "a cron schedules --rotate — autonomy must go through the explicit, revertible timer opt-in"
+else
+	ok "no cron schedules --rotate"
 fi
 
 # 6. The arm sentinel is node-local state, never committed (git can never carry it to a node).
