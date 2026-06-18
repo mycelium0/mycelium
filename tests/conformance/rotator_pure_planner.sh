@@ -4,39 +4,40 @@
 # This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
 # later. See the LICENSE file in the repository root.
 #
-# detector_pure_no_probe.sh — conformance: the Phase-2 classifier (internal/detect, RP-0010 Plane 2)
-# is PURE and DETERMINISTIC and adds NO new probing surface (RP-0010 AC-6).
+# rotator_pure_planner.sh — conformance: the Phase-2 rotation PLANNER (internal/rotate, RP-0012,
+# executing the RP-0010 Plane-3 ADAPT decision) is a PURE, DETERMINISTIC decision that never actuates
+# and never consumes a global signal.
 # Author: mindicator & silicon bags quartet.
 #
 # WHY THIS GATE
-#   Detection must be fed from the WRAP'd internal/reach signal only; it adds no new active-probe
-#   fingerprint (AC-6) and does not actuate. The cleanest structural guarantee is that the classifier
-#   package imports only a small pure ALLOWLIST and reads no wall clock and starts no goroutine — it
-#   classifies the spec.DetectorSignal it is handed. An allowlist (not a denylist) is used so a NEW
-#   impure import (net/os/syscall, x/sys, unsafe, io, runtime, internal/reach, …) fails by
-#   construction. OFFLINE + INSPECT-ONLY.
+#   The planner decides WHETHER and WHERE to rotate; the apply path is elsewhere. The planner must be
+#   pure (so the decision is testable + auditable, and "not yet wired" cannot become "accidentally
+#   live"), deterministic (the clock is a parameter, never time.Now), and fed only node-LOCAL signals.
+#   An allowlist (not a denylist) is used so a NEW impure import fails by construction. OFFLINE +
+#   INSPECT-ONLY.
 #
-# WHAT THIS CHECKS (over internal/detect non-test sources)
-#   1. The package exists, is flat, and is exactly `package detect`.
-#   2. It imports ONLY the ALLOWLIST {fmt, internal/spec} — anything else fails.
+# WHAT THIS CHECKS (over internal/rotate non-test sources)
+#   1. The package exists, is flat, and is exactly `package rotate`.
+#   2. It imports ONLY the ALLOWLIST {fmt, time, internal/spec} — anything else (net/os/syscall,
+#      internal/reach|detect|tune, x/sys, unsafe, …) fails. The planner consumes the OUTPUT types of
+#      detect/tune (via internal/spec), never those packages, so the data flow is one-way.
 #   3. It contains no determinism/actuation tokens: no `time.Now(`/`time.Since(`, no goroutine launch
 #      (`go func`/`go <fn>`), no channel (`chan`).
 #   Comments (`//` and multi-line `/* */`) are stripped before any match.
 #
-# Exit: 0 = pure / no new probe surface, 1 = a violation, 2 = usage/env error.
+# Exit: 0 = pure / deterministic / local-only, 1 = a violation, 2 = usage/env error.
 
 set -u
 REPO_ROOT="${MYC_REPO_ROOT:-$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)}"
-[ -n "$REPO_ROOT" ] || { printf 'detector_pure_no_probe: cannot resolve repo root\n' >&2; exit 2; }
-DETECT_DIR="$REPO_ROOT/internal/detect"
-PKG="detect"
-ALLOWED_RE='^"fmt"$|^"github\.com/mindicator/mycelium/internal/spec"$'
+[ -n "$REPO_ROOT" ] || { printf 'rotator_pure_planner: cannot resolve repo root\n' >&2; exit 2; }
+ROT_DIR="$REPO_ROOT/internal/rotate"
+PKG="rotate"
+ALLOWED_RE='^"(fmt|time)"$|^"github\.com/mindicator/mycelium/internal/spec"$'
 
 fail=0
 ok()    { printf '  ok    %s\n' "$1"; }
 badln() { printf '  FAIL  %s\n' "$1"; fail=1; }
 
-# strip_comments FILE — drop // and multi-line /* */ comments so neither hides nor adds a match.
 strip_comments() {
 	awk '
 		{
@@ -55,9 +56,6 @@ strip_comments() {
 		}
 	' "$1"
 }
-
-# imports_of FILE — imported package path strings (block, one-line block, single-line w/ optional
-# alias), over the comment-stripped source.
 imports_of() {
 	strip_comments "$1" | awk '
 		/^[[:space:]]*import[[:space:]]*\(/ { sub(/^[[:space:]]*import[[:space:]]*\(/, ""); inblk = 1 }
@@ -70,18 +68,18 @@ imports_of() {
 	' | grep -oE '"[^"]+"'
 }
 
-printf '== detector purity / determinism / no-new-probe-surface check (internal/detect, RP-0010 AC-6) ==\n'
+printf '== rotation-planner purity / determinism / local-only check (internal/rotate, RP-0012) ==\n'
 printf 'repo: %s\n' "$REPO_ROOT"
 
-nontest="$(find "$DETECT_DIR" -maxdepth 1 -name '*.go' ! -name '*_test.go' 2>/dev/null)"
+nontest="$(find "$ROT_DIR" -maxdepth 1 -name '*.go' ! -name '*_test.go' 2>/dev/null)"
 if [ -z "$nontest" ]; then
-	printf 'FAIL: internal/detect has no non-test .go source (the classifier package is the anchor).\n' >&2
+	printf 'FAIL: internal/rotate has no non-test .go source (the planner package is the anchor).\n' >&2
 	exit 1
 fi
-ok "classifier package present: internal/detect"
+ok "planner package present: internal/rotate"
 
-if [ -n "$(find "$DETECT_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]; then
-	badln "internal/detect grew a subpackage the purity scan does not cover (recurse the scan or keep it flat)"
+if [ -n "$(find "$ROT_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]; then
+	badln "internal/rotate grew a subpackage the purity scan does not cover (recurse the scan or keep it flat)"
 fi
 pkgs="$(awk '/^package[[:space:]]/ { print $2; exit }' $nontest | sort -u | tr '\n' ' ' | sed 's/ $//')"
 if [ "$pkgs" = "$PKG" ]; then
@@ -96,9 +94,9 @@ for f in $nontest; do
 	imps="$(imports_of "$f")"
 	bad="$(printf '%s\n' "$imps" | grep -E '^"' | grep -vE "$ALLOWED_RE" || true)"
 	if [ -n "$bad" ]; then
-		badln "$rel imports a non-allowlisted package (no probe/I/O/reach in the classifier): $(printf '%s' "$bad" | tr '\n' ' ')"
+		badln "$rel imports a non-allowlisted package (purity/local-only): $(printf '%s' "$bad" | tr '\n' ' ')"
 	else
-		ok "$rel imports only the allowlist {fmt, internal/spec}"
+		ok "$rel imports only the allowlist {fmt, time, internal/spec}"
 	fi
 	if printf '%s\n' "$imps" | grep -qE '"github.com/mindicator/mycelium/internal/spec"'; then
 		imports_spec=1
@@ -107,21 +105,22 @@ for f in $nontest; do
 	if [ -n "$banned" ]; then
 		badln "$rel uses a forbidden construct (wall-clock read / goroutine / channel): $(printf '%s' "$banned" | tr '\n' '|')"
 	else
-		ok "$rel reads no wall clock and launches no goroutine/channel (deterministic, no new probe surface)"
+		ok "$rel reads no wall clock and launches no goroutine/channel (deterministic, no background actuation)"
 	fi
+	# a dot-import pulls symbols into scope UNPREFIXED, evading the time.Now / allowlist token bans
 	if strip_comments "$f" | grep -qE '^[[:space:]]*(import[[:space:]]+)?\.[[:space:]]+"'; then
 		badln "$rel uses a dot-import (symbols enter scope unprefixed, evading the determinism token bans)"
 	fi
 done
 if [ "$imports_spec" = "1" ]; then
-	ok "the classifier consumes internal/spec (the typed DetectorSignal/Verdict)"
+	ok "the planner consumes internal/spec (the typed Verdict / RotationCandidate / RotationPlan)"
 else
-	badln "no internal/detect source imports internal/spec (it must consume the typed signal)"
+	badln "no internal/rotate source imports internal/spec (it must operate on the typed shapes)"
 fi
 
 if [ "$fail" -eq 0 ]; then
-	printf 'PASS: the classifier imports only the pure allowlist, reads no clock, runs no goroutine — fed only from the typed signal (AC-6).\n'
+	printf 'PASS: the rotation planner imports only the pure allowlist, reads no clock, runs no goroutine — a deterministic, node-local decision.\n'
 	exit 0
 fi
-printf 'FAIL: the classifier grew an impure import, a wall-clock read, or a concurrency surface — see above.\n' >&2
+printf 'FAIL: the rotation planner grew an impure import, a wall-clock read, or a concurrency surface — see above.\n' >&2
 exit 1

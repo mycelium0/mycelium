@@ -71,6 +71,14 @@
 #                               scoring layer that never actuates (AC-4): its non-test sources import
 #                               no net*/os*/syscall package and no internal/reach|detect, and consume
 #                               the typed internal/spec Verdict/DecayPolicy. OFFLINE
+#   * rotator_pure_planner.sh — the Phase-2 rotation planner (internal/rotate, RP-0012, executing the
+#                               RP-0010 Plane-3 ADAPT decision) is a PURE deterministic decision: its
+#                               non-test sources import only the allowlist {fmt, time, internal/spec},
+#                               read no wall clock, and run no goroutine/channel — node-local, never a
+#                               global signal. OFFLINE
+#   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
+#                               RotationAction enum has no add/grow member and RotationCandidate.Validate
+#                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
 #   * version_changelog_sync.sh — internal/spec.Version (the single-source spine version) equals the
 #                               newest CHANGELOG heading, so a version bump and its changelog entry
 #                               can never drift apart (development.md §1.2 version hygiene). OFFLINE
@@ -120,6 +128,8 @@ GATES=(
 	"tests/conformance/detector_state_closed_vocab.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
+	"tests/conformance/rotator_pure_planner.sh"
+	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/version_changelog_sync.sh"
 	"control/selftest.sh"
 )
