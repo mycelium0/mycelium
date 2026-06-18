@@ -51,6 +51,9 @@
 #     --revoke NAME    revoke a client (NAME|ID) + re-render + reload + refresh the served bundle
 #     --disable-two-hop  remove the node-local two_hop.json overlay, re-render + reload + refresh the
 #                        served bundle (the supported way to turn two-hop OFF; no manual file surgery)
+#     --rotate         DRY-RUN a rotation plan (RP-0012 C4b): apply the plan's params delta to a temp
+#                        copy, render + validate (sing-box check); NEVER promotes. Plan path: ROTATE_PLAN
+#                        (default $STATE_DIR/rotate_plan.json), produced by `myceliumctl rotate-plan`.
 #
 #   options:
 #     --repo-url URL       canonical artifact source (default: the pinned public repo remote)
@@ -85,7 +88,7 @@ set -euo pipefail
 
 # ===========================================================================
 # ORCHESTRATION ONLY (RP-0009). This entrypoint does arg-parse, the flow_* dispatchers
-# (bootstrap/update/ack/revoke/disable-two-hop), post-apply verify_*, and dispatch — nothing more. Every
+# (bootstrap/update/ack/revoke/disable-two-hop/rotate), post-apply verify_*, and dispatch — nothing more. Every
 # render/validate/policy/merge/install concern lives in a sourced control/lib/nb_*.sh module (resolved
 # from $ARTIFACT_ROOT/control/lib so it survives the --update re-exec):
 #   nb_identity      key/uuid/shortid/secret gen + ensure_identity
@@ -97,6 +100,7 @@ set -euo pipefail
 #   nb_two_hop       assert_two_hop_shape + the --disable-two-hop path (routing policy)
 #   nb_render_awg    AmneziaWG dialect/render + split-tunnel AllowedIPs + userspace setup
 #   nb_update_apply  the signed-pull -> render -> validate -> promote -> rollback apply state machine
+#   nb_rotate_apply  the --rotate dry-run executor seam (RP-0012 C4b: plan -> params delta -> render -> validate; never promotes)
 #   nb_observability node_exporter + the dataplane-metrics generator
 # The "no new control-decisions-in-bash" rule is enforced by tests/conformance/no_new_control_decisions_in_bash.sh.
 # ===========================================================================
@@ -121,7 +125,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | rotate
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -208,6 +212,7 @@ while [ "$#" -gt 0 ]; do
 		--ack)             MODE="ack"; shift ;;
 		--revoke)          MODE="revoke"; REVOKE_NAME="${2:?--revoke needs a client NAME or ID}"; shift 2 ;;
 		--disable-two-hop) MODE="disable-two-hop"; shift ;;
+		--rotate)          MODE="rotate"; shift ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;
@@ -287,7 +292,7 @@ fi
 # They define functions + their dedicated constants only; the constants reference STATE_DIR (already
 # final after arg-parse, above) and the function bodies reference shared globals/helpers at call time.
 NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
-for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_two_hop nb_render_awg nb_update_apply nb_observability; do
+for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_observability; do
 	# shellcheck source=/dev/null
 	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
 done
@@ -697,6 +702,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		ack)             flow_ack ;;
 		revoke)          flow_revoke ;;
 		disable-two-hop) flow_disable_two_hop ;;
+		rotate)          flow_rotate ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
 fi

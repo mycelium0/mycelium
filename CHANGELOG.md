@@ -11,6 +11,25 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.3] — 2026-06-18
+### Added
+- `myceliumctl rotate-plan FILE|-` (RP-0012 C4b): the shell-invocable boundary of the Plane-3 ADAPT
+  decision — reads a node-local `rotate.PlanInput` JSON, runs the pure `rotate.Plan`, and emits the
+  `RotationPlan` as JSON (the CLI fills `Now` from the system clock when the caller leaves it zero;
+  the planner itself stays clock-free). No network, no mutation.
+- `control/lib/nb_rotate_apply.sh` + `scripts/node-bootstrap.sh --rotate` (RP-0012 C4b): the DRY-RUN
+  executor seam. `flow_rotate` reads a `RotationPlan` (default `$STATE_DIR/rotate_plan.json`, override
+  `ROTATE_PLAN`); a HOLD plan is a no-op, an ACT plan applies its params delta to a TEMP params copy
+  (`apply_rotation_to_params` enables the To-sibling's key, fail-closed against the closed
+  `OPERATOR_TOGGLE_KEYS` allowlist), renders a candidate via the existing `render_candidate`, and runs
+  the real `validate_config` (`sing-box check`) — then STOPS. It never calls `promote_config`: the
+  persisted params, the operator-overrides overlay, and the live config are left byte-identical. The
+  live promote/verify/rollback loop and the unattended timer are C4c, behind the RP-0012 §6 go/no-go.
+- Gate `rotate_dry_run_default` (RP-0012 C4b): pins the dry-run boundary — `flow_rotate` never calls
+  `promote_config`, reuses `render_candidate`/`validate_config`, the entrypoint wires the seam, and
+  nothing auto-arms `--rotate` on a timer/cron. `apply_rotation_to_params` added to the
+  `no_new_control_decisions_in_bash` denylist (control-logic stays in the sourced lib).
+
 ## [0.2.2] — 2026-06-18
 ### Added
 - `internal/spec/rotate.go` + `internal/rotate` (RP-0012 C4a, executing the RP-0010 Plane-3 ADAPT

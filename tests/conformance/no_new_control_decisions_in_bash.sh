@@ -11,7 +11,7 @@
 #
 # WHAT COUNTS AS ORCHESTRATION (the allowlist of function names the entrypoint may DEFINE):
 #   * the tiny helpers: die, log, warn, have, run, need_root, usage, main
-#   * the flow dispatchers: flow_*  (bootstrap/update/ack/revoke/disable-two-hop — they SEQUENCE steps)
+#   * the flow dispatchers: flow_*  (bootstrap/update/ack/revoke/disable-two-hop/rotate — they SEQUENCE steps)
 #   * the post-apply verifiers: verify_*  (verify the deploy succeeded; no rendering/policy)
 # ANYTHING ELSE defined in node-bootstrap.sh is a control-logic or rendering function that belongs in a
 # control/lib/nb_*.sh module (or, ultimately, the Go spine — RP-0008), NOT the entrypoint.
@@ -72,7 +72,7 @@ else
 fi
 
 # 3. Direct regression guard: known control-logic functions must NOT be (re)defined in the entrypoint.
-DENY="write_params render_candidate render_serve_bundle render_awg0 validate_config promote_config rollback_config assert_two_hop_shape compute_client_allowed seed_operator_overrides merge_operator_overrides myc_fetch_artifacts setup_amneziawg setup_observability"
+DENY="write_params render_candidate render_serve_bundle render_awg0 validate_config promote_config rollback_config assert_two_hop_shape compute_client_allowed seed_operator_overrides merge_operator_overrides myc_fetch_artifacts setup_amneziawg setup_observability apply_rotation_to_params"
 reinlined=""
 for d in $DENY; do
 	grep -qE "^${d}\(\)" "$NB" && reinlined="$reinlined $d"
