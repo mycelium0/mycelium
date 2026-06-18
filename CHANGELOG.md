@@ -11,6 +11,21 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.2] — 2026-06-18
+### Added
+- `internal/spec/rotate.go` + `internal/rotate` (RP-0012 C4a, executing the RP-0010 Plane-3 ADAPT
+  decision): the auto-rotation PLANNER — the inert rotation schema (`RotationAction` / `RotationReason` / `RotationCandidate` /
+  `RotationLimits` / `RotationState` / `RotationPlan`, all with pure `Validate`) and the pure,
+  deterministic `Plan(PlanInput) -> RotationPlan` decision: clean → hold, then hysteresis
+  (`FlipConfirmations`) → cooldown (`MinInterval`) → rate budget (`MaxPerWindow`) / rollback latch →
+  pick the highest-weight tuner-promoted closed-set candidate that beats the incumbent by
+  `MinWeightMargin`. `RecordOutcome` spends the rollback budget and latches to hold. The decision is
+  node-LOCAL (no global/peer signal can reach it — AC-4) and stays WITHIN the closed transport set
+  (no add-transport action; an out-of-registry proto fails `Validate` — AC-5); the clock is a
+  parameter (deterministic). Gates: `rotator_pure_planner` (allowlist `{fmt, time, internal/spec}`,
+  no clock/goroutine), `rotate_closed_set_only` (AC-5). INERT: nothing calls `Plan` in production yet
+  (the executor seam + gated live loop are C4b/C4c).
+
 ## [0.2.1] — 2026-06-17
 ### Added
 - `internal/tune` (RP-0010 C3): the self-tuner — the Physarum/Tero-2010 reinforce-and-evaporate
