@@ -10,7 +10,7 @@ later. See the LICENSE file in the repository root.
 ## Metadata
 - **ID:** RP-0012
 - **Slug:** `phase2-auto-rotation-actuation`
-- **Status:** **ACTIVE — implementation started** (C4a landed; C4b dry-run + C4c live loop gated behind the §6 go/no-go)
+- **Status:** **ACTIVE — implementation in progress** (C4a planner + C4b dry-run seam + C4c-1 gated live apply landed; C4c-2 disabled timer + the §6 go/no-go live drill remain)
 - **Phase:** Phase 2 (Adaptation layer)
 - **Type:** single-workstream RP with three sub-chunks (planner / executor seam / gated live loop)
 - **Related:** [RP-0010](0010-phase2-adaptivity.md) (the detect→adapt→self-tune planes; this RP executes its Plane-3 ADAPT actuation — formerly RP-0010 "C4"); `internal/detect` (the verdict), `internal/tune` (the ranking), `internal/spec/rotate.go` + `internal/rotate` (this RP); [ADR-0010](../adr/0010-phase0-transport-set.md) (the closed transport set, AC-5); [ADR-0025](../adr/0025-no-global-abuse-oracle.md) (advisory-never-actuates, AC-4); `control/lib/nb_update_apply.sh` + `nb_two_hop.sh` (the reused render→validate→promote→verify→rollback path); [development.md](../development.md) §2.2 #4 (no silent emergency rotation path).
@@ -44,7 +44,9 @@ RP-0010 builds the connectivity **detector** (C1/C2) and **self-tuner** (C3) as 
 
 - **C4a — pure planner + gates + tests (LANDED).** `internal/spec/rotate.go` (the closed `RotationAction`/`RotationReason` enums, `RotationCandidate`/`RotationLimits`/`RotationState`/`RotationPlan` + pure `Validate`), `internal/rotate` (`Plan` + `RecordOutcome` + `DefaultRotationLimits`). Gates `rotator_pure_planner` (purity/determinism/local-only) + `rotate_closed_set_only` (AC-5). The whole AC-4/AC-5/anti-flap decision, provable offline. INERT — nothing calls `Plan` in production.
 - **C4b — executor seam, dry-run-first.** `myceliumctl rotate-plan` + `control/lib/nb_rotate_apply.sh` (`flow_rotate` + `apply_rotation_to_params`) + `--rotate`, reusing the existing apply path, **promote branch not reachable by default**. Extends `no_new_control_decisions_in_bash`. Runs the 4-node drill **Step 1** (dry-run).
-- **C4c — gated live loop (deferred).** The `--apply-rotation` promote→verify→rollback branch + the disabled timer; the 4-node drill Steps 2–4. Behind §6.
+- **C4c-1 — gated live apply (LANDED).** The `--apply-rotation` promote→verify→rollback branch in `control/lib/nb_rotate_apply.sh` (`rotate_apply_live`), behind a TRIPLE GATE: dry-run default · `--apply-rotation` (`ROTATE_APPLY=1`) + `DRY_RUN=0` · a node-local arm sentinel (`$STATE_DIR/rotate-live.enabled`, `--rotate-arm`, never committed). The rotation persists through the operator-overrides overlay (so it survives `write_params`/`--update`); EVERY failure edge reverts the overlay (subshell-wrapped so a `write_params`/`render_candidate` `die` is catchable) and a post-apply rollback records the outcome via `myceliumctl rotate-record` (the pure `RecordOutcome`: rollback budget + hold latch). The `enable_key`/`port_key` come from the committed registry (`control/vocab.json`, single source — §2.2 #8), not a bash convention. Gate `rotate_dry_run_default` → `rotate_apply_gated` (triple gate + revert-safety + no-implicit-actuation + no-auto-arm). **INERT on deploy** — `flow_rotate` is reached only by the explicit `--rotate` dispatch; an auto-pull changes no node's behaviour.
+- **C4c-2 — disabled unattended timer (next).** The auto-apply systemd timer that ships DISABLED + the explicit `--rotate-enable-loop`. Behind §6.
+- **C4c-3 — the live drill (next, supervised).** The 4-node drill Steps 2–8 on node A (the §7.3/§7.6 netsim-equivalent, recorded in a drill ledger). Behind §6.
 
 ## Acceptance criteria (verifiable)
 - **AC-1 (recover-without-human):** degrade the active transport on a node → a stock client recovers within single-digit minutes with no manual action, via client-native failover + the node's rotation; the node logs a class-level event.
