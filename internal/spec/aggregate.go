@@ -8,6 +8,7 @@ package spec
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -21,6 +22,25 @@ import (
 // outbound cannot be faithfully reconstructed — fail closed) or any unknown scheme. Pure; no network, no
 // eval — every value is decoded from the string. tag is the already-namespaced outbound tag to stamp on.
 func OutboundFromLink(tag, link string) (json.RawMessage, error) {
+	v, err := outboundValue(tag, link)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	// Marshal WITHOUT HTML escaping so '&' / '<' / '>' inside a value stay literal (matching jq's
+	// compact output); Encode appends a newline, which the raw outbound must not carry.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n")), nil
+}
+
+// outboundValue is OutboundFromLink's typed core: it returns the outbound as a typed struct (an aggVless /
+// aggHy2 / ... value), or nil for the fail-closed null cases (a ShadowTLS ss-link or an unknown scheme).
+// RenderAggregate uses the typed value directly so the merged profile indents uniformly like `jq .`.
+func outboundValue(tag, link string) (any, error) {
 	main := uriBefore(link, "#")
 	scheme := uriBefore(main, "://")
 	rest := uriAfter(main, "://")
@@ -85,15 +105,7 @@ func OutboundFromLink(tag, link string) (json.RawMessage, error) {
 	default:
 		return nil, nil
 	}
-	// Marshal WITHOUT HTML escaping so '&' / '<' / '>' inside a value stay literal (matching jq's
-	// compact output); Encode appends a newline, which the raw outbound must not carry.
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n")), nil
+	return v, nil
 }
 
 // --- outbound shapes (field order mirrors the shell jq construction order; omitempty drops the keys jq's
@@ -260,4 +272,157 @@ func qd2(m map[string]string, a, b, def string) string {
 		return v
 	}
 	return def
+}
+
+// --- aggregate: fold M per-node Bundles -> one client sing-box profile (RP-0008 P3-c part 2) ----------
+
+// AggregateInput is one of the operator's own nodes for the client-side merge: a parsed distribution
+// Bundle plus the LABEL that namespaces its outbound tags so tags from different nodes never collide.
+type AggregateInput struct {
+	Bundle Bundle
+	Label  string
+}
+
+// MYC_URLTEST_* single source with render_singbox.sh (C22 anti-flapping hysteresis for the cross-node
+// auto-switch); the probe URL is the same generate_204 endpoint the subscription path uses.
+const (
+	urltestInterval    = "5m"
+	urltestTolerance   = 150
+	urltestIdleTimeout = "30m"
+	urltestURL         = "https://www.gstatic.com/generate_204"
+)
+
+// RenderAggregate folds >=2 per-node Bundles into ONE sing-box client profile — the Go port of the shell
+// myc_render_aggregate. Each input's endpoints become namespaced client outbounds ("<label>.<tag-without-
+// mycelium-prefix>", parsed via outboundValue), then ONE urltest "auto" over all of them, ONE selector
+// "mycelium" (default "auto"), then direct + block. LOCAL-only, pure (no network). Fail-closed throughout:
+// ASCII labels only, unique labels, a recognised scheme consistent with the declared transport_class, a
+// ShadowTLS link refused, port in 1..65535. Byte-identical to the shell (aggregate_render_go_equiv pins it).
+func RenderAggregate(inputs []AggregateInput) ([]byte, error) {
+	if len(inputs) < 2 {
+		return nil, fmt.Errorf("aggregate: need >=2 --bundle inputs to merge (got %d); a single node already has its own subscription", len(inputs))
+	}
+	var proxies []any
+	var tags []string
+	seen := map[string]bool{}
+	for idx := range inputs {
+		label := inputs[idx].Label
+		// C27: ASCII whitelist only — refuse non-ASCII/whitespace labels (homoglyph tag-collision risk).
+		if strings.IndexFunc(label, func(r rune) bool {
+			return !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-')
+		}) >= 0 {
+			return nil, fmt.Errorf("aggregate: node label %q contains a character outside the ASCII whitelist [A-Za-z0-9._-] — non-ASCII/whitespace labels are refused (homoglyph tag-collision risk). Use an ASCII --name", label)
+		}
+		safe := label
+		if safe == "" {
+			safe = fmt.Sprintf("node%d", idx+1)
+		}
+		if seen[safe] {
+			return nil, fmt.Errorf("aggregate: duplicate node label %q — every --name must be unique so tags never collide across nodes", safe)
+		}
+		seen[safe] = true
+		for _, ep := range inputs[idx].Bundle.Endpoints {
+			shortTag := strings.TrimPrefix(ep.Tag, "mycelium-")
+			if shortTag == "" {
+				shortTag = ep.Tag
+			}
+			nsTag := safe + "." + shortTag
+			link := ep.Link
+			if strings.Contains(link, "plugin=shadow-tls") {
+				return nil, fmt.Errorf("aggregate: endpoint link is a ShadowTLS share-link (node %q, tag %q) which cannot be reconstructed into a dialable client outbound from its Link alone (the v3 handshake password/version are not in the Link)", safe, ep.Tag)
+			}
+			scheme := uriBefore(link, "://")
+			if !aggSchemeClassOK(scheme, string(ep.TransportClass)) {
+				switch scheme {
+				case "vless", "hysteria2", "tuic", "ss", "trojan":
+					return nil, fmt.Errorf("aggregate: endpoint scheme %q is inconsistent with its declared transport_class %q (node %q, tag %q) — the Link protocol and the typed family disagree", scheme, ep.TransportClass, safe, ep.Tag)
+				default:
+					return nil, fmt.Errorf("aggregate: endpoint link has an unrecognised scheme %q (node %q, tag %q) — expected one of vless/hysteria2/tuic/ss/trojan", scheme, safe, ep.Tag)
+				}
+			}
+			ob, err := outboundValue(nsTag, link)
+			if err != nil || ob == nil {
+				return nil, fmt.Errorf("aggregate: could not parse endpoint link into a client outbound (node %q, tag %q)", safe, ep.Tag)
+			}
+			if port := aggOutboundPort(ob); port < 1 || port > 65535 {
+				return nil, fmt.Errorf("aggregate: endpoint link port %d out of range 1..65535 (node %q, tag %q)", port, safe, ep.Tag)
+			}
+			proxies = append(proxies, ob)
+			tags = append(tags, nsTag)
+		}
+	}
+	if len(proxies) == 0 {
+		return nil, fmt.Errorf("aggregate: produced zero outbounds (no endpoints across the inputs)")
+	}
+	outbounds := make([]any, 0, len(proxies)+4)
+	outbounds = append(outbounds, proxies...)
+	outbounds = append(outbounds,
+		aggURLTest{Type: "urltest", Tag: "auto", Outbounds: tags, URL: urltestURL,
+			Interval: urltestInterval, Tolerance: urltestTolerance, IdleTimeout: urltestIdleTimeout},
+		aggSelector{Type: "selector", Tag: "mycelium", Outbounds: append([]string{"auto"}, tags...), Default: "auto"},
+		aggTagged{Type: "direct", Tag: "direct"},
+		aggTagged{Type: "block", Tag: "block"},
+	)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(aggProfile{Outbounds: outbounds}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// aggSchemeClassOK reports whether a share-link scheme is consistent with the endpoint's declared
+// transport_class (C26 — the Link protocol and the typed family must agree). Mirrors the shell case table.
+func aggSchemeClassOK(scheme, class string) bool {
+	switch scheme + ":" + class {
+	case "vless:reality-tcp", "vless:xhttp-tls", "vless:ws-tls",
+		"hysteria2:quic-udp", "tuic:quic-udp",
+		"ss:shadowsocks-tcp", "ss:shadowtls-tcp",
+		"trojan:trojan-tls":
+		return true
+	}
+	return false
+}
+
+// aggOutboundPort extracts server_port from a typed outbound value (C09 range check).
+func aggOutboundPort(ob any) int {
+	switch o := ob.(type) {
+	case aggVless:
+		return o.ServerPort
+	case aggHy2:
+		return o.ServerPort
+	case aggTuic:
+		return o.ServerPort
+	case aggSS:
+		return o.ServerPort
+	case aggTrojan:
+		return o.ServerPort
+	default:
+		return 0
+	}
+}
+
+type aggProfile struct {
+	Outbounds []any `json:"outbounds"`
+}
+type aggURLTest struct {
+	Type        string   `json:"type"`
+	Tag         string   `json:"tag"`
+	Outbounds   []string `json:"outbounds"`
+	URL         string   `json:"url"`
+	Interval    string   `json:"interval"`
+	Tolerance   int      `json:"tolerance"`
+	IdleTimeout string   `json:"idle_timeout"`
+}
+type aggSelector struct {
+	Type      string   `json:"type"`
+	Tag       string   `json:"tag"`
+	Outbounds []string `json:"outbounds"`
+	Default   string   `json:"default"`
+}
+type aggTagged struct {
+	Type string `json:"type"`
+	Tag  string `json:"tag"`
 }

@@ -84,3 +84,68 @@ func TestShareLinkOutboundRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderAggregate(t *testing.T) {
+	lp := LinkParams{Server: "h", Port: "443", UUID: "u/1", DonorSNI: "d", Pub: "k", ShortID: "s",
+		TLSSNI: "t", SSPassword: "ss/p", Hy2Password: "h@", TrojanPassword: "tr&p", TUICPassword: "tu",
+		GRPCServiceName: "g", XHTTPPath: "/x", XHTTPPathTLS: "/xt", WSPath: "/ws"}
+	mk := func(label, proto string) AggregateInput {
+		link, err := ShareLink(proto, lp)
+		if err != nil {
+			t.Fatalf("ShareLink(%q): %v", proto, err)
+		}
+		cls, _ := ClassForProto(proto)
+		return AggregateInput{Label: label, Bundle: Bundle{Version: NetworkStateVersion, Endpoints: []Endpoint{
+			{Tag: "mycelium-" + proto, TransportClass: cls, Region: RegionUnspecified, Priority: 0, Health: HealthUnknown, Link: link}}}}
+	}
+	out, err := RenderAggregate([]AggregateInput{mk("nodeA", "vless-reality-vision"), mk("nodeB", "trojan")})
+	if err != nil {
+		t.Fatalf("RenderAggregate: %v", err)
+	}
+	var prof struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(out, &prof); err != nil {
+		t.Fatalf("profile not JSON: %v", err)
+	}
+	// 2 proxies + urltest + selector + direct + block
+	if len(prof.Outbounds) != 6 {
+		t.Fatalf("outbounds = %d, want 6", len(prof.Outbounds))
+	}
+	if prof.Outbounds[0]["tag"] != "nodeA.vless-reality-vision" || prof.Outbounds[1]["tag"] != "nodeB.trojan" {
+		t.Errorf("tags not namespaced: %v / %v", prof.Outbounds[0]["tag"], prof.Outbounds[1]["tag"])
+	}
+	ut := prof.Outbounds[2]
+	if ut["type"] != "urltest" || ut["tag"] != "auto" {
+		t.Errorf("3rd outbound not urltest/auto: %v", ut)
+	}
+	sel := prof.Outbounds[3]
+	if sel["type"] != "selector" || sel["tag"] != "mycelium" || sel["default"] != "auto" {
+		t.Errorf("4th outbound not selector/mycelium/auto: %v", sel)
+	}
+}
+
+func TestRenderAggregateFailClosed(t *testing.T) {
+	one := AggregateInput{Label: "a", Bundle: Bundle{Endpoints: []Endpoint{{Tag: "mycelium-x", Link: "vless://u@h:1#f"}}}}
+	if _, err := RenderAggregate([]AggregateInput{one}); err == nil {
+		t.Error("a single input should fail closed (>=2 required)")
+	}
+	link, _ := ShareLink("vless-reality-vision", LinkParams{Server: "h", Port: "443", UUID: "u", DonorSNI: "d", Pub: "k", ShortID: "s"})
+	good := AggregateInput{Label: "ok", Bundle: Bundle{Endpoints: []Endpoint{{Tag: "mycelium-vless-reality-vision", TransportClass: TransportClassRealityTCP, Link: link}}}}
+	// non-ASCII label
+	bad := good
+	bad.Label = "nодe" // Cyrillic 'о'
+	if _, err := RenderAggregate([]AggregateInput{good, bad}); err == nil {
+		t.Error("non-ASCII label should fail closed")
+	}
+	// duplicate label
+	if _, err := RenderAggregate([]AggregateInput{good, good}); err == nil {
+		t.Error("duplicate label should fail closed")
+	}
+	// scheme/class mismatch (an ss link declared reality-tcp)
+	mism := AggregateInput{Label: "m", Bundle: Bundle{Endpoints: []Endpoint{
+		{Tag: "mycelium-x", TransportClass: TransportClassRealityTCP, Link: "ss://2022-blake3-aes-256-gcm:p@h:8388#f"}}}}
+	if _, err := RenderAggregate([]AggregateInput{good, mism}); err == nil {
+		t.Error("scheme/class mismatch should fail closed")
+	}
+}
