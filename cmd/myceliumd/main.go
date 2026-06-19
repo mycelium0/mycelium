@@ -44,7 +44,14 @@ func main() {
 		"health/readiness listen address (loopback by default; exposes no PII)")
 	reachConfig := flag.String("reachability-config", "",
 		"path to a node-local reachability monitor config (ADR-0019); empty disables the monitor")
+	measureCfgPath := flag.String("measure-config", "",
+		"path to a node-local MEASURE-plane config (RP-0010 Plane 1); empty disables it. Requires --reachability-config")
 	flag.Parse()
+
+	// The MEASURE plane folds the reach snapshot, so it cannot run without the reachability monitor.
+	if *measureCfgPath != "" && *reachConfig == "" {
+		log.Fatal("myceliumd: --measure-config requires --reachability-config (it folds the reachability snapshot)")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -91,6 +98,42 @@ func main() {
 			writeJSON(w, map[string]any{"version": spec.Version, "anchors": views})
 		})
 		log.Printf("myceliumd: reachability monitor active (%d anchors)", len(cfg.Targets))
+
+		// MEASURE plane (RP-0010 Plane 1): fold the reach snapshot into a rotate.PlanInput. The
+		// assembler is built once (its per-member detector hysteresis + tuner pheromone persist across
+		// ticks); the tick loop writes the PlanInput the gated rotation loop consumes. Strictly
+		// ADVISORY — it assembles and serves a plan input, and never actuates a rotation.
+		if *measureCfgPath != "" {
+			mcfg, err := loadMeasureConfig(*measureCfgPath)
+			if err != nil {
+				log.Fatalf("myceliumd: measure config: %v", err)
+			}
+			// The measure and reachability configs are ref-coupled; catch the dangerous mismatches
+			// (active not a member, a member with no probe, a tick that outpaces the probes) fail-FAST
+			// here rather than have the daemon run but silently never emit a fresh, usable PlanInput.
+			if err := mcfg.validateAgainstReach(cfg); err != nil {
+				log.Fatalf("myceliumd: %v", err)
+			}
+			asm, err := mcfg.buildAssembler(time.Now().UTC())
+			if err != nil {
+				log.Fatalf("myceliumd: measure assembler: %v", err)
+			}
+			holder := &planInputHolder{}
+			go runMeasure(ctx, mon, *measureCfgPath, asm, mcfg, holder)
+			mux.HandleFunc("/rotation/plan-input", func(w http.ResponseWriter, _ *http.Request) {
+				raw, at, lastErr := holder.snapshot()
+				// Always surface the freshness signal (tick_at + last_error) so an observer can tell a
+				// stale plan input — frozen at the last good tick across a run of failing ticks — from a
+				// current one. plan_input is null until the first successful assembly. (The written file
+				// carries its own freshness in PlanInput.Now; the consuming loop rejects a stale Now.)
+				resp := map[string]any{"version": spec.Version, "tick_at": at, "last_error": lastErr}
+				if raw != nil {
+					resp["plan_input"] = json.RawMessage(raw)
+				}
+				writeJSON(w, resp)
+			})
+			log.Printf("myceliumd: MEASURE plane active (%d members, tick %dms, advisory-only) -> %s", len(mcfg.Members), mcfg.TickMS, mcfg.OutputPath)
+		}
 	}
 
 	srv := &http.Server{
