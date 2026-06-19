@@ -183,9 +183,9 @@ func OperatorToggleKeys() []string {
 // control/vocab.json mirrors; the shell renderer reads that file instead of keeping
 // its own copies of these tables (RP-0008 P2).
 type Vocab struct {
-	Version          int               `json:"version"`           // schema version (NetworkStateVersion)
-	TransportClasses []TransportClass  `json:"transport_classes"` // closed coarse-family vocabulary
-	RegionBuckets    []RegionBucket    `json:"region_buckets"`    // closed region vocabulary (Phase 1: only "unspecified")
+	Version            int               `json:"version"`              // schema version (NetworkStateVersion)
+	TransportClasses   []TransportClass  `json:"transport_classes"`    // closed coarse-family vocabulary
+	RegionBuckets      []RegionBucket    `json:"region_buckets"`       // closed region vocabulary (Phase 1: only "unspecified")
 	HealthValues       []HealthValue     `json:"health_values"`        // closed advisory-health vocabulary
 	OperatorToggleKeys []string          `json:"operator_toggle_keys"` // closed allowlist of operator-settable params keys
 	Protos             []ProtoDescriptor `json:"protos"`               // canonical proto registry, priority order
