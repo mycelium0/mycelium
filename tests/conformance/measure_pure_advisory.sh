@@ -119,7 +119,7 @@ for f in $nontest; do
 	printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/spec"'   && imports_spec=1
 	printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/rotate"' && imports_rotate=1
 	# 4. determinism / actuation token bans (over comment-stripped source)
-	banned="$(strip_comments "$f" | grep -nE 'time\.(Now|Since)\(|(^|[^[:alnum:]_])go[[:space:]]+(func|[A-Za-z])|(^|[^[:alnum:]_])chan[[:space:]]' || true)"
+	banned="$(strip_comments "$f" | grep -nE 'time\.(Now|Since)([^A-Za-z0-9_]|$)|(^|[^[:alnum:]_])go[[:space:]]+(func|[A-Za-z])|(^|[^[:alnum:]_])chan([[:space:]]|<-)' || true)"
 	if [ -n "$banned" ]; then
 		badln "$rel uses a forbidden construct (wall-clock read / goroutine / channel): $(printf '%s' "$banned" | tr '\n' '|')"
 	else
@@ -127,6 +127,16 @@ for f in $nontest; do
 	fi
 	if strip_comments "$f" | grep -qE '^[[:space:]]*(import[[:space:]]+)?\.[[:space:]]+"'; then
 		badln "$rel uses a dot-import (symbols enter scope unprefixed, evading the determinism token bans)"
+	fi
+	# An ALIASED import of "time" (import clk "time") would let clk.Now() read the wall clock while
+	# slipping past both the path allowlist (alias-blind) and the time.Now ban; forbid the alias.
+	if strip_comments "$f" | grep -oE '[A-Za-z_][A-Za-z0-9_]*[[:space:]]+"time"' | grep -qvE '^import '; then
+		badln "$rel aliases the \"time\" import — an alias evades the wall-clock-read ban"
+	fi
+	# AC-4 assemble-only: the MEASURE plane references the rotate.PlanInput TYPE, but must NEVER run the
+	# planner itself — calling rotate.Plan( would begin to DECIDE a rotation, not merely measure for one.
+	if strip_comments "$f" | grep -qE '(^|[^[:alnum:]_])rotate\.Plan\('; then
+		badln "$rel calls rotate.Plan — the MEASURE plane must ASSEMBLE a PlanInput, not run the planner (AC-4)"
 	fi
 done
 

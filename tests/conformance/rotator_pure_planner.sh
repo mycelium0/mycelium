@@ -101,7 +101,7 @@ for f in $nontest; do
 	if printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/spec"'; then
 		imports_spec=1
 	fi
-	banned="$(strip_comments "$f" | grep -nE 'time\.(Now|Since)\(|(^|[^[:alnum:]_])go[[:space:]]+(func|[A-Za-z])|(^|[^[:alnum:]_])chan[[:space:]]' || true)"
+	banned="$(strip_comments "$f" | grep -nE 'time\.(Now|Since)([^A-Za-z0-9_]|$)|(^|[^[:alnum:]_])go[[:space:]]+(func|[A-Za-z])|(^|[^[:alnum:]_])chan([[:space:]]|<-)' || true)"
 	if [ -n "$banned" ]; then
 		badln "$rel uses a forbidden construct (wall-clock read / goroutine / channel): $(printf '%s' "$banned" | tr '\n' '|')"
 	else
@@ -110,6 +110,11 @@ for f in $nontest; do
 	# a dot-import pulls symbols into scope UNPREFIXED, evading the time.Now / allowlist token bans
 	if strip_comments "$f" | grep -qE '^[[:space:]]*(import[[:space:]]+)?\.[[:space:]]+"'; then
 		badln "$rel uses a dot-import (symbols enter scope unprefixed, evading the determinism token bans)"
+	fi
+	# An ALIASED import of "time" (import clk "time") would let clk.Now() read the wall clock while
+	# slipping past both the path allowlist (alias-blind) and the time.Now ban; forbid the alias.
+	if strip_comments "$f" | grep -oE '[A-Za-z_][A-Za-z0-9_]*[[:space:]]+"time"' | grep -qvE '^import '; then
+		badln "$rel aliases the \"time\" import — an alias evades the wall-clock-read ban"
 	fi
 done
 if [ "$imports_spec" = "1" ]; then

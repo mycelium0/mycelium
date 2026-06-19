@@ -105,6 +105,7 @@ func New(members []Member, limits spec.RotationLimits, th detect.Thresholds, p t
 		verdicts:  make(map[string]spec.Verdict, len(members)),
 		limits:    limits,
 	}
+	seenProto := make(map[string]bool, len(members))
 	for _, m := range members {
 		if m.Ref == "" {
 			return nil, fmt.Errorf("measure: refusing to build assembler: %w: member ref", spec.ErrEmptyField)
@@ -116,6 +117,13 @@ func New(members []Member, limits spec.RotationLimits, th detect.Thresholds, p t
 		if !ok {
 			return nil, fmt.Errorf("measure: refusing to build assembler: %w: member proto %q is not in the closed transport registry", spec.ErrUnknownEnum, m.Proto)
 		}
+		if seenProto[m.Proto] {
+			// The planner keys candidate selection on proto (rotate.Plan skips c.Proto == active.Proto and
+			// ranks by registry order), so two members sharing a proto would leave one permanently
+			// un-selectable. Reject it, mirroring the duplicate-ref rejection.
+			return nil, fmt.Errorf("measure: refusing to build assembler: duplicate member proto %q", m.Proto)
+		}
+		seenProto[m.Proto] = true
 		if !m.Action.IsValid() {
 			return nil, fmt.Errorf("measure: refusing to build assembler: %w: member %q action %q", spec.ErrUnknownEnum, m.Proto, m.Action)
 		}
