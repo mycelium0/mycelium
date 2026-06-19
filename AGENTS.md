@@ -349,6 +349,19 @@ When asked to implement or design something:
 9. Keep the project useful at every phase; never require the future mesh to justify unsafe early code.
 10. Treat every bridge as potentially useful and potentially dangerous: characterize capability and risk
     before routing through it.
+11. **Gates before behaviour.** Land the typed schema and a conformance gate before the behaviour that
+    uses it. A Phase-0–2 spec type stays inert by construction — pure data plus `Validate()`, importing
+    no `net` / `os` / `os/exec`, exposing no server or goroutine entrypoint — until its phase authorizes
+    it. Keep control logic in the Go spine: *the shell renders and deploys; the Go binary decides and
+    adapts.* Migrate an existing shell decision by a **strangler** port behind a bash↔Go byte-equivalence
+    gate — additive, no cutover until the output is byte-identical.
+12. **Version hygiene per chunk.** Every change that lands Go-spine work (`internal/**`, `cmd/**`) bumps
+    the runtime version and adds a `CHANGELOG` entry in the **same** commit (a gate pins the version const
+    to the newest changelog heading). One PATCH per landed increment during the 0.x line.
+13. **Actuation is dry-run-first and gated.** Anything that mutates a live node ships dry-run by default,
+    behind an explicit operator gate (and a recorded go/no-go before the first live run), with rate
+    limits, anti-flapping, and automatic rollback. No silent emergency path bypasses the policy, and an
+    auto-pull of inert code can never actuate a node on its own.
 
 ## 8. Research baseline
 
