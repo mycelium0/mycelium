@@ -26,6 +26,7 @@ MYC_VOCAB="${MYC_VOCAB:-$MYC_ROOT/vocab.json}"
 _MYC_VOCAB_CLASSMAP=""
 _MYC_VOCAB_PORTMAP=""
 _MYC_VOCAB_PROTOS=""
+_MYC_VOCAB_PROTOS_SINGBOX=""
 
 myc_vocab_load() {
 	[ -n "$_MYC_VOCAB_PROTOS" ] && return 0
@@ -36,6 +37,13 @@ myc_vocab_load() {
 		|| myc_die "vocab: could not read the proto->port map from $MYC_VOCAB."
 	_MYC_VOCAB_PROTOS="$(jq -r '[.protos[] | select(.engine != "amneziawg") | .proto] | join(" ")' "$MYC_VOCAB" 2>/dev/null)" \
 		|| myc_die "vocab: could not read the proto list from $MYC_VOCAB."
+	# The sing-box ENGINE's servable protos (engine == "sing-box"): excludes the xray-only protos
+	# (e.g. vless-xhttp-tls — the xhttp transport is Xray-core only) AND the standalone amneziawg
+	# dataplane. The sing-box renderer iterates THIS list so enabling an xray-engine proto never tries
+	# to render an inbound sing-box cannot serve (ADR-0032 dual-engine). The full myc_vocab_protos list
+	# (sing-box + xray) stays the source for endpoint enumeration (bundle), which spans both engines.
+	_MYC_VOCAB_PROTOS_SINGBOX="$(jq -r '[.protos[] | select(.engine == "sing-box") | .proto] | join(" ")' "$MYC_VOCAB" 2>/dev/null)" \
+		|| myc_die "vocab: could not read the sing-box proto list from $MYC_VOCAB."
 	[ -n "$_MYC_VOCAB_PROTOS" ] || myc_die "vocab: $MYC_VOCAB has an empty proto registry."
 	return 0
 }
@@ -68,8 +76,17 @@ MYC_VOCAB_EOF
 }
 
 # myc_vocab_protos -> the space-separated, priority-ordered sing-box/xray proto list (the old
-# MYC_SB_PROTOS, minus the standalone amneziawg dataplane).
+# MYC_SB_PROTOS, minus the standalone amneziawg dataplane). Spans BOTH engines — used for endpoint
+# enumeration (bundle). For the sing-box RENDERER use myc_vocab_protos_singbox (below).
 myc_vocab_protos() {
 	myc_vocab_load
 	printf '%s' "$_MYC_VOCAB_PROTOS"
+}
+
+# myc_vocab_protos_singbox -> only the protos the sing-box ENGINE serves (engine == "sing-box"). The
+# sing-box renderer's MYC_SB_PROTOS derives from this so an enabled xray-engine proto (vless-xhttp-tls)
+# is skipped, not fatally rendered into a config sing-box cannot load (ADR-0032 dual-engine).
+myc_vocab_protos_singbox() {
+	myc_vocab_load
+	printf '%s' "$_MYC_VOCAB_PROTOS_SINGBOX"
 }
