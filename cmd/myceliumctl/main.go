@@ -65,6 +65,8 @@ func run(args []string) error {
 		return cmdShareLink(rest)
 	case "bundle":
 		return cmdBundle(rest)
+	case "link-outbound":
+		return cmdLinkOutbound(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -402,6 +404,35 @@ func cmdBundle(args []string) error {
 	return nil
 }
 
+// cmdLinkOutbound parses an opaque client share-link into a sing-box client outbound (RP-0008 P3-c) via
+// the pure spec.OutboundFromLink (the inverse of share-link) and prints the compact-JSON outbound on
+// stdout, or "null" when the link yields no faithful outbound (a ShadowTLS ss-link or an unknown scheme —
+// the shell's fail-closed null). It is the Go port of the shell `myc_agg_link_outbound`;
+// aggregate_outbound_go_equiv asserts byte-identical output. No network.
+func cmdLinkOutbound(args []string) error {
+	fs := flag.NewFlagSet("link-outbound", flag.ContinueOnError)
+	tag := fs.String("tag", "", "outbound tag (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *tag == "" {
+		return fmt.Errorf("link-outbound: --tag is required")
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("link-outbound: exactly one LINK argument is required")
+	}
+	ob, err := spec.OutboundFromLink(*tag, fs.Arg(0))
+	if err != nil {
+		return fmt.Errorf("link-outbound: %w", err)
+	}
+	if ob == nil {
+		fmt.Println("null")
+		return nil
+	}
+	fmt.Println(string(ob))
+	return nil
+}
+
 // cmdVocab emits the canonical Go-owned control-plane vocabulary (spec.NewVocab) as
 // deterministic, indented JSON on stdout: the closed transport-class / region-bucket /
 // advisory-health vocabularies and the full proto->class/port/key/scheme/engine
@@ -446,6 +477,7 @@ Commands:
   rotate-record FILE|-                         fold an apply outcome into the rotation state: {state,limits,rolled_back,now} -> RotationState JSON (RP-0012)
   share-link --proto P FILE|-                  render the dialable client share-link for a transport from LinkParams JSON (RP-0008 P3)
   bundle --params F --state F [--out F|-]       render a node's distribution Bundle JSON from params + identities (RP-0008 P3)
+  link-outbound --tag T LINK                    parse a client share-link into a sing-box client outbound JSON (RP-0008 P3)
   version                                      print the spine version
   help                                         show this help
 
