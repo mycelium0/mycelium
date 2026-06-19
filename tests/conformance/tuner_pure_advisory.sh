@@ -9,8 +9,9 @@
 # Author: mindicator & silicon bags quartet.
 #
 # WHY THIS GATE
-#   The self-tuner maintains a per-(class,path) weight (the Physarum reinforce-and-evaporate law on
-#   spec.DecayPolicy). That weight is a RANKING INPUT only: it must never auto-ban, force-route, hard-
+#   The self-tuner maintains a per-(class,path) weight (a reinforce-and-evaporate scoring law — EWMA +
+#   exponential decay + control-theory hysteresis — on spec.DecayPolicy; Physarum is metaphor, not the
+#   implemented equation). That weight is a RANKING INPUT only: it must never auto-ban, force-route, hard-
 #   trust, rotate, probe, or read the wall clock (time is a parameter, never `time.Now`). The package
 #   doc promises purity + determinism + no goroutines; this gate pins those promises structurally so
 #   "not yet wired" cannot drift into "accidentally live". OFFLINE + INSPECT-ONLY.

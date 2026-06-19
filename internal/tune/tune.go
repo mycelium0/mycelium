@@ -3,13 +3,18 @@
 // This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
 // later. See the LICENSE file in the repository root.
 
-// Package tune is the Phase-2 self-tuner (RP-0010 Plane 3, the ADR-0031 ADOPT verdict). It carries
-// the Physarum/Tero-2010 reinforce-and-evaporate control law, expressed directly on
-// spec.DecayPolicy, as a per-(transport-class, path) Weight: each good connectivity Verdict
-// reinforces the weight, and the weight decays continuously by HalfLife toward RetentionFloor, so a
-// just-degraded shape fades WITHOUT explicit teardown and re-promotes automatically when a block
-// lifts. RetentionFloor is "scar memory": a repeatedly-blocked shape settles low (not eagerly
-// retried) but is never forgotten. A Hysteresis band damps flapping of the promote decision.
+// Package tune is the Phase-2 self-tuner (RP-0010 Plane 3, the ADR-0031 ADOPT verdict). It maintains a
+// per-(transport-class, path) Weight using STANDARD, named prior art — no novel network biology (the
+// "fungal" / Physarum framing is METAPHOR only, ADR-0031). The implemented law is, precisely:
+//   - an EWMA / exponential-smoothing update toward a goodness target — each good connectivity Verdict
+//     smooths the weight upward by Reinforce*goodness*(1-w) (Robbins-Monro / exponential forgetting);
+//   - an exponential time-decay-to-floor by HalfLife — a just-degraded shape fades WITHOUT explicit
+//     teardown and re-promotes automatically when a block lifts;
+//   - a control-theory Schmitt-trigger Hysteresis band that damps flapping of the promote decision.
+// RetentionFloor is a bespoke "scar memory" term: a repeatedly-blocked shape settles low (not eagerly
+// retried) but is never forgotten. The reinforce-and-evaporate / Physarum / ant-colony imagery is a
+// useful METAPHOR for that decay-and-scar intuition — NOT a citation; the code implements EWMA +
+// exponential decay + hysteresis on spec.DecayPolicy, not the Tero-2010 tube-conductivity model.
 //
 // It is a SCORING layer only. The weight is a ranking input; it NEVER auto-bans, force-routes, or
 // hard-trusts (ADR-0025 / RP-0010 AC-4 advisory-never-actuates). The package is pure: it imports
