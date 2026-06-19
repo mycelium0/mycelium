@@ -257,7 +257,7 @@ install_spine() {
 	# stable node-local cache so repeated updates are fast incremental rebuilds, touching nothing global.
 	if ( cd "$ARTIFACT_ROOT" && HOME="$TOOLING_DIR/.gohome" GOPATH="$TOOLING_DIR/.gopath" \
 			GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
-			go build -trimpath -ldflags "-buildid= -X github.com/mindicator/mycelium/internal/spec.SourceRev=$rev" \
+			go build -trimpath -ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$rev" \
 			-o "$bin" ./cmd/myceliumctl ); then
 		log "built + installed the Go spine -> $bin (rev $rev; inert in P3 chunk 1, shell tool stays authoritative)"
 	else

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 // sample is one recorded probe outcome at a point in time. It holds no address,

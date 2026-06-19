@@ -112,7 +112,7 @@ unblockability**, and **anonymity / privacy**.
 
 Report privately through **GitHub private vulnerability reporting**: open the repository's
 **Security** tab and choose **"Report a vulnerability"**
-(`https://github.com/mindicator/mycelium/security/advisories/new`). This opens a private
+(`https://github.com/mycelium0/mycelium/security/advisories/new`). This opens a private
 security advisory visible only to you and the maintainers — no public issue, and no report
 contents travelling over plain email.
 

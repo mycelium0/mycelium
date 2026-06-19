@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 func TestLoadMissingReturnsEmpty(t *testing.T) {

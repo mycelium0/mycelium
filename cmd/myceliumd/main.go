@@ -23,8 +23,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/reach"
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/reach"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 // reachView is the redacted per-anchor health shown on /reachability: the opaque

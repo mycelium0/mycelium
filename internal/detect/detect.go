@@ -24,7 +24,7 @@ package detect
 import (
 	"fmt"
 
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 // Thresholds parameterises the classifier. Every numeric parameter is named and configurable

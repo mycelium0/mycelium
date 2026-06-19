@@ -23,7 +23,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 // Params configures the self-tuner. Decay is the ADOPTed evaporation shape (spec.DecayPolicy:

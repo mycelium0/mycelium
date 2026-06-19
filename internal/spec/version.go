@@ -19,7 +19,7 @@ const Version = "0.2.9"
 
 // SourceRev is the source revision the binary was built from. It is empty for a plain
 // `go build` and is stamped at build time via the linker
-// (`-ldflags "-X github.com/mindicator/mycelium/internal/spec.SourceRev=<rev>"`) by the
+// (`-ldflags "-X github.com/mycelium0/mycelium/internal/spec.SourceRev=<rev>"`) by the
 // node-bootstrap spine install (RP-0008 P3). Because Version is a hand-bumped SemVer
 // const that two commits routinely share, SourceRev is the FINE-GRAINED identity the
 // node's idempotent build keys on, so a node never serves a stale binary after an update.

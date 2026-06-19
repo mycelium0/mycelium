@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 // DefaultRotationLimits returns the documented Phase-2 policy: rotate only after 3 consecutive

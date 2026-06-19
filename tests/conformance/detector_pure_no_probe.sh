@@ -30,7 +30,7 @@ REPO_ROOT="${MYC_REPO_ROOT:-$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)}"
 [ -n "$REPO_ROOT" ] || { printf 'detector_pure_no_probe: cannot resolve repo root\n' >&2; exit 2; }
 DETECT_DIR="$REPO_ROOT/internal/detect"
 PKG="detect"
-ALLOWED_RE='^"fmt"$|^"github\.com/mindicator/mycelium/internal/spec"$'
+ALLOWED_RE='^"fmt"$|^"github\.com/mycelium0/mycelium/internal/spec"$'
 
 fail=0
 ok()    { printf '  ok    %s\n' "$1"; }
@@ -100,7 +100,7 @@ for f in $nontest; do
 	else
 		ok "$rel imports only the allowlist {fmt, internal/spec}"
 	fi
-	if printf '%s\n' "$imps" | grep -qE '"github.com/mindicator/mycelium/internal/spec"'; then
+	if printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/spec"'; then
 		imports_spec=1
 	fi
 	banned="$(strip_comments "$f" | grep -nE 'time\.(Now|Since)\(|(^|[^[:alnum:]_])go[[:space:]]+(func|[A-Za-z])|(^|[^[:alnum:]_])chan[[:space:]]' || true)"
