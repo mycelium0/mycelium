@@ -75,14 +75,14 @@ resolve_node_address() {
 # OPERATOR_TOGGLE_KEYS is the closed allowlist of keys an operator may override (the *_enabled flags +
 # the handful of operator-tunable knobs). Identity-derived fields (keys, secrets, node_address, cert
 # paths, short_ids) are DELIBERATELY excluded so they can never be pinned stale by an override.
-OPERATOR_TOGGLE_KEYS='[
-	"vless_reality_vision_enabled","vless_reality_grpc_enabled","vless_reality_xhttp_enabled",
-	"vless_xhttp_tls_enabled","vless_ws_tls_enabled","hysteria2_enabled","tuic_enabled","shadowsocks_enabled",
-	"shadowtls_enabled","trojan_enabled",
-	"vless_reality_vision_port","vless_reality_grpc_port","vless_reality_xhttp_port",
-	"vless_xhttp_tls_port","vless_ws_tls_port","hysteria2_port","tuic_port","shadowsocks_port","shadowtls_port",
-	"trojan_port","xhttp_path","xhttp_path_tls","ws_path","grpc_service_name","region_bucket"
-]'
+#
+# RP-0008: this allowlist is GO-OWNED — internal/spec.OperatorToggleKeys() (the registry enable/port keys
+# + the tunable knobs), emitted into control/vocab.json (.operator_toggle_keys). We READ it from there,
+# the single source, rather than restating it (the same allowlist the auto-rotation executor validates
+# against — one owner for two callers). Best-effort at source time; write_params fail-closes if it is
+# empty on a real write. The committed vocab.json ships with control/ via install_tooling, and the
+# two-tick update rule lands node-bootstrap + vocab.json together, so a real write always sees it.
+OPERATOR_TOGGLE_KEYS="$(jq -ec '.operator_toggle_keys // empty' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}" 2>/dev/null || true)"
 
 # seed_operator_overrides DEFAULTS_FILE — on the FIRST write under this logic (no overrides file yet),
 # capture any operator toggles that DIFFER from the freshly-generated defaults from the PRIOR params.json
@@ -234,6 +234,10 @@ write_params() {
 	# operator toggles ON TOP of these defaults so an enablement set on a previous run is NOT reverted by
 	# this --update. Only the allowlisted toggle keys are honoured; identity-derived fields stay as
 	# regenerated. A node whose operator never overrode anything keeps an empty {} and renders identically.
+	# FAIL-CLOSED: the allowlist is Go-owned (read from control/vocab.json above); an empty value means a
+	# missing/stale vocab. Refuse to seed/merge with no allowlist (it would silently drop operator toggles).
+	printf '%s' "$OPERATOR_TOGGLE_KEYS" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1 \
+		|| die "params: operator_toggle_keys is empty/invalid — regenerate control/vocab.json from the Go spine (RP-0008; the override allowlist is Go-owned)."
 	seed_operator_overrides "$tmp"
 	merge_operator_overrides "$tmp"
 	# Optional two-hop egress overlay (ADR-0029): a node acting as an in-region INGRESS for an

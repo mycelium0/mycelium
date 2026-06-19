@@ -90,6 +90,27 @@ else
 	badln "duplicate proto name in the registry"
 fi
 
+# RP-0008: the operator-toggle allowlist is Go-owned in the vocab and read by the shell from here — not
+# restated. (a) the file carries a non-empty operator_toggle_keys that COVERS every params-toggled
+# proto's enable/port key; (b) nb_render_params.sh reads .operator_toggle_keys from the vocab and does
+# NOT hardcode the enable-key list (the single-source invariant, offline-checkable).
+NBP="$REPO_ROOT/control/lib/nb_render_params.sh"
+if jq -e '
+	(.operator_toggle_keys | type == "array" and length > 0)
+	and ([.protos[] | select(.enable_key != "") | .enable_key] - .operator_toggle_keys | length == 0)
+	and ([.protos[] | select(.port_key   != "") | .port_key]   - .operator_toggle_keys | length == 0)
+' "$VOCAB" >/dev/null 2>&1; then
+	okln "operator_toggle_keys is present and covers every params-toggled proto's enable/port key"
+else
+	badln "operator_toggle_keys missing or does not cover the registry's enable/port keys"
+fi
+if [ -f "$NBP" ] && grep -q 'operator_toggle_keys' "$NBP" \
+	&& ! grep -qE '"vless_reality_vision_enabled"[[:space:]]*,[[:space:]]*"vless_reality_grpc_enabled"' "$NBP"; then
+	okln "nb_render_params.sh reads the allowlist from vocab.json (no hardcoded copy) — single source"
+else
+	badln "nb_render_params.sh still hardcodes OPERATOR_TOGGLE_KEYS (must read .operator_toggle_keys from vocab.json — RP-0008)"
+fi
+
 # params keys unique among the params-toggled protos (non-empty enable/port keys).
 if [ "$(jq '[.protos[] | select(.enable_key != "") | .enable_key] | length' "$VOCAB")" \
    -eq "$(jq '[.protos[] | select(.enable_key != "") | .enable_key] | unique | length' "$VOCAB")" ] \
@@ -153,22 +174,11 @@ else
 	badln "render_singbox.sh not found: $RS"
 fi
 
-# OPERATOR_TOGGLE_KEYS (nb_render_params.sh) is a static allowlist whose *_enabled/*_port members MUST
-# equal the registry's enable/port keys. It is POLICED here rather than derived in the bootstrap source
-# path on purpose: that lib is sourced in clean envs (node_update_artifact_root re-exec test) where
-# ARTIFACT_ROOT is unset, so a source-time jq would break it. This check makes drift impossible anyway.
-NRP="$REPO_ROOT/control/lib/nb_render_params.sh"
-if [ -f "$NRP" ]; then
-	otk_keys="$(sed -n "/OPERATOR_TOGGLE_KEYS='/,/\]'/p" "$NRP" | grep -oE '"[a-z0-9_]+_(enabled|port)"' | tr -d '"' | sort -u)"
-	voc_keys="$(jq -r '.protos[] | select(.engine != "amneziawg") | .enable_key, .port_key' "$VOCAB" | sort -u)"
-	if [ -n "$otk_keys" ] && [ "$otk_keys" = "$voc_keys" ]; then
-		okln "OPERATOR_TOGGLE_KEYS enable/port allowlist matches the registry exactly (no drift)"
-	else
-		badln "OPERATOR_TOGGLE_KEYS enable/port keys differ from the registry (toggle-key allowlist drifted)"
-	fi
-else
-	badln "nb_render_params.sh not found: $NRP"
-fi
+# NOTE: OPERATOR_TOGGLE_KEYS is no longer hardcoded in nb_render_params.sh — RP-0008 moved the allowlist
+# into the Go-owned vocab (.operator_toggle_keys), and the shell reads it from there. The single-source
+# invariant is now checked above (operator_toggle_keys covers the registry's enable/port keys + the bash
+# reads it from vocab) and by Step 2 (Go ↔ vocab.json byte-identical). The old "policed in bash" check is
+# retired with the hardcoded copy it policed.
 
 # --- Step 2: drift catch — regenerate from Go and assert byte-identical (skips without Go). ----------
 GO=""
