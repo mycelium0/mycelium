@@ -96,6 +96,80 @@ ensure_singbox_user() {
 	run install -d -m 0750 -o "$SINGBOX_RUN_USER" -g "$SINGBOX_RUN_GROUP" "$STATE_DIR/run"
 }
 
+# node_needs_xray — true iff params enables any xray-ENGINE transport. Reads the closed registry
+# (control/vocab.json) for the engine map + the enable_key (single source, never a bash convention —
+# §2.2 #8). This GATES install_xray + the xray unit: default-off => no xray on a stock node (the
+# ADR-0032 per-protocol opt-in; the only xray-engine proto today is vless-xhttp-tls).
+node_needs_xray() {
+	local vocab; vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	[ -f "$vocab" ] && [ -f "$PARAMS_JSON" ] || return 1
+	have jq || return 1
+	local n
+	n="$(jq -r --slurpfile p "$PARAMS_JSON" \
+		'[ .protos[] | select(.engine == "xray") | select($p[0][.enable_key] == true) ] | length' \
+		"$vocab" 2>/dev/null || echo 0)"
+	[ "${n:-0}" -ge 1 ]
+}
+
+# install_xray — install xray-core, pinned + checksum-verified (ADR-0032 dual-engine; the peer of
+# install_singbox). Called ONLY when node_needs_xray (an xray-engine transport is enabled), so a stock
+# node installs no xray. Xray ships a .zip (not a tar.gz) whose root holds the `xray` binary. Fail-closed
+# pins (--xray-version / --xray-sha256), honouring the ADR-0028 currency floor (>= v26.3.27). Idempotent.
+install_xray() {
+	log "ensuring xray-core is installed (pinned + checksum-verified) — an xray-engine transport is enabled"
+	need_root
+	if have "$XRAY_BIN"; then
+		local cur
+		cur="$("$XRAY_BIN" version 2>/dev/null | sed -n 's/^Xray[[:space:]]*//p' | awk '{print $1}' | head -n1)"
+		if [ -n "$XRAY_VERSION" ] && printf '%s' "$cur" | grep -q "${XRAY_VERSION#v}"; then
+			log "xray ${XRAY_VERSION} already installed; skipping."
+			return 0
+		fi
+	fi
+	[ -n "$XRAY_VERSION" ] || die "--xray-version is required to install xray (an xray-engine transport is enabled; fail-closed pin)."
+	[ -n "$XRAY_SHA256" ]  || die "--xray-sha256 is required to install xray (fail-closed pin)."
+	have curl || have wget || die "need curl or wget to download xray."
+	have unzip || die "need unzip to unpack the xray release (Xray ships a .zip)."
+
+	# Map machine arch -> the xray release archive arch token (note: distinct from sing-box's tokens).
+	local march arch
+	march="$(uname -m)"
+	case "$march" in
+		x86_64|amd64) arch="64" ;;
+		aarch64|arm64) arch="arm64-v8a" ;;
+		armv7l) arch="arm32-v7a" ;;
+		*) die "unsupported architecture for the xray release: $march" ;;
+	esac
+	local archive="Xray-linux-${arch}.zip"
+	local url="$XRAY_DL_BASE/${XRAY_VERSION}/${archive}"
+	local tmp; tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
+
+	log "downloading $url"
+	if have curl; then
+		run curl -fsSL "$url" -o "$tmp/$archive" || die "download failed: $url"
+	else
+		run wget -qO "$tmp/$archive" "$url" || die "download failed: $url"
+	fi
+
+	# FAIL-CLOSED checksum verification against the operator-supplied pin.
+	if [ "$DRY_RUN" -eq 0 ]; then
+		local got
+		if have sha256sum; then
+			got="$(sha256sum "$tmp/$archive" | awk '{print $1}')"
+		else
+			got="$(shasum -a 256 "$tmp/$archive" | awk '{print $1}')"
+		fi
+		[ "$got" = "$XRAY_SHA256" ] \
+			|| die "xray checksum MISMATCH (got $got, expected $XRAY_SHA256) — refusing to install."
+		log "checksum verified: $got"
+	fi
+
+	run unzip -o -q "$tmp/$archive" xray -d "$tmp"
+	[ "$DRY_RUN" -eq 1 ] || [ -f "$tmp/xray" ] || die "release layout unexpected: the xray binary is not at the root of $archive."
+	run install -m 0755 "$tmp/xray" "$XRAY_BIN"
+	log "installed xray to $XRAY_BIN"
+}
+
 ensure_self_signed_cert() {
 	# ensure_self_signed_cert CN — per-node self-signed cert + key under TLS_DIR (ADR-0014).
 	local cn="$1"
