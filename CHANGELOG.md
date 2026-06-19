@@ -11,6 +11,32 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.12] — 2026-06-19
+### Added
+- RP-0010 **Plane-1 C5b (daemon embed)**: `myceliumd` now hosts the MEASURE plane. Given a
+  `--measure-config` (alongside `--reachability-config`), it builds an `internal/measure.Assembler`
+  ONCE (so the per-member detector hysteresis + tuner pheromone persist across ticks) and runs a tick
+  loop that folds each `reach.Monitor` snapshot into a `rotate.PlanInput`, writes it atomically to the
+  configured `output_path` (the file `myceliumctl rotate-plan` consumes), and serves the latest on a
+  loopback `/rotation/plan-input`. The active member, between-tick `RotationState` (`rotate_state.json`)
+  and output paths are re-read each tick so a rotation is picked up without losing accumulated state.
+  At startup the daemon cross-checks the measure config against the reachability config and refuses to
+  run on a dangerous mismatch (an active ref that is not a member; a member with no reach probe — it
+  would stay seeded-clean and never be rotated away from; a `tick_ms` below the slowest probe interval
+  — it would re-fold the same window and defeat the detector anti-flap / over-reinforce the tuner). The
+  reach snapshot is filtered to member refs before the fold (reach may probe context anchors the node
+  does not rotate among). The written `PlanInput.now` is its freshness stamp (the file freezes at the
+  last good tick across failing ticks, so the consuming loop rejects a stale one); the loopback
+  endpoint always surfaces `tick_at` + `last_error`.
+  Strictly ADVISORY (AC-4): it assembles + serves a plan input and never spawns a process, invokes the
+  engine, or actuates — rotation stays behind the RP-0012 triple gate. INERT until a measure config is
+  supplied (nodes have none yet; deployment + bash-loop wiring + the live drill are C5c). New gate
+  `measure_daemon_advisory` pins the daemon's no-actuation surface (denylist: no `os/exec`,
+  `exec.Command`, `syscall.*Exec`, or sing-box invocation; asserts the measure+reach wiring is present).
+  `control/measure.config.example.json` documents the schema. `cmd/myceliumd` tests cover config
+  validation, fail-closed assembler build, the assemble golden (+ planner round-trip), and the file
+  round-trips. Additive: no wire/output change.
+
 ## [0.2.11] — 2026-06-19
 ### Changed
 - Post-review hardening of the RP-0010 Plane-1 MEASURE plane and the Phase-2 purity gates (from the

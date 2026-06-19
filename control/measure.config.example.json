@@ -1,0 +1,21 @@
+{
+  "_note": "Node-local MEASURE-plane config (RP-0010 Plane 1). Copy to a local, gitignored path (e.g. /var/lib/mycelium/measure.config.json) and pass it via 'myceliumd --measure-config' ALONGSIDE --reachability-config (the plane folds the reachability snapshot). Each member's 'ref' MUST match a reachability-config target 'ref' (the join key) — the daemon REFUSES TO START if a member has no matching reach target (an unmeasured member would stay seeded-clean and never be rotated away from). 'tick_ms' MUST be >= the slowest member's reach probe interval (else the daemon refuses to start) — a tick that outpaces the probes re-folds the same window and defeats the detector anti-flap / over-reinforces the tuner. 'proto' is a closed-registry transport id (control/vocab.json); its class is derived from it. 'action' is the move that promotes the member when it is a candidate (promote-sibling / rotate-port / regen-reality). 'active_ref' is the currently-active member and is re-read each tick; it must be one of the members. The daemon writes the assembled rotate.PlanInput to 'output_path' (atomically) — that file feeds 'myceliumctl rotate-plan'. The PlanInput's 'now' is its freshness stamp: across failing ticks the file FREEZES at the last good tick, so the consuming loop MUST reject a PlanInput whose 'now' is stale (older than ~2*tick_ms). This config drives NO actuation; rotation stays behind the RP-0012 triple gate. With no config supplied, the plane does not run.",
+  "version": 1,
+  "tick_ms": 60000,
+  "active_ref": "vision",
+  "output_path": "/var/lib/mycelium/rotate_plan_input.json",
+  "state_path": "/var/lib/mycelium/rotate_state.json",
+  "limits": {
+    "flip_confirmations": 3,
+    "min_weight_margin": 0.1,
+    "min_interval_ns": 1800000000000,
+    "window_ns": 3600000000000,
+    "max_per_window": 2,
+    "max_rollbacks_per_window": 1,
+    "cooldown_after_rollback_ns": 3600000000000
+  },
+  "members": [
+    { "ref": "vision", "proto": "vless-reality-vision", "action": "promote-sibling", "from_port": 443, "to_port": 0 },
+    { "ref": "grpc", "proto": "vless-reality-grpc", "action": "promote-sibling", "from_port": 8443, "to_port": 0 }
+  ]
+}

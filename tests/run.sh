@@ -161,6 +161,7 @@ GATES=(
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
 	"tests/conformance/measure_pure_advisory.sh"
+	"tests/conformance/measure_daemon_advisory.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/version_changelog_sync.sh"
