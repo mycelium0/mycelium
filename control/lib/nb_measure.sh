@@ -121,6 +121,40 @@ UNIT
 	log "measure: mycelium-measure.service ENABLED — this node now assembles a node-local rotate.PlanInput (ADVISORY; it does NOT rotate). Disable with '$0 --measure-disable'."
 }
 
+MEASURE_PLAN_MAX_STALE_SEC="${MEASURE_PLAN_MAX_STALE_SEC:-180}"
+
+# refresh_rotate_plan_from_daemon — bridge the MEASURE daemon's output into the GATED rotation loop
+# (RP-0010 C5c-3). If the daemon has written a FRESH rotate.PlanInput, run `myceliumctl rotate-plan` on
+# it to produce the RotationPlan flow_rotate consumes — so the loop self-drives off the measured signal.
+# A STALE PlanInput (its `.now` older than MEASURE_PLAN_MAX_STALE_SEC, or unparseable) is REFUSED: the
+# daemon may be dead/hung, and across failing ticks it FREEZES the file at the last good tick, so a
+# frozen plan must never be applied as if current. No daemon PlanInput -> no-op (the operator-supplied
+# plan path is unchanged). This NEVER actuates — it only PRODUCES the plan; flow_rotate's triple gate
+# (dry-run default + --apply-rotation + DRY_RUN=0 + arm sentinel) remains the only actuator.
+refresh_rotate_plan_from_daemon() {
+	local pi spine plan pi_now pi_epoch now_epoch age
+	pi="$STATE_DIR/rotate_plan_input.json"
+	plan="${ROTATE_PLAN:-$STATE_DIR/rotate_plan.json}"
+	spine="${SPINE_BIN:-$TOOLING_DIR/bin/myceliumctl-go}"
+	[ -f "$pi" ] || return 0
+	[ -x "$spine" ] || { warn "rotation: $spine absent — cannot consume the MEASURE PlanInput (no self-drive this tick)."; return 0; }
+	pi_now="$(jq -r '.now // empty' "$pi" 2>/dev/null)"
+	pi_epoch="$(date -u -d "$pi_now" +%s 2>/dev/null || echo 0)"
+	now_epoch="$(date -u +%s)"
+	age=$(( now_epoch - pi_epoch ))
+	if [ -z "$pi_now" ] || [ "$pi_epoch" -eq 0 ] || [ "$age" -lt 0 ] || [ "$age" -gt "$MEASURE_PLAN_MAX_STALE_SEC" ]; then
+		warn "rotation: the MEASURE PlanInput at $pi is STALE or unparseable (now='$pi_now', age=${age}s > ${MEASURE_PLAN_MAX_STALE_SEC}s) — REFUSING to self-drive off it (is mycelium-measure.service healthy?)."
+		return 0
+	fi
+	if ( "$spine" rotate-plan "$pi" >"$plan.tmp" 2>/dev/null ) && jq -e . "$plan.tmp" >/dev/null 2>&1; then
+		mv -f "$plan.tmp" "$plan"
+		log "rotation: refreshed $plan from the MEASURE daemon PlanInput (self-driven; age ${age}s, act=$(jq -r '.act // false' "$plan"))."
+	else
+		rm -f "$plan.tmp"
+		warn "rotation: rotate-plan on the MEASURE PlanInput failed — keeping the existing $plan (if any)."
+	fi
+}
+
 # measure_disable (--measure-disable) — disable + remove the unit (revert to no MEASURE daemon).
 measure_disable() {
 	need_root

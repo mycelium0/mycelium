@@ -356,7 +356,12 @@ flow_rotate() {
 	log "=== rotate: plan -> dry-run preview | gated live apply (RP-0012) ==="
 	need_root
 	local plan="${ROTATE_PLAN:-$STATE_DIR/rotate_plan.json}"
-	[ -f "$plan" ] || die "rotation: no plan at $plan (produce one: 'myceliumctl rotate-plan PLANINPUT.json > $plan')."
+	# Self-drive (RP-0010 C5c): if the MEASURE daemon has written a FRESH rotate.PlanInput, fold it into
+	# the RotationPlan this loop consumes. A stale or absent PlanInput leaves $plan untouched (the loop
+	# then uses whatever plan is present, or holds). The apply path below stays triple-gated regardless,
+	# so self-driving NEVER lowers the actuation bar — it only supplies the plan, never applies it.
+	refresh_rotate_plan_from_daemon
+	[ -f "$plan" ] || die "rotation: no plan at $plan (produce one, or enable the MEASURE daemon with --measure-enable, or 'myceliumctl rotate-plan PLANINPUT.json > $plan')."
 	jq -e . "$plan" >/dev/null 2>&1 || die "rotation: plan $plan is not valid JSON (fail-closed)."
 	[ -f "$PARAMS_JSON" ] || die "rotation: params.json missing ($PARAMS_JSON); bootstrap first."
 	if [ "$(jq -r '.act // false' "$plan")" != "true" ]; then
