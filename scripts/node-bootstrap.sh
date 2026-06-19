@@ -139,7 +139,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -233,6 +233,8 @@ while [ "$#" -gt 0 ]; do
 		--rotate-disarm)   MODE="rotate-disarm"; shift ;;
 		--rotate-enable-loop)  MODE="rotate-enable-loop"; shift ;;
 		--rotate-disable-loop) MODE="rotate-disable-loop"; shift ;;
+		--measure-enable)  MODE="measure-enable"; shift ;;
+		--measure-disable) MODE="measure-disable"; shift ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;
@@ -312,7 +314,7 @@ fi
 # They define functions + their dedicated constants only; the constants reference STATE_DIR (already
 # final after arg-parse, above) and the function bodies reference shared globals/helpers at call time.
 NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
-for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_observability; do
+for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_measure nb_observability; do
 	# shellcheck source=/dev/null
 	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
 done
@@ -727,6 +729,8 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		rotate-disarm)   rotate_disarm ;;
 		rotate-enable-loop)  rotate_enable_loop ;;
 		rotate-disable-loop) rotate_disable_loop ;;
+		measure-enable)  measure_enable ;;
+		measure-disable) measure_disable ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
 fi

@@ -228,22 +228,8 @@ install_tooling() {
 install_spine() {
 	have go || { warn "Go toolchain absent; skipping the (inert) myceliumctl-go build — the shell control tool remains authoritative."; return 0; }
 	need_root
-	local rev cur bin="$TOOLING_DIR/bin/myceliumctl-go"
+	local rev cur
 	rev="$(git -C "$ARTIFACT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-	# Idempotency: skip only when a PRESENT binary self-reports the deployed rev. The version probe is
-	# guarded so a missing/half-written/old binary can never trip `set -e` (existence test first; the
-	# version call may fail). rev=unknown (non-git/tarball deploy) -> never matches -> always rebuild (safe).
-	if [ "$rev" != unknown ] && [ -x "$bin" ]; then
-		cur="$("$bin" version 2>/dev/null)" || true
-		if printf '%s' "$cur" | grep -qF "$rev"; then
-			log "myceliumctl-go already built from rev $rev; skipping."
-			return 0
-		fi
-	fi
-	if [ "$DRY_RUN" -eq 1 ]; then
-		log "[dry-run] would build + install the Go spine: go build -o $bin ./cmd/myceliumctl (rev $rev)."
-		return 0
-	fi
 	run install -d -m 0755 "$TOOLING_DIR/bin"
 	# The timer-driven --update runs under systemd with an EMPTY environment (Environment=, no HOME). `go
 	# build` needs HOME to resolve its default GOPATH / GOENV; without it, internal-package import
@@ -251,18 +237,41 @@ install_spine() {
 	# and the spine silently never rebuilt (the warn-not-die fallback masked it). Pin a node-local HOME +
 	# GOPATH so the build is independent of the (absent) service environment.
 	run install -d -m 0700 "$TOOLING_DIR/.gohome"
-	# `if ( ... ); then` neutralises set -e for the build subshell, so a build failure lands in the warn
-	# branch instead of aborting the update. CGO_ENABLED=0 -> static pure-Go binary (no libc/gcc surprises
-	# across node distros); -trimpath strips the checkout path (reproducibility + no-PII); GOCACHE is a
-	# stable node-local cache so repeated updates are fast incremental rebuilds, touching nothing global.
-	if ( cd "$ARTIFACT_ROOT" && HOME="$TOOLING_DIR/.gohome" GOPATH="$TOOLING_DIR/.gopath" \
-			GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
-			go build -trimpath -ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$rev" \
-			-o "$bin" ./cmd/myceliumctl ); then
-		log "built + installed the Go spine -> $bin (rev $rev; inert in P3 chunk 1, shell tool stays authoritative)"
-	else
-		warn "myceliumctl-go build failed (rev $rev); the node continues on the shell control tool (the chunk-1 binary is inert)."
-	fi
+	# Build BOTH Go binaries from the fetched source: the control CLI (myceliumctl-go — the RP-0008
+	# strangler, shell tool stays authoritative) and the daemon (myceliumd — the RP-0010 MEASURE-plane
+	# host). BOTH are inert on a stock node: myceliumd RUNS only when an operator enables
+	# mycelium-measure.service (RP-0010 C5c — the unit ships disabled, written only by --measure-enable),
+	# so building it always is harmless. A missing toolchain / failed build WARNs, never dies (strangler
+	# doctrine: degrade to the shell, never brick the --update path).
+	local entry name pkg bin
+	for entry in "myceliumctl-go:./cmd/myceliumctl" "myceliumd:./cmd/myceliumd"; do
+		name="${entry%%:*}"; pkg="${entry##*:}"; bin="$TOOLING_DIR/bin/$name"
+		# Idempotency: skip only when a PRESENT binary self-reports the deployed rev (existence test
+		# first; the version call may fail). rev=unknown (tarball deploy) -> never matches -> rebuild (safe).
+		if [ "$rev" != unknown ] && [ -x "$bin" ]; then
+			cur="$("$bin" version 2>/dev/null)" || true
+			if printf '%s' "$cur" | grep -qF "$rev"; then
+				log "$name already built from rev $rev; skipping."
+				continue
+			fi
+		fi
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log "[dry-run] would build + install $name: go build -o $bin $pkg (rev $rev)."
+			continue
+		fi
+		# `if ( ... ); then` neutralises set -e for the build subshell, so a failure lands in the warn
+		# branch instead of aborting the update. CGO_ENABLED=0 -> static pure-Go binary (no libc/gcc
+		# surprises across node distros); -trimpath strips the checkout path (reproducibility + no-PII);
+		# GOCACHE is a stable node-local cache so repeated updates are fast incremental rebuilds.
+		if ( cd "$ARTIFACT_ROOT" && HOME="$TOOLING_DIR/.gohome" GOPATH="$TOOLING_DIR/.gopath" \
+				GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
+				go build -trimpath -ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$rev" \
+				-o "$bin" "$pkg" ); then
+			log "built + installed $name -> $bin (rev $rev; inert until enabled, shell tool stays authoritative)"
+		else
+			warn "$name build failed (rev $rev); the node continues on the shell control tool (the binary is inert)."
+		fi
+	done
 	return 0
 }
 

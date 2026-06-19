@@ -11,6 +11,23 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.14] — 2026-06-19
+### Added
+- RP-0010 **Plane-1 C5c-1 (deploy seam)**: `install_spine` now builds BOTH Go binaries from the fetched
+  source — the control CLI (`myceliumctl-go`) and the daemon (`myceliumd`, the MEASURE-plane host) —
+  into `$TOOLING_DIR/bin`, with the same idempotent rev-keyed skip (`myceliumd version` added). The
+  daemon runs under systemd **`Type=notify` + `WatchdogSec`**: `myceliumd` sends `sd_notify(READY=1)`
+  once its listener is bound + monitors are up and pings the watchdog (zero-dependency; reuses systemd's
+  liveness contract rather than a hand-rolled supervisor — ADR-0031). New `control/lib/nb_measure.sh`
+  `measure_enable` / `measure_disable` (`--measure-enable` / `--measure-disable`) write + enable the
+  `mycelium-measure.service` unit — **SHIPS DISABLED**: the unit is written + enabled ONLY by the
+  explicit flag, NEVER by `flow_bootstrap` / `flow_update` / `install_tooling` / `install_spine`, so an
+  auto-pull deploys the (always-built, inert) binary but can never start the advisory plane (the C4c-2
+  pattern). `measure_enable` is fail-closed (requires the binary + both node-local configs). Gate
+  `measure_daemon_ships_disabled` pins the no-auto-arm contract. The daemon is strictly ADVISORY —
+  actuation stays behind the RP-0012 triple gate. Node-local config generation (C5c-2), the bash-loop
+  wiring (C5c-3), and the live drill (C5c-4) follow. Additive: no wire/output change on a stock node.
+
 ## [0.2.13] — 2026-06-19
 ### Added
 - ADR-0033 (extends ADR-0029) + the inert `internal/spec.FrontConfig` schema for an OPTIONAL
