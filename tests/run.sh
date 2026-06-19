@@ -54,6 +54,10 @@
 #                               BYTE-IDENTICAL to the shell bundle producer for the same params + identity
 #                               (RP-0008 P3-b; generated_at instant text-normalized before a raw byte
 #                               diff). SKIPs without Go
+#   * aggregate_outbound_go_equiv.sh — the Go share-link PARSER (spec.OutboundFromLink / myceliumctl
+#                               link-outbound) is BYTE-IDENTICAL to the shell myc_agg_link_outbound across
+#                               the transport matrix incl. the reserved-char round-trip + the shadowtls
+#                               fail-closed null (RP-0008 P3-c). SKIPs without Go
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -133,6 +137,7 @@ GATES=(
 	"tests/conformance/bundle_go_roundtrip.sh"
 	"tests/conformance/share_link_go_equiv.sh"
 	"tests/conformance/bundle_render_go_equiv.sh"
+	"tests/conformance/aggregate_outbound_go_equiv.sh"
 	"tests/conformance/spine_binary_build.sh"
 	"tests/conformance/engine_load_check.sh"
 	"tests/conformance/active_probe_owncert.sh"

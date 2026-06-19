@@ -11,6 +11,20 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.8] — 2026-06-19
+### Added
+- RP-0008 **P3-c (part 1 — the link parser)**: `internal/spec.OutboundFromLink(tag, link)` +
+  `myceliumctl link-outbound --tag T LINK` — the Go port of the shell `myc_agg_link_outbound`, the
+  inverse of `ShareLink`: parse an opaque `vless://`/`hysteria2://`/`tuic://`/`ss://`/`trojan://`
+  share-link into a sing-box client outbound. Pure string parsing (`uriDecode` is the inverse of
+  `uriEncode`; query/authority split mirror the shell jq `before`/`after`); outbound shapes are typed
+  structs whose field order + `omitempty` reproduce the shell jq construction byte-for-byte. A ShadowTLS
+  ss-link and any unknown scheme fail closed to `null` (the inner-only material cannot rebuild the v3
+  detour). Conformance gate `aggregate_outbound_go_equiv` generates links via the proven `share-link`
+  (reserved char in every field) and asserts the shell + Go parsers agree byte-for-byte; the shell stays
+  authoritative (no cutover). `TestUriDecodeRoundTrip`/`TestOutboundFromLinkGolden`/`TestShareLinkOutboundRoundTrip`
+  pin it. P3-c part 2 (the profile fold — urltest/selector) follows. Additive: no wire/output change.
+
 ## [0.2.7] — 2026-06-19
 ### Added
 - RP-0008 **P3-b**: `internal/spec.RenderBundle` + `myceliumctl bundle --params F --state F [--out F|-]` —
