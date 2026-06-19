@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -62,6 +63,8 @@ func run(args []string) error {
 		return cmdRotateRecord(rest)
 	case "share-link":
 		return cmdShareLink(rest)
+	case "bundle":
+		return cmdBundle(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -337,6 +340,68 @@ func cmdShareLink(args []string) error {
 	return nil
 }
 
+// cmdBundle renders a node's distribution Bundle (RP-0008 P3-b) from its params.json + identities.json
+// (the first client is the endpoint credential), runs the pure spec.RenderBundle, and writes the JSON
+// (jq-style: 2-space indent, no HTML escaping so '&' in links stays literal, trailing newline) to --out
+// (or stdout). It is the Go port of the shell `myceliumctl bundle`; bundle_render_go_equiv asserts
+// byte-identical output (modulo the generated_at instant) before any renderer cutover. No network.
+func cmdBundle(args []string) error {
+	fs := flag.NewFlagSet("bundle", flag.ContinueOnError)
+	paramsPath := fs.String("params", "", "params.json (required)")
+	statePath := fs.String("state", "", "identities.json (required)")
+	out := fs.String("out", "-", "output file (- for stdout)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *paramsPath == "" || *statePath == "" {
+		return fmt.Errorf("bundle: --params and --state are required")
+	}
+	pdata, err := os.ReadFile(*paramsPath)
+	if err != nil {
+		return fmt.Errorf("bundle: read params %s: %w", *paramsPath, err)
+	}
+	var pmap map[string]json.RawMessage
+	if err := json.Unmarshal(pdata, &pmap); err != nil {
+		return fmt.Errorf("bundle: %s is not valid params JSON: %w", *paramsPath, err)
+	}
+	sdata, err := os.ReadFile(*statePath)
+	if err != nil {
+		return fmt.Errorf("bundle: read state %s: %w", *statePath, err)
+	}
+	var st struct {
+		Clients []struct {
+			ID       string `json:"id"`
+			Password string `json:"password"`
+		} `json:"clients"`
+	}
+	if err := json.Unmarshal(sdata, &st); err != nil {
+		return fmt.Errorf("bundle: %s is not valid identity state JSON: %w", *statePath, err)
+	}
+	var id, pw string
+	if len(st.Clients) > 0 {
+		id, pw = st.Clients[0].ID, st.Clients[0].Password
+	}
+	b, err := spec.RenderBundle(pmap, id, pw, time.Now().UTC().Truncate(time.Second))
+	if err != nil {
+		return fmt.Errorf("bundle: %w", err)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(b); err != nil {
+		return fmt.Errorf("bundle: marshal: %w", err)
+	}
+	if *out == "-" {
+		_, err = os.Stdout.Write(buf.Bytes())
+		return err
+	}
+	if err := os.WriteFile(*out, buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("bundle: write %s: %w", *out, err)
+	}
+	return nil
+}
+
 // cmdVocab emits the canonical Go-owned control-plane vocabulary (spec.NewVocab) as
 // deterministic, indented JSON on stdout: the closed transport-class / region-bucket /
 // advisory-health vocabularies and the full proto->class/port/key/scheme/engine
@@ -380,6 +445,7 @@ Commands:
   rotate-plan FILE|-                           plan a node-local transport rotation: PlanInput JSON -> RotationPlan JSON (RP-0012)
   rotate-record FILE|-                         fold an apply outcome into the rotation state: {state,limits,rolled_back,now} -> RotationState JSON (RP-0012)
   share-link --proto P FILE|-                  render the dialable client share-link for a transport from LinkParams JSON (RP-0008 P3)
+  bundle --params F --state F [--out F|-]       render a node's distribution Bundle JSON from params + identities (RP-0008 P3)
   version                                      print the spine version
   help                                         show this help
 

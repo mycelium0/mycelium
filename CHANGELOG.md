@@ -11,6 +11,19 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.7] — 2026-06-19
+### Added
+- RP-0008 **P3-b**: `internal/spec.RenderBundle` + `myceliumctl bundle --params F --state F [--out F|-]` —
+  the Go port of the shell bundle producer (`render_bundle.sh`). One Endpoint per enabled transport in
+  registry/priority order, each via `spec.ShareLink`; resolution mirrors the shell exactly (params
+  defaults via the `myc_params_get` `// empty` semantics, the per-identity password fallback to the
+  shared secret, the C03 own-cert-tls_sni and C09 port-range fail-closed checks). Marshalled jq-style
+  (2-space indent, `SetEscapeHTML(false)` so `&` in links stays literal, trailing newline). Conformance
+  gate `bundle_render_go_equiv` renders the same params+identity through BOTH producers and asserts a
+  raw byte diff (the `generated_at` instant text-normalized) — the strangler equivalence proof; the
+  shell stays authoritative until green. `TestRenderBundleShape`/`TestRenderBundleFailClosed` pin it.
+  Additive: no wire/output change.
+
 ## [0.2.6] — 2026-06-19
 ### Added
 - RP-0008 **P3-a** (the renderer-porting phase begins): `internal/spec.ShareLink(proto, LinkParams)` +
