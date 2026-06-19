@@ -11,6 +11,19 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.5] — 2026-06-19
+### Changed
+- RP-0008 (Go-spine migration): the operator-override allowlist is now GO-OWNED. `internal/spec`
+  gains `OperatorToggleKeys()` (every params-toggled proto's `*_enabled`/`*_port` key from the
+  registry, plus the tunable knobs `xhttp_path`/`xhttp_path_tls`/`ws_path`/`grpc_service_name`/
+  `region_bucket`), emitted into the `Vocab` (`myceliumctl vocab` / `control/vocab.json` →
+  `.operator_toggle_keys`). `control/lib/nb_render_params.sh` reads the allowlist from `vocab.json`
+  instead of a hardcoded bash array — the single source consumed by BOTH the override merge
+  (`write_params`) and the auto-rotation executor (enable-key validation). Fail-closed: a real write
+  refuses an empty/missing allowlist. `TestOperatorToggleKeysMatchesLegacy` pins the registry-derived
+  set to the exact legacy 25-key list (lossless migration); `vocab_single_source` keeps Go ↔ `vocab.json`
+  in lockstep. No wire/output change.
+
 ## [0.2.4] — 2026-06-19
 ### Added
 - `myceliumctl rotate-record FILE|-` (RP-0012 C4c): folds an apply outcome into the rotation state via the
