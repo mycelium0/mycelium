@@ -166,7 +166,10 @@ myc_render_xray_xhttp_tls() {
 	tls_sni="$(myc_params_get "$params" '.tls_sni')"
 	[ -n "$tls_sni" ] || myc_die "render-xray-xhttp-tls: params.tls_sni is empty — the own-cert genuine-TLS family must carry its OWN SNI (never the donor_sni/localhost fallback; that is a cert/SNI-mismatch tell). Set params.tls_sni."
 	tls_cert="$(myc_params_get "$params" '.tls_certificate_path' '/etc/mycelium/tls/fullchain.pem')"
-	tls_key="$(myc_params_get "$params" '.tls_private_key_path' '/etc/mycelium/tls/privkey.pem')"
+	# Canonical param key is tls_key_path (the same one render_singbox.sh's own-cert path + write_params
+	# emit); the earlier prototype read a non-canonical tls_private_key_path that write_params never sets,
+	# so on a real node the key path silently fell back to the wrong default. Align to the single vocabulary.
+	tls_key="$(myc_params_get "$params" '.tls_key_path' '/etc/mycelium/tls/privkey.pem')"
 	xhttp_path="$(myc_params_get "$params" '.xhttp_path_tls' '/')"
 
 	# Xray VLESS clients for XHTTP carry NO flow (xtls-rprx-vision is a REALITY/TCP shape).
