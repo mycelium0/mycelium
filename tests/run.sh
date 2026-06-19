@@ -92,6 +92,11 @@
 #                               non-test sources import only the allowlist {fmt, time, internal/spec},
 #                               read no wall clock, and run no goroutine/channel — node-local, never a
 #                               global signal. OFFLINE
+#   * measure_pure_advisory.sh — the Phase-2 MEASURE plane (internal/measure, RP-0010 Plane 1) folds
+#                               reach->detect->tune into a rotate.PlanInput: its non-test sources
+#                               import only {fmt, sort, time, internal/detect|rotate|spec|tune} — no
+#                               socket/file/process/clock (AC-6: no new probe surface; AC-4: advisory
+#                               input only, never actuates). OFFLINE
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
@@ -155,6 +160,7 @@ GATES=(
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
+	"tests/conformance/measure_pure_advisory.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/version_changelog_sync.sh"
