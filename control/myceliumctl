@@ -42,6 +42,9 @@ MYC_DEFAULT_STATE="$MYC_ROOT/state/identities.json"
 # Engine-specific default templates. sing-box is the PRIMARY engine; xray is the
 # optional legacy alternative.
 MYC_DEFAULT_TEMPLATE_XRAY="$MYC_ROOT/../nodes/dataplane/vless-reality/server.template.json"
+# The Xray engine's vless-xhttp-tls inbound template (ADR-0032 dual-engine; the one xray-engine
+# proto, served nowhere by default). `render-server --engine xray --proto vless-xhttp-tls` selects it.
+MYC_DEFAULT_TEMPLATE_XRAY_XHTTP="$MYC_ROOT/../nodes/dataplane/vless-xhttp-tls/xray.server.template.json"
 # The DEPLOYED sing-box template (the same one node-bootstrap.sh renders). The historical
 # server.template.json was a split-brain stale variant (no vless-xhttp-tls-in, inbound tags
 # render_singbox.sh never matched) and has been removed (RP-0003 §W5). There is now ONE sing-box
@@ -95,7 +98,7 @@ Commands:
         List clients as a table.
         Default state file: control/state/identities.json
 
-  render-server [--engine singbox|xray] [--template FILE] --params FILE [--state FILE] [--out FILE]
+  render-server [--engine singbox|xray] [--proto NAME] [--template FILE] --params FILE [--state FILE] [--out FILE]
         Render a server config by jq path using the params file and identity state.
         Output is valid JSON (default: state/server.json).
           --engine singbox  PRIMARY (DEFAULT): one sing-box server with every ENABLED
@@ -103,8 +106,12 @@ Commands:
                             TUIC v5, Shadowsocks-2022, ShadowTLS v3, Trojan).
                             Per-protocol <proto>_enabled flags in params decide what
                             is exposed.
-          --engine xray     OPTIONAL alternative: VLESS+REALITY+Vision only. The
-                            default template is engine-specific.
+          --engine xray     OPTIONAL alternative engine. The default template is
+                            engine-specific. Select the inbound with --proto:
+                              --proto vless-reality-vision  (default) legacy REALITY+Vision.
+                              --proto vless-xhttp-tls        VLESS+XHTTP over genuine TLS
+                                                             (ADR-0032; xray-only proto).
+                            --proto is only valid with --engine xray.
 
   subscription  [--engine singbox|xray] --params FILE [--state FILE] [--out DIR]
         Emit per-client sing-box JSON and Clash-Meta YAML subscription configs
@@ -268,16 +275,18 @@ cmd_identity() {
 # ---------------------------------------------------------------------------
 
 cmd_render_server() {
-	local engine engine_explicit template params state out
+	local engine engine_explicit template params state out proto
 	engine="$MYC_DEFAULT_ENGINE"
 	engine_explicit=0
 	template=""   # empty => pick the engine-specific default after parsing
 	params=""
 	state="$MYC_DEFAULT_STATE"
 	out="$MYC_DEFAULT_OUT_SERVER"
+	proto=""      # only meaningful for --engine xray; empty => the legacy REALITY+Vision inbound
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 			--engine)   engine="${2:?--engine needs a value}"; engine_explicit=1; shift 2 ;;
+			--proto)    proto="${2:?--proto needs a value}"; shift 2 ;;
 			--template) template="${2:?--template needs a value}"; shift 2 ;;
 			--params)   params="${2:?--params needs a value}"; shift 2 ;;
 			--state)    state="${2:?--state needs a value}"; shift 2 ;;
@@ -287,6 +296,11 @@ cmd_render_server() {
 		esac
 	done
 	[ -n "$params" ] || myc_die "render-server: --params is required"
+	# --proto selects WHICH xray-engine inbound to render; the sing-box engine renders every
+	# enabled protocol in one server, so per-proto selection is an xray-only concept. Fail closed.
+	if [ -n "$proto" ] && [ "$engine" != "xray" ]; then
+		myc_die "render-server: --proto is only valid with --engine xray (the sing-box engine renders all enabled protocols)"
+	fi
 	# The default engine is now sing-box (project canon). Note this once for any caller
 	# that relied on the historical xray default and did not pass --engine.
 	if [ "$engine_explicit" -eq 0 ]; then
@@ -298,8 +312,19 @@ cmd_render_server() {
 			myc_sb_render_server "$template" "$params" "$state" "$out"
 			;;
 		xray)
-			[ -n "$template" ] || template="$MYC_DEFAULT_TEMPLATE_XRAY"
-			myc_render_server "$template" "$params" "$state" "$out"
+			# Dispatch by the xray-engine proto (closed vocab: vocab.json .protos[] where engine=="xray").
+			# Default (empty / vless-reality-vision) keeps the legacy REALITY+Vision path byte-for-byte.
+			case "$proto" in
+				""|vless-reality-vision)
+					[ -n "$template" ] || template="$MYC_DEFAULT_TEMPLATE_XRAY"
+					myc_render_server "$template" "$params" "$state" "$out"
+					;;
+				vless-xhttp-tls)
+					[ -n "$template" ] || template="$MYC_DEFAULT_TEMPLATE_XRAY_XHTTP"
+					myc_render_xray_xhttp_tls "$template" "$params" "$state" "$out"
+					;;
+				*) myc_die "render-server: --engine xray supports --proto {vless-reality-vision|vless-xhttp-tls}, got '$proto'" ;;
+			esac
 			;;
 		*) myc_die "render-server: unknown --engine '$engine' (expected singbox|xray)" ;;
 	esac

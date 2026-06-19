@@ -38,17 +38,11 @@ fail=0
 okln()  { printf '  ok    %s\n' "$1"; }
 badln() { printf '  FAIL  %s\n' "$1"; fail=1; }
 
-# Source the render libs standalone (the xhttp-tls render fn is an INERT prototype not yet exposed via
-# the myceliumctl CLI dispatch — ADR-0032). Order mirrors myceliumctl's loader. The libs expect
-# MYC_ROOT/MYC_LIB (myceliumctl sets them); provide them so a standalone source under `set -u` does not
-# trip on an unbound MYC_ROOT (e.g. vocab.sh references it at source time).
-MYC_ROOT="$REPO_ROOT/control"
-MYC_LIB="$LIB"
-export MYC_ROOT MYC_LIB
-# shellcheck disable=SC1090
-for l in common.sh jqlib.sh vocab.sh identity.sh render.sh; do
-	. "$LIB/$l" 2>/dev/null || { printf 'FAIL: cannot source control/lib/%s\n' "$l" >&2; exit 2; }
-done
+# Render through the real myceliumctl CLI dispatch — `render-server --engine xray --proto vless-xhttp-tls`
+# (ADR-0032 P2-2 wired the xhttp-tls renderer into the CLI; it is no longer a standalone-only prototype).
+# This proves the OPERATOR-facing toolchain path renders the config the engine then loads, end to end.
+CTL="$REPO_ROOT/control/myceliumctl"
+[ -x "$CTL" ] || { printf 'FAIL: myceliumctl not executable: %s\n' "$CTL" >&2; exit 2; }
 
 # Resolve an xray binary: PATH then the well-known node install locations. Absent => the LOAD half SKIPs.
 XRAY=""
@@ -74,7 +68,7 @@ PARAMS="$WORK/params.json"; STATE="$WORK/identities.json"; OUT="$WORK/xray.serve
 jq -n --arg cert "$CERT" --arg key "$KEY" '{
 	vless_xhttp_tls_port: 2087,
 	tls_sni: "tls.example.invalid",
-	tls_certificate_path: $cert, tls_private_key_path: $key,
+	tls_certificate_path: $cert, tls_key_path: $key,
 	xhttp_path_tls: "/xhttp"
 }' > "$PARAMS"
 jq -n '{ version: 1, clients: [ { name: "alice", id: "a1b2c3d4-e5f6-7890-abcd-ef0123456789", created: "2026-01-01T00:00:00Z" } ] }' > "$STATE"
@@ -82,9 +76,10 @@ jq -n '{ version: 1, clients: [ { name: "alice", id: "a1b2c3d4-e5f6-7890-abcd-ef
 TEMPLATE="$REPO_ROOT/nodes/dataplane/vless-xhttp-tls/xray.server.template.json"
 [ -f "$TEMPLATE" ] || { badln "xray xhttp-tls template missing: $TEMPLATE"; printf '\n-- Result --\nFAIL\n' >&2; exit 1; }
 
-# --- RENDER half (always runs: bash + jq only). Subshell-wrap: the render fn uses myc_die (exit 1). ---
-if ( myc_render_xray_xhttp_tls "$TEMPLATE" "$PARAMS" "$STATE" "$OUT" ) >"$WORK/render.err" 2>&1; then
-	okln "shell rendered a vless-xhttp-tls xray config"
+# --- RENDER half (always runs: bash + jq only). Through the CLI dispatch (the real operator path). ---
+if "$CTL" render-server --engine xray --proto vless-xhttp-tls \
+		--template "$TEMPLATE" --params "$PARAMS" --state "$STATE" --out "$OUT" >"$WORK/render.err" 2>&1; then
+	okln "myceliumctl render-server --engine xray --proto vless-xhttp-tls rendered a config"
 else
 	badln "render FAILED: $(tr -d '\n' < "$WORK/render.err" | cut -c1-200)"
 	printf '\n-- Result --\nFAIL: could not render a vless-xhttp-tls config to load-check.\n' >&2
