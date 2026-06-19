@@ -46,6 +46,10 @@
 #   * bundle_go_roundtrip.sh  — a shell-rendered bundle round-trips through the authoritative Go
 #                               validator (myceliumctl validate-bundle); RP-0008 P1 / audit C11. SKIPs
 #                               where no Go toolchain is present (jq-only host/CI lane)
+#   * share_link_go_equiv.sh  — the Go share-link renderer (spec.ShareLink / myceliumctl share-link) is
+#                               BYTE-IDENTICAL to the shell myc_bundle_link across the link-bearing
+#                               transport matrix incl. reserved-char encoding (RP-0008 P3-a strangler
+#                               equivalence; no cutover until green). SKIPs without Go
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -123,6 +127,7 @@ GATES=(
 	"tests/conformance/dependency_policy.sh"
 	"tests/conformance/bundle_region_closed_vocab.sh"
 	"tests/conformance/bundle_go_roundtrip.sh"
+	"tests/conformance/share_link_go_equiv.sh"
 	"tests/conformance/spine_binary_build.sh"
 	"tests/conformance/engine_load_check.sh"
 	"tests/conformance/active_probe_owncert.sh"

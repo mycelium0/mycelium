@@ -60,6 +60,8 @@ func run(args []string) error {
 		return cmdRotatePlan(rest)
 	case "rotate-record":
 		return cmdRotateRecord(rest)
+	case "share-link":
+		return cmdShareLink(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -293,6 +295,48 @@ func cmdRotateRecord(args []string) error {
 	return nil
 }
 
+// cmdShareLink renders the dialable client share-link for one transport (RP-0008 P3-a). It reads an
+// already-resolved spec.LinkParams as JSON (a FILE argument or - for stdin) + a --proto flag, runs the
+// pure spec.ShareLink, and prints the link. It is the Go port of the shell `myc_bundle_link`; the
+// share_link_go_equiv gate asserts byte-identical output before any renderer cutover. No network, no
+// mutation.
+func cmdShareLink(args []string) error {
+	fs := flag.NewFlagSet("share-link", flag.ContinueOnError)
+	proto := fs.String("proto", "", "transport proto (required)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *proto == "" {
+		return fmt.Errorf("share-link: --proto is required")
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("share-link: exactly one LinkParams FILE (or - for stdin) is required")
+	}
+	src := fs.Arg(0)
+	var (
+		data []byte
+		err  error
+	)
+	if src == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(src)
+	}
+	if err != nil {
+		return fmt.Errorf("share-link: read %s: %w", src, err)
+	}
+	var p spec.LinkParams
+	if err := json.Unmarshal(data, &p); err != nil {
+		return fmt.Errorf("share-link: %s is not valid LinkParams JSON: %w", src, err)
+	}
+	link, err := spec.ShareLink(*proto, p)
+	if err != nil {
+		return fmt.Errorf("share-link: %w", err)
+	}
+	fmt.Println(link)
+	return nil
+}
+
 // cmdVocab emits the canonical Go-owned control-plane vocabulary (spec.NewVocab) as
 // deterministic, indented JSON on stdout: the closed transport-class / region-bucket /
 // advisory-health vocabularies and the full proto->class/port/key/scheme/engine
@@ -335,6 +379,7 @@ Commands:
   vocab                                        emit the canonical transport/region/health vocabulary as JSON (RP-0008 P2)
   rotate-plan FILE|-                           plan a node-local transport rotation: PlanInput JSON -> RotationPlan JSON (RP-0012)
   rotate-record FILE|-                         fold an apply outcome into the rotation state: {state,limits,rolled_back,now} -> RotationState JSON (RP-0012)
+  share-link --proto P FILE|-                  render the dialable client share-link for a transport from LinkParams JSON (RP-0008 P3)
   version                                      print the spine version
   help                                         show this help
 
