@@ -11,6 +11,18 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.6] — 2026-06-19
+### Added
+- RP-0008 **P3-a** (the renderer-porting phase begins): `internal/spec.ShareLink(proto, LinkParams)` +
+  `uriEncode` — the Go port of the shell `myc_bundle_link` (the dialable client share-link / Bundle
+  Endpoint Link). Pure + deterministic, byte-identical to the shell template across the 10 link-bearing
+  transports; `uriEncode` matches `jq @uri` (RFC-3986 unreserved set, uppercase `%XX`, byte-wise).
+  `myceliumctl share-link --proto P FILE|-` exposes it. Conformance gate `share_link_go_equiv` drives
+  BOTH renderers with the same values (incl. reserved chars) and asserts identical output — the
+  strangler equivalence proof; the shell renderer stays authoritative (no cutover) until it is green.
+  Additive: no wire/output change. (`TestUriEncodeMatchesJqAtUri`, `TestShareLinkGolden`,
+  `TestShareLinkEncodesReservedChars` pin it where Go is unavailable.)
+
 ## [0.2.5] — 2026-06-19
 ### Changed
 - RP-0008 (Go-spine migration): the operator-override allowlist is now GO-OWNED. `internal/spec`
