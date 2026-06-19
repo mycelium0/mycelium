@@ -149,6 +149,34 @@ func HealthValues() []HealthValue {
 	return out
 }
 
+// operatorTunableKnobs are the operator-settable params that are NOT a per-proto enable/port toggle:
+// the transport-shape knobs (paths / gRPC service name) and the coarse region bucket. They are
+// deliberately NOT identity-derived, so an override may set them without pinning a secret/key stale.
+var operatorTunableKnobs = []string{"xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket"}
+
+// OperatorToggleKeys returns the CLOSED allowlist of params keys an operator may override: every
+// params-toggled proto's *_enabled flag, then every *_port key (registry order), then the tunable
+// knobs. Identity-derived fields (keys, secrets, node_address, cert paths, short_ids) are excluded by
+// construction — only registry enable/port keys + the knob list are included — so an override can never
+// pin them stale. This is the SINGLE source consumed by BOTH write_params (the override merge) and the
+// auto-rotation executor (enable-key validation); the shell reads it from control/vocab.json (RP-0008
+// P2), never restating it. Pure; deterministic order.
+func OperatorToggleKeys() []string {
+	out := make([]string, 0, len(transportRegistry)*2+len(operatorTunableKnobs))
+	for i := range transportRegistry {
+		if transportRegistry[i].EnableKey != "" {
+			out = append(out, transportRegistry[i].EnableKey)
+		}
+	}
+	for i := range transportRegistry {
+		if transportRegistry[i].PortKey != "" {
+			out = append(out, transportRegistry[i].PortKey)
+		}
+	}
+	out = append(out, operatorTunableKnobs...)
+	return out
+}
+
 // Vocab is the serialisable aggregate of every Go-owned control-plane vocabulary:
 // the closed transport-class / region-bucket / advisory-health sets and the full
 // proto registry. It is what `myceliumctl vocab` emits and the committed
@@ -158,8 +186,9 @@ type Vocab struct {
 	Version          int               `json:"version"`           // schema version (NetworkStateVersion)
 	TransportClasses []TransportClass  `json:"transport_classes"` // closed coarse-family vocabulary
 	RegionBuckets    []RegionBucket    `json:"region_buckets"`    // closed region vocabulary (Phase 1: only "unspecified")
-	HealthValues     []HealthValue     `json:"health_values"`     // closed advisory-health vocabulary
-	Protos           []ProtoDescriptor `json:"protos"`            // canonical proto registry, priority order
+	HealthValues       []HealthValue     `json:"health_values"`        // closed advisory-health vocabulary
+	OperatorToggleKeys []string          `json:"operator_toggle_keys"` // closed allowlist of operator-settable params keys
+	Protos             []ProtoDescriptor `json:"protos"`               // canonical proto registry, priority order
 }
 
 // NewVocab returns the canonical Vocab built from the Go-owned registries. It is pure:
@@ -167,10 +196,11 @@ type Vocab struct {
 // (encoding/json with this struct's fixed field order is stable).
 func NewVocab() Vocab {
 	return Vocab{
-		Version:          NetworkStateVersion,
-		TransportClasses: TransportClasses(),
-		RegionBuckets:    RegionBuckets(),
-		HealthValues:     HealthValues(),
-		Protos:           TransportRegistry(),
+		Version:            NetworkStateVersion,
+		TransportClasses:   TransportClasses(),
+		RegionBuckets:      RegionBuckets(),
+		HealthValues:       HealthValues(),
+		OperatorToggleKeys: OperatorToggleKeys(),
+		Protos:             TransportRegistry(),
 	}
 }

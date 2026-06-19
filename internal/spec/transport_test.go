@@ -158,3 +158,42 @@ func TestVocabRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestOperatorToggleKeysMatchesLegacy pins the registry-derived operator allowlist to the exact set the
+// shell hardcoded before RP-0008 moved it into the vocab — so the migration is provably lossless (the
+// override merge + the rotation enable-key validation see the identical closed set, just single-sourced).
+func TestOperatorToggleKeysMatchesLegacy(t *testing.T) {
+	legacy := []string{
+		"vless_reality_vision_enabled", "vless_reality_grpc_enabled", "vless_reality_xhttp_enabled",
+		"vless_xhttp_tls_enabled", "vless_ws_tls_enabled", "hysteria2_enabled", "tuic_enabled", "shadowsocks_enabled",
+		"shadowtls_enabled", "trojan_enabled",
+		"vless_reality_vision_port", "vless_reality_grpc_port", "vless_reality_xhttp_port",
+		"vless_xhttp_tls_port", "vless_ws_tls_port", "hysteria2_port", "tuic_port", "shadowsocks_port", "shadowtls_port",
+		"trojan_port", "xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket",
+	}
+	got := OperatorToggleKeys()
+	asSet := func(s []string) map[string]int {
+		m := make(map[string]int, len(s))
+		for _, k := range s {
+			m[k]++
+		}
+		return m
+	}
+	want, have := asSet(legacy), asSet(got)
+	if len(got) != len(legacy) {
+		t.Errorf("OperatorToggleKeys length %d != legacy %d", len(got), len(legacy))
+	}
+	for k := range want {
+		if have[k] == 0 {
+			t.Errorf("OperatorToggleKeys is missing the legacy key %q", k)
+		}
+	}
+	for k, n := range have {
+		if want[k] == 0 {
+			t.Errorf("OperatorToggleKeys has an unexpected key %q (not in the legacy allowlist)", k)
+		}
+		if n > 1 {
+			t.Errorf("OperatorToggleKeys has a duplicate key %q (x%d)", k, n)
+		}
+	}
+}
