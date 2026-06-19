@@ -16,7 +16,9 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -40,6 +42,20 @@ type reachView struct {
 }
 
 func main() {
+	// `myceliumd version` prints the version + build rev and exits (the idempotent spine install keys
+	// the no-rebuild check on this, identically to myceliumctl). Handled before flag parsing.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "-version", "--version":
+			if spec.SourceRev != "" {
+				fmt.Printf("myceliumd %s (rev %s)\n", spec.Version, spec.SourceRev)
+			} else {
+				fmt.Printf("myceliumd %s\n", spec.Version)
+			}
+			return
+		}
+	}
+
 	listen := flag.String("listen", "127.0.0.1:9551",
 		"health/readiness listen address (loopback by default; exposes no PII)")
 	reachConfig := flag.String("reachability-config", "",
@@ -137,18 +153,28 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:              *listen,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	// Bind the listener BEFORE signalling readiness so Type=notify's READY=1 means the socket is
+	// actually accepting (the monitors above are already running). Then let systemd own liveness via
+	// sd_notify + WatchdogSec (reuse, not a hand-rolled supervisor).
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		log.Fatalf("myceliumd: listen on %s: %v", *listen, err)
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("myceliumd %s: health endpoint on %s", spec.Version, *listen)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
+
+	sdNotify("READY=1")
+	go runWatchdog(ctx)
 
 	select {
 	case err := <-errCh:
