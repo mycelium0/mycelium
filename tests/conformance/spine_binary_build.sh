@@ -66,7 +66,7 @@ BIN="$WORK/bin/myceliumctl-go"
 if ( cd "$REPO_ROOT" \
 	&& GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$WORK/gocache" \
 	"$GO" build -trimpath \
-		-ldflags "-buildid= -X github.com/mindicator/mycelium/internal/spec.SourceRev=$PROBE" \
+		-ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$PROBE" \
 		-o "$BIN" ./cmd/myceliumctl ) >"$WORK/build.out" 2>&1; then
 	okln "myceliumctl-go builds + installs offline with the production env (GOPROXY=off, CGO=0, trimpath)"
 else

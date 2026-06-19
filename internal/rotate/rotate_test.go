@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 var t0 = time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)

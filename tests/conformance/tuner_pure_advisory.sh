@@ -32,7 +32,7 @@ REPO_ROOT="${MYC_REPO_ROOT:-$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)}"
 [ -n "$REPO_ROOT" ] || { printf 'tuner_pure_advisory: cannot resolve repo root\n' >&2; exit 2; }
 TUNE_DIR="$REPO_ROOT/internal/tune"
 PKG="tune"
-ALLOWED_RE='^"(fmt|math|time)"$|^"github\.com/mindicator/mycelium/internal/spec"$'
+ALLOWED_RE='^"(fmt|math|time)"$|^"github\.com/mycelium0/mycelium/internal/spec"$'
 
 fail=0
 ok()    { printf '  ok    %s\n' "$1"; }
@@ -104,7 +104,7 @@ for f in $nontest; do
 	else
 		ok "$rel imports only the allowlist {fmt, math, time, internal/spec}"
 	fi
-	if printf '%s\n' "$imps" | grep -qE '"github.com/mindicator/mycelium/internal/spec"'; then
+	if printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/spec"'; then
 		imports_spec=1
 	fi
 	# 3. determinism / actuation token bans (over comment-stripped source)
