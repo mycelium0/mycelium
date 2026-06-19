@@ -182,7 +182,11 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 // RecordOutcome folds the executor's apply result back into the state. A successful promote needs no
 // adjustment (Plan already advanced the window). A rollback spends the rollback budget, and once the
 // budget is exhausted the planner LATCHES into a hold for CooldownAfterRollback (leave last-known-good
-// running, stop the retry storm, surface for the operator). Pure. CALL ORDER: it must run within the
+// running, stop the retry storm, surface for the operator). This budget-then-latch is exactly a
+// CIRCUIT-BREAKER open->half-open transition (standard prior art); a vendored breaker (e.g. sony/
+// gobreaker) was considered and the ~10-line bespoke latch kept deliberately, to preserve the package's
+// zero-dependency purity (no net/os/syscall — the rotator_pure_planner gate) and the Mycelium-specific
+// regen/port/sibling actuation it gates. Pure. CALL ORDER: it must run within the
 // same tick that produced the plan's NextState (executor: persist NextState, apply, then RecordOutcome
 // on the result before the next Plan), so the rollback budget lands in the correct window.
 func RecordOutcome(state spec.RotationState, limits spec.RotationLimits, rolledBack bool, now time.Time) spec.RotationState {
