@@ -11,6 +11,20 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.9] — 2026-06-19
+### Added
+- RP-0008 **P3-c (part 2 — the aggregate fold)**, completing the aggregate port: `internal/spec.RenderAggregate`
+  + `myceliumctl aggregate --out F --bundle F [--name L] ...` — the Go port of the shell
+  `myc_render_aggregate`: fold ≥2 per-node Bundles into ONE sing-box client profile (each endpoint a
+  namespaced `<label>.<tag>` outbound via `outboundValue`, then ONE urltest "auto" + ONE selector
+  "mycelium"/default "auto" + direct/block). Pure + LOCAL-only; fail-closed (ASCII labels, unique labels,
+  scheme↔transport_class consistency, ShadowTLS refused, port range), byte-identical to the shell
+  (`MarshalIndent` 2-space + `SetEscapeHTML(false)`; `URLTEST_*` defaults shared with `render_singbox`).
+  Conformance gate `aggregate_render_go_equiv` folds two shell-rendered bundles through both producers and
+  raw-byte-diffs the profile; the shell stays authoritative (no cutover). `TestRenderAggregate`/
+  `TestRenderAggregateFailClosed` pin it. With P3-a/P3-b/P3-c-1 this brings bundle + aggregate fully into
+  the Go spine (subscription + two-hop routing remain). Additive: no wire/output change.
+
 ## [0.2.8] — 2026-06-19
 ### Added
 - RP-0008 **P3-c (part 1 — the link parser)**: `internal/spec.OutboundFromLink(tag, link)` +

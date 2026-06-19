@@ -67,6 +67,8 @@ func run(args []string) error {
 		return cmdBundle(rest)
 	case "link-outbound":
 		return cmdLinkOutbound(rest)
+	case "aggregate":
+		return cmdAggregate(rest)
 	case "reality-keys", "render-server", "subscription":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -433,6 +435,77 @@ func cmdLinkOutbound(args []string) error {
 	return nil
 }
 
+// cmdAggregate folds >=2 per-node distribution Bundles into ONE client sing-box profile (RP-0008 P3-c)
+// via the pure spec.RenderAggregate, writing the profile (jq-style) to --out (or stdout). The flag shape
+// mirrors the shell `myceliumctl aggregate`: --out FILE plus repeated `--bundle FILE [--name LABEL]` (a
+// --name binds to the preceding --bundle; an unnamed input defaults to node<N>). LOCAL-only: it reads the
+// input bundle files and writes the profile, no network. bundle_render's sibling; aggregate_render_go_equiv
+// asserts byte-identical output before any cutover.
+func cmdAggregate(args []string) error {
+	var out string
+	var files, labels []string
+	cur := -1
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--out":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("aggregate: --out needs a value")
+			}
+			out = args[i]
+		case "--bundle":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("aggregate: --bundle needs a value")
+			}
+			files = append(files, args[i])
+			labels = append(labels, "")
+			cur = len(files) - 1
+		case "--name":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("aggregate: --name needs a value")
+			}
+			if cur < 0 {
+				return fmt.Errorf("aggregate: --name %q has no preceding --bundle (give --bundle FILE first)", args[i])
+			}
+			if labels[cur] != "" {
+				return fmt.Errorf("aggregate: --bundle already has a --name (%q); only one --name per --bundle", labels[cur])
+			}
+			labels[cur] = args[i]
+		default:
+			return fmt.Errorf("aggregate: unknown argument: %s", args[i])
+		}
+	}
+	if out == "" {
+		return fmt.Errorf("aggregate: --out is required")
+	}
+	inputs := make([]spec.AggregateInput, 0, len(files))
+	for i, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("aggregate: read %s: %w", f, err)
+		}
+		var b spec.Bundle
+		if err := json.Unmarshal(data, &b); err != nil {
+			return fmt.Errorf("aggregate: %s is not valid bundle JSON: %w", f, err)
+		}
+		inputs = append(inputs, spec.AggregateInput{Bundle: b, Label: labels[i]})
+	}
+	profile, err := spec.RenderAggregate(inputs)
+	if err != nil {
+		return fmt.Errorf("aggregate: %w", err)
+	}
+	if out == "-" {
+		_, err = os.Stdout.Write(profile)
+		return err
+	}
+	if err := os.WriteFile(out, profile, 0o644); err != nil {
+		return fmt.Errorf("aggregate: write %s: %w", out, err)
+	}
+	return nil
+}
+
 // cmdVocab emits the canonical Go-owned control-plane vocabulary (spec.NewVocab) as
 // deterministic, indented JSON on stdout: the closed transport-class / region-bucket /
 // advisory-health vocabularies and the full proto->class/port/key/scheme/engine
@@ -478,6 +551,7 @@ Commands:
   share-link --proto P FILE|-                  render the dialable client share-link for a transport from LinkParams JSON (RP-0008 P3)
   bundle --params F --state F [--out F|-]       render a node's distribution Bundle JSON from params + identities (RP-0008 P3)
   link-outbound --tag T LINK                    parse a client share-link into a sing-box client outbound JSON (RP-0008 P3)
+  aggregate --out F --bundle F [--name L] ...   fold >=2 per-node bundles into one client sing-box profile (RP-0008 P3)
   version                                      print the spine version
   help                                         show this help
 

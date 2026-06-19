@@ -58,6 +58,10 @@
 #                               link-outbound) is BYTE-IDENTICAL to the shell myc_agg_link_outbound across
 #                               the transport matrix incl. the reserved-char round-trip + the shadowtls
 #                               fail-closed null (RP-0008 P3-c). SKIPs without Go
+#   * aggregate_render_go_equiv.sh — the Go aggregate fold (spec.RenderAggregate / myceliumctl aggregate)
+#                               is BYTE-IDENTICAL to the shell aggregate producer: two per-node bundles
+#                               folded into one client sing-box profile (namespaced outbounds + urltest +
+#                               selector), raw byte-diff (no timestamp) (RP-0008 P3-c). SKIPs without Go
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -138,6 +142,7 @@ GATES=(
 	"tests/conformance/share_link_go_equiv.sh"
 	"tests/conformance/bundle_render_go_equiv.sh"
 	"tests/conformance/aggregate_outbound_go_equiv.sh"
+	"tests/conformance/aggregate_render_go_equiv.sh"
 	"tests/conformance/spine_binary_build.sh"
 	"tests/conformance/engine_load_check.sh"
 	"tests/conformance/active_probe_owncert.sh"
