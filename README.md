@@ -132,12 +132,23 @@ Full term list: [docs/GLOSSARY.md](docs/GLOSSARY.md). Architecture layers and th
 
 ## Status
 
-**Phase 0 — Foundation:** the deploy-ready node scaffold has landed — multi-protocol data plane
+**Phase 0 — Foundation (landed):** the deploy-ready node scaffold — multi-protocol data plane
 (sing-box + AmneziaWG), control tooling, provisioning (Ansible), observability, conformance tests,
-and runbooks. The scaffold is deploy-ready for any operator to self-host on their own server; the
-project itself runs no public network. The roadmap now spans phases
-0→7; each phase is useful on its own and ships to production, and the mesh is extended on top of
-something already working, not instead of it.
+and runbooks.
+
+**Phase 1 — Distribution & on-device validation (closed):** genuine-TLS transports, a typed and
+self-replenishing endpoint bundle, and a self-updating subscription — validated hands-on over real
+cellular and Wi-Fi links.
+
+**Phase 2 — Adaptation layer (in progress):** the control plane that *measures and adapts* — a
+deterministic network-state detector, a reinforce-and-decay self-tuner, and a node-local
+auto-rotation loop that moves the active transport off a degraded path within rate limits, with
+anti-flapping and automatic rollback. In parallel the control logic is consolidating into a typed Go
+spine — *the shell renders and deploys; the Go binary decides and adapts.*
+
+The scaffold is deploy-ready for any operator to self-host on their own server; the project itself
+runs no public network. The roadmap spans phases 0→7; each phase is useful on its own and ships to
+production, and the mesh is extended on top of something already working, not instead of it.
 
 ## Principles
 
