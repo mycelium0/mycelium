@@ -11,6 +11,32 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.10] — 2026-06-19
+### Added
+- RP-0010 **Plane 1 (MEASURE)**: `internal/measure.Assembler` — the node-local seam that folds the
+  existing `internal/reach` health signal through the detector and the self-tuner into a
+  `rotate.PlanInput`, closing the adaptivity loop measure → detect → tune → assemble → plan. It WRAPs
+  existing components and adds NO new measurement surface (RP-0010 AC-6): it consumes only the
+  fast-class `spec.TransportHealth` window (success/failure per opaque transport ref) and never dials,
+  reads a file, or runs a process. Because reach reports only success/failure, the `DetectorSignal` is
+  DERIVED from the window — a window with ≥1 success proves the channel connects and handshakes; zero
+  successes is read as a black-hole; the by-products reach never measures (active-probe, post-connect
+  collapse, single-stream comparison) are presented as non-faulted — and the success ratio then grades
+  a connecting channel clean vs throttled inside the detector. Strictly ADVISORY (AC-4): it only
+  assembles a plan input, never actuates — actuation stays behind the RP-0012 triple gate. Stateful
+  across ticks (per-member detector hysteresis + evaporating tuner weight) and deterministic (the clock
+  is injected). Conformance gate `measure_pure_advisory` pins the purity (allowlist {fmt, sort, time,
+  internal/detect|rotate|spec|tune}; no socket/file/process/clock) and that it genuinely wires
+  detect+tune+spec → `rotate.PlanInput`. Tests cover the fold, the end-to-end loop-closes-and-acts
+  path, determinism, idle evaporation + verdict carry, and fail-closed construction. Daemon embedding
+  and live-loop wiring follow (C5b). Additive: no wire/output change.
+### Changed
+- The Go module path is now `github.com/mycelium0/mycelium` (was `github.com/mindicator/mycelium`),
+  aligning it with the repository home so `go get`/`go install` resolve and every import matches the
+  canonical location. Mechanical rename across `go.mod`, all `internal/` + `cmd/` imports, the
+  spine-build ldflags (`-X …spec.SourceRev`), and the purity-gate import allowlists; no behaviour
+  change.
+
 ## [0.2.9] — 2026-06-19
 ### Added
 - RP-0008 **P3-c (part 2 — the aggregate fold)**, completing the aggregate port: `internal/spec.RenderAggregate`
