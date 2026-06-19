@@ -11,6 +11,24 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.13] — 2026-06-19
+### Added
+- ADR-0033 (extends ADR-0029) + the inert `internal/spec.FrontConfig` schema for an OPTIONAL
+  operator-provided CDN/ingress front: bring-your-own-domain, opt-in, default-off. `FrontConfig.Validate`
+  pins the doctrine fail-closed — an enabled front requires the operator's own domain, may sit in front
+  of ONLY the genuine-single-TLS own-cert HTTP transports (`vless-xhttp-tls` / `vless-ws-tls` via the
+  closed `IsFrontableTransport` set; REALITY/raw/UDP refused), and is RELAY-PREFERRED: `FrontMode` is a
+  closed `{relay, terminate}` enum where `relay` is the default (`EffectiveMode`) and `terminate`
+  requires an explicit `ack_terminate_tradeoff` (a TLS-terminating edge is the metadata leak
+  THREAT-MODEL calls "worse than neutral" — ADR-0026). The schema records the efficacy framing: a front
+  is COMPLEMENTARY / last-resort (reachability on IP/SNI-blocking networks + control-plane hardening),
+  NOT a fix for the destination-class throttle, where the in-region two-hop is primary (ADR-0027). Gate
+  `front_relay_preferred` pins the closed vocab + the relay-preferred / frontable-only / domain-required
+  invariants + the efficacy framing (and runs the Go tests where a toolchain is present).
+  `control/front.config.example.json` documents it. INERT: nothing consumes `FrontConfig` yet — the
+  fronted-endpoint render + the deploy-time bring-your-own-domain wiring + an operator reachability field
+  test are a follow-on RP (ADR-0033 §Implementation). Additive: no wire/output change.
+
 ## [0.2.12] — 2026-06-19
 ### Added
 - RP-0010 **Plane-1 C5b (daemon embed)**: `myceliumd` now hosts the MEASURE plane. Given a
