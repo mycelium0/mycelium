@@ -245,11 +245,18 @@ install_spine() {
 		return 0
 	fi
 	run install -d -m 0755 "$TOOLING_DIR/bin"
+	# The timer-driven --update runs under systemd with an EMPTY environment (Environment=, no HOME). `go
+	# build` needs HOME to resolve its default GOPATH / GOENV; without it, internal-package import
+	# resolution fails with an empty-path error ("could not import internal/rotate: open : no such file")
+	# and the spine silently never rebuilt (the warn-not-die fallback masked it). Pin a node-local HOME +
+	# GOPATH so the build is independent of the (absent) service environment.
+	run install -d -m 0700 "$TOOLING_DIR/.gohome"
 	# `if ( ... ); then` neutralises set -e for the build subshell, so a build failure lands in the warn
 	# branch instead of aborting the update. CGO_ENABLED=0 -> static pure-Go binary (no libc/gcc surprises
 	# across node distros); -trimpath strips the checkout path (reproducibility + no-PII); GOCACHE is a
 	# stable node-local cache so repeated updates are fast incremental rebuilds, touching nothing global.
-	if ( cd "$ARTIFACT_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
+	if ( cd "$ARTIFACT_ROOT" && HOME="$TOOLING_DIR/.gohome" GOPATH="$TOOLING_DIR/.gopath" \
+			GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
 			go build -trimpath -ldflags "-buildid= -X github.com/mindicator/mycelium/internal/spec.SourceRev=$rev" \
 			-o "$bin" ./cmd/myceliumctl ); then
 		log "built + installed the Go spine -> $bin (rev $rev; inert in P3 chunk 1, shell tool stays authoritative)"
