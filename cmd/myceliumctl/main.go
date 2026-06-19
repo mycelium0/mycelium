@@ -20,9 +20,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/identity"
-	"github.com/mindicator/mycelium/internal/rotate"
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/identity"
+	"github.com/mycelium0/mycelium/internal/rotate"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 // defaultState matches the shell tool's default (control/state/identities.json).

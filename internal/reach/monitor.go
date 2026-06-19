@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mindicator/mycelium/internal/spec"
+	"github.com/mycelium0/mycelium/internal/spec"
 )
 
 // Monitor runs the node-local reachability measurement loop: each target is
