@@ -119,6 +119,100 @@ myc_render_server() {
 }
 
 # ---------------------------------------------------------------------------
+# render-server (Xray engine, vless-xhttp-tls) — ADR-0032 prototype (P1)
+# ---------------------------------------------------------------------------
+#
+# Renders the Xray-only transport `vless-xhttp-tls` (VLESS + XHTTP over genuine
+# single-layer TLS, own certificate, NO REALITY — ADR-0010 transport #10) from a
+# template + params + identity state, BY jq PATH. No secret material is invented
+# here; the certificate/key paths and SNI come from params, the client ids from
+# state. INERT prototype: this renders a config and is proven loadable by the
+# `xray_engine_load_check` gate; it is not yet wired into a live apply (that is the
+# follow-on RP per ADR-0032). Sets, on the first VLESS inbound:
+#   .port                                            <- vless_xhttp_tls_port (def 2087)
+#   .settings.clients                                <- from state, { id, email }
+#        (NO flow: xtls-rprx-vision is a REALITY/TCP shape, not XHTTP)
+#   .streamSettings.network                          <- "xhttp"
+#   .streamSettings.security                         <- "tls"
+#   .streamSettings.tlsSettings.serverName           <- tls_sni (own domain; C03)
+#   .streamSettings.tlsSettings.certificates         <- [{certificateFile,keyFile}]
+#   .streamSettings.xhttpSettings.path               <- xhttp_path_tls (def "/")
+
+# myc_render_xray_xhttp_tls TEMPLATE PARAMS_FILE STATE OUT
+myc_render_xray_xhttp_tls() {
+	local template params_file state out
+	template="$1"; params_file="$2"; state="$3"; out="$4"
+
+	[ -n "$template" ] || myc_die "render-xray-xhttp-tls: TEMPLATE is required"
+	[ -n "$params_file" ] || myc_die "render-xray-xhttp-tls: PARAMS is required"
+	[ -n "$state" ]    || myc_die "render-xray-xhttp-tls: STATE is required"
+	[ -n "$out" ]      || myc_die "render-xray-xhttp-tls: OUT is required"
+
+	myc_assert_json "$template" "template"
+
+	local params clients
+	params="$(myc_params_to_json "$params_file")"
+	myc_state_init "$state"
+	clients="$(myc_identity_clients_json "$state")"
+	if [ "$(printf '%s' "$clients" | jq 'length')" -eq 0 ]; then
+		myc_warn "render-xray-xhttp-tls: identity state has zero clients; the inbound will accept no one"
+	fi
+
+	local port tls_sni tls_cert tls_key xhttp_path
+	port="$(myc_params_get "$params" '.vless_xhttp_tls_port' '2087')"
+	# C03 (own-cert genuine-TLS): vless-xhttp-tls presents the node's OWN certificate, so its serverName
+	# MUST be the node's own domain — never the donor SNI / localhost fallback (that is a cert/SNI
+	# mismatch active-probe tell). Require an explicit tls_sni, exactly as the sing-box own-cert path does.
+	tls_sni="$(myc_params_get "$params" '.tls_sni')"
+	[ -n "$tls_sni" ] || myc_die "render-xray-xhttp-tls: params.tls_sni is empty — the own-cert genuine-TLS family must carry its OWN SNI (never the donor_sni/localhost fallback; that is a cert/SNI-mismatch tell). Set params.tls_sni."
+	tls_cert="$(myc_params_get "$params" '.tls_certificate_path' '/etc/mycelium/tls/fullchain.pem')"
+	tls_key="$(myc_params_get "$params" '.tls_private_key_path' '/etc/mycelium/tls/privkey.pem')"
+	xhttp_path="$(myc_params_get "$params" '.xhttp_path_tls' '/')"
+
+	# Xray VLESS clients for XHTTP carry NO flow (xtls-rprx-vision is a REALITY/TCP shape).
+	local xray_clients
+	xray_clients="$(printf '%s' "$clients" | jq -c 'map({ id: .id, email: .name })')"
+
+	local idx
+	idx="$(jq -r '
+		[.inbounds // [] | to_entries[]
+		 | select(.value.protocol == "vless")][0].key // empty
+	' "$template")"
+	if [ -z "$idx" ]; then
+		myc_die "render-xray-xhttp-tls: template has no inbound with protocol \"vless\": $template"
+	fi
+
+	local rendered
+	rendered="$(jq \
+		--argjson i "$idx" \
+		--argjson port "$port" \
+		--arg sni "$tls_sni" \
+		--arg cert "$tls_cert" \
+		--arg key "$tls_key" \
+		--arg path "$xhttp_path" \
+		--argjson clients "$xray_clients" \
+		'
+		.inbounds[$i].port = $port
+		| .inbounds[$i].protocol = "vless"
+		| .inbounds[$i].settings.clients = $clients
+		| .inbounds[$i].settings.decryption = "none"
+		| .inbounds[$i].streamSettings.network = "xhttp"
+		| .inbounds[$i].streamSettings.security = "tls"
+		| .inbounds[$i].streamSettings.tlsSettings.serverName = $sni
+		| .inbounds[$i].streamSettings.tlsSettings.certificates = [{ certificateFile: $cert, keyFile: $key }]
+		| .inbounds[$i].streamSettings.xhttpSettings.path = $path
+		' "$template" 2>/dev/null)"
+
+	if [ -z "$rendered" ] || ! printf '%s' "$rendered" | jq -e . >/dev/null 2>&1; then
+		myc_die "render-xray-xhttp-tls: rendering produced invalid JSON (check template shape)"
+	fi
+
+	printf '%s\n' "$rendered" | jq . | myc_atomic_write "$out"
+	myc_assert_json "$out" "rendered xray xhttp-tls config"
+	myc_log "wrote xray xhttp-tls config: $out (inbound index $idx, $(printf '%s' "$xray_clients" | jq 'length') client(s))"
+}
+
+# ---------------------------------------------------------------------------
 # subscription
 # ---------------------------------------------------------------------------
 #
