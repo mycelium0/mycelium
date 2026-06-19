@@ -11,6 +11,21 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.15] — 2026-06-19
+### Added
+- RP-0010 **C5 (advisory emit)** — the inert constructor for the ADR-0030 advisory-emit seam:
+  `internal/spec.BuildNodeStatusDigest` turns per-class `AdvisoryHealth()` projections (the lossy,
+  externalisable view — never the fine `ConnState`) into a `NodeStatusDigest`, enforcing the privacy
+  invariants BY CONSTRUCTION: **k-floor with omit-not-zero** (a class with `< k` member observations is
+  DROPPED, never zeroed/imputed; below the floor entirely it returns `ErrAggregationFloor` — emit
+  nothing, never a sub-floor digest), **class-aggregate** alive-dominant (one `(class, HealthValue)`
+  cell, no per-member row, no node ref), region forced `RegionUnspecified`, deterministic (sorted class
+  order). Pure, no I/O, no live emission/signing — the live emitter/cache/publisher remain a future
+  cross-cutting RP (ADR-0030). The `NodeStatusDigest` type + `Validate` were already the landed seam;
+  this adds the safe constructor + tests. Gate `node_status_digest_emit_safe` pins the emit-safety at
+  the conformance layer (no per-node/identity/location field in the type; the builder omits sub-floor
+  cells + forces unspecified region) so it holds where `go test` does not run. Additive: no wire change.
+
 ## [0.2.14] — 2026-06-19
 ### Added
 - RP-0010 **Plane-1 C5c-1 (deploy seam)**: `install_spine` now builds BOTH Go binaries from the fetched

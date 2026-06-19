@@ -8,6 +8,7 @@ package spec
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -98,5 +99,86 @@ func TestNodeStatusDigestNoPerNodeField(t *testing.T) {
 		if strings.Contains(wire, f) {
 			t.Fatalf("NodeStatusDigest wire shape must not contain a per-node/identity/location field, found %q in: %s", f, wire)
 		}
+	}
+}
+
+func TestBuildNodeStatusDigest(t *testing.T) {
+	scope := TrustScope{ID: "op", Label: "network", MaxHops: 0}
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	// k=3: reality-tcp has 3 members (one alive => class alive); amneziawg-udp has 2 (< k => OMITTED).
+	obs := map[TransportClass][]HealthValue{
+		TransportClassRealityTCP:   {HealthDegraded, HealthAlive, HealthUnknown},
+		TransportClassAmneziaWGUDP: {HealthAlive, HealthAlive},
+	}
+	d, err := BuildNodeStatusDigest(scope, obs, 3, 15*time.Minute, now)
+	if err != nil {
+		t.Fatalf("BuildNodeStatusDigest: %v", err)
+	}
+	if err := d.Validate(); err != nil {
+		t.Errorf("built digest does not validate: %v", err)
+	}
+	if len(d.Classes) != 1 {
+		t.Fatalf("classes = %d, want 1 (the sub-floor amneziawg class must be OMITTED, never zeroed)", len(d.Classes))
+	}
+	if d.Classes[0].Class != TransportClassRealityTCP || d.Classes[0].Health != HealthAlive {
+		t.Errorf("class[0] = %+v, want reality-tcp/alive (alive-dominant aggregate)", d.Classes[0])
+	}
+	if d.MinAggregate != 3 || d.SampleCount != 3 {
+		t.Errorf("floor/sample = %d/%d, want 3/3", d.MinAggregate, d.SampleCount)
+	}
+	if !d.IssuedAt.Equal(now) || !d.ExpiresAt.Equal(now.Add(15*time.Minute)) {
+		t.Errorf("ttl window wrong: issued %v expires %v", d.IssuedAt, d.ExpiresAt)
+	}
+	if d.Region != RegionUnspecified {
+		t.Errorf("region = %q, want unspecified", d.Region)
+	}
+}
+
+func TestBuildNodeStatusDigestAggregateAndDeterminism(t *testing.T) {
+	scope := TrustScope{ID: "op"}
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	obs := map[TransportClass][]HealthValue{
+		TransportClassRealityTCP:   {HealthDegraded, HealthUnknown}, // no alive => degraded
+		TransportClassAmneziaWGUDP: {HealthUnknown, HealthUnknown},  // all unknown => unknown
+	}
+	d1, err := BuildNodeStatusDigest(scope, obs, 2, time.Minute, now)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	d2, _ := BuildNodeStatusDigest(scope, obs, 2, time.Minute, now)
+	if !reflect.DeepEqual(d1, d2) {
+		t.Error("non-deterministic build (same obs must yield the same digest)")
+	}
+	got := map[TransportClass]HealthValue{}
+	for _, c := range d1.Classes {
+		got[c.Class] = c.Health
+	}
+	if got[TransportClassRealityTCP] != HealthDegraded {
+		t.Errorf("reality-tcp = %q, want degraded (no alive member)", got[TransportClassRealityTCP])
+	}
+	if got[TransportClassAmneziaWGUDP] != HealthUnknown {
+		t.Errorf("amneziawg-udp = %q, want unknown (all unknown)", got[TransportClassAmneziaWGUDP])
+	}
+}
+
+func TestBuildNodeStatusDigestFailClosed(t *testing.T) {
+	scope := TrustScope{ID: "op"}
+	now := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	two := []HealthValue{HealthAlive, HealthAlive}
+	// every class below the floor -> emit NOTHING (ErrAggregationFloor), never a sub-floor digest.
+	if _, err := BuildNodeStatusDigest(scope, map[TransportClass][]HealthValue{TransportClassRealityTCP: {HealthAlive}}, 3, time.Minute, now); !errors.Is(err, ErrAggregationFloor) {
+		t.Errorf("sub-floor: err = %v, want ErrAggregationFloor", err)
+	}
+	if _, err := BuildNodeStatusDigest(scope, map[TransportClass][]HealthValue{TransportClassRealityTCP: two}, 0, time.Minute, now); err == nil {
+		t.Error("k=0 should fail")
+	}
+	if _, err := BuildNodeStatusDigest(scope, map[TransportClass][]HealthValue{TransportClassRealityTCP: two}, 2, 0, now); err == nil {
+		t.Error("ttl=0 should fail")
+	}
+	if _, err := BuildNodeStatusDigest(scope, map[TransportClass][]HealthValue{TransportClass("made-up"): two}, 2, time.Minute, now); err == nil {
+		t.Error("an unknown class meeting the floor should fail closed")
+	}
+	if _, err := BuildNodeStatusDigest(TrustScope{}, map[TransportClass][]HealthValue{TransportClassRealityTCP: two}, 2, time.Minute, now); err == nil {
+		t.Error("an invalid scope should fail closed (via Validate)")
 	}
 }
