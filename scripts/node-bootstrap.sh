@@ -158,6 +158,8 @@ STATE_DIR="/var/lib/mycelium"
 TOOLING_DIR="/usr/local/lib/mycelium"
 SINGBOX_VERSION=""          # e.g. v1.13.13 — operator-pinned; required to install/upgrade
 SINGBOX_SHA256=""           # expected archive SHA256 — operator-supplied; fail-closed
+XRAY_VERSION=""             # e.g. v26.3.27 — operator-pinned; required ONLY when an xray-engine transport is enabled (ADR-0032)
+XRAY_SHA256=""              # expected archive SHA256 — operator-supplied; fail-closed
 CLIENT_NAMES="default"
 FORCE_DONOR=""
 NODE_ADDRESS=""             # this node's own reachable address for client subscriptions; if empty,
@@ -178,6 +180,12 @@ AWG_BIN_DIR="/usr/local/bin"   # amneziawg-go + awg/awg-quick land here when bui
 # Canonical sing-box release source (public GitHub releases). The exact tag + hash are operator
 # pins (fail-closed); only the public base URL is committed.
 SINGBOX_DL_BASE="https://github.com/SagerNet/sing-box/releases/download"
+
+# Canonical on-node xray path + release source (ADR-0032 dual-engine; installed ONLY when an
+# xray-engine transport is enabled). The tag + hash are operator pins (fail-closed); only the base URL
+# is committed.
+XRAY_BIN="/usr/local/bin/xray"
+XRAY_DL_BASE="https://github.com/XTLS/Xray-core/releases/download"
 
 # AmneziaWG constants (RP-0009 C3): the userspace source repos + pinned tags (AWG_GO_REPO/
 # AWG_TOOLS_REPO/AWG_GO_TAG/AWG_TOOLS_TAG), the in-tunnel "dialect" (AWG_TUNNEL_*/AWG_PEER_BASE_*/
@@ -246,6 +254,8 @@ while [ "$#" -gt 0 ]; do
 		--tooling-dir)     TOOLING_DIR="${2:?--tooling-dir needs a value}"; shift 2 ;;
 		--singbox-version) SINGBOX_VERSION="${2:?--singbox-version needs a value}"; shift 2 ;;
 		--singbox-sha256)  SINGBOX_SHA256="${2:?--singbox-sha256 needs a value}"; shift 2 ;;
+		--xray-version)    XRAY_VERSION="${2:?--xray-version needs a value}"; shift 2 ;;
+		--xray-sha256)     XRAY_SHA256="${2:?--xray-sha256 needs a value}"; shift 2 ;;
 		--clients)         CLIENT_NAMES="${2:?--clients needs a value}"; shift 2 ;;
 		--region-exclude)  AWG_REGION_EXCLUDE_FILE="${2:?--region-exclude needs a path}"; shift 2 ;;
 		--full-tunnel)     AWG_FULL_TUNNEL_OPTOUT=1; shift ;;
@@ -488,6 +498,14 @@ flow_bootstrap() {
 	install_tooling
 	ensure_identity
 	write_params
+	# ADR-0032 dual-engine: install xray-core ONLY when an xray-engine transport is enabled in the
+	# just-written params (default-off => no xray on a stock node). The xray CONFIG render + unit are a
+	# later P2 chunk; this only ensures the (pinned, checksum-verified) binary is present.
+	if node_needs_xray; then
+		install_xray
+	else
+		log "no xray-engine transport enabled; skipping xray install (dual-engine opt-in, default-off)."
+	fi
 	local candidate="$STATE_DIR/config.candidate.json"
 	render_candidate "$candidate"
 	if ! validate_config "$candidate"; then
@@ -533,6 +551,8 @@ flow_update() {
 		reexec_args+=(--checkout "$CHECKOUT_DIR" --state-dir "$STATE_DIR" --tooling-dir "$TOOLING_DIR")
 		if [ -n "$SINGBOX_VERSION" ]; then reexec_args+=(--singbox-version "$SINGBOX_VERSION"); fi
 		if [ -n "$SINGBOX_SHA256" ]; then reexec_args+=(--singbox-sha256 "$SINGBOX_SHA256"); fi
+		if [ -n "$XRAY_VERSION" ]; then reexec_args+=(--xray-version "$XRAY_VERSION"); fi
+		if [ -n "$XRAY_SHA256" ]; then reexec_args+=(--xray-sha256 "$XRAY_SHA256"); fi
 		reexec_args+=(--clients "$CLIENT_NAMES")
 		if [ -n "$AWG_REGION_EXCLUDE_FILE" ]; then reexec_args+=(--region-exclude "$AWG_REGION_EXCLUDE_FILE"); fi
 		if [ "$AWG_FULL_TUNNEL_OPTOUT" -eq 1 ]; then reexec_args+=(--full-tunnel); fi
