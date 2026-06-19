@@ -255,6 +255,26 @@ stable identifier linking requests from the same user (`PII_LEAK` / `USER_DEANON
   binary can be matched against source to rule out silent substitution. Reproducibility is the
   verifiable consequence of commitments 4.1–4.3.
 
+### 4.5. Supply-chain and the update path
+
+The self-update path is a first-order supply-chain surface — a poisoned update equals network-wide
+compromise — so it is held to *provenance before execution*:
+
+- **Signed before run.** A node verifies the operator's out-of-band signature on the pinned ref
+  **before** any fetched code is merged, installed, or executed; an unverifiable ref is refused, and
+  the network-update timer runs **only** in signature-verifying mode
+  ([development.md §8.7](docs/development.md),
+  [ADR-0015](docs/adr/0015-network-artifact-delivery-and-node-update.md)).
+- **No shared key material.** Per-node credentials (REALITY / AmneziaWG keypairs, and a self-signed
+  certificate only where that transport is enabled) are generated **locally at bootstrap**; key
+  material is never copied between operators or distributed network-wide
+  ([ADR-0014](docs/adr/0014-per-operator-node-credentials.md)).
+- **Certificate pinning, never blanket trust.** Self-signed transports pin the certificate by
+  SHA-256; `insecure: true` is forbidden. TLS is transport security only — never node identity.
+- **Fail-closed apply.** An update re-renders from the **local** pinned identity (never regenerating
+  it), validates before applying, and rolls back to last-known-good on any validation or post-apply
+  failure; a byte-identical candidate is a no-op, so an unchanged push causes no needless restart.
+
 ---
 
 ## 5. Severity classification
