@@ -33,9 +33,25 @@
 # and against a `<token>_enabled` flag in params.
 #
 # The list is the Go-owned registry (control/vocab.json, minus the standalone amneziawg dataplane), read
-# through the shared vocab accessor (RP-0008 P2) — never a hand-maintained copy. vocab.sh is sourced
-# before this lib, so the value is resolved once at source time.
+# through the shared vocab accessor (RP-0008 P2) — never a hand-maintained copy. It spans the FULL
+# servable registry (both the sing-box and Xray engines) because it is also the source for the BUNDLE,
+# which advertises every node endpoint regardless of engine. The sing-box SERVER + SUBSCRIPTION render
+# intersect their enabled set with the sing-box-engine protos via myc_sb_singbox_only (below) so an
+# enabled xray-only proto (vless-xhttp-tls) is delegated to the Xray engine, not fatally rendered into a
+# sing-box config (ADR-0032 dual-engine). vocab.sh is sourced before this lib, resolved once at source time.
 MYC_SB_PROTOS="$(myc_vocab_protos)"
+
+# myc_sb_singbox_only LIST -> LIST with the xray-engine protos removed (keep only what the sing-box engine
+# can actually serve/dial). Used by the sing-box server + subscription render to drop e.g. vless-xhttp-tls
+# (the xhttp transport is Xray-core only) while the BUNDLE keeps the full list. (ADR-0032 dual-engine.)
+myc_sb_singbox_only() {
+	local sb_set keep="" p
+	sb_set=" $(myc_vocab_protos_singbox) "
+	for p in $1; do
+		case "$sb_set" in *" $p "*) keep="$keep $p" ;; esac
+	done
+	printf '%s' "${keep# }"
+}
 
 # ---------------------------------------------------------------------------
 # urltest anti-flapping calibration (C22)
@@ -127,19 +143,23 @@ myc_sb_render_server() {
 	local enabled
 	enabled="$(myc_sb_enabled_list "$params")"
 	[ -n "$enabled" ] || myc_die "render-server: no protocols enabled in params (set at least one <proto>_enabled: true)"
+	# Drop xray-engine protos (e.g. vless-xhttp-tls): the sing-box engine cannot serve them — the Xray
+	# engine does (ADR-0032). The enabled set spans the full registry (shared with the bundle); the
+	# sing-box SERVER render keeps only its own engine's protos here, so enabling vless-xhttp-tls renders
+	# the sing-box config for its OTHER protocols (no xhttp inbound) instead of failing the whole render.
+	enabled="$(myc_sb_singbox_only "$enabled")"
+	[ -n "$enabled" ] || myc_die "render-server: no sing-box-servable protocols enabled (only xray-engine protos were on; the sing-box engine has nothing to render)."
 	myc_log "render-server (singbox): enabled protocols: $enabled"
 
-	# ENGINE-COMPATIBILITY fail-closed (BEFORE emitting any config): the `xhttp` transport is
-	# Xray-core ONLY. sing-box does not implement it — `sing-box check` rejects a config carrying
-	# `transport.type: "xhttp"` with FATAL "unknown transport type: xhttp", which would crash
-	# sing-box on load. The vless-xhttp-tls inbound in the template uses exactly that transport, so
-	# enabling vless-xhttp-tls on the sing-box engine would render a config sing-box cannot serve.
-	# Refuse LOUDLY here instead of shipping a config that crashes the live service. (The template
-	# inbound is intentionally kept for the future Xray serving path — a separate RP; the guard is
-	# what prevents the crash on the sing-box engine.)
+	# ENGINE-COMPATIBILITY backstop. The `xhttp` transport with genuine TLS (vless-xhttp-tls) is Xray-core
+	# ONLY — `sing-box check` rejects it with FATAL "unknown transport type: xhttp" and would crash on load.
+	# vless-xhttp-tls is an xray-ENGINE proto (ADR-0032) and myc_sb_singbox_only above already removed it
+	# from $enabled, so this guard is unreachable in normal operation; it stays as a fail-closed defence so
+	# a future regression that leaked an xray-only proto back into the sing-box enabled set refuses LOUDLY
+	# rather than shipping a config that crashes.
 	case " $enabled " in
 		*" vless-xhttp-tls "*)
-			myc_die "render-server: vless-xhttp-tls is enabled but the sing-box engine cannot serve it — the xhttp transport is Xray-core only (sing-box rejects transport.type \"xhttp\" with 'unknown transport type: xhttp' and would crash on load). Do NOT enable vless-xhttp-tls on the sing-box engine; it will be served via the Xray engine in a future RP." ;;
+			myc_die "render-server: vless-xhttp-tls leaked into the sing-box enabled set — the xhttp transport is Xray-core only (sing-box rejects transport.type \"xhttp\" with 'unknown transport type: xhttp' and would crash on load). This is unreachable in normal operation (myc_sb_singbox_only drops it); it is served by the Xray engine via 'render-server --engine xray --proto vless-xhttp-tls' (ADR-0032)." ;;
 	esac
 
 	# REALITY material is required as soon as any vless-reality-* protocol is on.
@@ -480,13 +500,17 @@ myc_sb_render_subscription() {
 	local enabled
 	enabled="$(myc_sb_enabled_list "$params")"
 	[ -n "$enabled" ] || myc_die "subscription: no protocols enabled in params"
+	# Drop xray-engine protos: a sing-box CLIENT cannot DIAL the xhttp transport either, so a sing-box
+	# subscription emits no vless-xhttp-tls outbound (the Xray client dials it instead — ADR-0032). The
+	# enabled set spans the full registry (shared with the bundle); keep only the sing-box-engine protos.
+	enabled="$(myc_sb_singbox_only "$enabled")"
+	[ -n "$enabled" ] || myc_die "subscription: no sing-box-dialable protocols enabled (only xray-engine protos were on)."
 	myc_log "subscription (singbox): enabled protocols: $enabled"
 
-	# ENGINE-COMPATIBILITY fail-closed (mirror of the render-server guard): the `xhttp` transport is
-	# Xray-core ONLY. A sing-box CLIENT cannot DIAL it either — a sing-box outbound with
-	# `transport.type: "xhttp"` is rejected with "unknown transport type: xhttp". So a sing-box
-	# subscription must NOT emit a vless-xhttp-tls outbound. Refuse loudly here rather than hand a
-	# client a config sing-box cannot load. (xhttp-tls will be served/dialed via Xray in a future RP.)
+	# ENGINE-COMPATIBILITY backstop (mirror of the render-server guard): the genuine-TLS `xhttp` transport
+	# (vless-xhttp-tls) is Xray-core ONLY — a sing-box outbound with `transport.type: "xhttp"` is rejected
+	# with "unknown transport type: xhttp". myc_sb_singbox_only above already removed it, so this guard is
+	# unreachable in normal operation and stays only as a fail-closed defence against a future regression.
 	case " $enabled " in
 		*" vless-xhttp-tls "*)
 			myc_die "subscription: vless-xhttp-tls is enabled but the sing-box engine cannot dial it — the xhttp transport is Xray-core only (a sing-box client rejects transport.type \"xhttp\"). Do NOT enable vless-xhttp-tls on the sing-box engine; it will be served via the Xray engine in a future RP." ;;

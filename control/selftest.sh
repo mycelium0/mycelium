@@ -933,8 +933,8 @@ note "C06 — per-family XHTTP path (reality-xhttp vs xhttp-tls carry DISTINCT p
 # ---------------------------------------------------------------------------
 # The two XHTTP families must be able to carry different plaintext paths so an on-path observer cannot
 # correlate them by an identical path. NOTE the engine split: the `xhttp` transport is Xray-core only,
-# so the sing-box ENGINE cannot SERVE the xhttp-tls family (the render-guard refuses it — see the
-# "engine-compat" case below) and the xhttp-tls path is asserted via the bundle Link (the xhttp-tls
+# so the sing-box ENGINE cannot SERVE the xhttp-tls family (the sing-box render SKIPS it / delegates it to
+# the Xray engine — see the "engine-compat" case below) and the xhttp-tls path is asserted via the bundle Link (the xhttp-tls
 # deliverable, consumed by an Xray client in a future RP). The sing-box reality-xhttp family IS served,
 # so its distinct path is asserted against the rendered sing-box SERVER config.
 C06_PARAMS="$WORK/c06.params.json"
@@ -979,33 +979,59 @@ if "$CTL" bundle --params "$C03_PARAMS" --state "$STATE" --out "$WORK/c03.bundle
 else
 	ok "C03 bundle refuses xhttp-tls with empty tls_sni (fail-closed; no donor-SNI fallback)"
 fi
-if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$C03_PARAMS" --state "$STATE" --out "$WORK/c03.server.json" >/dev/null 2>&1; then
-	bad "C03 server rendered xhttp-tls with NO tls_sni (cert/SNI mismatch tell)"
+# xhttp-tls is an xray-ENGINE proto (ADR-0032), so its server-side own-cert-SNI enforcement lives in the
+# Xray render path. The Xray engine must refuse an xhttp-tls render with empty tls_sni (same fail-closed).
+if "$CTL" render-server --engine xray --proto vless-xhttp-tls --params "$C03_PARAMS" --state "$STATE" --out "$WORK/c03.xray.json" >/dev/null 2>&1; then
+	bad "C03 xray server rendered xhttp-tls with NO tls_sni (cert/SNI mismatch tell)"
 else
-	ok "C03 server refuses xhttp-tls with empty tls_sni (fail-closed)"
+	ok "C03 xray server refuses xhttp-tls with empty tls_sni (fail-closed)"
+fi
+# The sing-box engine's own-cert family is vless-ws-tls; its server render must also refuse an empty tls_sni
+# (the same C03 guard, on the engine that serves it). This keeps sing-box-engine C03 coverage now that the
+# sing-box engine no longer renders xhttp-tls at all.
+C03_WS_PARAMS="$WORK/c03.ws.params.json"
+jq 'del(.tls_sni) | . + { vless_ws_tls_enabled: true, vless_ws_tls_port: 2089, ws_path: "/owncert-ws" }' "$SB_PARAMS" > "$C03_WS_PARAMS"
+if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$C03_WS_PARAMS" --state "$STATE" --out "$WORK/c03.ws.json" >/dev/null 2>&1; then
+	bad "C03 sing-box server rendered ws-tls with NO tls_sni (cert/SNI mismatch tell)"
+else
+	ok "C03 sing-box server refuses ws-tls with empty tls_sni (fail-closed)"
 fi
 
 # ---------------------------------------------------------------------------
-note "engine-compat — vless-xhttp-tls is REFUSED on the sing-box engine (xhttp is Xray-core only)"
+note "engine-compat — vless-xhttp-tls is SKIPPED (not crashed) on the sing-box engine; Xray serves it (ADR-0032)"
 # ---------------------------------------------------------------------------
-# The `xhttp` transport is implemented by Xray-core ONLY. sing-box rejects a config carrying
-# transport.type "xhttp" with FATAL "unknown transport type: xhttp" and would CRASH on load. The
-# template's vless-xhttp-tls inbound uses exactly that transport, so enabling vless-xhttp-tls on the
-# sing-box engine must FAIL CLOSED at render — a loud refusal, never a crash-on-load config. (Even with
-# a valid tls_sni present, so this is the engine-compat guard, NOT the C03 own-cert-SNI check above.)
-# The template inbound stays for the future Xray serving path; the render-guard is what prevents the crash.
+# The `xhttp` transport is implemented by Xray-core ONLY — sing-box rejects transport.type "xhttp" with
+# FATAL "unknown transport type: xhttp" and would CRASH on load. vless-xhttp-tls is now an xray-ENGINE
+# proto, so the sing-box engine's proto list (myc_vocab_protos_singbox) EXCLUDES it: enabling it must
+# leave the sing-box render to serve only its OWN protocols (NO vless-xhttp-tls-in inbound, NO
+# transport.type "xhttp") rather than failing — the Xray engine serves vless-xhttp-tls. (Pre-ADR-0032 the
+# sing-box render fail-closed REFUSED this; now it cleanly delegates, which is what makes a node that
+# enables xhttp-tls actually bootable — flow_bootstrap renders sing-box THEN brings up the xray engine.)
 XHT_PARAMS="$WORK/params.singbox-xhttptls.json"; XHT_OUT="$WORK/server.singbox-xhttptls.json"; rm -f "$XHT_OUT"
 jq '. + { vless_xhttp_tls_enabled: true, vless_xhttp_tls_port: 2087, xhttp_path_tls: "/owncert-tls", tls_sni: "tls.example.invalid" }' "$SB_PARAMS" > "$XHT_PARAMS"
+# NB: SB_PARAMS also enables vless-reality-xhttp, a sing-box-served REALITY proto that legitimately uses
+# transport.type "xhttp" — so the proof is SPECIFICALLY that the genuine-TLS vless-xhttp-tls-in inbound is
+# absent (not that "xhttp" appears nowhere).
 if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$XHT_PARAMS" --state "$STATE" --out "$XHT_OUT" >/dev/null 2>&1 && [ -s "$XHT_OUT" ]; then
-	bad "vless-xhttp-tls was RENDERED on the sing-box engine (would crash sing-box: 'unknown transport type: xhttp')"
+	if jq -e '([.inbounds[].tag] | index("vless-xhttp-tls-in")) == null' "$XHT_OUT" >/dev/null 2>&1; then
+		ok "vless-xhttp-tls is SKIPPED on the sing-box engine (renders cleanly with NO vless-xhttp-tls-in inbound; Xray serves it)"
+	else
+		bad "the sing-box render emitted the vless-xhttp-tls-in inbound (would crash sing-box: 'unknown transport type: xhttp')"
+	fi
 else
-	ok "vless-xhttp-tls is REFUSED on the sing-box engine (fail-closed; xhttp transport is Xray-core only)"
+	bad "the sing-box render FAILED with vless-xhttp-tls enabled (it must skip the xray-only proto, not refuse the whole render)"
 fi
-# The same xhttp-tls subscription render must also fail closed (a sing-box CLIENT cannot dial xhttp).
+# The sing-box subscription must likewise SKIP xhttp-tls (a sing-box client cannot dial it): render
+# succeeds and emits NO vless-xhttp-tls outbound for any client (the "xhttp-tls" token is specific to that
+# family; vless-reality-xhttp, which is correctly emitted, contains "xhttp" but never "xhttp-tls").
 if "$CTL" subscription --engine singbox --params "$XHT_PARAMS" --state "$STATE" --out "$WORK/subs.xhttptls" >/dev/null 2>&1; then
-	bad "vless-xhttp-tls subscription was emitted on the sing-box engine (a sing-box client cannot dial xhttp)"
+	if ! grep -rqiE 'xhttp-tls' "$WORK/subs.xhttptls" 2>/dev/null; then
+		ok "sing-box subscription SKIPS xhttp-tls (emits no vless-xhttp-tls outbound; client cannot dial it)"
+	else
+		bad "sing-box subscription emitted a vless-xhttp-tls outbound (a sing-box client cannot dial xhttp)"
+	fi
 else
-	ok "vless-xhttp-tls subscription is REFUSED on the sing-box engine (fail-closed; client cannot dial xhttp)"
+	bad "sing-box subscription FAILED with vless-xhttp-tls enabled (it must skip the xray-only proto)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1020,7 +1046,7 @@ WS_PARAMS="$WORK/params.singbox-wstls.json"; WS_OUT="$WORK/server.singbox-wstls.
 jq '. + { vless_ws_tls_enabled: true, vless_ws_tls_port: 2089, ws_path: "/owncert-ws", tls_sni: "tls.example.invalid" }' "$SB_PARAMS" > "$WS_PARAMS"
 # (1) server render SUCCEEDS (NOT refused — the engine-compat guard is xhttp-tls-only).
 if "$CTL" render-server --engine singbox --template "$SB_TEMPLATE" --params "$WS_PARAMS" --state "$STATE" --out "$WS_OUT" >/dev/null 2>&1 && [ -s "$WS_OUT" ]; then
-	ok "vless-ws-tls is SERVED on the sing-box engine (render succeeds; ws is native — NOT refused like xhttp-tls)"
+	ok "vless-ws-tls is SERVED on the sing-box engine (render succeeds; ws is native — NOT skipped/delegated like xhttp-tls)"
 else
 	bad "vless-ws-tls was REFUSED on the sing-box engine (it must be servable — ws is a native sing-box transport)"
 fi
