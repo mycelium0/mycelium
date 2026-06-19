@@ -11,6 +11,22 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.11] — 2026-06-19
+### Changed
+- Post-review hardening of the RP-0010 Plane-1 MEASURE plane and the Phase-2 purity gates (from the
+  `internal/measure` adversarial review):
+  - `internal/measure.New` now rejects two members sharing a `proto` — the planner keys candidate
+    selection on proto (rotate.Plan skips `c.Proto == active.Proto` and ranks by registry order), so a
+    duplicate would leave one member permanently un-selectable. Mirrors the existing duplicate-ref
+    rejection.
+  - The four Phase-2 purity gates (`detector_pure_no_probe`, `tuner_pure_advisory`,
+    `rotator_pure_planner`, `measure_pure_advisory`) shared determinism token-bans a future edit could
+    evade. Hardened all four: the wall-clock ban now matches `time.Now`/`time.Since` with or without a
+    trailing `(` (catches `var f = time.Now`); the channel ban catches the directional `chan<-`
+    spelling; and an ALIASED `import x "time"` (which slipped past the alias-blind path allowlist) is
+    now refused. `measure_pure_advisory` additionally forbids calling `rotate.Plan` (assemble-only,
+    AC-4). No production code path changed.
+
 ## [0.2.10] — 2026-06-19
 ### Added
 - RP-0010 **Plane 1 (MEASURE)**: `internal/measure.Assembler` — the node-local seam that folds the

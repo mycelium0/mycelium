@@ -64,6 +64,10 @@ func TestNewFailClosed(t *testing.T) {
 			{Ref: "x", Proto: candProto, Action: spec.RotationActionPromoteSibling},
 		}, good, detect.DefaultThresholds(), tune.DefaultParams()},
 		{"unknown proto", []Member{{Ref: "x", Proto: "not-a-proto", Action: spec.RotationActionPromoteSibling}}, good, detect.DefaultThresholds(), tune.DefaultParams()},
+		{"duplicate proto", []Member{
+			{Ref: "x", Proto: activeProto, Action: spec.RotationActionPromoteSibling},
+			{Ref: "y", Proto: activeProto, Action: spec.RotationActionPromoteSibling},
+		}, good, detect.DefaultThresholds(), tune.DefaultParams()},
 		{"invalid action", []Member{{Ref: "x", Proto: activeProto, Action: spec.RotationAction("teleport")}}, good, detect.DefaultThresholds(), tune.DefaultParams()},
 		{"port out of range", []Member{{Ref: "x", Proto: activeProto, Action: spec.RotationActionRotatePort, ToPort: 70000}}, good, detect.DefaultThresholds(), tune.DefaultParams()},
 		{"bad limits", twoMembers(), spec.RotationLimits{}, detect.DefaultThresholds(), tune.DefaultParams()},
