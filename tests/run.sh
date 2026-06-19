@@ -151,6 +151,7 @@ GATES=(
 	"tests/conformance/spine_binary_build.sh"
 	"tests/conformance/engine_load_check.sh"
 	"tests/conformance/xray_engine_load_check.sh"
+	"tests/conformance/xray_serve_gated_inert.sh"
 	"tests/conformance/active_probe_owncert.sh"
 	"tests/conformance/sub_channel_not_single_point.sh"
 	"tests/conformance/node_two_hop_failclosed.sh"

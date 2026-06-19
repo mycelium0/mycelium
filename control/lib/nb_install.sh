@@ -264,6 +264,83 @@ restart_singbox() { need_root; run systemctl enable --now sing-box 2>/dev/null |
 # orchestration-only.)
 apply_singbox() { need_root; run systemctl enable sing-box 2>/dev/null || true; run systemctl restart sing-box; }
 
+# install_xray_unit — the hardened xray.service for the OPTIONAL secondary engine (ADR-0032 dual-engine).
+# Peer of install_singbox_unit; kept in lockstep with infra/ansible/roles/xray/templates/xray.service.j2
+# (the AF_NETLINK directive is pinned by tests/conformance/unit_netlink_parity.sh — change BOTH together).
+# Two differences from the sing-box unit: (1) ExecStartPre runs `xray run -test` so a config xray cannot
+# parse FAILS THE START rather than crash-looping (fail-closed start, the unit-level peer of the pre-promote
+# validate_xray_config gate); (2) xray writes nothing at runtime, so there is no -D run dir and no
+# ReadWritePaths. Installs the unit DISABLED (daemon-reload only); apply_xray is what enables+starts it,
+# and that is reached only under the node_needs_xray guard.
+install_xray_unit() {
+	log "installing the xray systemd unit (optional secondary engine)"
+	need_root
+	local unit="/etc/systemd/system/xray.service"
+	if [ "$DRY_RUN" -eq 0 ]; then
+		cat >"$unit" <<UNIT
+[Unit]
+Description=Mycelium Xray data plane (vless-xhttp-tls; OPTIONAL secondary engine)
+Documentation=https://github.com/XTLS/Xray-core
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$XRAY_RUN_USER
+Group=$XRAY_RUN_GROUP
+ExecStartPre=$XRAY_BIN run -test -config $XRAY_CONFIG
+ExecStart=$XRAY_BIN run -config $XRAY_CONFIG
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=$XRAY_ETC
+ReadWritePaths=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+PrivateDevices=true
+DevicePolicy=closed
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+KeyringMode=private
+UMask=0077
+# AF_NETLINK is REQUIRED: xray subscribes to route/interface updates via rtnetlink at startup; without it
+# xray FATALs and the service crash-loops. Keep in lockstep with the sing-box unit (unit_netlink_parity.sh).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+	fi
+	run systemctl daemon-reload
+}
+
+restart_xray() { need_root; run systemctl enable --now xray 2>/dev/null || true; run systemctl restart xray; }
+
+# apply_xray — the flow-level apply primitive for the xray engine (peer of apply_singbox). xray is
+# Type=simple with no live reload of a new config file, so applying a config IS a restart. The unit's
+# ExecStartPre `xray run -test` re-validates at start, so a bad config refuses to start (fail-closed).
+apply_xray() { need_root; run systemctl enable xray 2>/dev/null || true; run systemctl restart xray; }
+
 install_tooling() {
 	log "installing control tooling to $TOOLING_DIR"
 	need_root

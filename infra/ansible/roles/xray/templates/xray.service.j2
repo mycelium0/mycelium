@@ -19,6 +19,9 @@ Type=simple
 User={{ xray_run_user }}
 Group={{ xray_run_group }}
 
+# Fail-closed start: a config xray cannot parse FAILS THE START instead of crash-looping
+# (kept in lockstep with install_xray_unit in control/lib/nb_install.sh).
+ExecStartPre={{ xray_bin_path }} run -test -config {{ xray_config_path }}
 ExecStart={{ xray_bin_path }} run -config {{ xray_config_path }}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

@@ -186,6 +186,15 @@ SINGBOX_DL_BASE="https://github.com/SagerNet/sing-box/releases/download"
 # is committed.
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_DL_BASE="https://github.com/XTLS/Xray-core/releases/download"
+# Xray engine service paths (ADR-0032 dual-engine; peers of SINGBOX_ETC/SINGBOX_CONFIG). The xray
+# engine serves from its OWN config, separate from sing-box's, so the two engines never collide.
+XRAY_ETC="/usr/local/etc/xray"
+XRAY_CONFIG="$XRAY_ETC/config.json"
+# Shared unprivileged runtime identity: xray runs as the SAME system user/group as sing-box so it can
+# read the per-node TLS cert/key (0640 root:$SINGBOX_RUN_GROUP) the own-cert xhttp-tls family presents —
+# no second user and no cert re-chown. (Defined here, after SINGBOX_RUN_USER/GROUP above.)
+XRAY_RUN_USER="$SINGBOX_RUN_USER"
+XRAY_RUN_GROUP="$SINGBOX_RUN_GROUP"
 
 # AmneziaWG constants (RP-0009 C3): the userspace source repos + pinned tags (AWG_GO_REPO/
 # AWG_TOOLS_REPO/AWG_GO_TAG/AWG_TOOLS_TAG), the in-tunnel "dialect" (AWG_TUNNEL_*/AWG_PEER_BASE_*/
@@ -339,6 +348,10 @@ TLS_DIR="$STATE_DIR/tls"                         # per-node self-signed cert + k
 # Canonical artifacts resolve off ARTIFACT_ROOT (the real checkout), NOT REPO_ROOT — see above.
 DONOR_LIST="$ARTIFACT_ROOT/nodes/dataplane/donor-sni-candidates.json"
 RENDER_TEMPLATE="$ARTIFACT_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
+# Xray engine render template + last-known-good (ADR-0032 dual-engine; peers of RENDER_TEMPLATE/
+# LASTGOOD_CONFIG). Used only when node_needs_xray; a stock node never touches these.
+XRAY_RENDER_TEMPLATE="$ARTIFACT_ROOT/nodes/dataplane/vless-xhttp-tls/xray.server.template.json"
+XRAY_LASTGOOD_CONFIG="$STATE_DIR/xray.config.lastgood.json"
 LASTGOOD_CONFIG="$STATE_DIR/config.lastgood.json"
 STAGED_CONFIG="$STATE_DIR/config.staged.json"
 ACK_MARKER="$STATE_DIR/config.staged.ack"
@@ -499,8 +512,9 @@ flow_bootstrap() {
 	ensure_identity
 	write_params
 	# ADR-0032 dual-engine: install xray-core ONLY when an xray-engine transport is enabled in the
-	# just-written params (default-off => no xray on a stock node). The xray CONFIG render + unit are a
-	# later P2 chunk; this only ensures the (pinned, checksum-verified) binary is present.
+	# just-written params (default-off => no xray on a stock node). This ensures the (pinned, checksum-
+	# verified) binary is present; the xray CONFIG render + unit + apply follow after the primary engine
+	# is up (the serve_xray block below).
 	if node_needs_xray; then
 		install_xray
 	else
@@ -516,6 +530,22 @@ flow_bootstrap() {
 	rm -f "$candidate" 2>/dev/null || true
 	install_singbox_unit
 	restart_singbox
+	# ADR-0032 dual-engine: bring up the OPTIONAL xray engine only when an xray-engine transport is
+	# enabled — AFTER the primary sing-box engine is live. Same fail-closed spine as sing-box: render a
+	# candidate, validate with `xray run -test`, promote with a known-good backup, then start (the unit's
+	# ExecStartPre re-validates). A stock node skips this entirely (node_needs_xray false).
+	if node_needs_xray; then
+		local xray_candidate="$STATE_DIR/xray.config.candidate.json"
+		render_xray_candidate "$xray_candidate"
+		if ! validate_xray_config "$xray_candidate"; then
+			rm -f "$xray_candidate" 2>/dev/null || true
+			die "xray candidate failed 'xray run -test' on bootstrap (fail-closed). Fix params/template."
+		fi
+		promote_xray_config "$xray_candidate"
+		rm -f "$xray_candidate" 2>/dev/null || true
+		install_xray_unit
+		restart_xray
+	fi
 	setup_amneziawg
 	setup_observability
 	# Render the served distribution bundle (RP-0007-b). Fail-closed: keeps last-known-good on failure.

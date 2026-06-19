@@ -150,6 +150,14 @@ harden_ufw() {
 	local p
 	for p in $enabled_tcp; do run ufw allow "$p/tcp"; done
 	for p in $enabled_udp; do run ufw allow "$p/udp"; done
+	# ADR-0032 dual-engine: the xray engine serves from a SEPARATE config (XRAY_CONFIG), so its listen
+	# ports are not in the sing-box config the loop above read. Open them too (xray inbounds key on
+	# `.port`; the xhttp-tls family is TCP). A stock node has no XRAY_CONFIG, so this opens nothing.
+	if [ -n "${XRAY_CONFIG:-}" ] && [ -f "$XRAY_CONFIG" ] && have jq; then
+		local xray_tcp
+		xray_tcp="$(jq -r '[.inbounds[]? | select(.port != null) | .port] | unique | .[]' "$XRAY_CONFIG" 2>/dev/null | tr '\n' ' ')"
+		for p in $xray_tcp; do run ufw allow "$p/tcp"; done
+	fi
 	# AmneziaWG UDP port (its conventional canon port; the actual value is operator/runtime).
 	if [ "$DO_AMNEZIAWG" -eq 1 ] && [ -f "$STATE_DIR/awg.port" ]; then
 		run ufw allow "$(cat "$STATE_DIR/awg.port")/udp"

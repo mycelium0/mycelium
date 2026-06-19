@@ -172,3 +172,56 @@ rollback_config() {
 		warn "no last-known-good config to roll back to; leaving the running service untouched."
 	fi
 }
+
+# ---------------------------------------------------------------------------
+# Xray engine config spine (ADR-0032 dual-engine) — the per-engine peers of the four sing-box
+# primitives above: render the enabled xray-engine inbound (vless-xhttp-tls) THROUGH the same
+# myceliumctl pipeline into a candidate, validate with `xray run -test` (the fail-closed gate the
+# renderer does not run itself), promote atomically keeping a known-good backup, rollback on failure.
+# Reached only under the node_needs_xray guard, so a stock node never invokes them.
+# ---------------------------------------------------------------------------
+render_xray_candidate() {
+	local candidate="$1"
+	log "rendering xray candidate config via myceliumctl -> $candidate"
+	[ -x "$MYCTL" ] || die "myceliumctl not found/executable: $MYCTL"
+	[ -f "$XRAY_RENDER_TEMPLATE" ] || die "xray render template missing: $XRAY_RENDER_TEMPLATE"
+	[ -f "$PARAMS_JSON" ] || die "params.json missing; run write_params first."
+	[ -f "$IDENTITIES_JSON" ] || die "identities.json missing; run ensure_identity first."
+	run "$MYCTL" render-server \
+		--engine xray --proto vless-xhttp-tls \
+		--template "$XRAY_RENDER_TEMPLATE" \
+		--params "$PARAMS_JSON" \
+		--state "$IDENTITIES_JSON" \
+		--out "$candidate" \
+		|| die "xray render-server failed (fail-closed; nothing promoted)."
+}
+
+# `xray run -test` is the fail-closed GATE the renderer does NOT run itself (peer of validate_config).
+validate_xray_config() {
+	local cfg="$1"
+	log "validating xray candidate with 'xray run -test' (fail-closed gate)"
+	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] xray run -test -c $cfg"; return 0; fi
+	have "$XRAY_BIN" || die "xray binary missing; cannot validate."
+	"$XRAY_BIN" run -test -c "$cfg" || return 1
+}
+
+promote_xray_config() {
+	# Atomically replace the live xray config with the candidate, keeping a known-good backup.
+	local candidate="$1"
+	need_root
+	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] promote $candidate -> $XRAY_CONFIG"; return 0; fi
+	install -d -m 0755 "$XRAY_ETC"
+	if [ -f "$XRAY_CONFIG" ]; then cp -f "$XRAY_CONFIG" "$XRAY_LASTGOOD_CONFIG"; fi
+	install -m 0644 "$candidate" "$XRAY_CONFIG"
+	log "promoted xray candidate to live config: $XRAY_CONFIG"
+}
+
+rollback_xray_config() {
+	need_root
+	if [ -f "$XRAY_LASTGOOD_CONFIG" ]; then
+		warn "rolling back xray to last known-good config (fail-closed)."
+		run install -m 0644 "$XRAY_LASTGOOD_CONFIG" "$XRAY_CONFIG"
+	else
+		warn "no last-known-good xray config to roll back to; leaving the running service untouched."
+	fi
+}
