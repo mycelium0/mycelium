@@ -1,0 +1,8 @@
+{
+  "_note": "OPTIONAL operator-provided CDN/ingress front (ADR-0033, extends ADR-0029). INERT in this release — nothing consumes it yet (the schema lands before the render/deploy a follow-on RP adds). Opt-in, default-off: a node with enabled=false is byte-identical to no front. BRING-YOUR-OWN-DOMAIN — the operator supplies 'domain' (their own); core registers none (positioning + ADR-0029). 'transport' must be a CDN-frontable shape — ONLY the genuine-single-TLS own-cert HTTP transports vless-xhttp-tls / vless-ws-tls (REALITY/raw/UDP cannot be fronted, a front would break them). 'mode' is RELAY-PREFERRED: relay (default) forwards the encrypted tunnel — the edge learns only that a client reached AN edge, never the inner destination; terminate makes the edge see the user's source address + destination hostnames (a metadata trade-off — ADR-0026 / THREAT-MODEL 'worse than neutral') and is allowed ONLY with ack_terminate_tradeoff=true. EFFICACY: a front is COMPLEMENTARY / last-resort — it adds reachability on networks that block by IP/SNI and hardens control-plane distribution, but it is NOT a fix for the destination-class throughput throttle, where the in-region two-hop is primary (THREAT-MODEL / ADR-0027).",
+  "enabled": false,
+  "domain": "front.your-own-domain.example",
+  "transport": "vless-xhttp-tls",
+  "mode": "relay",
+  "ack_terminate_tradeoff": false
+}
