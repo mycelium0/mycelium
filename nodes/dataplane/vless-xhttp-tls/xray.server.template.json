@@ -1,0 +1,33 @@
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": 0,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "",
+          "minVersion": "1.2",
+          "alpn": ["h2", "http/1.1"],
+          "certificates": [
+            { "certificateFile": "", "keyFile": "" }
+          ]
+        },
+        "xhttpSettings": {
+          "path": "/",
+          "mode": "auto"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "protocol": "freedom" }
+  ]
+}
