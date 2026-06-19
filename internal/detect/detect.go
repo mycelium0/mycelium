@@ -15,10 +15,11 @@
 // Two layers:
 //   - Classify is the PURE, stateless single-observation core: it reads the unambiguous probe
 //     signatures and returns the (state, reason) they indicate, with no memory.
-//   - Detector adds the fast-class success-ratio hysteresis dead-zone (route-flap damping) and an
-//     anti-flap confirmation count over a stream of observations, so a transient blip does not move
-//     the verdict. Decisions are deterministic: the same observation stream yields the same verdicts
-//     (RP-0010 AC-2).
+//   - Detector adds the fast-class success-ratio hysteresis dead-zone (a dual-threshold Schmitt-trigger
+//     = route-flap damping) and an anti-flap confirmation count (an N-consecutive-sample debounce/RFD
+//     primitive) over a stream of observations, so a transient blip does not move the verdict — both
+//     standard control-theory prior art (RP-0002 §W4.5 RFD/Schmitt/EWMA), not new invention. Decisions
+//     are deterministic: the same observation stream yields the same verdicts (RP-0010 AC-2).
 package detect
 
 import (
