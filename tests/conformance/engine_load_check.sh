@@ -15,21 +15,22 @@
 #   2. render with vless-ws-tls ENABLED (genuine single-layer TLS over sing-box's NATIVE WebSocket
 #      transport) and prove the render SUCCEEDS and `sing-box check` LOADS it — the AC-a1 proof that the
 #      genuine-TLS family is actually servable on the primary engine (the ws transport, unlike xhttp).
-#   3. render with vless-xhttp-tls ENABLED and prove the shell render FAILS CLOSED (the render-guard in
-#      control/lib/render_singbox.sh — `render-server` exits non-zero), so the bug can never reach a node:
-#      enabling xhttp-tls on the sing-box engine is a loud refusal, not a crash on load.
+#   3. render with vless-xhttp-tls ENABLED and prove the sing-box render cleanly DELEGATES it: the render
+#      SUCCEEDS but carries NO vless-xhttp-tls-in inbound (xhttp is Xray-core only; the Xray engine serves
+#      it — ADR-0032 dual-engine), and where sing-box is present that config LOADS. So a node that enables
+#      xhttp-tls still boots its sing-box engine (which renders BEFORE the xray engine comes up) instead of
+#      bricking — the dual-engine split, not a crash and not a whole-render refusal.
 #
 # Author: mindicator & silicon bags quartet.
 #
 # SKIP-IF-NO-BINARY: the offline suite runs on hosts without a sing-box binary (the maintainer's macOS
 # host; the jq-only CI lane). There the `sing-box check` HALF SKIPs (a printed note) — it is NOT a
-# failure, exactly like bundle_go_roundtrip skips when no Go toolchain is present. The render-guard
-# fail-closed HALF needs only bash + jq and ALWAYS runs. Where sing-box IS present (a node) the load
-# check runs for real.
+# failure, exactly like bundle_go_roundtrip skips when no Go toolchain is present. The render + delegation
+# HALF needs only bash + jq and ALWAYS runs. Where sing-box IS present (a node) the load check runs for real.
 #
-# Exit: 0 = the rendered config loads (or the load half was skipped, no sing-box) AND the guard refuses
-#       xhttp-tls; 1 = a rendered config sing-box rejects OR the render-guard is missing (xhttp-tls was
-#       rendered instead of refused); 2 = usage/env error.
+# Exit: 0 = the rendered config loads (or the load half was skipped, no sing-box) AND the sing-box engine
+#       cleanly skips/delegates xhttp-tls; 1 = a rendered config sing-box rejects OR the sing-box render
+#       emitted the xhttp-tls inbound / refused the whole render; 2 = usage/env error.
 
 set -uo pipefail
 
@@ -162,24 +163,37 @@ else
 	badln "vless-ws-tls FAILED to render on the sing-box engine: $(tr -d '\n' < "$WORK/ws.err" | cut -c1-200) (ws-tls must be SERVABLE — it is a native sing-box transport, unlike xhttp-tls)"
 fi
 
-# --- Render-guard fail-closed (ALWAYS runs; bash + jq only): enabling vless-xhttp-tls on the sing-box
-#     engine MUST be REFUSED by the shell render, because xhttp is Xray-core only and sing-box would
-#     crash on load. This proves the guard in control/lib/render_singbox.sh is present and effective —
-#     the positive assertion of the bug fix. If the render SUCCEEDS, the guard is missing/broken and a
-#     crash-on-load config would have shipped: that is a FAIL. ---
+# --- Engine-delegation (ALWAYS runs; bash + jq only): enabling vless-xhttp-tls on the sing-box engine
+#     must render CLEANLY but SKIP it — xhttp is Xray-core only, so the sing-box config must carry NO
+#     vless-xhttp-tls-in inbound (the Xray engine serves vless-xhttp-tls — ADR-0032 dual-engine). This
+#     proves render_singbox DELEGATES the xray-only proto rather than crashing sing-box OR refusing the
+#     whole render (which would brick a node that enables xhttp-tls, since flow_bootstrap renders the
+#     sing-box config BEFORE bringing up the xray engine). Where sing-box is present, the skipped-render
+#     config is additionally proven to LOAD (no 'unknown transport type: xhttp' crash). ---
 XH_PARAMS="$WORK/params.xhttptls.json"
 XH_OUT="$WORK/server.xhttptls.json"; rm -f "$XH_OUT"
 jq '. + { vless_xhttp_tls_enabled: true, vless_xhttp_tls_port: 2087, xhttp_path_tls: "/owncert-tls", tls_sni: "tls.example.invalid" }' "$PARAMS" > "$XH_PARAMS"
 if bash "$CTL" render-server --engine singbox --params "$XH_PARAMS" --state "$STATE" --out "$XH_OUT" >"$WORK/xh.err" 2>&1 && [ -s "$XH_OUT" ]; then
-	badln "vless-xhttp-tls was RENDERED on the sing-box engine (the render-guard is MISSING — this config would crash sing-box on load with 'unknown transport type: xhttp')"
+	if jq -e '([.inbounds[].tag] | index("vless-xhttp-tls-in")) == null' "$XH_OUT" >/dev/null 2>&1; then
+		okln "vless-xhttp-tls is SKIPPED on the sing-box engine (renders cleanly, NO vless-xhttp-tls-in inbound; Xray serves it)"
+		if [ -n "$SB" ]; then
+			if "$SB" check -c "$XH_OUT" >"$WORK/xh.check" 2>&1; then
+				okln "the xhttp-tls-enabled sing-box config LOADS in 'sing-box check' (no 'unknown transport type: xhttp' crash)"
+			else
+				badln "the xhttp-tls-enabled sing-box config did NOT load: $(tr -d '\n' < "$WORK/xh.check" | cut -c1-200)"
+			fi
+		fi
+	else
+		badln "vless-xhttp-tls-in inbound was RENDERED on the sing-box engine (would crash sing-box on load with 'unknown transport type: xhttp')"
+	fi
 else
-	okln "vless-xhttp-tls is REFUSED on the sing-box engine (render-guard fail-closed; xhttp is Xray-core only — no crash-on-load config ships)"
+	badln "the sing-box render FAILED with vless-xhttp-tls enabled (it must SKIP the xray-only proto, not refuse the whole render): $(tr -d '\n' < "$WORK/xh.err" | cut -c1-200)"
 fi
 
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
-	printf 'FAIL: a rendered sing-box config did not load, or the xhttp-tls render-guard is missing.\n' >&2
+	printf 'FAIL: a rendered sing-box config did not load, or the sing-box engine did not cleanly delegate xhttp-tls to Xray.\n' >&2
 	exit 1
 fi
-printf 'PASS: the default sing-box config loads (or load-half skipped, no binary) and xhttp-tls is refused fail-closed.\n'
+printf 'PASS: the default sing-box config loads (or load-half skipped, no binary) and vless-xhttp-tls is cleanly skipped (delegated to the Xray engine).\n'
 exit 0
