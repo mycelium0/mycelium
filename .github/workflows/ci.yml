@@ -1,0 +1,147 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# CI — enforce Mycelium's own invariants and prove the Go control-plane spine.
+#   * gates    — the full offline conformance suite WITH a Go toolchain, so the Go-equivalence /
+#                spine-build / vocab-regen gate halves actually RUN (not SKIP). Strict merge gate.
+#   * build    — compile + vet + gofmt + unit tests + race for the Go spine (ADR-0012). Strict.
+#   * lint     — stack linters (shell/yaml/terraform/ansible). Advisory until the tree is clean.
+#   * secret-scan — gitleaks. Strict.
+#   * badges   — publish self-hosted shields endpoints (coverage %, gate count) to the `badges`
+#                branch on push to main. No third-party account, no external token.
+# Third-party actions are pinned to a full commit SHA (supply-chain hygiene; dependabot bumps them).
+# OFFLINE only: no live-node / post-deploy gate runs here (they need a real node + donor).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: conformance gates (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Offline conformance suite (with Go — Go-half gates run, not skip)
+        run: bash tests/run.sh
+      - name: Control tooling selftest
+        run: bash control/selftest.sh
+
+  build:
+    name: go spine — build / vet / fmt / test / race (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make build
+      - run: make vet
+      - run: make fmt-check
+      - run: make test
+      - run: make race
+
+  lint:
+    name: stack linters (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          files="$(git ls-files '*.sh') control/myceliumctl"
+          echo "linting: $files"
+          shellcheck -S warning $files || true
+      - name: yamllint
+        run: |
+          pip install --user yamllint
+          python3 -m yamllint -d relaxed . || true
+      - name: setup terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      - name: terraform fmt -check
+        run: terraform -chdir=infra/terraform fmt -check -recursive || true
+      - name: ansible-lint
+        run: |
+          pip install --user ansible-lint
+          ~/.local/bin/ansible-lint infra/ansible || true
+
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  badges:
+    name: publish badge endpoints (main only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [gates, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Measure coverage + gate count
+        id: m
+        run: |
+          go test -coverprofile=cover.out ./... >/dev/null 2>&1 || true
+          # Fail-soft: a missing/empty cover.out must NOT abort the step under `set -eo pipefail`.
+          cov="$( { go tool cover -func=cover.out 2>/dev/null || true; } | awk '/^total:/{print $3}' )"
+          [ -n "$cov" ] || cov="n/a"
+          gates="$(ls tests/conformance/*.sh | wc -l | tr -d ' ')"
+          echo "cov=$cov"   >>"$GITHUB_OUTPUT"
+          echo "gates=$gates" >>"$GITHUB_OUTPUT"
+      - name: Publish self-hosted shields endpoints to the badges branch
+        env:
+          COV: ${{ steps.m.outputs.cov }}
+          GATES: ${{ steps.m.outputs.gates }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pct="${COV%\%}"; pct="${pct%.*}"; color=red
+          case "${pct:-0}" in ''|*[!0-9]*) pct=0;; esac
+          if   [ "$pct" -ge 80 ]; then color=brightgreen
+          elif [ "$pct" -ge 60 ]; then color=green
+          elif [ "$pct" -ge 40 ]; then color=yellow
+          elif [ "$pct" -ge 20 ]; then color=orange
+          fi
+          tmp="$(mktemp -d)"
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s","color":"%s"}\n' "$COV" "$color" >"$tmp/coverage.json"
+          printf '{"schemaVersion":1,"label":"gates","message":"%s passing","color":"blue"}\n' "$GATES" >"$tmp/gates.json"
+          printf 'Machine-generated shields.io endpoints, refreshed by CI on push to main. Do not edit by hand.\n' >"$tmp/README.md"
+          cd "$tmp"
+          git init -q
+          git checkout -q -b badges
+          git config user.name  "mycelium-ci"
+          git config user.email "mycelium-ci@example.com"
+          git add -A
+          git commit -q -m "ci: refresh badge endpoints (coverage ${COV}, gates ${GATES})"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${REPO}.git" badges
