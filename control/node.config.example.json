@@ -1,0 +1,22 @@
+{
+  "transports": [
+    "vless-reality-vision",
+    "vless-reality-grpc"
+  ],
+  "reachable": false,
+  "front": {
+    "enabled": false,
+    "domain": "front.your-own-domain.example",
+    "transport": "vless-ws-tls",
+    "mode": "relay",
+    "ack_terminate_tradeoff": false
+  },
+  "loops": {
+    "update": false,
+    "rotate": false,
+    "measure": false
+  },
+  "weather": {
+    "enabled": false
+  }
+}
