@@ -23,50 +23,11 @@ import (
 // the documented default; the per-identity password falls back to the shared protocol secret; the
 // own-cert genuine-TLS families fail closed without an explicit tls_sni (C03); ports must be 1..65535 (C09).
 func RenderBundle(params map[string]json.RawMessage, firstClientID, firstClientPassword string, generatedAt time.Time) (Bundle, error) {
-	// N4 fail-closed: an empty first-client id would splice into the Link as `vless://@server:port`.
-	if firstClientID == "" {
-		return Bundle{}, fmt.Errorf("bundle: first identity has an empty id — cannot build a dialable endpoint credential")
+	base, err := bundleBaseLinkParams(params, firstClientID, firstClientPassword)
+	if err != nil {
+		return Bundle{}, err
 	}
 	region := paramStr(params, "region_bucket", "unspecified")
-	nodeAddr := paramStr(params, "node_address", "")
-	if nodeAddr == "" {
-		return Bundle{}, fmt.Errorf("bundle: node_address is required")
-	}
-	donorSNI := paramStr(params, "donor_sni", "")
-	tlsFallback := donorSNI
-	if tlsFallback == "" {
-		tlsFallback = "localhost"
-	}
-	// C03: an own-cert genuine-TLS family (xhttp-tls/ws-tls) REQUIRES its own explicit tls_sni — never the
-	// donor/localhost fallback (a cert/SNI mismatch tell). Probe explicit presence separately.
-	if (paramBool(params, "vless_xhttp_tls_enabled") || paramBool(params, "vless_ws_tls_enabled")) &&
-		paramStr(params, "tls_sni", "") == "" {
-		return Bundle{}, fmt.Errorf("bundle: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — set params.tls_sni (never fall back to donor_sni)")
-	}
-	ipw := firstClientPassword // per-identity password; falls back to the shared protocol secret below.
-	or := func(a, b string) string {
-		if a != "" {
-			return a
-		}
-		return b
-	}
-	base := LinkParams{
-		Server:          nodeAddr,
-		UUID:            firstClientID,
-		DonorSNI:        donorSNI,
-		Pub:             paramStr(params, "reality_public_key", ""),
-		ShortID:         firstShortID(params),
-		TLSSNI:          paramStr(params, "tls_sni", tlsFallback),
-		SSPassword:      or(ipw, paramStr(params, "ss_password", "")),
-		Hy2Password:     or(ipw, paramStr(params, "hysteria2_password", "")),
-		TrojanPassword:  or(ipw, paramStr(params, "trojan_password", "")),
-		TUICPassword:    or(ipw, firstClientID),
-		GRPCServiceName: paramStr(params, "grpc_service_name", "grpc"),
-		XHTTPPath:       paramStr(params, "xhttp_path", "/"),
-		WSPath:          paramStr(params, "ws_path", "/ws"),
-	}
-	// xhttp_path_tls defaults to xhttp_path when unset (back-compat; C06 lets an operator set them apart).
-	base.XHTTPPathTLS = paramStr(params, "xhttp_path_tls", base.XHTTPPath)
 
 	var eps []Endpoint
 	for i := range transportRegistry {
@@ -103,6 +64,57 @@ func RenderBundle(params map[string]json.RawMessage, firstClientID, firstClientP
 		return Bundle{}, fmt.Errorf("bundle: no protocols enabled in params (set at least one <proto>_enabled: true)")
 	}
 	return Bundle{Version: NetworkStateVersion, Endpoints: eps, GeneratedAt: generatedAt}, nil
+}
+
+// bundleBaseLinkParams resolves the per-bundle base LinkParams (everything except the per-protocol Port)
+// from params + the first identity — the shared resolution RenderBundle and the fronted-endpoint render
+// both use, so the direct and fronted Links cannot drift. The bundle_render_go_equiv gate protects this
+// extraction (any change to the resolution would break byte-equivalence with the shell).
+func bundleBaseLinkParams(params map[string]json.RawMessage, firstClientID, firstClientPassword string) (LinkParams, error) {
+	// N4 fail-closed: an empty first-client id would splice into the Link as `vless://@server:port`.
+	if firstClientID == "" {
+		return LinkParams{}, fmt.Errorf("bundle: first identity has an empty id — cannot build a dialable endpoint credential")
+	}
+	nodeAddr := paramStr(params, "node_address", "")
+	if nodeAddr == "" {
+		return LinkParams{}, fmt.Errorf("bundle: node_address is required")
+	}
+	donorSNI := paramStr(params, "donor_sni", "")
+	tlsFallback := donorSNI
+	if tlsFallback == "" {
+		tlsFallback = "localhost"
+	}
+	// C03: an own-cert genuine-TLS family (xhttp-tls/ws-tls) REQUIRES its own explicit tls_sni — never the
+	// donor/localhost fallback (a cert/SNI mismatch tell). Probe explicit presence separately.
+	if (paramBool(params, "vless_xhttp_tls_enabled") || paramBool(params, "vless_ws_tls_enabled")) &&
+		paramStr(params, "tls_sni", "") == "" {
+		return LinkParams{}, fmt.Errorf("bundle: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — set params.tls_sni (never fall back to donor_sni)")
+	}
+	ipw := firstClientPassword // per-identity password; falls back to the shared protocol secret below.
+	or := func(a, b string) string {
+		if a != "" {
+			return a
+		}
+		return b
+	}
+	base := LinkParams{
+		Server:          nodeAddr,
+		UUID:            firstClientID,
+		DonorSNI:        donorSNI,
+		Pub:             paramStr(params, "reality_public_key", ""),
+		ShortID:         firstShortID(params),
+		TLSSNI:          paramStr(params, "tls_sni", tlsFallback),
+		SSPassword:      or(ipw, paramStr(params, "ss_password", "")),
+		Hy2Password:     or(ipw, paramStr(params, "hysteria2_password", "")),
+		TrojanPassword:  or(ipw, paramStr(params, "trojan_password", "")),
+		TUICPassword:    or(ipw, firstClientID),
+		GRPCServiceName: paramStr(params, "grpc_service_name", "grpc"),
+		XHTTPPath:       paramStr(params, "xhttp_path", "/"),
+		WSPath:          paramStr(params, "ws_path", "/ws"),
+	}
+	// xhttp_path_tls defaults to xhttp_path when unset (back-compat; C06 lets an operator set them apart).
+	base.XHTTPPathTLS = paramStr(params, "xhttp_path_tls", base.XHTTPPath)
+	return base, nil
 }
 
 // paramStr mirrors the shell `myc_params_get` (jq -r '.key // empty' then a non-empty test): it returns

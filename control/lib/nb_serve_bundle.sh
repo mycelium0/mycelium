@@ -148,4 +148,7 @@ render_serve_bundle() {
 	record_bundle_served_age 0
 	log "served bundle updated (validated): $BUNDLE_SERVED ($(jq '.endpoints | length' "$BUNDLE_SERVED" 2>/dev/null || echo '?') endpoint(s))."
 	log "serve it over HTTPS with a profile-update-interval header so clients self-poll (see roles/caddy: caddy_serve_bundle)."
+	# ADR-0033 P2: apply the OPTIONAL operator front (re-render the served bundle WITH the fronted endpoint
+	# + compile the edge config). Default-OFF no-op unless a node-local front.config.json is enabled.
+	if command -v front_setup >/dev/null 2>&1; then front_setup; fi
 }
