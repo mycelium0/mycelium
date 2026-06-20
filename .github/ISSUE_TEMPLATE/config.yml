@@ -1,0 +1,15 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Issue chooser: no blank issues; route security privately and questions to Discussions.
+
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/mycelium0/mycelium/security/advisories/new
+    about: Report anything that could expose an operator, a node, or a user — privately, never as a public issue.
+  - name: Questions & discussion
+    url: https://github.com/mycelium0/mycelium/discussions
+    about: Design questions, usage help, and general discussion.

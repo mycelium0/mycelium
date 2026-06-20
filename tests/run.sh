@@ -109,6 +109,11 @@
 #   * version_changelog_sync.sh — internal/spec.Version (the single-source spine version) equals the
 #                               newest CHANGELOG heading, so a version bump and its changelog entry
 #                               can never drift apart (development.md §1.2 version hygiene). OFFLINE
+#   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
+#                               internal/spec.Version and the go.mod go directive (no silent drift),
+#                               the badge block makes no operated-network/uptime/online claim
+#                               (ADR-0016), and every shields endpoint references only this repo's
+#                               slug (RP-0011 Operability chunk A / AC-10). OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -173,6 +178,7 @@ GATES=(
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/version_changelog_sync.sh"
+	"tests/conformance/readme_badges_honest.sh"
 	"control/selftest.sh"
 )
 

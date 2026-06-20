@@ -11,6 +11,17 @@ later. See the LICENSE file in the repository root.
 
 # Mycelium
 
+<p align="center">
+  <a href="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml"><img src="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mycelium0/mycelium/badges/gates.json" alt="conformance gates">
+  <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mycelium0/mycelium/badges/coverage.json" alt="Go test coverage">
+  <img src="https://img.shields.io/badge/version-0.2.19-blue" alt="version 0.2.19">
+  <img src="https://img.shields.io/badge/go-1.23%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.23+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License: AGPL-3.0-or-later"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/contribute-welcome-brightgreen" alt="contribute"></a>
+  <a href="https://github.com/mycelium0/mycelium/discussions"><img src="https://img.shields.io/badge/discuss-github-8A2BE2" alt="discuss on GitHub"></a>
+</p>
+
 > 🇬🇧 Resilient private connectivity over unreliable networks. · 🇨🇳 在不可靠网络上提供有韧性的私有连接。 · 🇮🇳 अविश्वसनीय नेटवर्कों पर सुदृढ़ निजी कनेक्टिविटी। · 🇪🇸 Conectividad privada y resiliente sobre redes poco fiables. · 🇸🇦 اتصال خاص ومرن عبر الشبكات غير الموثوقة. · 🇫🇷 Connectivité privée et résiliente sur des réseaux peu fiables. · 🇷🇺 Устойчивая приватная связь поверх ненадёжных сетей. · 🇵🇹 Conectividade privada e resiliente sobre redes não confiáveis. · 🇮🇩 Konektivitas privat yang tangguh di jaringan tak andal. · 🇩🇪 Robuste private Konnektivität über unzuverlässige Netze. · 🇯🇵 不安定なネットワーク上での回復力あるプライベート接続。 · 🇹🇷 Güvenilmez ağlar üzerinde dayanıklı, özel bağlantı. · 🇰🇷 불안정한 네트워크에서도 견고한 프라이빗 연결. · 🇮🇷 اتصال خصوصیِ پایدار روی شبکه‌های نامطمئن.
 
 > [!IMPORTANT]
