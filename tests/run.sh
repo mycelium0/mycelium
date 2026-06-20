@@ -109,6 +109,12 @@
 #   * version_changelog_sync.sh — internal/spec.Version (the single-source spine version) equals the
 #                               newest CHANGELOG heading, so a version bump and its changelog entry
 #                               can never drift apart (development.md §1.2 version hygiene). OFFLINE
+#   * node_profile_single_source.sh — the unified node profile (ADR-0034) is ONE node-local
+#                               descriptor of default-off CAPABILITIES, never a node-TYPE enum and never
+#                               a second divergent profile: one internal/spec.NodeProfile schema with no
+#                               type/kind selector, the proto->enable-key mapping read from the registry
+#                               (not restated), the committed example all-default-off / inert, and NO
+#                               bootstrap path writes a node.config.json (operator-supplied). OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -169,6 +175,7 @@ GATES=(
 	"tests/conformance/node_status_digest_emit_safe.sh"
 	"tests/conformance/front_relay_preferred.sh"
 	"tests/conformance/front_deploy_inert.sh"
+	"tests/conformance/node_profile_single_source.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"

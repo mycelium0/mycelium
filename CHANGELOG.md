@@ -11,6 +11,23 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.20] — 2026-06-21
+### Added
+- ADR-0034 **unified node profile (RP-0011 Operability & Release, chunk B)** — the INERT, node-local
+  descriptor that unifies what a node IS into ONE declaration: `internal/spec.NodeProfile`, where
+  transports / reachability / CDN front / two-hop ingress / background loops / (reserved) weather opt-in
+  are **default-off CAPABILITY fields of one node form**. There is deliberately NO node-TYPE enum (fungi
+  is a reversible niche — ADR-0018) and NO engine selector (engines stay additive — ADR-0032; the engine
+  is derived from the enabled transports, never chosen). `Validate()` is fail-closed: transport names are
+  checked against the Go-owned registry (never a restated `<proto>_enabled` rule), the front delegates to
+  the ADR-0033 invariants (relay default, frontable-only, terminate-needs-ack), the two-hop minimal shape
+  is required, and the reserved weather slot is refused while inert. `ParseNodeProfile` refuses unknown
+  fields, so a stray node-"type" enum fails closed. Committed example `control/node.config.example.json`
+  (all default-off; the real descriptor is node-local / never committed). New gate
+  `node_profile_single_source` (one schema, capabilities-not-types, registry-read, example inert, no
+  bootstrap path writes it). Nothing consumes it yet — the bootstrap reads it ADDITIVELY in a later chunk
+  (byte-identical for a node that adopts no new field). Suite 50 → 51.
+
 ## [0.2.19] — 2026-06-20
 ### Added
 - ADR-0033 **CDN/ingress front P2-2 (edge config compiler) + P2-3 (bundle integration + deploy wiring)**.

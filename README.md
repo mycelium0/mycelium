@@ -15,9 +15,8 @@ later. See the LICENSE file in the repository root.
   <a href="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml"><img src="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mycelium0/mycelium/badges/gates.json" alt="conformance gates">
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mycelium0/mycelium/badges/coverage.json" alt="Go test coverage">
-  <img src="https://img.shields.io/badge/version-0.2.19-blue" alt="version 0.2.19">
+  <img src="https://img.shields.io/badge/version-0.2.20-blue" alt="version 0.2.20">
   <img src="https://img.shields.io/badge/go-1.23%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.23+">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License: AGPL-3.0-or-later"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/contribute-welcome-brightgreen" alt="contribute"></a>
   <a href="https://github.com/mycelium0/mycelium/discussions"><img src="https://img.shields.io/badge/discuss-github-8A2BE2" alt="discuss on GitHub"></a>
 </p>
