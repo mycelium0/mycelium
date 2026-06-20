@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -69,7 +70,9 @@ func run(args []string) error {
 		return cmdLinkOutbound(rest)
 	case "aggregate":
 		return cmdAggregate(rest)
-	case "reality-keys", "render-server", "subscription":
+	case "subscription":
+		return cmdSubscription(rest)
+	case "reality-keys", "render-server":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
 		usage(os.Stdout)
@@ -402,6 +405,78 @@ func cmdBundle(args []string) error {
 	}
 	if err := os.WriteFile(*out, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("bundle: write %s: %w", *out, err)
+	}
+	return nil
+}
+
+// cmdSubscription emits per-client sing-box + Clash-Meta subscription configs (RP-0008 P3-d) via
+// spec.RenderSubscription — the Go port of the shell `myceliumctl subscription --engine singbox`.
+// It writes <safe>.singbox.json (marshalled exactly like bundle: SetEscapeHTML(false) + 2-space indent
+// + trailing newline) and <safe>.clash.yaml per client into the --out directory.
+func cmdSubscription(args []string) error {
+	fs := flag.NewFlagSet("subscription", flag.ContinueOnError)
+	paramsPath := fs.String("params", "", "params.json (required)")
+	statePath := fs.String("state", "", "identities.json (required)")
+	out := fs.String("out", "control/out", "output directory")
+	engine := fs.String("engine", "singbox", "engine (only singbox is ported to the Go spine)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *engine != "singbox" {
+		return fmt.Errorf("subscription: --engine %q is not ported to the Go spine; use control/myceliumctl for the xray subscription", *engine)
+	}
+	if *paramsPath == "" || *statePath == "" {
+		return fmt.Errorf("subscription: --params and --state are required")
+	}
+	pdata, err := os.ReadFile(*paramsPath)
+	if err != nil {
+		return fmt.Errorf("subscription: read params %s: %w", *paramsPath, err)
+	}
+	var pmap map[string]json.RawMessage
+	if err := json.Unmarshal(pdata, &pmap); err != nil {
+		return fmt.Errorf("subscription: %s is not valid params JSON: %w", *paramsPath, err)
+	}
+	sdata, err := os.ReadFile(*statePath)
+	if err != nil {
+		return fmt.Errorf("subscription: read state %s: %w", *statePath, err)
+	}
+	var st struct {
+		Clients []struct {
+			Name     string `json:"name"`
+			ID       string `json:"id"`
+			Password string `json:"password"`
+		} `json:"clients"`
+	}
+	if err := json.Unmarshal(sdata, &st); err != nil {
+		return fmt.Errorf("subscription: %s is not valid identity state JSON: %w", *statePath, err)
+	}
+	clients := make([]spec.SubClient, 0, len(st.Clients))
+	for _, c := range st.Clients {
+		clients = append(clients, spec.SubClient{Name: c.Name, ID: c.ID, Password: c.Password})
+	}
+	subs, err := spec.RenderSubscription(pmap, clients)
+	if err != nil {
+		return fmt.Errorf("subscription: %w", err)
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return fmt.Errorf("subscription: mkdir %s: %w", *out, err)
+	}
+	for _, s := range subs {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(s.Singbox); err != nil {
+			return fmt.Errorf("subscription: marshal sing-box config for %q: %w", s.Name, err)
+		}
+		sbPath := filepath.Join(*out, s.Safe+".singbox.json")
+		if err := os.WriteFile(sbPath, buf.Bytes(), 0o644); err != nil {
+			return fmt.Errorf("subscription: write %s: %w", sbPath, err)
+		}
+		clashPath := filepath.Join(*out, s.Safe+".clash.yaml")
+		if err := os.WriteFile(clashPath, []byte(s.Clash), 0o644); err != nil {
+			return fmt.Errorf("subscription: write %s: %w", clashPath, err)
+		}
 	}
 	return nil
 }
