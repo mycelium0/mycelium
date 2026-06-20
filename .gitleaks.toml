@@ -1,0 +1,27 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# gitleaks config — extend the default ruleset, then allowlist KNOWN false positives. There are no
+# real secrets in the tree (per-node key material is gitignored, never committed — see .gitignore and
+# the no_contact_leak / no_dataplane_pii gates). The generic-api-key rule is noisy on the transport
+# vocabulary name "hysteria2" and on the self-test password SENTINEL placeholder; those are config
+# identifiers and test fixtures, not credentials.
+
+title = "Mycelium gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives: transport-vocabulary identifiers + a self-test sentinel; node-local secrets are gitignored, not in the tree."
+# Allowlist by matched-secret content (precise — clears the finding only when the 'secret' is one of
+# these non-secret strings), plus the operator-local, gitignored settings file (absent in CI anyway).
+regexes = [
+  '''hysteria2''',
+  '''SENTINEL_HY2_PW''',
+]
+paths = [
+  '''\.claude/''',
+]
