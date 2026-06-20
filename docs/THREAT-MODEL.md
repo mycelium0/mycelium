@@ -189,6 +189,36 @@ selection.
 > it cannot follow a single impaired hostname inside an otherwise-native range — so where domain-grain
 > Selective Growth is required, the xray-class transport is the correct engine.
 
+## Attack surface: non-443 port throughput degradation (field-observed, distinct from the destination throttle)
+
+Field testing on a real high-interference mobile network surfaced a **second, independent** download-direction
+throttle, keyed not on the destination but on the **TCP port**: a foreign genuine-TLS exit on a **non-443**
+port is choked to a trickle — TLS completes, the first bytes arrive, then sustained download freezes (the same
+"connects but nothing loads" signature) — while the **same exit on port 443** carries full throughput.
+
+**How it was separated from the destination-class throttle.** A control isolated the variable: the *same* node,
+the *same* transport (genuine-TLS over WebSocket), the *same* certificate and credential — only the **port**
+changed. Port 443 carried video / messenger / web traffic normally; ports 2087 and 2089 on that node both
+froze. So on this network the discriminator is the **port**, not the destination AS / subnet (which would have
+degraded 443 too) and not the flow signature (identical across the two ports). The two throttles are distinct
+and can apply together: the destination-class one (above) keys on *where the bytes go*, this one on *which port*.
+
+**Mitigation — reach the genuine-TLS family on 443.** Unlike the destination-class throttle, a port-keyed
+filter **is** defeated by moving the client-visible port to 443:
+
+- **Serve the genuine-TLS family on 443** where a port is free, or
+- **Front it onto 443** via a TLS-SNI-passthrough edge ([ADR-0033](adr/0033-operator-cdn-front-relay-byod.md)
+  relay mode): the client dials `front-domain:443` (passing the port filter), and the edge forwards the raw TLS
+  to the node's non-443 port over a node-to-node hop that never crosses the user's filtered path. This is the
+  one case where the operator front is a **primary** fix rather than complementary — because here the
+  discriminator is exactly the port/SNI the front rewrites, not the destination class the front cannot escape.
+
+**Consequence for the port canon.** The genuine-single-TLS own-cert family's canonical ports (`xhttp-tls` 2087,
+`ws-tls` 2089) were placed *off* 443 deliberately (port-canon distinctness); on a network with this port filter
+those ports are unreachable directly, so the family must be reached on 443 (direct or fronted). The
+field-validated working shape on this network is **`ws-tls` on 443**; the genuine-TLS `xhttp-tls` engine is
+sound but, on its 2087 default, reachable on such a network only behind a 443 front.
+
 ## Attack surface: carriers, bridges, and spores
 
 Treating any carrier that moves authenticated bytes as a possible bridge (the carrier-agnostic model
