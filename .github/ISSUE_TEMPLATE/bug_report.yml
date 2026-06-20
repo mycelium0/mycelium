@@ -1,0 +1,69 @@
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# Bug-report issue form. Steers anything operator/node/user-exposing to a PRIVATE security advisory
+# and requires a redacted (PII-free) bundle for diagnostics — never raw journald output.
+
+name: Bug report
+description: Report a defect in the Mycelium server software
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Mycelium.
+
+        > ⚠️ **Privacy — read before posting.** A public issue is world-readable. **Do not paste raw
+        > logs, IP addresses, hostnames, domains, keys, UUIDs, or `journalctl` output.** Attach a
+        > **sanitized diagnostics bundle** instead (a redacted-by-construction bundle is being added
+        > to the CLI; until then, hand-redact). Anything that could expose an **operator, a node, or
+        > a user** is a security matter — report it through a private
+        > [Security Advisory](https://github.com/mycelium0/mycelium/security/advisories/new), not here.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I have removed all IPs, hostnames, domains, keys, UUIDs, and raw logs from this report.
+          required: true
+        - label: This bug does not, by itself, expose an operator, a node, or a user (if it does, I will use a private Security Advisory instead).
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the defect and what you expected instead.
+      placeholder: When I run … the node … but I expected …
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The minimal sequence that triggers it.
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions (redacted)
+      description: Spine version (`internal/spec.Version`), OS/distro, and engine versions — names and versions only, no host identifiers.
+      placeholder: |
+        spine: 0.2.x
+        OS: <distro> <version>
+        engine: sing-box <ver> / xray <ver>
+    validations:
+      required: true
+  - type: textarea
+    id: bundle
+    attributes:
+      label: Sanitized diagnostics (optional)
+      description: Paste the redacted diagnostics bundle, or note that you reviewed it and it is clean before attaching.
+    validations:
+      required: false
