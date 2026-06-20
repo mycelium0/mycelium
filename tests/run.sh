@@ -149,6 +149,7 @@ GATES=(
 	"tests/conformance/aggregate_outbound_go_equiv.sh"
 	"tests/conformance/aggregate_render_go_equiv.sh"
 	"tests/conformance/subscription_go_equiv.sh"
+	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/spine_binary_build.sh"
 	"tests/conformance/engine_load_check.sh"
 	"tests/conformance/xray_engine_load_check.sh"

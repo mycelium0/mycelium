@@ -72,7 +72,9 @@ func run(args []string) error {
 		return cmdAggregate(rest)
 	case "subscription":
 		return cmdSubscription(rest)
-	case "reality-keys", "render-server":
+	case "render-server":
+		return cmdRenderServer(rest)
+	case "reality-keys":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
 		usage(os.Stdout)
@@ -477,6 +479,73 @@ func cmdSubscription(args []string) error {
 		if err := os.WriteFile(clashPath, []byte(s.Clash), 0o644); err != nil {
 			return fmt.Errorf("subscription: write %s: %w", clashPath, err)
 		}
+	}
+	return nil
+}
+
+// cmdRenderServer renders the node's sing-box SERVER config (RP-0008 P3-e) via spec.RenderServer — the
+// Go port of `myceliumctl render-server --engine singbox` (incl. the two-hop via_user routing). The
+// Go renderer encodes the template structure in typed structs, so --template is accepted (CLI parity)
+// but unused; the render_server_go_equiv gate keeps the structs in lockstep with the shipped template.
+func cmdRenderServer(args []string) error {
+	fs := flag.NewFlagSet("render-server", flag.ContinueOnError)
+	engine := fs.String("engine", "singbox", "engine (only singbox is ported to the Go spine)")
+	_ = fs.String("template", "", "template path (accepted for CLI parity; the Go renderer encodes the template)")
+	paramsPath := fs.String("params", "", "params.json (required)")
+	statePath := fs.String("state", "", "identities.json (required)")
+	out := fs.String("out", "-", "output file (- for stdout)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *engine != "singbox" {
+		return fmt.Errorf("render-server: --engine %q is not ported to the Go spine; use control/myceliumctl for the xray engine", *engine)
+	}
+	if *paramsPath == "" || *statePath == "" {
+		return fmt.Errorf("render-server: --params and --state are required")
+	}
+	pdata, err := os.ReadFile(*paramsPath)
+	if err != nil {
+		return fmt.Errorf("render-server: read params %s: %w", *paramsPath, err)
+	}
+	var pmap map[string]json.RawMessage
+	if err := json.Unmarshal(pdata, &pmap); err != nil {
+		return fmt.Errorf("render-server: %s is not valid params JSON: %w", *paramsPath, err)
+	}
+	sdata, err := os.ReadFile(*statePath)
+	if err != nil {
+		return fmt.Errorf("render-server: read state %s: %w", *statePath, err)
+	}
+	var st struct {
+		Clients []struct {
+			Name     string  `json:"name"`
+			ID       string  `json:"id"`
+			Password *string `json:"password"`
+		} `json:"clients"`
+	}
+	if err := json.Unmarshal(sdata, &st); err != nil {
+		return fmt.Errorf("render-server: %s is not valid identity state JSON: %w", *statePath, err)
+	}
+	clients := make([]spec.ServerClient, 0, len(st.Clients))
+	for _, c := range st.Clients {
+		clients = append(clients, spec.ServerClient{Name: c.Name, ID: c.ID, Password: c.Password})
+	}
+	srv, err := spec.RenderServer(pmap, clients)
+	if err != nil {
+		return fmt.Errorf("render-server: %w", err)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(srv); err != nil {
+		return fmt.Errorf("render-server: marshal: %w", err)
+	}
+	if *out == "-" {
+		_, err = os.Stdout.Write(buf.Bytes())
+		return err
+	}
+	if err := os.WriteFile(*out, buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("render-server: write %s: %w", *out, err)
 	}
 	return nil
 }

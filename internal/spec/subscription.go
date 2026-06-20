@@ -54,8 +54,12 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 		return nil, fmt.Errorf("subscription: no sing-box-dialable protocols enabled (only xray-engine protos were on)")
 	}
 
-	// Shared connection parameters.
+	// Shared connection parameters. node_address is read via the shell's no-default myc_params_get, which
+	// fails closed on a missing/empty value — mirror that (a subscription with no server address is useless).
 	nodeAddr := paramStr(params, "node_address", "")
+	if nodeAddr == "" {
+		return nil, fmt.Errorf("subscription: required params field missing or empty: .node_address")
+	}
 	donorSNI := paramStr(params, "donor_sni", "")
 	tlsFallback := donorSNI
 	if tlsFallback == "" {
