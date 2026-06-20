@@ -11,6 +11,27 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.19] — 2026-06-20
+### Added
+- ADR-0033 **CDN/ingress front P2-2 (edge config compiler) + P2-3 (bundle integration + deploy wiring)**.
+  - **P2-2:** `internal/spec.RenderFrontProxy` compiles a `FrontConfig` into the nginx config the OPERATOR
+    deploys on their own edge: RELAY (default) → an `ssl_preread` SNI-routed TLS-PASSTHROUGH `stream` server
+    (the edge terminates nothing, holds no key — the node's own cert is served end to end); TERMINATE
+    (ack-gated) → a TLS-terminating reverse proxy (the metadata trade-off, emitted only with the explicit
+    ack). Operator-supplied domain/host are config-injection-guarded (`isSafeHost`). `myceliumctl
+    front-render --front F --params P` resolves the node address + transport port and emits it.
+  - **P2-3:** `spec.RenderBundleFront` APPENDS one fronted endpoint (distinct `-front` tag, last-resort
+    priority) to the bundle for the configured frontable transport — purely additive (a disabled /
+    not-served front leaves the bundle byte-identical, so `bundle_render_go_equiv` stays green; the base
+    LinkParams resolution was extracted to `bundleBaseLinkParams` so direct and fronted Links cannot drift).
+    `bundle --front F` wires it in. Deploy wiring `control/lib/nb_front.sh` `front_setup` (run at the tail of
+    `render_serve_bundle`, default-OFF): when a node-local `front.config.json` is enabled it compiles the
+    edge config + re-renders the SERVED bundle WITH the fronted endpoint (fail-closed), the Go spine doing
+    the render. New gate `front_deploy_inert` pins default-off / read-only-on-config / no-auto-enable; the
+    front gate also pins the compiler (relay=passthrough/keyless, terminate ack-gated, injection-guarded).
+  - REMAINING: only the operator reachability field test (P2-4), which needs a real bring-your-own domain.
+    Additive; default-off; a node without a front is unchanged. Suite 49/49 on a Go node.
+
 ## [0.2.18] — 2026-06-20
 ### Added
 - ADR-0033 **CDN/ingress front P2-1 (fronted-endpoint render)** — `internal/spec.FrontLinkParams` re-points

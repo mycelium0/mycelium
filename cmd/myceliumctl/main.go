@@ -74,6 +74,8 @@ func run(args []string) error {
 		return cmdSubscription(rest)
 	case "render-server":
 		return cmdRenderServer(rest)
+	case "front-render":
+		return cmdFrontRender(rest)
 	case "reality-keys":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -358,12 +360,23 @@ func cmdBundle(args []string) error {
 	fs := flag.NewFlagSet("bundle", flag.ContinueOnError)
 	paramsPath := fs.String("params", "", "params.json (required)")
 	statePath := fs.String("state", "", "identities.json (required)")
+	frontPath := fs.String("front", "", "optional FrontConfig JSON (ADR-0033): when enabled, appends one fronted endpoint")
 	out := fs.String("out", "-", "output file (- for stdout)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *paramsPath == "" || *statePath == "" {
 		return fmt.Errorf("bundle: --params and --state are required")
+	}
+	var fc spec.FrontConfig // zero value = disabled => RenderBundleFront is byte-identical to RenderBundle
+	if *frontPath != "" {
+		fdata, err := os.ReadFile(*frontPath)
+		if err != nil {
+			return fmt.Errorf("bundle: read front %s: %w", *frontPath, err)
+		}
+		if err := json.Unmarshal(fdata, &fc); err != nil {
+			return fmt.Errorf("bundle: %s is not a valid FrontConfig: %w", *frontPath, err)
+		}
 	}
 	pdata, err := os.ReadFile(*paramsPath)
 	if err != nil {
@@ -390,7 +403,7 @@ func cmdBundle(args []string) error {
 	if len(st.Clients) > 0 {
 		id, pw = st.Clients[0].ID, st.Clients[0].Password
 	}
-	b, err := spec.RenderBundle(pmap, id, pw, time.Now().UTC().Truncate(time.Second))
+	b, err := spec.RenderBundleFront(pmap, id, pw, fc, time.Now().UTC().Truncate(time.Second))
 	if err != nil {
 		return fmt.Errorf("bundle: %w", err)
 	}
@@ -546,6 +559,50 @@ func cmdRenderServer(args []string) error {
 	}
 	if err := os.WriteFile(*out, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("render-server: write %s: %w", *out, err)
+	}
+	return nil
+}
+
+// cmdFrontRender compiles an operator's FrontConfig into the nginx edge-proxy config they deploy on their
+// bring-your-own-domain front (ADR-0033 P2). The node's direct address + the frontable transport's port
+// come from --params. A disabled / invalid / non-frontable front fails closed; nothing on a node runs this.
+func cmdFrontRender(args []string) error {
+	fs := flag.NewFlagSet("front-render", flag.ContinueOnError)
+	frontPath := fs.String("front", "", "front config JSON (FrontConfig; required)")
+	paramsPath := fs.String("params", "", "params.json (for node_address + the transport port; required)")
+	out := fs.String("out", "-", "output file (- for stdout)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *frontPath == "" || *paramsPath == "" {
+		return fmt.Errorf("front-render: --front and --params are required")
+	}
+	fdata, err := os.ReadFile(*frontPath)
+	if err != nil {
+		return fmt.Errorf("front-render: read front %s: %w", *frontPath, err)
+	}
+	var fc spec.FrontConfig
+	if err := json.Unmarshal(fdata, &fc); err != nil {
+		return fmt.Errorf("front-render: %s is not a valid FrontConfig: %w", *frontPath, err)
+	}
+	pdata, err := os.ReadFile(*paramsPath)
+	if err != nil {
+		return fmt.Errorf("front-render: read params %s: %w", *paramsPath, err)
+	}
+	var pmap map[string]json.RawMessage
+	if err := json.Unmarshal(pdata, &pmap); err != nil {
+		return fmt.Errorf("front-render: %s is not valid params JSON: %w", *paramsPath, err)
+	}
+	conf, err := spec.FrontProxyFromParams(fc, pmap)
+	if err != nil {
+		return fmt.Errorf("front-render: %w", err)
+	}
+	if *out == "-" {
+		_, err = os.Stdout.Write([]byte(conf))
+		return err
+	}
+	if err := os.WriteFile(*out, []byte(conf), 0o644); err != nil {
+		return fmt.Errorf("front-render: write %s: %w", *out, err)
 	}
 	return nil
 }

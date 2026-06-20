@@ -142,6 +142,21 @@ else
 	badln "front_render.go missing (the P2 fronted-endpoint render)"
 fi
 
+# 6b. edge proxy compiler (ADR-0033 P2-2): relay = TLS-PASSTHROUGH (ssl_preread, no ssl_certificate/key);
+#     terminate is ack-gated; operator-supplied host/domain is config-injection-guarded.
+FP_GO="$REPO_ROOT/internal/spec/front_proxy.go"
+if [ -f "$FP_GO" ]; then
+	fp_code() { sed -e 's://.*$::' "$FP_GO"; }
+	fp_code | grep -qE 'func RenderFrontProxy\(' && ok "RenderFrontProxy (edge config compiler) present" || badln "RenderFrontProxy missing (P2-2)"
+	fp_code | grep -qE 'ssl_preread on' && ok "relay mode compiles a TLS-PASSTHROUGH (ssl_preread) edge — the edge terminates nothing, holds no key" || badln "relay mode is not a TLS-passthrough (ssl_preread missing)"
+	# terminate stays gated on the validated ack (RenderFrontProxy calls Validate, which enforces it)
+	fp_code | grep -qE 'fc\.Validate\(\)' && ok "compiler runs FrontConfig.Validate (terminate stays ack-gated; non-frontable refused)" || badln "compiler does not Validate the FrontConfig (terminate could be emitted un-acked)"
+	# config-injection guard on operator-supplied domain/node host
+	fp_code | grep -qE 'func isSafeHost\(' && fp_code | grep -qE 'isSafeHost\(fc\.Domain\)' && ok "operator domain/host is config-injection-guarded (isSafeHost)" || badln "no config-injection guard on the operator-supplied domain/host"
+else
+	badln "front_proxy.go missing (the P2-2 edge config compiler)"
+fi
+
 # 7. Go test half (skip-if-no-Go)
 if command -v go >/dev/null 2>&1; then
 	if ( cd "$REPO_ROOT" && go test ./internal/spec -run 'Front' >/dev/null 2>&1 ); then

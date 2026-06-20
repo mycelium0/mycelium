@@ -8,7 +8,58 @@ package spec
 import (
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestRenderBundleFrontAppendsFrontedEndpoint(t *testing.T) {
+	p := rawParams(t, `{"node_address":"node.direct.invalid","donor_sni":"d.invalid","reality_public_key":"PUB",
+		"short_ids":["abcd0123"],"tls_sni":"node.own.invalid",
+		"vless_reality_vision_enabled":true,"vless_reality_vision_port":443,
+		"vless_xhttp_tls_enabled":true,"vless_xhttp_tls_port":2087}`)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base, err := RenderBundle(p, "id-a", "", now)
+	if err != nil {
+		t.Fatalf("RenderBundle: %v", err)
+	}
+	fc := FrontConfig{Enabled: true, Domain: "front.op.example", Transport: "vless-xhttp-tls", Mode: FrontModeRelay}
+	fronted, err := RenderBundleFront(p, "id-a", "", fc, now)
+	if err != nil {
+		t.Fatalf("RenderBundleFront: %v", err)
+	}
+	if len(fronted.Endpoints) != len(base.Endpoints)+1 {
+		t.Fatalf("fronted bundle should add exactly one endpoint: base=%d fronted=%d", len(base.Endpoints), len(fronted.Endpoints))
+	}
+	fe := fronted.Endpoints[len(fronted.Endpoints)-1]
+	if fe.Tag != "mycelium-vless-xhttp-tls-front" {
+		t.Errorf("fronted endpoint tag = %q, want mycelium-vless-xhttp-tls-front", fe.Tag)
+	}
+	if fe.Priority < FrontEndpointPriorityBase {
+		t.Errorf("fronted endpoint must be last-resort priority (>= %d), got %d", FrontEndpointPriorityBase, fe.Priority)
+	}
+	if !strings.Contains(fe.Link, "@front.op.example:443?") {
+		t.Errorf("fronted endpoint link must target the front: %s", fe.Link)
+	}
+}
+
+func TestRenderBundleFrontDisabledIsIdentical(t *testing.T) {
+	p := rawParams(t, `{"node_address":"n.invalid","donor_sni":"d.invalid","reality_public_key":"PUB",
+		"short_ids":["abcd0123"],"vless_reality_vision_enabled":true,"vless_reality_vision_port":443}`)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base, _ := RenderBundle(p, "id-a", "", now)
+	// disabled front + a front for a not-served transport must both be no-ops.
+	for _, fc := range []FrontConfig{
+		{Enabled: false, Domain: "f.example", Transport: "vless-xhttp-tls"},
+		{Enabled: true, Domain: "f.example", Transport: "vless-xhttp-tls", Mode: FrontModeRelay}, // xhttp-tls not enabled here
+	} {
+		got, err := RenderBundleFront(p, "id-a", "", fc, now)
+		if err != nil {
+			t.Fatalf("RenderBundleFront: %v", err)
+		}
+		if len(got.Endpoints) != len(base.Endpoints) {
+			t.Errorf("a disabled/not-served front must not change the bundle: base=%d got=%d", len(base.Endpoints), len(got.Endpoints))
+		}
+	}
+}
 
 func TestFrontLinkParamsRewritesMatchingTransport(t *testing.T) {
 	base := LinkParams{

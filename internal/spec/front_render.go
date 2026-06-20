@@ -5,6 +5,74 @@
 
 package spec
 
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"time"
+)
+
+// FrontEndpointPriorityBase offsets a fronted endpoint's selection priority so it sorts AFTER every
+// direct endpoint (whose priorities are the small registry indices). A front is complementary /
+// last-resort doctrine (ADR-0033 §5), so the client prefers the direct path and falls to the front.
+const FrontEndpointPriorityBase = 1000
+
+// RenderBundleFront renders the node's Bundle and, when an enabled front is configured for a frontable
+// transport this node actually serves, APPENDS one extra fronted Endpoint pointing at the operator's
+// front domain (ADR-0033 P2). It is purely additive: a disabled / non-matching / not-served front leaves
+// the bundle byte-identical to RenderBundle (so a node without a front is unchanged and the
+// bundle_render_go_equiv gate — which passes no front — stays green). The fronted endpoint reuses the
+// SAME base resolution as the direct ones (bundleBaseLinkParams) so the two cannot drift, gets a distinct
+// `-front` tag, and a last-resort priority. Pure.
+func RenderBundleFront(params map[string]json.RawMessage, firstClientID, firstClientPassword string, fc FrontConfig, generatedAt time.Time) (Bundle, error) {
+	b, err := RenderBundle(params, firstClientID, firstClientPassword, generatedAt)
+	if err != nil {
+		return Bundle{}, err
+	}
+	if !fc.Enabled {
+		return b, nil // default-off: byte-identical to RenderBundle
+	}
+	if err := fc.Validate(); err != nil {
+		return Bundle{}, fmt.Errorf("bundle front: %w", err)
+	}
+	// Locate the frontable transport in the registry and require this node to actually serve it.
+	var d ProtoDescriptor
+	idx, found := -1, false
+	for i := range transportRegistry {
+		if transportRegistry[i].Proto == fc.Transport {
+			d, idx, found = transportRegistry[i], i, true
+			break
+		}
+	}
+	if !found || d.EnableKey == "" || !paramBool(params, d.EnableKey) {
+		return b, nil // front configured for a transport this node does not serve — fail-safe no-op
+	}
+	base, err := bundleBaseLinkParams(params, firstClientID, firstClientPassword)
+	if err != nil {
+		return Bundle{}, err
+	}
+	lp := base
+	lp.Port = paramStr(params, d.PortKey, strconv.Itoa(d.DefaultPort))
+	fronted, ok := FrontLinkParams(d.Proto, lp, fc)
+	if !ok {
+		return b, nil
+	}
+	link, err := ShareLink(d.Proto, fronted)
+	if err != nil {
+		return Bundle{}, fmt.Errorf("bundle front: %w", err)
+	}
+	region := paramStr(params, "region_bucket", "unspecified")
+	b.Endpoints = append(b.Endpoints, Endpoint{
+		Tag:            "mycelium-" + d.Proto + "-front",
+		TransportClass: d.Class,
+		Region:         RegionBucket(region),
+		Priority:       FrontEndpointPriorityBase + idx,
+		Health:         HealthUnknown,
+		Link:           link,
+	})
+	return b, nil
+}
+
 // FrontPort is the port a CDN/ingress front listens on — always 443, because the whole point of
 // fronting is to blend with ordinary HTTPS (a non-443 front would defeat the purpose). The front is the
 // operator's edge; the client dials front-domain:443 and (in the default relay mode) the encrypted
