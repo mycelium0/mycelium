@@ -11,6 +11,22 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.16] — 2026-06-20
+### Added
+- RP-0008 **P3-d (subscription → Go)** — `internal/spec.RenderSubscription` + `myceliumctl subscription
+  --engine singbox` port the per-client sing-box client config + Clash-Meta YAML emission to the Go spine
+  (the strangler continues; the shell stays authoritative until the gate is green). Per client it emits
+  `<safe>.singbox.json` (one outbound per enabled sing-box-engine protocol, the ShadowTLS handshake detour,
+  a urltest "auto" + "mycelium" selector + direct/block) and `<safe>.clash.yaml` (the Clash-supported
+  subset). It carries the **dual-engine** update (ADR-0032): the enabled set is filtered to the sing-box
+  ENGINE, so the xray-only `vless-xhttp-tls` is **skipped** (a sing-box client cannot dial the xhttp
+  transport — the Xray client dials it), and resolution uses the canonical `tls_key_path`. Resolution
+  mirrors the shell EXACTLY (per-identity password → shared-secret fallback, TUIC-uses-UUID, the C03
+  own-cert-SNI fail-closed, registry-priority order, `tr -c` name sanitisation). New gate
+  `subscription_go_equiv` byte-diffs both producers across two fixtures (all transports + 2 clients incl.
+  the skipped xray proto and a sanitised name; a subset with an empty client password → shared-secret
+  fallback); `TestRenderSubscriptionShape` pins the structure where Go is unavailable. Additive; no wire change.
+
 ## [0.2.15] — 2026-06-19
 ### Added
 - RP-0010 **C5 (advisory emit)** — the inert constructor for the ADR-0030 advisory-emit seam:
