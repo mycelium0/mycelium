@@ -197,7 +197,7 @@ func TestBundleJSONWireShape(t *testing.T) {
 		t.Fatalf("valid wire bundle must validate, got %v", err)
 	}
 	bad := map[string]string{
-		"precise region":   `{"version":1,"generated_at":"2026-06-15T12:00:00Z","endpoints":[{"tag":"t","transport_class":"reality-tcp","region":"us-ca-1","priority":0,"health":"unknown","link":"vless://x"}]}`,
+		"precise region":    `{"version":1,"generated_at":"2026-06-15T12:00:00Z","endpoints":[{"tag":"t","transport_class":"reality-tcp","region":"us-ca-1","priority":0,"health":"unknown","link":"vless://x"}]}`,
 		"populated health":  `{"version":1,"generated_at":"2026-06-15T12:00:00Z","endpoints":[{"tag":"t","transport_class":"reality-tcp","region":"unspecified","priority":0,"health":"alive","link":"vless://x"}]}`,
 		"missing timestamp": `{"version":1,"endpoints":[{"tag":"t","transport_class":"reality-tcp","region":"unspecified","priority":0,"health":"unknown","link":"vless://x"}]}`,
 	}

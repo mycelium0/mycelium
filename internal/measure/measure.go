@@ -76,8 +76,8 @@ type Member struct {
 // detect/tune/rotation policies, then call Tick on each reach snapshot to obtain the current
 // rotate.PlanInput. It is fail-closed at construction and on every tick.
 type Assembler struct {
-	order     []string                    // member refs in declared order (stable rank tiebreak)
-	members   map[string]Member           // by ref
+	order     []string          // member refs in declared order (stable rank tiebreak)
+	members   map[string]Member // by ref
 	class     map[string]spec.TransportClass
 	detectors map[string]*detect.Detector // by ref, stateful across ticks
 	weights   map[string]*tune.Weight     // by ref, stateful across ticks

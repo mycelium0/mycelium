@@ -11,6 +11,7 @@
 //   - an exponential time-decay-to-floor by HalfLife — a just-degraded shape fades WITHOUT explicit
 //     teardown and re-promotes automatically when a block lifts;
 //   - a control-theory Schmitt-trigger Hysteresis band that damps flapping of the promote decision.
+//
 // RetentionFloor is a bespoke "scar memory" term: a repeatedly-blocked shape settles low (not eagerly
 // retried) but is never forgotten. The reinforce-and-evaporate / Physarum / ant-colony imagery is a
 // useful METAPHOR for that decay-and-scar intuition — NOT a citation; the code implements EWMA +
