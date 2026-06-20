@@ -11,6 +11,28 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.17] — 2026-06-20
+### Added
+- RP-0008 **P3-e (render-server → Go) + the two-hop via_user routing** — the LAST renderer port.
+  `internal/spec.RenderServer` + `myceliumctl render-server --engine singbox` build the node's sing-box
+  SERVER config on the Go spine, byte-identically to `myc_sb_render_server`: one inbound per enabled,
+  sing-box-ENGINE protocol (the xray-only `vless-xhttp-tls` is dropped — dual-engine, ADR-0032) in the
+  template's inbound order, the hidden ShadowTLS detour SS inbound when ShadowTLS is on, the static
+  direct/block outbounds + private/bittorrent route rules, the loopback `clash_api` with an optional
+  Bearer secret (omitted when unprovisioned, so legacy nodes render identically), and — when params
+  declare a `two_hop` upstream — a VLESS+WS+TLS egress outbound + an `auth_user` route rule (ADR-0029
+  in-region-ingress → out-of-region-egress, P3-e). The Go renderer encodes the template's per-inbound
+  key order in typed structs (the only faithful way to reproduce jq's order in Go); the
+  `render_server_go_equiv` gate keeps the structs in lockstep with the shipped template. Resolution +
+  fail-closed checks mirror the shell exactly: REALITY material is consulted ONLY when a REALITY proto is
+  on (so a non-reality node's shadowtls handshake defaults to www.microsoft.com and tls_sni to localhost);
+  short_ids must be non-empty under REALITY; the own-cert families require an explicit tls_sni (C03); the
+  per-identity password falls back via jq `//` (absent/null only, never ""); the two-hop is fail-closed
+  (C17 shape/port, C18 via_user is a known client, C21 distinct hop). Verified byte-identical across 16
+  adversarial fixtures on a Go node; `TestRenderServer{Shape,ClashSecretOmitted,FailClosed}` pin the
+  structure where Go is unavailable. Additive; the shell stays authoritative until cutover. **RP-0008 P3
+  (renderer porting → Go) is now COMPLETE (P3-a..P3-e).**
+
 ## [0.2.16] — 2026-06-20
 ### Added
 - RP-0008 **P3-d (subscription → Go)** — `internal/spec.RenderSubscription` + `myceliumctl subscription
