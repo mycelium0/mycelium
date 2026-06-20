@@ -84,6 +84,7 @@ func (c *measureConfig) buildAssembler(now time.Time) (*measure.Assembler, error
 //   - a tick_ms below the slowest member's probe interval — the tick would outpace the probes and
 //     re-fold the SAME health window, advancing the detector's anti-flap count and reinforcing the
 //     tuner without a fresh observation.
+//
 // Pure.
 func (c *measureConfig) validateAgainstReach(rcfg *reach.Config) error {
 	inMembers := false
