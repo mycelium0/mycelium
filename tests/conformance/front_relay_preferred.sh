@@ -124,7 +124,25 @@ else
 	badln "the efficacy framing is missing from the schema (the front must not be mistaken for the answer THREAT-MODEL says it is not)"
 fi
 
-# 6. Go test half (skip-if-no-Go)
+# 6. fronted-endpoint render (ADR-0033 P2): FrontLinkParams re-points the client at the front domain on
+#    443 (blend with HTTPS), mode-agnostic at the client, and is a no-op for a disabled/non-matching front.
+FR_GO="$REPO_ROOT/internal/spec/front_render.go"
+if [ -f "$FR_GO" ]; then
+	fr_code() { sed -e 's://.*$::' "$FR_GO"; }
+	fr_code | grep -qE 'func FrontLinkParams\(' && ok "FrontLinkParams (fronted-endpoint render) present" || badln "FrontLinkParams missing (P2 render)"
+	fr_code | grep -qE 'FrontPort[[:space:]]*=[[:space:]]*"443"' && ok "the front listens on 443 (blends with ordinary HTTPS)" || badln "FrontPort is not 443"
+	fr_code | grep -qE 'Server[[:space:]]*=[[:space:]]*fc\.Domain' && ok "render re-points the dial server at the front domain" || badln "render does not re-point Server to the front domain"
+	fr_code | grep -qE 'TLSSNI[[:space:]]*=[[:space:]]*fc\.Domain' && ok "render re-points the SNI at the front domain (the edge routes on it)" || badln "render does not re-point TLSSNI to the front domain"
+	if fr_code | grep -qE '!fc\.Enabled' && fr_code | grep -qE 'proto != fc\.Transport'; then
+		ok "render is a fail-safe no-op for a disabled / non-matching front"
+	else
+		badln "render does not guard the disabled / non-matching-transport cases (a no-op is required)"
+	fi
+else
+	badln "front_render.go missing (the P2 fronted-endpoint render)"
+fi
+
+# 7. Go test half (skip-if-no-Go)
 if command -v go >/dev/null 2>&1; then
 	if ( cd "$REPO_ROOT" && go test ./internal/spec -run 'Front' >/dev/null 2>&1 ); then
 		ok "go test ./internal/spec -run Front passes (the real invariant proof)"

@@ -11,6 +11,19 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.18] — 2026-06-20
+### Added
+- ADR-0033 **CDN/ingress front P2-1 (fronted-endpoint render)** — `internal/spec.FrontLinkParams` re-points
+  a frontable transport's client endpoint at the operator's bring-your-own-domain front: the client dials
+  `front-domain:443` (SNI = the front domain, so the edge routes on it) while the encrypted tunnel passes
+  through to the node (default relay mode → the node's own-cert pin is unchanged end to end). It is a
+  fail-safe NO-OP for a disabled / non-matching / non-frontable front, and mode-agnostic at the client
+  (relay vs terminate is an EDGE concern, compiled into the edge proxy config by a later chunk). For
+  vless-ws-tls the front domain drives both `sni=` and `host=`. INERT: nothing wires it into the bundle
+  yet (that + the edge TLS-passthrough config compiler + deploy-time BYOD wiring are the next chunks).
+  `front_relay_preferred` extended to pin the render (re-points server/SNI to the front on 443, no-op when
+  disabled); `TestFrontLinkParams*` prove it. Additive; default-off; no wire change on a node without a front.
+
 ## [0.2.17] — 2026-06-20
 ### Added
 - RP-0008 **P3-e (render-server → Go) + the two-hop via_user routing** — the LAST renderer port.
