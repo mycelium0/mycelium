@@ -115,11 +115,11 @@
 #                               type/kind selector, the proto->enable-key mapping read from the registry
 #                               (not restated), the committed example all-default-off / inert, and NO
 #                               bootstrap path writes a node.config.json (operator-supplied). OFFLINE
-#   * node_cli_readonly.sh    — the operator-facing node-profile CLI verbs (myceliumctl node
-#                               validate|plan, transport list) are READ-ONLY: they parse/validate/preview
-#                               the descriptor + registry but never write node state, rename/remove a
-#                               file, or exec a subprocess (RP-0011 chunk C; live-mutating verbs land once
-#                               the bootstrap reads the descriptor). OFFLINE
+#   * node_cli_no_actuation.sh — the operator-facing node/transport CLI verbs (myceliumctl node
+#                               validate|plan, transport list|enable|disable) never ACTUATE a live node:
+#                               they read the registry + the descriptor, and the writer verbs edit ONLY
+#                               node.config.json (0600) — no subprocess, no live-state mutation, no
+#                               destructive op; the apply is the explicit --node-apply (RP-0011 C/B2c). OFFLINE
 #   * node_profile_read_additive.sh — the bootstrap reads the node.config.json descriptor ADDITIVELY
 #                               and fail-closed (ADR-0034 / RP-0011 B2): apply_node_profile is a no-op
 #                               when the descriptor is ABSENT (byte-identical; zero blast radius under
@@ -192,7 +192,7 @@ GATES=(
 	"tests/conformance/front_relay_preferred.sh"
 	"tests/conformance/front_deploy_inert.sh"
 	"tests/conformance/node_profile_single_source.sh"
-	"tests/conformance/node_cli_readonly.sh"
+	"tests/conformance/node_cli_no_actuation.sh"
 	"tests/conformance/node_profile_read_additive.sh"
 	"tests/conformance/node_apply_failclosed.sh"
 	"tests/conformance/detector_pure_no_probe.sh"

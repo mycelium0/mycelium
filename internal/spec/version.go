@@ -15,7 +15,7 @@ package spec
 // 0.2.x = Phase 2, …); the PATCH increments per landed phase increment, and a git tag
 // (v0.1.N) marks a phase close. 1.0.0 is reserved for the first stable public release.
 // Per-build identity is SourceRev (below), not this hand-bumped const.
-const Version = "0.2.21"
+const Version = "0.2.22"
 
 // SourceRev is the source revision the binary was built from. It is empty for a plain
 // `go build` and is stamped at build time via the linker

@@ -6,6 +6,7 @@
 package spec
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,33 @@ func TestNodeProfileRejectsNonToggleableTransport(t *testing.T) {
 		}
 	}
 	t.Skip("no non-toggleable transport in the registry to exercise this branch")
+}
+
+func TestNodeProfileWithTransport(t *testing.T) {
+	base := NodeProfile{Transports: []string{"vless-reality-vision", "hysteria2"}}
+	cases := []struct {
+		name   string
+		proto  string
+		enable bool
+		want   []string
+	}{
+		{"enable new -> appended", "trojan", true, []string{"vless-reality-vision", "hysteria2", "trojan"}},
+		{"enable existing -> dedup, moved last", "vless-reality-vision", true, []string{"hysteria2", "vless-reality-vision"}},
+		{"disable existing -> removed", "hysteria2", false, []string{"vless-reality-vision"}},
+		{"disable absent -> no-op", "trojan", false, []string{"vless-reality-vision", "hysteria2"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := base.WithTransport(tt.proto, tt.enable).Transports
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("WithTransport(%q, %v) = %v; want %v", tt.proto, tt.enable, got, tt.want)
+			}
+		})
+	}
+	// value semantics: the source profile is never mutated.
+	if !slices.Equal(base.Transports, []string{"vless-reality-vision", "hysteria2"}) {
+		t.Fatalf("WithTransport mutated the source: %v", base.Transports)
+	}
 }
 
 func TestParseNodeProfileRejectsUnknownFields(t *testing.T) {
