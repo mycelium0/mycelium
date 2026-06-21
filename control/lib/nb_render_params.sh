@@ -160,30 +160,66 @@ apply_node_profile() {
 	[ -f "$vocab" ] || die "node.config.json present but the Go-owned vocab.json is missing ($vocab)."
 	jq -e 'type == "object"' "$cfg" >/dev/null 2>&1 \
 		|| die "node.config.json present but not a JSON object (fail-closed; fix or remove $cfg)."
+	# Reachability posture (RP-0011 chunk D / ADR-0034 §3): reachable:false -> stamp node_bind=127.0.0.1
+	# so the renderer binds every PUBLIC inbound to loopback (the node is provisioned + converged but NOT
+	# a public entry; harden_ufw then skips the loopback-bound ports). ABSENT/true -> stamp NOTHING -> the
+	# renderer default "::" holds -> byte-identical. Read .reachable as a STRICT JSON boolean (parity with
+	# Go ParseNodeProfile, which type-rejects a non-bool): a string "false"/number/etc. must hit the
+	# fail-closed arm, not silently match a case. ABSENT key => "true" => default "::" holds.
+	local reachable
+	reachable="$(jq -r 'if has("reachable") then (if (.reachable|type)=="boolean" then (.reachable|tostring) else "not-a-boolean" end) else "true" end' "$cfg" 2>/dev/null)" \
+		|| die "node.config.json: cannot read .reachable (fail-closed; fix or remove $cfg)."
+	case "$reachable" in
+		true) ;;
+		false)
+			if jq '.node_bind = "127.0.0.1"' "$tmp" >"$tmp.rb"; then
+				mv -f "$tmp.rb" "$tmp"
+				log "node.config.json: reachable=false -> public inbounds bind loopback (not a public entry)."
+			else
+				rm -f "$tmp.rb"; die "node.config.json: failed to set loopback bind for reachable=false."
+			fi ;;
+		*) die "node.config.json: .reachable must be a JSON boolean true or false (fix or remove $cfg)." ;;
+	esac
 	local transports
 	transports="$(jq -r '(.transports // [])[]' "$cfg" 2>/dev/null)" \
 		|| die "node.config.json: cannot read .transports (fail-closed; fix or remove $cfg)."
-	if [ -z "$transports" ]; then
-		log "node.config.json present with no transports[] — keeping the default-on set."
-		return 0
-	fi
-	local t key
-	while IFS= read -r t; do
-		[ -n "$t" ] || continue
-		key="$(jq -r --arg t "$t" '.protos[] | select(.proto == $t) | .enable_key' "$vocab" 2>/dev/null)"
-		[ -n "$key" ] && [ "$key" != "null" ] \
-			|| die "node.config.json: transport '$t' is unknown or not operator-toggleable (no enable_key in the Go-owned vocab.json)."
-		printf '%s' "$OPERATOR_TOGGLE_KEYS" | jq -e --arg k "$key" 'index($k) != null' >/dev/null 2>&1 \
-			|| die "node.config.json: transport '$t' resolves to '$key', which is not in the operator_toggle_keys allowlist (fail-closed)."
-		if jq --arg k "$key" '.[$k] = true' "$tmp" >"$tmp.np"; then
-			mv -f "$tmp.np" "$tmp"
-		else
-			rm -f "$tmp.np"; die "node.config.json: failed to enable transport '$t' (key '$key') in params."
-		fi
-	done <<NODE_PROFILE_EOF
+	if [ -n "$transports" ]; then
+		local t key
+		while IFS= read -r t; do
+			[ -n "$t" ] || continue
+			key="$(jq -r --arg t "$t" '.protos[] | select(.proto == $t) | .enable_key' "$vocab" 2>/dev/null)"
+			[ -n "$key" ] && [ "$key" != "null" ] \
+				|| die "node.config.json: transport '$t' is unknown or not operator-toggleable (no enable_key in the Go-owned vocab.json)."
+			printf '%s' "$OPERATOR_TOGGLE_KEYS" | jq -e --arg k "$key" 'index($k) != null' >/dev/null 2>&1 \
+				|| die "node.config.json: transport '$t' resolves to '$key', which is not in the operator_toggle_keys allowlist (fail-closed)."
+			if jq --arg k "$key" '.[$k] = true' "$tmp" >"$tmp.np"; then
+				mv -f "$tmp.np" "$tmp"
+			else
+				rm -f "$tmp.np"; die "node.config.json: failed to enable transport '$t' (key '$key') in params."
+			fi
+		done <<NODE_PROFILE_EOF
 $transports
 NODE_PROFILE_EOF
-	log "params: applied node.config.json descriptor — enabled transports: $(printf '%s' "$transports" | tr '\n' ' ')."
+		log "params: applied node.config.json descriptor — enabled transports: $(printf '%s' "$transports" | tr '\n' ' ')."
+	else
+		log "node.config.json present with no transports[] — keeping the default-on set."
+	fi
+
+	# Foreign-engine reachability guard (RP-0011 chunk D, fail-closed). node_bind is a sing-box-only
+	# mechanism: the Xray engine renders to a SEPARATE config (and AmneziaWG to its own surface) that the
+	# loopback rebind never reaches (ADR-0034 §4; dual-engine reachability is a tracked follow-up). So a
+	# reachable=false node with an enabled non-sing-box-engine transport would STILL be a public entry on
+	# that engine's port. Refuse rather than give a false sense of privacy. (AmneziaWG carries no params
+	# enable_key, so it is governed separately per ADR-0034 §4 — documented, not guarded here.)
+	if [ "$reachable" = "false" ]; then
+		local foreign_keys fk
+		foreign_keys="$(jq -r '.protos[] | select(.engine != "sing-box") | .enable_key | select(. != null and . != "")' "$vocab" 2>/dev/null)"
+		for fk in $foreign_keys; do
+			if [ "$(jq -r --arg k "$fk" '(.[$k] // false)' "$tmp" 2>/dev/null)" = "true" ]; then
+				die "node.config.json: reachable=false does not yet cover the non-sing-box-engine transport keyed '$fk' — it renders to a separate config the loopback rebind cannot reach, so the node would stay a public entry (tracked: dual-engine reachability). Disable that transport or keep the node reachable."
+			fi
+		done
+	fi
 }
 
 write_params() {

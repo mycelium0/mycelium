@@ -97,6 +97,13 @@ func RenderServer(params map[string]json.RawMessage, clients []ServerClient) (sb
 	grpcService := paramStr(params, "grpc_service_name", "grpc")
 	xhttpPath := paramStr(params, "xhttp_path", "/")
 	wsPath := paramStr(params, "ws_path", "/ws")
+
+	// Reachability posture (RP-0011 chunk D / ADR-0034 §3). node_bind is the listen address for every
+	// PUBLIC inbound: it DEFAULTS to "::" (all interfaces — byte-identical to today, so a node with no
+	// descriptor / reachable=true renders exactly as before), and apply_node_profile stamps "127.0.0.1"
+	// only when the descriptor declares reachable:false (the node is provisioned + converged but NOT a
+	// public entry). The hidden detour SS inbound stays 127.0.0.1 unconditionally (it is never public).
+	bind := paramStr(params, "node_bind", "::")
 	stlsHandshakeDefault := donorHost
 	if stlsHandshakeDefault == "" {
 		stlsHandshakeDefault = "www.microsoft.com"
@@ -158,43 +165,43 @@ func RenderServer(params map[string]json.RawMessage, clients []ServerClient) (sb
 		return nil
 	}
 	if err := add("vless-reality-vision", func(p int) any {
-		return sbInVision{Type: "vless", Tag: "vless-reality-vision-in", Listen: "::", ListenPort: p, Users: usersVision, TLS: realityTLS()}
+		return sbInVision{Type: "vless", Tag: "vless-reality-vision-in", Listen: bind, ListenPort: p, Users: usersVision, TLS: realityTLS()}
 	}); err != nil {
 		return zero, err
 	}
 	if err := add("vless-reality-grpc", func(p int) any {
-		return sbInRealityGRPC{Type: "vless", Tag: "vless-reality-grpc-in", Listen: "::", ListenPort: p, Users: usersPlain, TLS: realityTLS(), Transport: sbGRPCTransport{Type: "grpc", ServiceName: grpcService}}
+		return sbInRealityGRPC{Type: "vless", Tag: "vless-reality-grpc-in", Listen: bind, ListenPort: p, Users: usersPlain, TLS: realityTLS(), Transport: sbGRPCTransport{Type: "grpc", ServiceName: grpcService}}
 	}); err != nil {
 		return zero, err
 	}
 	if err := add("vless-reality-xhttp", func(p int) any {
-		return sbInRealityXHTTP{Type: "vless", Tag: "vless-reality-xhttp-in", Listen: "::", ListenPort: p, Users: usersPlain, TLS: realityTLS(), Transport: sbPathTransport{Type: "xhttp", Path: xhttpPath}}
+		return sbInRealityXHTTP{Type: "vless", Tag: "vless-reality-xhttp-in", Listen: bind, ListenPort: p, Users: usersPlain, TLS: realityTLS(), Transport: sbPathTransport{Type: "xhttp", Path: xhttpPath}}
 	}); err != nil {
 		return zero, err
 	}
 	// vless-xhttp-tls is an xray-engine proto — filtered out of the sing-box server (never in enabledSet).
 	if err := add("vless-ws-tls", func(p int) any {
-		return sbInWSTLS{Type: "vless", Tag: "vless-ws-tls-in", Listen: "::", ListenPort: p, Users: usersPlain, TLS: sbWSCertTLS{Enabled: true, ServerName: tlsSNI, CertificatePath: tlsCert, KeyPath: tlsKey, ALPN: []string{"http/1.1"}}, Transport: sbPathTransport{Type: "ws", Path: wsPath}}
+		return sbInWSTLS{Type: "vless", Tag: "vless-ws-tls-in", Listen: bind, ListenPort: p, Users: usersPlain, TLS: sbWSCertTLS{Enabled: true, ServerName: tlsSNI, CertificatePath: tlsCert, KeyPath: tlsKey, ALPN: []string{"http/1.1"}}, Transport: sbPathTransport{Type: "ws", Path: wsPath}}
 	}); err != nil {
 		return zero, err
 	}
 	if err := add("hysteria2", func(p int) any {
-		return sbInHysteria2{Type: "hysteria2", Tag: "hysteria2-in", Listen: "::", ListenPort: p, Users: usersHy2, TLS: sbAlpnCertTLS{Enabled: true, ServerName: tlsSNI, ALPN: []string{"h3"}, CertificatePath: tlsCert, KeyPath: tlsKey}}
+		return sbInHysteria2{Type: "hysteria2", Tag: "hysteria2-in", Listen: bind, ListenPort: p, Users: usersHy2, TLS: sbAlpnCertTLS{Enabled: true, ServerName: tlsSNI, ALPN: []string{"h3"}, CertificatePath: tlsCert, KeyPath: tlsKey}}
 	}); err != nil {
 		return zero, err
 	}
 	if err := add("tuic", func(p int) any {
-		return sbInTUIC{Type: "tuic", Tag: "tuic-in", Listen: "::", ListenPort: p, Users: usersTUIC, CongestionControl: "bbr", TLS: sbAlpnCertTLS{Enabled: true, ServerName: tlsSNI, ALPN: []string{"h3"}, CertificatePath: tlsCert, KeyPath: tlsKey}}
+		return sbInTUIC{Type: "tuic", Tag: "tuic-in", Listen: bind, ListenPort: p, Users: usersTUIC, CongestionControl: "bbr", TLS: sbAlpnCertTLS{Enabled: true, ServerName: tlsSNI, ALPN: []string{"h3"}, CertificatePath: tlsCert, KeyPath: tlsKey}}
 	}); err != nil {
 		return zero, err
 	}
 	if err := add("shadowsocks", func(p int) any {
-		return sbInShadowsocks{Type: "shadowsocks", Tag: "shadowsocks-in", Listen: "::", ListenPort: p, Method: "2022-blake3-aes-256-gcm", Password: ssPassword, Users: usersSS}
+		return sbInShadowsocks{Type: "shadowsocks", Tag: "shadowsocks-in", Listen: bind, ListenPort: p, Method: "2022-blake3-aes-256-gcm", Password: ssPassword, Users: usersSS}
 	}); err != nil {
 		return zero, err
 	}
 	if err := add("shadowtls", func(p int) any {
-		return sbInShadowTLS{Type: "shadowtls", Tag: "shadowtls-in", Listen: "::", ListenPort: p, Version: 3, StrictMode: true, Users: usersStls, Handshake: sbHandshake{Server: stlsHandshake, ServerPort: stlsHandshakePort}, Detour: "shadowtls-ss-in"}
+		return sbInShadowTLS{Type: "shadowtls", Tag: "shadowtls-in", Listen: bind, ListenPort: p, Version: 3, StrictMode: true, Users: usersStls, Handshake: sbHandshake{Server: stlsHandshake, ServerPort: stlsHandshakePort}, Detour: "shadowtls-ss-in"}
 	}); err != nil {
 		return zero, err
 	}
@@ -203,7 +210,7 @@ func RenderServer(params map[string]json.RawMessage, clients []ServerClient) (sb
 		inbounds = append(inbounds, sbInShadowTLSSS{Type: "shadowsocks", Tag: "shadowtls-ss-in", Listen: "127.0.0.1", Network: "tcp", Method: "2022-blake3-aes-256-gcm", Password: ssPassword})
 	}
 	if err := add("trojan", func(p int) any {
-		return sbInTrojan{Type: "trojan", Tag: "trojan-in", Listen: "::", ListenPort: p, Users: usersTrojan, TLS: sbAlpnCertTLS{Enabled: true, ServerName: tlsSNI, ALPN: []string{"h2", "http/1.1"}, CertificatePath: tlsCert, KeyPath: tlsKey}}
+		return sbInTrojan{Type: "trojan", Tag: "trojan-in", Listen: bind, ListenPort: p, Users: usersTrojan, TLS: sbAlpnCertTLS{Enabled: true, ServerName: tlsSNI, ALPN: []string{"h2", "http/1.1"}, CertificatePath: tlsCert, KeyPath: tlsKey}}
 	}); err != nil {
 		return zero, err
 	}

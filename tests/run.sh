@@ -131,6 +131,10 @@
 #                               profile to the live node) is LOCAL-ONLY (no fetch) + FAIL-CLOSED
 #                               (validate before promote, rollback on failure, no-op-on-identical) and
 #                               reachable only via the explicit mode, never an auto-run (RP-0011 B2b). OFFLINE
+#   * reachable_firewall_loopback.sh — the FIREWALL half of the reachability posture (ADR-0034 §3 / RP-0011
+#                               D): myc_firewall_singbox_ports opens public ("::") ports only and NEVER a
+#                               loopback-bound (reachable=false / shadowtls-detour) port; a missing listen
+#                               defaults public (no jq null-abort); harden_ufw delegates to it. OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -195,6 +199,7 @@ GATES=(
 	"tests/conformance/node_cli_no_actuation.sh"
 	"tests/conformance/node_profile_read_additive.sh"
 	"tests/conformance/node_apply_failclosed.sh"
+	"tests/conformance/reachable_firewall_loopback.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"

@@ -102,6 +102,37 @@ CONF
 		|| warn "could not reload sshd (continuing)."
 }
 
+# myc_firewall_singbox_ports <config> <tcp|udp> — PURE (no side effects): echo, one per line, the set of
+# sing-box listen_ports the firewall should OPEN for the given transport family, EXCLUDING loopback-bound
+# inbounds (reachable=false rebinds public inbounds to 127.0.0.1; the shadowtls detour is always loopback).
+# `(.listen // "::")` keeps a MISSING listen treated as the public default "::" (so it is OPENED, matching
+# pre-RP-0011 behaviour) instead of letting jq's test() hard-error on a null listen and abort the firewall
+# step. Single source of truth for harden_ufw AND tests/conformance/reachable_firewall_loopback.sh.
+myc_firewall_singbox_ports() {
+	local cfg="$1" fam="${2:-tcp}"
+	[ -f "$cfg" ] || return 0
+	command -v jq >/dev/null 2>&1 || return 0
+	case "$fam" in
+		tcp)
+			jq -r '
+				[.inbounds[]? | select(.listen_port != null)
+				 | select(.type=="vless" or .type=="trojan" or .type=="shadowtls" or .type=="shadowsocks")
+				 | select((.listen // "::")|test("127\\.0\\.0\\.1")|not)
+				 | .listen_port] | unique | .[]' "$cfg" 2>/dev/null ;;
+		udp)
+			# hysteria2/tuic, plus shadowsocks-2022 which opens UDP too (each only when public-bound).
+			jq -r '
+				([.inbounds[]? | select(.listen_port != null)
+				  | select(.type=="hysteria2" or .type=="tuic")
+				  | select((.listen // "::")|test("127\\.0\\.0\\.1")|not)
+				  | .listen_port]
+				 + [.inbounds[]? | select(.tag=="shadowsocks-in")
+				  | select((.listen // "::")|test("127\\.0\\.0\\.1")|not)
+				  | .listen_port // empty]) | unique | .[]' "$cfg" 2>/dev/null ;;
+		*) return 0 ;;
+	esac
+}
+
 harden_ufw() {
 	log "configuring the host firewall (ufw) for the enabled canonical ports"
 	need_root
@@ -130,23 +161,15 @@ harden_ufw() {
 	fi
 	# Canonical ports come from the rendered config (the single source of truth at runtime). We
 	# read the live config's listen_port set so the firewall opens EXACTLY what is enabled.
+	# Canonical ports come from the rendered config (the single source of truth at runtime), via the pure
+	# myc_firewall_singbox_ports helper. RP-0011 chunk D / ADR-0034 §3: a LOOPBACK-bound inbound
+	# (reachable=false rebinds public inbounds to 127.0.0.1; the shadowtls detour is always loopback) is NOT
+	# a public entry, so the helper EXCLUDES its port — across ALL types (the exclusion was previously only
+	# on the shadowsocks branch). On a reachable=true node every public listen is "::", so this opens exactly
+	# today's ports (no regression); reachable_firewall_loopback.sh pins both directions.
 	local enabled_tcp enabled_udp
-	enabled_tcp=""; enabled_udp=""
-	if [ -f "$SINGBOX_CONFIG" ] && have jq; then
-		enabled_tcp="$(jq -r '
-			[.inbounds[]? | select(.listen_port != null)
-			 | select(.type=="vless" or .type=="trojan" or .type=="shadowtls"
-			          or (.type=="shadowsocks" and (.listen|test("127\\.0\\.0\\.1")|not)))
-			 | .listen_port] | unique | .[]' "$SINGBOX_CONFIG" 2>/dev/null | tr '\n' ' ')"
-		enabled_udp="$(jq -r '
-			[.inbounds[]? | select(.listen_port != null)
-			 | select(.type=="hysteria2" or .type=="tuic") | .listen_port] | unique | .[]' \
-			"$SINGBOX_CONFIG" 2>/dev/null | tr '\n' ' ')"
-		# Shadowsocks-2022 opens BOTH tcp and udp on its port.
-		local ss_port
-		ss_port="$(jq -r '.inbounds[]? | select(.tag=="shadowsocks-in") | .listen_port // empty' "$SINGBOX_CONFIG" 2>/dev/null)"
-		[ -n "$ss_port" ] && enabled_udp="$enabled_udp $ss_port"
-	fi
+	enabled_tcp="$(myc_firewall_singbox_ports "$SINGBOX_CONFIG" tcp | tr '\n' ' ')"
+	enabled_udp="$(myc_firewall_singbox_ports "$SINGBOX_CONFIG" udp | tr '\n' ' ')"
 	local p
 	for p in $enabled_tcp; do run ufw allow "$p/tcp"; done
 	for p in $enabled_udp; do run ufw allow "$p/udp"; done
