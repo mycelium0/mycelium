@@ -120,6 +120,13 @@
 #                               the descriptor + registry but never write node state, rename/remove a
 #                               file, or exec a subprocess (RP-0011 chunk C; live-mutating verbs land once
 #                               the bootstrap reads the descriptor). OFFLINE
+#   * node_profile_read_additive.sh — the bootstrap reads the node.config.json descriptor ADDITIVELY
+#                               and fail-closed (ADR-0034 / RP-0011 B2): apply_node_profile is a no-op
+#                               when the descriptor is ABSENT (byte-identical; zero blast radius under
+#                               auto-pull), is wired into write_params, resolves enable keys from the
+#                               Go-owned vocab.json (no restated literal) honoured only via the
+#                               operator_toggle_keys allowlist, dies on malformed/unknown/non-allowlisted,
+#                               and never writes the descriptor (operator-supplied). OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -182,6 +189,7 @@ GATES=(
 	"tests/conformance/front_deploy_inert.sh"
 	"tests/conformance/node_profile_single_source.sh"
 	"tests/conformance/node_cli_readonly.sh"
+	"tests/conformance/node_profile_read_additive.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
