@@ -76,6 +76,10 @@ func run(args []string) error {
 		return cmdRenderServer(rest)
 	case "front-render":
 		return cmdFrontRender(rest)
+	case "node":
+		return cmdNode(rest)
+	case "transport":
+		return cmdTransport(rest)
 	case "reality-keys":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -735,6 +739,141 @@ func cmdVocab(args []string) error {
 	return nil
 }
 
+// readFileOrStdin reads a CLI FILE argument, or stdin when the argument is "-".
+func readFileOrStdin(name string) ([]byte, error) {
+	if name == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return os.ReadFile(name)
+}
+
+// cmdNode is the operator-facing node-profile surface (ADR-0034 / RP-0011 chunk C). These verbs are
+// READ-ONLY: they parse, validate, and preview the node descriptor — they never write node state or
+// shell the deploy path (the live-mutating verbs land once the bootstrap reads the descriptor).
+func cmdNode(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("node: a subcommand is required (validate | plan)")
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "validate":
+		return cmdNodeValidate(rest)
+	case "plan":
+		return cmdNodePlan(rest)
+	default:
+		return fmt.Errorf("node: unknown subcommand %q (validate | plan)", sub)
+	}
+}
+
+// cmdNodeValidate parses + fail-closed-validates a node profile descriptor read from FILE|- (ADR-0034).
+// Read-only. A stray node-"type" enum or any out-of-set field is refused by ParseNodeProfile.
+func cmdNodeValidate(args []string) error {
+	fs := flag.NewFlagSet("node validate", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("node validate: exactly one node profile FILE (or - for stdin) is required")
+	}
+	data, err := readFileOrStdin(fs.Arg(0))
+	if err != nil {
+		return fmt.Errorf("node validate: read %s: %w", fs.Arg(0), err)
+	}
+	p, err := spec.ParseNodeProfile(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("node validate: %w", err)
+	}
+	keys, _ := p.EnabledKeys()
+	fmt.Printf("ok\tvalid node profile\ttransports=%d\treachable=%t\tfront=%t\tingress=%t\n",
+		len(keys), p.Reachable, p.Front.Enabled, p.Ingress != nil)
+	return nil
+}
+
+// cmdNodePlan prints what a node profile resolves to — a DRY-RUN preview, no mutation. It shows the
+// params enable-keys the descriptor's transports turn on (resolved through the registry) with each
+// transport's port/engine/frontable, plus the reachability posture and the front/ingress/loops summary.
+func cmdNodePlan(args []string) error {
+	fs := flag.NewFlagSet("node plan", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("node plan: exactly one node profile FILE (or - for stdin) is required")
+	}
+	data, err := readFileOrStdin(fs.Arg(0))
+	if err != nil {
+		return fmt.Errorf("node plan: read %s: %w", fs.Arg(0), err)
+	}
+	p, err := spec.ParseNodeProfile(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("node plan: %w", err)
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "# node profile plan (dry-run — nothing is applied)")
+	if len(p.Transports) == 0 {
+		fmt.Fprintln(w, "transports:\t(empty — the node keeps its default-on set)")
+	} else {
+		fmt.Fprintln(w, "transports:")
+		for _, t := range p.Transports {
+			d, _ := spec.ProtoByName(t)
+			fmt.Fprintf(w, "  %s\tenable=%s\tport=%d\tengine=%s\tfrontable=%t\n",
+				t, d.EnableKey, d.DefaultPort, d.Engine, spec.IsFrontableTransport(t))
+		}
+	}
+	fmt.Fprintf(w, "reachable:\t%t (public-entry posture)\n", p.Reachable)
+	if p.Front.Enabled {
+		fmt.Fprintf(w, "front:\tenabled transport=%s mode=%s\n", p.Front.Transport, p.Front.EffectiveMode())
+	} else {
+		fmt.Fprintln(w, "front:\tdisabled")
+	}
+	fmt.Fprintf(w, "ingress(two-hop):\t%t\n", p.Ingress != nil)
+	fmt.Fprintf(w, "loops:\tupdate=%t rotate=%t measure=%t\n", p.Loops.Update, p.Loops.Rotate, p.Loops.Measure)
+	return w.Flush()
+}
+
+// cmdTransport is the operator-facing transport catalog surface (read-only).
+func cmdTransport(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("transport: a subcommand is required (list)")
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "list":
+		return cmdTransportList(rest)
+	default:
+		return fmt.Errorf("transport: unknown subcommand %q (list)", sub)
+	}
+}
+
+// cmdTransportList prints the closed transport registry (the Go-owned single source of truth) — proto,
+// class, port, engine, and whether each is CDN-frontable / operator-toggleable. Read-only.
+func cmdTransportList(args []string) error {
+	fs := flag.NewFlagSet("transport list", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "emit the registry as JSON instead of a table")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("transport list: takes no positional arguments")
+	}
+	reg := spec.TransportRegistry()
+	if *asJSON {
+		data, err := json.MarshalIndent(reg, "", "  ")
+		if err != nil {
+			return fmt.Errorf("transport list: marshal: %w", err)
+		}
+		_, err = os.Stdout.Write(append(data, '\n'))
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(w, "PROTO\tCLASS\tPORT\tENGINE\tFRONTABLE\tTOGGLEABLE")
+	for _, d := range reg {
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%t\t%t\n",
+			d.Proto, d.Class, d.DefaultPort, d.Engine, spec.IsFrontableTransport(d.Proto), d.EnableKey != "")
+	}
+	return w.Flush()
+}
+
 func usage(w *os.File) {
 	fmt.Fprintf(w, `myceliumctl %s — Mycelium Phase 0 control CLI (Go spine).
 
@@ -753,11 +892,14 @@ Commands:
   bundle --params F --state F [--out F|-]       render a node's distribution Bundle JSON from params + identities (RP-0008 P3)
   link-outbound --tag T LINK                    parse a client share-link into a sing-box client outbound JSON (RP-0008 P3)
   aggregate --out F --bundle F [--name L] ...   fold >=2 per-node bundles into one client sing-box profile (RP-0008 P3)
+  node validate FILE|-                         parse + validate a node profile descriptor (ADR-0034)
+  node plan FILE|-                             dry-run: preview what a node profile resolves to (read-only)
+  transport list [--json]                      list the closed transport registry (proto/class/port/engine/frontable)
   version                                      print the spine version
   help                                         show this help
 
 Not yet ported to the Go spine (use the shell tool control/myceliumctl):
-  reality-keys, render-server, subscription    (RP-0002 W7)
+  reality-keys                                 (RP-0002 W7)
 
 Default state file: %s
 `, spec.Version, defaultState)

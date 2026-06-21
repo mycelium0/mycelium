@@ -11,6 +11,21 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.21] — 2026-06-21
+### Added
+- **RP-0011 Operability & Release, chunk C — read-only operator CLI verbs** on the Go spine
+  (`myceliumctl`): `node validate FILE|-` (parse + fail-closed-validate a node profile — ADR-0034),
+  `node plan FILE|-` (a DRY-RUN preview of what a descriptor resolves to — the enable-keys its
+  transports turn on via the registry, plus the reachability / front / ingress / loops summary; no
+  mutation), and `transport list [--json]` (the closed transport registry: proto / class / port /
+  engine / frontable / toggleable). New pure resolver `internal/spec.NodeProfile.EnabledKeys()` (the
+  descriptor → params-toggle translation the bootstrap will later apply additively) + exported
+  `spec.ProtoByName`. New gate `node_cli_readonly` (offline suite 51 → 52): the verbs are READ-ONLY —
+  no write / rename / remove / exec — so they cannot change a live node; the live-mutating verbs
+  (`deploy`, `transport enable|disable`) land once the bootstrap reads the descriptor. Also corrected
+  the stale `usage` "not yet ported" line (render-server / subscription are ported; only reality-keys
+  remains). Verified on a Go node: build / vet / fmt-check / test / race green.
+
 ## [0.2.20] — 2026-06-21
 ### Added
 - ADR-0034 **unified node profile (RP-0011 Operability & Release, chunk B)** — the INERT, node-local
