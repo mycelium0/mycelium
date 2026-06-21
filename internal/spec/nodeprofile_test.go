@@ -68,6 +68,41 @@ func TestParseNodeProfileRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestNodeProfileEnabledKeys(t *testing.T) {
+	// empty transports -> no keys (the node keeps its default-on set)
+	if keys, err := (NodeProfile{}).EnabledKeys(); err != nil || len(keys) != 0 {
+		t.Fatalf("empty profile EnabledKeys = %v, %v; want [], nil", keys, err)
+	}
+	// known transports -> their registry enable-keys, sorted, each a real registry key
+	keys, err := NodeProfile{Transports: []string{"vless-reality-vision", "vless-reality-grpc"}}.EnabledKeys()
+	if err != nil {
+		t.Fatalf("EnabledKeys error: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("want 2 keys, got %v", keys)
+	}
+	for i := 1; i < len(keys); i++ {
+		if keys[i-1] > keys[i] {
+			t.Fatalf("keys not sorted: %v", keys)
+		}
+	}
+	for _, k := range keys {
+		found := false
+		for _, d := range TransportRegistry() {
+			if d.EnableKey == k {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("key %q is not a registry enable key", k)
+		}
+	}
+	// unknown transport -> error (fail-closed, mirrors Validate)
+	if _, err := (NodeProfile{Transports: []string{"nope"}}).EnabledKeys(); err == nil {
+		t.Fatal("EnabledKeys accepted an unknown transport")
+	}
+}
+
 func TestParseNodeProfileValidatesContent(t *testing.T) {
 	// Parse runs Validate: a weather-on descriptor is refused even though it is syntactically valid.
 	const weatherOn = `{"weather":{"enabled":true}}`

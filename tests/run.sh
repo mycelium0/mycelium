@@ -115,6 +115,11 @@
 #                               type/kind selector, the proto->enable-key mapping read from the registry
 #                               (not restated), the committed example all-default-off / inert, and NO
 #                               bootstrap path writes a node.config.json (operator-supplied). OFFLINE
+#   * node_cli_readonly.sh    — the operator-facing node-profile CLI verbs (myceliumctl node
+#                               validate|plan, transport list) are READ-ONLY: they parse/validate/preview
+#                               the descriptor + registry but never write node state, rename/remove a
+#                               file, or exec a subprocess (RP-0011 chunk C; live-mutating verbs land once
+#                               the bootstrap reads the descriptor). OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -176,6 +181,7 @@ GATES=(
 	"tests/conformance/front_relay_preferred.sh"
 	"tests/conformance/front_deploy_inert.sh"
 	"tests/conformance/node_profile_single_source.sh"
+	"tests/conformance/node_cli_readonly.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
