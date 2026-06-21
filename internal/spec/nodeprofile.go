@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 )
 
 // NodeProfile is the INERT, node-local descriptor that unifies what a Mycelium node IS into ONE
@@ -77,10 +78,10 @@ type WeatherSlot struct {
 	Enabled bool `json:"enabled"` // reserved; MUST be false until the awareness build-RP
 }
 
-// protoByName returns the registry descriptor for a wire proto name (closed registry — internal/spec /
+// ProtoByName returns the registry descriptor for a wire proto name (closed registry — internal/spec /
 // control/vocab.json), so NodeProfile validates transport names against the single source of truth
 // rather than restating any naming rule.
-func protoByName(proto string) (ProtoDescriptor, bool) {
+func ProtoByName(proto string) (ProtoDescriptor, bool) {
 	for _, d := range TransportRegistry() {
 		if d.Proto == proto {
 			return d, true
@@ -89,13 +90,35 @@ func protoByName(proto string) (ProtoDescriptor, bool) {
 	return ProtoDescriptor{}, false
 }
 
+// EnabledKeys returns the params enable-keys the descriptor's transports turn on, resolved THROUGH the
+// Go-owned registry (never a restated naming rule) and sorted for determinism. This is the pure
+// descriptor->params-toggle translation the bootstrap will later apply additively (RP-0011 chunk B/C);
+// it is exposed now via `myceliumctl node plan` as a dry-run preview, with no live mutation. An empty
+// Transports yields no keys (the node keeps its default-on set). It fails closed on any transport that
+// is unknown or not operator-toggleable, mirroring Validate.
+func (p NodeProfile) EnabledKeys() ([]string, error) {
+	keys := make([]string, 0, len(p.Transports))
+	for _, t := range p.Transports {
+		d, ok := ProtoByName(t)
+		if !ok {
+			return nil, fmt.Errorf("%w: transports[] %q is not a known transport", ErrUnknownEnum, t)
+		}
+		if d.EnableKey == "" {
+			return nil, fmt.Errorf("%w: transports[] %q is not operator-toggleable (the registry gives it no enable key)", ErrUnknownEnum, t)
+		}
+		keys = append(keys, d.EnableKey)
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
 // Validate enforces the ADR-0034 invariants, fail-closed and pure. An all-default profile (no
 // transports, not reachable, no front, no ingress, no loops, weather off) is valid and inert.
 func (p NodeProfile) Validate() error {
 	// transports: every named transport must be a real, params-toggleable registry proto. The schema
 	// reads the registry's EnableKey; it never restates the "<proto>_enabled" naming rule.
 	for _, t := range p.Transports {
-		d, ok := protoByName(t)
+		d, ok := ProtoByName(t)
 		if !ok {
 			return fmt.Errorf("%w: transports[] %q is not a known transport", ErrUnknownEnum, t)
 		}
