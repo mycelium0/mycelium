@@ -11,6 +11,18 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.22] — 2026-06-21
+### Added
+- **RP-0011 Operability & Release, chunk B2c — transport writer CLI verbs**: `myceliumctl transport
+  enable|disable PROTO [--config FILE]` edit the node-profile descriptor's `transports[]` (validated
+  against the Go-owned registry, fail-closed) and write `node.config.json` (0600). They are WRITE-ONLY on
+  the descriptor — no subprocess, no live-node mutation; the operator applies the change with the
+  explicit `node-bootstrap.sh --node-apply` (B2b). New pure `internal/spec.NodeProfile.WithTransport`
+  (dedup + order-stable list edit). The chunk-C gate `node_cli_readonly` is renamed/refined to
+  `node_cli_no_actuation` (the verbs may now write the descriptor, but still never exec a subprocess,
+  mutate live state, or perform a destructive op; the descriptor write is 0600). Also corrected the
+  `usage` text. Verified on a Go node: build / vet / fmt-check / test / race green.
+
 ## [0.2.21] — 2026-06-21
 ### Added
 - **RP-0011 Operability & Release, chunk C — read-only operator CLI verbs** on the Go spine

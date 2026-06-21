@@ -834,15 +834,78 @@ func cmdNodePlan(args []string) error {
 // cmdTransport is the operator-facing transport catalog surface (read-only).
 func cmdTransport(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("transport: a subcommand is required (list)")
+		return fmt.Errorf("transport: a subcommand is required (list | enable | disable)")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
 	case "list":
 		return cmdTransportList(rest)
+	case "enable":
+		return cmdTransportSet(rest, true)
+	case "disable":
+		return cmdTransportSet(rest, false)
 	default:
-		return fmt.Errorf("transport: unknown subcommand %q (list)", sub)
+		return fmt.Errorf("transport: unknown subcommand %q (list | enable | disable)", sub)
 	}
+}
+
+// defaultNodeConfig is the node-local node-profile descriptor the writer verbs edit (matches the bash
+// STATE_DIR). It is operator-supplied + node-local + never committed (ADR-0034).
+const defaultNodeConfig = "/var/lib/mycelium/node.config.json"
+
+// cmdTransportSet edits the node-profile descriptor's transports[] — it adds (enable) or removes
+// (disable) PROTO, validated against the Go-owned registry, then writes node.config.json (0600). It is
+// WRITE-ONLY on the descriptor: it NEVER applies the change to the live node and runs no subprocess; the
+// operator applies it with the explicit `node-bootstrap.sh --node-apply` (B2b, fail-closed). So the CLI
+// edits intent; the live mutation stays an explicit, separately-gated act.
+func cmdTransportSet(args []string, enable bool) error {
+	verb := "disable"
+	if enable {
+		verb = "enable"
+	}
+	// PROTO is the first positional (Go's flag package stops at the first non-flag arg, so flags follow
+	// PROTO): `transport enable PROTO [--config FILE]`.
+	if len(args) == 0 {
+		return fmt.Errorf("transport %s: exactly one PROTO is required (see 'transport list')", verb)
+	}
+	proto := args[0]
+	fs := flag.NewFlagSet("transport "+verb, flag.ContinueOnError)
+	cfgPath := fs.String("config", defaultNodeConfig, "node profile descriptor to edit")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("transport %s: unexpected extra argument(s) after PROTO %q", verb, proto)
+	}
+	d, ok := spec.ProtoByName(proto)
+	if !ok || d.EnableKey == "" {
+		return fmt.Errorf("transport %s: %q is not a known operator-toggleable transport (see 'transport list')", verb, proto)
+	}
+	// Read the existing descriptor (fail-closed if present-but-invalid); start from empty if absent.
+	var p spec.NodeProfile
+	if data, rerr := os.ReadFile(*cfgPath); rerr == nil {
+		parsed, perr := spec.ParseNodeProfile(bytes.NewReader(data))
+		if perr != nil {
+			return fmt.Errorf("transport %s: existing %s is invalid: %w", verb, *cfgPath, perr)
+		}
+		p = parsed
+	} else if !os.IsNotExist(rerr) {
+		return fmt.Errorf("transport %s: read %s: %w", verb, *cfgPath, rerr)
+	}
+	p = p.WithTransport(proto, enable)
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("transport %s: the resulting profile is invalid: %w", verb, err)
+	}
+	out, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return fmt.Errorf("transport %s: marshal: %w", verb, err)
+	}
+	if err := os.WriteFile(*cfgPath, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("transport %s: write %s: %w", verb, *cfgPath, err)
+	}
+	fmt.Printf("ok\t%s %s\ttransports=%v\t-> %s\n", verb, proto, p.Transports, *cfgPath)
+	fmt.Println("apply on this node with: node-bootstrap.sh --node-apply")
+	return nil
 }
 
 // cmdTransportList prints the closed transport registry (the Go-owned single source of truth) — proto,
@@ -895,6 +958,8 @@ Commands:
   node validate FILE|-                         parse + validate a node profile descriptor (ADR-0034)
   node plan FILE|-                             dry-run: preview what a node profile resolves to (read-only)
   transport list [--json]                      list the closed transport registry (proto/class/port/engine/frontable)
+  transport enable  PROTO [--config FILE]      add a transport to the node profile descriptor (write-only; apply with --node-apply)
+  transport disable PROTO [--config FILE]      remove a transport from the node profile descriptor (write-only)
   version                                      print the spine version
   help                                         show this help
 
