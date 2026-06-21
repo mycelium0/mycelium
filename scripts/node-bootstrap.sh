@@ -139,7 +139,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -244,6 +244,7 @@ while [ "$#" -gt 0 ]; do
 		--ack)             MODE="ack"; shift ;;
 		--revoke)          MODE="revoke"; REVOKE_NAME="${2:?--revoke needs a client NAME or ID}"; shift 2 ;;
 		--disable-two-hop) MODE="disable-two-hop"; shift ;;
+		--node-apply)      MODE="node-apply"; shift ;;
 		--rotate)          MODE="rotate"; shift ;;
 		--apply-rotation)  ROTATE_APPLY=1; shift ;;
 		--rotate-arm)      MODE="rotate-arm"; shift ;;
@@ -775,6 +776,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		ack)             flow_ack ;;
 		revoke)          flow_revoke ;;
 		disable-two-hop) flow_disable_two_hop ;;
+		node-apply)      flow_node_apply ;;
 		rotate)          flow_rotate ;;
 		rotate-arm)      rotate_arm ;;
 		rotate-disarm)   rotate_disarm ;;

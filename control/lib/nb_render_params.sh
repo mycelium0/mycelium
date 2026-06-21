@@ -321,3 +321,52 @@ write_params() {
 	fi
 	log "wrote $PARAMS_JSON (0600, local-only)."
 }
+
+# flow_node_apply — ADR-0034 / RP-0011 chunk B2b: apply the unified node profile to the LIVE node.
+# Local-only (NO fetch): re-render params from the current node-local state (write_params reads
+# node.config.json via apply_node_profile) -> render candidate -> validate ('sing-box check', fail-closed)
+# -> NO-OP short-circuit if the candidate is byte-identical to the live config (protects live client
+# connections; a no-descriptor / no-change node does nothing) -> promote -> reload -> verify -> rollback
+# on failure. It reuses the SAME render->validate->promote->verify->rollback spine as
+# flow_update/flow_disable_two_hop, and is reachable ONLY via the explicit --node-apply mode (never an
+# auto-run from bootstrap/update). It does NOT mutate the firewall (no lockout surface); enabling a
+# transport on a new port also needs the listen port opened (harden_ufw on a full bootstrap) — tracked.
+flow_node_apply() {
+	log "=== apply node profile (local re-render -> validate -> promote -> reload) ==="
+	need_root
+	[ -f "$IDENTITY_SECRETS" ] || die "no local identity; cannot apply a node profile (bootstrap first)."
+	write_params
+	local candidate="$STATE_DIR/config.candidate.json"
+	render_candidate "$candidate"
+	if ! validate_config "$candidate"; then
+		rm -f "$candidate" 2>/dev/null || true
+		die "candidate failed 'sing-box check' applying the node profile (fail-closed; nothing promoted)."
+	fi
+	# NO-OP SHORT-CIRCUIT: a validated candidate byte-identical to the live config => no promote, no
+	# restart (a restart drops live client connections on an always-on PPN). A node with no descriptor /
+	# no change renders byte-identically here and does nothing.
+	if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then
+		rm -f "$candidate" 2>/dev/null || true
+		log "node profile produces a config byte-identical to the live one; no change to apply (service untouched)."
+		render_serve_bundle
+		return 0
+	fi
+	if [ "$DRY_RUN" -eq 1 ]; then
+		rm -f "$candidate" 2>/dev/null || true
+		log "[dry-run] node profile validates and WOULD be applied (not promoted)."
+		return 0
+	fi
+	promote_config "$candidate"
+	rm -f "$candidate" 2>/dev/null || true
+	install_singbox_unit
+	if apply_singbox && verify_post_apply; then
+		render_serve_bundle
+		log "node profile applied + verified; config reloaded + served bundle refreshed."
+	else
+		warn "post-apply verification failed applying the node profile; rolling back."
+		rollback_config
+		apply_singbox || true
+		verify_post_apply || warn "service still unhealthy after rollback — operator attention needed."
+		die "node-apply rolled back (fail-closed) — the previous known-good config was restored."
+	fi
+}

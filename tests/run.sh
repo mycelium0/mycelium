@@ -127,6 +127,10 @@
 #                               Go-owned vocab.json (no restated literal) honoured only via the
 #                               operator_toggle_keys allowlist, dies on malformed/unknown/non-allowlisted,
 #                               and never writes the descriptor (operator-supplied). OFFLINE
+#   * node_apply_failclosed.sh — flow_node_apply (the --node-apply mode that applies the node
+#                               profile to the live node) is LOCAL-ONLY (no fetch) + FAIL-CLOSED
+#                               (validate before promote, rollback on failure, no-op-on-identical) and
+#                               reachable only via the explicit mode, never an auto-run (RP-0011 B2b). OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -190,6 +194,7 @@ GATES=(
 	"tests/conformance/node_profile_single_source.sh"
 	"tests/conformance/node_cli_readonly.sh"
 	"tests/conformance/node_profile_read_additive.sh"
+	"tests/conformance/node_apply_failclosed.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
