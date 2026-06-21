@@ -30,9 +30,14 @@ type NodeProfile struct {
 	// "use the node's default-on set", so an empty descriptor changes nothing.
 	Transports []string `json:"transports,omitempty"`
 
-	// Reachable is the public-entry POSTURE. Default false (safe): a freshly-provisioned node does not
-	// auto-advertise. Set true only when the operator declares the node a public entry. A false node is
-	// provisioned + converged but not a public entry (it can still be an egress/relay participant).
+	// Reachable is the public-entry POSTURE. WIRE/APPLY semantics: an ABSENT reachable key renders PUBLIC
+	// ("::") so a node that has not adopted the field is byte-identical to today (the additive guard) — the
+	// CLI always writes the field explicitly, so a CLI-produced descriptor is never ambiguous. The Go zero
+	// value is false, so a NodeProfile *constructed in Go* is non-public until you opt in; that is a
+	// construction default, NOT the absent-key wire default. Set true to declare the node a public entry; a
+	// false node is provisioned + converged but not a public entry (it can still be an egress/relay
+	// participant). NOTE: false governs the sing-box ingress; the optional Xray engine is covered fail-closed
+	// at apply time (it refuses reachable=false + an Xray-only transport) pending dual-engine reachability.
 	Reachable bool `json:"reachable"`
 
 	// Front folds the ADR-0033 operator CDN/ingress front (relay-preferred, bring-your-own-domain,
