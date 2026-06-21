@@ -224,6 +224,10 @@ myc_sb_render_server() {
 	# (back-compat); MUST match render_bundle.sh's resolution so server and Link agree.
 	xhttp_path_tls="$(myc_params_get "$params" '.xhttp_path_tls' "$xhttp_path")"
 	stls_handshake="$(myc_params_get "$params" '.shadowtls_handshake_server' "${donor_host:-www.microsoft.com}")"
+	# Reachability posture (RP-0011 chunk D / ADR-0034 §3): node_bind is the listen address for every
+	# PUBLIC inbound. Default "::" (byte-identical to today); apply_node_profile stamps "127.0.0.1" only
+	# when the descriptor declares reachable:false. The hidden detour SS inbound stays 127.0.0.1.
+	local node_bind; node_bind="$(myc_params_get "$params" '.node_bind' '::')"
 	stls_handshake_port="$(myc_params_get "$params" '.shadowtls_handshake_port' '443')"
 
 	# Per-protocol listen ports. The DEFAULT for each is the Go-owned canonical port from the registry
@@ -304,6 +308,7 @@ myc_sb_render_server() {
 		--arg xpath "$xhttp_path" \
 		--arg xpathtls "$xhttp_path_tls" \
 		--arg wspath "$ws_path" \
+		--arg bind "$node_bind" \
 		--arg stlshs "$stls_handshake" \
 		--arg clash_secret "$clash_secret" \
 		--argjson stlshp "$stls_handshake_port" \
@@ -353,6 +358,10 @@ myc_sb_render_server() {
 				| setport("shadowsocks")
 				| setport("shadowtls")
 				| setport("trojan")
+				# Reachability posture (RP-0011 D): rebind the listen of every PUBLIC inbound to $bind
+				# ("::" by default = byte-identical; "127.0.0.1" when the descriptor sets reachable:false).
+				# The hidden detour SS inbound (shadowtls-ss-in) stays loopback regardless.
+				| if (.tag != "shadowtls-ss-in" and (.listen != null)) then .listen = $bind else . end
 				# per-protocol payloads, keyed by tag
 				| if .tag == "vless-reality-vision-in" then .users = $uvision else . end
 				| if .tag == "vless-reality-grpc-in"   then .users = $uplain  | .transport.service_name = $grpc else . end

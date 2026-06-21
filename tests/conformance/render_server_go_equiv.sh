@@ -110,9 +110,25 @@ jq -n '{version:1,clients:[
 	{name:"nl-exit", id:"a1e02b65-0000-4000-8000-000000000000", created:"2026-01-01T00:00:00Z"}
 ]}' > "$SC"
 
+# Fixture D (RP-0011 chunk D / ADR-0034 §3): reachable=false -> node_bind "127.0.0.1" -> every PUBLIC
+# inbound binds loopback (the hidden shadowtls detour SS inbound stays 127.0.0.1 regardless). Pins that
+# the shell jq rewrite + the Go bind parameterization are byte-identical on the loopback case.
+PD="$WORK/d.params.json"; SD="$WORK/d.state.json"
+jq -n '{ node_address:"loop.invalid", donor_host:"www.example.invalid", donor_sni:"www.example.invalid",
+	reality_private_key:"PK4", reality_public_key:"PUB4", short_ids:["feed0004"],
+	tls_sni:"tls.example.invalid", tls_certificate_path:"/c/full.pem", tls_key_path:"/c/key.pem",
+	ss_password:"sspw", shadowtls_password:"stlspw", shadowtls_handshake_server:"hs.example.invalid",
+	node_bind:"127.0.0.1",
+	vless_reality_vision_enabled:true, vless_reality_vision_port:443,
+	vless_reality_grpc_enabled:true, vless_reality_grpc_port:8443,
+	shadowsocks_enabled:true, shadowsocks_port:8388,
+	shadowtls_enabled:true, shadowtls_port:8446 }' > "$PD"
+jq -n '{version:1,clients:[{name:"d1", id:"d1d10000-0000-4000-8000-000000000000", created:"2026-01-01T00:00:00Z"}]}' > "$SD"
+
 compare "A: all transports + clash secret + 2 clients (xhttp-tls dropped)" "$PA" "$SA"
 compare "B: vision only, no clash secret" "$PB" "$SB"
 compare "C: two-hop via_user egress (P3-e)" "$PC" "$SC"
+compare "D: reachable=false (node_bind 127.0.0.1) — public inbounds loopback, detour stays loopback" "$PD" "$SD"
 
 printf '\n-- Result --\n'
 if [ "$fail" -eq 0 ]; then

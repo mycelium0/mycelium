@@ -80,6 +80,8 @@ func run(args []string) error {
 		return cmdNode(rest)
 	case "transport":
 		return cmdTransport(rest)
+	case "reachable":
+		return cmdReachable(rest)
 	case "reality-keys":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -831,6 +833,69 @@ func cmdNodePlan(args []string) error {
 	return w.Flush()
 }
 
+// cmdReachable sets the node-profile descriptor's reachability POSTURE (RP-0011 chunk D / ADR-0034 §3):
+// `on` = a public entry (the default); `off` = provisioned + converged but NOT a public entry (when
+// applied, every public inbound binds loopback and the firewall skips those ports). It is WRITE-ONLY on
+// the descriptor (writes node.config.json, 0600) — it runs no subprocess and never mutates a live node;
+// the operator applies the change with the explicit `node-bootstrap.sh --node-apply` (B2b).
+func cmdReachable(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("reachable: an on|off argument is required")
+	}
+	state := args[0]
+	var on bool
+	switch state {
+	case "on":
+		on = true
+	case "off":
+		on = false
+	default:
+		return fmt.Errorf("reachable: the argument must be 'on' or 'off' (got %q)", state)
+	}
+	fs := flag.NewFlagSet("reachable", flag.ContinueOnError)
+	cfgPath := fs.String("config", defaultNodeConfig, "node profile descriptor to edit")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("reachable: unexpected extra argument(s) after %q", state)
+	}
+	var p spec.NodeProfile
+	if data, rerr := os.ReadFile(*cfgPath); rerr == nil {
+		parsed, perr := spec.ParseNodeProfile(bytes.NewReader(data))
+		if perr != nil {
+			return fmt.Errorf("reachable: existing %s is invalid: %w", *cfgPath, perr)
+		}
+		p = parsed
+	} else if !os.IsNotExist(rerr) {
+		return fmt.Errorf("reachable: read %s: %w", *cfgPath, rerr)
+	}
+	p.Reachable = on
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("reachable: the resulting profile is invalid: %w", err)
+	}
+	out, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return fmt.Errorf("reachable: marshal: %w", err)
+	}
+	if err := os.WriteFile(*cfgPath, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("reachable: write %s: %w", *cfgPath, err)
+	}
+	posture := "is NOT a public entry (public inbounds bind loopback when applied)"
+	if on {
+		posture = "is a public entry"
+	}
+	fmt.Printf("ok\treachable %s\t(this node %s)\t-> %s\n", state, posture, *cfgPath)
+	fmt.Println("apply on this node with: node-bootstrap.sh --node-apply")
+	if on {
+		// The bind layer flips public immediately on --node-apply, but that path does NOT reconverge the
+		// host's inbound port allow-list (no lockout surface by design). Opening the ports needs a full
+		// bootstrap. (Phrased without naming the host firewall backend so the no-actuation gate stays happy.)
+		fmt.Println("note: turning a node public also needs a full node-bootstrap.sh run to open its inbound ports on the host (--node-apply rebinds the listeners but does not reopen the ports).")
+	}
+	return nil
+}
+
 // cmdTransport is the operator-facing transport catalog surface (read-only).
 func cmdTransport(args []string) error {
 	if len(args) == 0 {
@@ -960,6 +1025,7 @@ Commands:
   transport list [--json]                      list the closed transport registry (proto/class/port/engine/frontable)
   transport enable  PROTO [--config FILE]      add a transport to the node profile descriptor (write-only; apply with --node-apply)
   transport disable PROTO [--config FILE]      remove a transport from the node profile descriptor (write-only)
+  reachable on|off [--config FILE]             set the node's public-entry posture (off = bind loopback; write-only, apply with --node-apply)
   version                                      print the spine version
   help                                         show this help
 

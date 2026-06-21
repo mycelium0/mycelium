@@ -71,6 +71,50 @@ func TestRenderServerShape(t *testing.T) {
 	}
 }
 
+func TestRenderServerReachable(t *testing.T) {
+	const base = `{
+		"node_address":"n.invalid","donor_host":"dh.invalid","donor_sni":"ds.invalid",
+		"reality_private_key":"PK","reality_public_key":"PUB","short_ids":["abcd0123"],
+		"ss_password":"SS","shadowtls_password":"STLS",
+		"vless_reality_vision_enabled":true,"vless_reality_grpc_enabled":true,
+		"shadowsocks_enabled":true,"shadowtls_enabled":true`
+	// node_bind absent (reachable=true/default) -> every PUBLIC inbound binds "::"; the detour SS stays loopback.
+	srvDefault, err := RenderServer(rawParams(t, base+"}"), []ServerClient{{Name: "a", ID: "id-a"}})
+	if err != nil {
+		t.Fatalf("RenderServer (default): %v", err)
+	}
+	checkBinds(t, marshalServer(t, srvDefault), "::")
+	// node_bind 127.0.0.1 (reachable=false) -> every PUBLIC inbound binds loopback; the detour stays loopback.
+	srvLoop, err := RenderServer(rawParams(t, base+`,"node_bind":"127.0.0.1"}`), []ServerClient{{Name: "a", ID: "id-a"}})
+	if err != nil {
+		t.Fatalf("RenderServer (loopback): %v", err)
+	}
+	checkBinds(t, marshalServer(t, srvLoop), "127.0.0.1")
+}
+
+func checkBinds(t *testing.T, out, wantPublic string) {
+	t.Helper()
+	var doc struct {
+		Inbounds []map[string]any `json:"inbounds"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	for _, in := range doc.Inbounds {
+		tag, _ := in["tag"].(string)
+		listen, _ := in["listen"].(string)
+		if tag == "shadowtls-ss-in" { // the hidden detour SS inbound is ALWAYS loopback (never public)
+			if listen != "127.0.0.1" {
+				t.Errorf("detour %s listen = %q, want 127.0.0.1", tag, listen)
+			}
+			continue
+		}
+		if listen != wantPublic {
+			t.Errorf("public inbound %s listen = %q, want %q", tag, listen, wantPublic)
+		}
+	}
+}
+
 func TestRenderServerClashSecretOmitted(t *testing.T) {
 	p := rawParams(t, `{"node_address":"n","donor_sni":"d","donor_host":"dh","reality_private_key":"P","reality_public_key":"X",
 		"short_ids":["abcd0123"],"vless_reality_vision_enabled":true}`)

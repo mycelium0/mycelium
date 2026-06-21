@@ -11,6 +11,32 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.23] — 2026-06-21
+### Added
+- **RP-0011 Operability & Release, chunk D — reachability posture (ADR-0034 §3)**: a node can be
+  provisioned + converged but NOT a public entry. Mechanism = a single render-time `node_bind` param
+  (default `"::"`, **byte-identical to today**; `apply_node_profile` stamps `"127.0.0.1"` only when the
+  descriptor declares `reachable: false`), applied identically by the shell renderer and
+  `internal/spec.RenderServer` so every PUBLIC inbound binds loopback (the hidden ShadowTLS detour stays
+  loopback regardless). The firewall follows automatically — `harden_ufw`'s loopback exclusion is
+  generalised to all inbound types, so a loopback-bound port is never opened (anti-lockout: sshd-allow
+  stays first). New CLI verb `myceliumctl reachable on|off [--config FILE]` (write-only on the descriptor,
+  apply with `--node-apply`). The bind layer holds on every flow the instant `reachable: false` is set
+  (never fail-open); the firewall layer converges at bootstrap (ADR-0034 §3 staging note). New gate
+  fixture `render_server_go_equiv` case D (reachable=false byte-identical shell↔Go) + Go unit test
+  `TestRenderServerReachable` (absent → `"::"`, `node_bind:"127.0.0.1"` → loopback). Verified on a Go node
+  + drilled DRY-RUN on a live node.
+  Hardened after an adversarial review: (1) the firewall port selection is extracted to a pure, unit-tested
+  helper `myc_firewall_singbox_ports` with a **null-tolerant** `listen` test (a missing `listen` defaults
+  public instead of aborting `harden_ufw`); (2) a **fail-closed foreign-engine guard** — `apply_node_profile`
+  refuses `reachable: false` while a non-sing-box-engine transport (e.g. the Xray-only `vless-xhttp-tls`) is
+  enabled, since `node_bind` is sing-box-only and that inbound would otherwise stay public (ADR-0034 §4;
+  dual-engine reachability is a tracked follow-up); (3) `.reachable` is read as a **strict JSON boolean**
+  (parity with Go's typed parse); (4) `reachable on` warns that going public also needs a full bootstrap to
+  open the firewall; (5) the doc contract is corrected (an absent `reachable` key renders public for
+  byte-identity). New gate `reachable_firewall_loopback` pins the firewall half (public ports opened,
+  loopback never opened) + `node_cli_no_actuation` now asserts the `reachable` verb is dispatched.
+
 ## [0.2.22] — 2026-06-21
 ### Added
 - **RP-0011 Operability & Release, chunk B2c — transport writer CLI verbs**: `myceliumctl transport
