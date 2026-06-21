@@ -149,6 +149,27 @@ func (p NodeProfile) Validate() error {
 	return nil
 }
 
+// WithTransport returns a copy of the profile with proto added (enable) or removed (disable) from
+// Transports — deduplicated, with the remaining order preserved and an enabled proto appended last. It
+// is a PURE list edit and does NOT validate proto (the caller validates it against the registry) or
+// actuate anything; it is the descriptor mutation the `transport enable|disable` CLI verbs apply before
+// writing node.config.json. Disabling a transport only removes it from the descriptor's additive enable
+// set (it cannot turn off a default-on transport — that is the additive read semantics of apply_node_profile).
+func (p NodeProfile) WithTransport(proto string, enable bool) NodeProfile {
+	out := make([]string, 0, len(p.Transports)+1)
+	for _, t := range p.Transports {
+		if t == proto {
+			continue // drop any existing occurrence (dedup)
+		}
+		out = append(out, t)
+	}
+	if enable {
+		out = append(out, proto)
+	}
+	p.Transports = out
+	return p
+}
+
 // ParseNodeProfile decodes a node profile, fail-closed: it REFUSES unknown fields so a stray node-"type"
 // enum, an engine selector, or any field outside the closed capability set is rejected (ADR-0034 —
 // capabilities, not types), then runs Validate. Pure; no I/O beyond the reader.
