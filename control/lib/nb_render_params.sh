@@ -141,6 +141,51 @@ merge_operator_overrides() {
 	log "params: applied operator-set toggle overrides on top of regenerated defaults (C19: operator enablement preserved across --update)."
 }
 
+# apply_node_profile <params_tmp> — ADR-0034 / RP-0011 chunk B2: translate a node-local node.config.json
+# descriptor's declared transports[] into params enable-key toggles and set them ON, additively on top of
+# the defaults + operator overrides. The enable_key for each transport is looked up from the Go-owned
+# vocab.json (never a restated "<proto>_enabled" naming rule) and is honoured ONLY if it is in the
+# operator_toggle_keys allowlist (the same fail-closed discipline as merge_operator_overrides).
+#
+# ABSENT descriptor => no-op => params render BYTE-IDENTICALLY (every node that has not adopted a
+# descriptor is unchanged; zero blast radius under auto-pull). READ-ONLY on the descriptor (it is
+# operator-supplied; this never writes it). FAIL-CLOSED: a present-but-malformed descriptor, an unknown
+# transport, or a non-allowlisted key hard-fails — we never silently write params that ignore the
+# operator's declared profile.
+apply_node_profile() {
+	local tmp="$1"
+	local cfg="$STATE_DIR/node.config.json"
+	[ -f "$cfg" ] || return 0   # DEFAULT: no descriptor => unchanged (the byte-identical guard)
+	local vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	[ -f "$vocab" ] || die "node.config.json present but the Go-owned vocab.json is missing ($vocab)."
+	jq -e 'type == "object"' "$cfg" >/dev/null 2>&1 \
+		|| die "node.config.json present but not a JSON object (fail-closed; fix or remove $cfg)."
+	local transports
+	transports="$(jq -r '(.transports // [])[]' "$cfg" 2>/dev/null)" \
+		|| die "node.config.json: cannot read .transports (fail-closed; fix or remove $cfg)."
+	if [ -z "$transports" ]; then
+		log "node.config.json present with no transports[] — keeping the default-on set."
+		return 0
+	fi
+	local t key
+	while IFS= read -r t; do
+		[ -n "$t" ] || continue
+		key="$(jq -r --arg t "$t" '.protos[] | select(.proto == $t) | .enable_key' "$vocab" 2>/dev/null)"
+		[ -n "$key" ] && [ "$key" != "null" ] \
+			|| die "node.config.json: transport '$t' is unknown or not operator-toggleable (no enable_key in the Go-owned vocab.json)."
+		printf '%s' "$OPERATOR_TOGGLE_KEYS" | jq -e --arg k "$key" 'index($k) != null' >/dev/null 2>&1 \
+			|| die "node.config.json: transport '$t' resolves to '$key', which is not in the operator_toggle_keys allowlist (fail-closed)."
+		if jq --arg k "$key" '.[$k] = true' "$tmp" >"$tmp.np"; then
+			mv -f "$tmp.np" "$tmp"
+		else
+			rm -f "$tmp.np"; die "node.config.json: failed to enable transport '$t' (key '$key') in params."
+		fi
+	done <<NODE_PROFILE_EOF
+$transports
+NODE_PROFILE_EOF
+	log "params: applied node.config.json descriptor — enabled transports: $(printf '%s' "$transports" | tr '\n' ' ')."
+}
+
 write_params() {
 	log "writing params.json (local-only render input) from node identity + canonical ports"
 	need_root
@@ -240,6 +285,11 @@ write_params() {
 		|| die "params: operator_toggle_keys is empty/invalid — regenerate control/vocab.json from the Go spine (RP-0008; the override allowlist is Go-owned)."
 	seed_operator_overrides "$tmp"
 	merge_operator_overrides "$tmp"
+	# Optional unified node-profile descriptor (ADR-0034 / RP-0011 chunk B2): if a node-local
+	# node.config.json is present, enable its declared transports[] (additively, on top of the defaults +
+	# operator overrides). ABSENT on every node that has not adopted it -> no-op -> params render
+	# byte-identically (zero blast radius under auto-pull). Read-only on the descriptor; fail-closed.
+	apply_node_profile "$tmp"
 	# Optional two-hop egress overlay (ADR-0029): a node acting as an in-region INGRESS for an
 	# out-of-region egress drops a local-only two_hop.json into STATE_DIR; merge it into params so the
 	# renderer (render_singbox.sh) emits the upstream outbound + auth_user route. Node-local + never
