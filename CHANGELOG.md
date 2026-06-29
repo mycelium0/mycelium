@@ -24,6 +24,14 @@ truth for the version is `internal/spec.Version`.
   now also asserts `deploy-plan`). Verified on a Go node: resolves the correct per-arch pins for the
   example descriptor (amd64 vs arm64), both arg forms, suite 60/60. Builds on chunks C-1 (the committed
   manifest + resolver) and C-2 (node-bootstrap reads it as default pins).
+- **RP-0011 Operability & Release, chunk C-4 — `scripts/fungi` one-command entrypoint**: the operator-facing
+  surface for a node — `fungi deploy|update|apply|plan|status`. ORCHESTRATION ONLY: `deploy`/`update`/`apply`
+  actuate solely by exec-ing `node-bootstrap.sh` (the fail-closed render→validate→promote→rollback actuator;
+  engine pins auto-fill from the manifest, C-2); `plan` delegates to the pure `deploy-plan`; `status` is a
+  read-only probe (service state / listeners / engine versions — never starts/stops/restarts anything). fungi
+  embeds NO render/validate/promote/config-mutation logic. New gate `fungi_scoped` pins both halves
+  (actuation-only-via-bootstrap + orchestration-only); `scripts/fungi` ships in `make dist`. Drilled on a Go
+  node: `status` read-only, `update --dry-run` promotes nothing (NRestarts=0), `plan` resolves pins; suite 61/61.
 
 ## [0.2.23] — 2026-06-21
 ### Added
