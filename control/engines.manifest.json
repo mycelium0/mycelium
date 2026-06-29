@@ -1,0 +1,22 @@
+{
+  "_comment": "Pinned dataplane engine versions + per-arch archive SHA256 (RP-0011 chunk C). node-bootstrap reads this as the DEFAULT --singbox-*/--xray-* pins when the operator passes no explicit flag (additive: an explicit flag still overrides; an arch not listed falls back to the required-flag behaviour). dl_base MUST equal node-bootstrap's SINGBOX_DL_BASE/XRAY_DL_BASE constants. SHA256 is over the official release archive each engine's installer downloads (sing-box: sing-box-<ver>-linux-<arch>.tar.gz; xray: Xray-linux-<token>.zip). Keys are NORMALISED arches (amd64/arm64); armv7 is intentionally uncovered (stays a required flag). Bump version + sha together; engine_manifest_shape pins the structure and the currency check ties the version to the pin CI uses.",
+  "version": 1,
+  "engines": {
+    "singbox": {
+      "version": "v1.13.13",
+      "dl_base": "https://github.com/SagerNet/sing-box/releases/download",
+      "sha256": {
+        "amd64": "bb99cabf47694625db421ee17898f36cdc1f9c2cb5decf65b12bac8d8437e842",
+        "arm64": "d7fab87b921933eb281d8ee7bd5377cdd8228089f1f7c807c9363a6a2329286c"
+      }
+    },
+    "xray": {
+      "version": "v26.3.27",
+      "dl_base": "https://github.com/XTLS/Xray-core/releases/download",
+      "sha256": {
+        "amd64": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
+        "arm64": "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"
+      }
+    }
+  }
+}
