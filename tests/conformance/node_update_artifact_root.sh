@@ -53,7 +53,7 @@ REAL_LIB_DIR="$REPO_ROOT/control/lib"
 # nb_rotate_apply — the RP-0012 C4b dry-run rotation seam that reuses that same render/validate path —
 # and nb_observability) — keep this list in lockstep with the `for _lib in …` loop in
 # scripts/node-bootstrap.sh.
-NB_LIBS="nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_front nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_measure nb_observability"
+NB_LIBS="nb_identity nb_donor nb_harden nb_engine_manifest nb_install nb_render_params nb_serve_bundle nb_front nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_measure nb_observability"
 
 command -v git >/dev/null 2>&1 || { printf 'SKIP: git not available; cannot stage a fake checkout.\n'; exit 0; }
 [ -f "$SCRIPT" ]        || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$SCRIPT" >&2; exit 2; }

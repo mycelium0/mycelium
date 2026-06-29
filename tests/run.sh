@@ -155,6 +155,11 @@
 #                               digests, dl_base == node-bootstrap's SINGBOX_DL_BASE/XRAY_DL_BASE
 #                               constants (byte-identity guard), and nb_engine_manifest.sh resolves it
 #                               (tuple for a covered arch, nothing for armv7). OFFLINE
+#   * engine_manifest_additive.sh — install_singbox/install_xray (RP-0011 chunk C-2) fill an ABSENT
+#                               --singbox-*/--xray-* pin from the manifest ONLY (explicit flag wins →
+#                               byte-identical), BEFORE a still-present fail-closed die, with
+#                               nb_engine_manifest sourced in lockstep (node-bootstrap loop + the
+#                               node_update_artifact_root NB_LIBS list). OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -224,6 +229,7 @@ GATES=(
 	"tests/conformance/release_workflow_sane.sh"
 	"tests/conformance/release_verify_failclosed.sh"
 	"tests/conformance/engine_manifest_shape.sh"
+	"tests/conformance/engine_manifest_additive.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"

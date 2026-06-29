@@ -335,7 +335,7 @@ fi
 # They define functions + their dedicated constants only; the constants reference STATE_DIR (already
 # final after arg-parse, above) and the function bodies reference shared globals/helpers at call time.
 NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
-for _lib in nb_identity nb_donor nb_harden nb_install nb_render_params nb_serve_bundle nb_front nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_measure nb_observability; do
+for _lib in nb_identity nb_donor nb_harden nb_engine_manifest nb_install nb_render_params nb_serve_bundle nb_front nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_measure nb_observability; do
 	# shellcheck source=/dev/null
 	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
 done

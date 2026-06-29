@@ -24,6 +24,19 @@
 install_singbox() {
 	log "ensuring sing-box is installed (pinned + checksum-verified)"
 	need_root
+	# RP-0011 chunk C: fill an ABSENT pin from control/engines.manifest.json (ADDITIVE — an explicit
+	# --singbox-version/--singbox-sha256 still wins; no manifest / no jq / an uncovered arch leaves the
+	# values empty and the fail-closed die below still applies; byte-identical for a flag-passing caller).
+	if [ -z "$SINGBOX_VERSION" ] || [ -z "$SINGBOX_SHA256" ]; then
+		if command -v manifest_engine_pins >/dev/null 2>&1; then
+			local _mfpins; _mfpins="$(manifest_engine_pins singbox 2>/dev/null || true)"
+			if [ -n "$_mfpins" ]; then
+				[ -z "$SINGBOX_VERSION" ] && SINGBOX_VERSION="$(printf '%s' "$_mfpins" | cut -f1)"
+				[ -z "$SINGBOX_SHA256" ]  && SINGBOX_SHA256="$(printf '%s' "$_mfpins" | cut -f2)"
+				log "sing-box pin resolved from engines.manifest.json: ${SINGBOX_VERSION}"
+			fi
+		fi
+	fi
 	if have "$SINGBOX_BIN"; then
 		local cur
 		cur="$("$SINGBOX_BIN" version 2>/dev/null | sed -n 's/.*version[[:space:]]*//p' | head -n1)"
@@ -118,6 +131,17 @@ node_needs_xray() {
 install_xray() {
 	log "ensuring xray-core is installed (pinned + checksum-verified) — an xray-engine transport is enabled"
 	need_root
+	# RP-0011 chunk C: fill an ABSENT pin from control/engines.manifest.json (ADDITIVE — see install_singbox).
+	if [ -z "$XRAY_VERSION" ] || [ -z "$XRAY_SHA256" ]; then
+		if command -v manifest_engine_pins >/dev/null 2>&1; then
+			local _mfpins; _mfpins="$(manifest_engine_pins xray 2>/dev/null || true)"
+			if [ -n "$_mfpins" ]; then
+				[ -z "$XRAY_VERSION" ] && XRAY_VERSION="$(printf '%s' "$_mfpins" | cut -f1)"
+				[ -z "$XRAY_SHA256" ]  && XRAY_SHA256="$(printf '%s' "$_mfpins" | cut -f2)"
+				log "xray pin resolved from engines.manifest.json: ${XRAY_VERSION}"
+			fi
+		fi
+	fi
 	if have "$XRAY_BIN"; then
 		local cur
 		cur="$("$XRAY_BIN" version 2>/dev/null | sed -n 's/^Xray[[:space:]]*//p' | awk '{print $1}' | head -n1)"
