@@ -140,6 +140,11 @@
 #                               bootstrap+build source, is SECRET-FREE (no identity/params/keys/configs),
 #                               and DETERMINISTIC (two builds byte-identical). SKIPS without a git work
 #                               tree. OFFLINE
+#   * release_workflow_sane.sh — the release workflow (.github/workflows/release.yml, RP-0011 REL-2)
+#                               triggers only on a v* tag, builds via `make dist`, verifies with
+#                               release_dist_sane, guards tag==spec.Version, SHA-pins every action, and
+#                               holds NO signing secret (the tag + SHA256SUMS are signed locally,
+#                               ADR-0015). OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -206,6 +211,7 @@ GATES=(
 	"tests/conformance/node_apply_failclosed.sh"
 	"tests/conformance/reachable_firewall_loopback.sh"
 	"tests/conformance/release_dist_sane.sh"
+	"tests/conformance/release_workflow_sane.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
