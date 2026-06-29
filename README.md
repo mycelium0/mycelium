@@ -55,6 +55,12 @@ networks are one case.
 > It does not distribute public client configs.
 > Each operator independently deploys and controls their own node.
 
+## Get started
+
+Stand up a node in a few commands — fetch + verify a release, then `scripts/fungi deploy`. See
+**[QUICKSTART.md](QUICKSTART.md)**. Engine versions/checksums are pinned and resolved automatically;
+the release is signed and verifiable ([docs/RELEASING.md](docs/RELEASING.md)).
+
 ## Who it's for
 
 Mycelium is built for the people and groups who need dependable private connectivity when networks
