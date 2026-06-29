@@ -65,8 +65,9 @@ fi
 grep -qE '^[[:space:]]*case "node":' "$MAIN" \
 	&& grep -qE '^[[:space:]]*case "transport":' "$MAIN" \
 	&& grep -qE '^[[:space:]]*case "reachable":' "$MAIN" \
-	&& ok "the node + transport + reachable commands are dispatched" \
-	|| badln "the node/transport/reachable commands are not all dispatched in main.go run()"
+	&& grep -qE '^[[:space:]]*case "deploy-plan":' "$MAIN" \
+	&& ok "the node + transport + reachable + deploy-plan commands are dispatched" \
+	|| badln "the node/transport/reachable/deploy-plan commands are not all dispatched in main.go run()"
 
 if [ "$fail" -eq 0 ]; then
 	printf 'PASS: the node/transport CLI verbs edit intent only and never actuate a live node.\n'
