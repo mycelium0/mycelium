@@ -145,6 +145,11 @@
 #                               release_dist_sane, guards tag==spec.Version, SHA-pins every action, and
 #                               holds NO signing secret (the tag + SHA256SUMS are signed locally,
 #                               ADR-0015). OFFLINE
+#   * release_verify_failclosed.sh — scripts/verify-release.sh (RP-0011 REL-3, the downloader-side check)
+#                               is FAIL-CLOSED: against a synthetic SSH-signed release it passes a clean
+#                               one, rejects a tampered artifact (integrity) and a forged/missing
+#                               signature (authenticity), and integrity-only-passes when no key is given
+#                               (never silently OKs authenticity). SKIPS without ssh-keygen. OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -212,6 +217,7 @@ GATES=(
 	"tests/conformance/reachable_firewall_loopback.sh"
 	"tests/conformance/release_dist_sane.sh"
 	"tests/conformance/release_workflow_sane.sh"
+	"tests/conformance/release_verify_failclosed.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"

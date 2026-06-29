@@ -51,17 +51,24 @@ gh release upload vX.Y.Z dist/SHA256SUMS.sig
 
 ## Verify a release (operator / downloader)
 
+Use the helper (fail-closed — integrity always, authenticity when you supply the key):
+
 ```sh
-# authenticity of the source (the tag is the root of trust)
-git verify-tag vX.Y.Z                              # against your allowed_signers
-
-# integrity of the downloaded tarball
-sha256sum -c SHA256SUMS                             # (macOS: shasum -a 256 -c SHA256SUMS)
-
-# authenticity of the checksums (detached SSH signature)
-ssh-keygen -Y verify -f allowed_signers -I <signer-id> -n file \
-  -s SHA256SUMS.sig < SHA256SUMS
+# from the directory holding mycelium-X.Y.Z.tar.gz + SHA256SUMS + SHA256SUMS.sig:
+scripts/verify-release.sh . --allowed-signers allowed_signers --signer <signer-id> [--tag vX.Y.Z]
 ```
+
+It runs, fail-closed, the underlying checks:
+
+```sh
+sha256sum -c SHA256SUMS                             # integrity (macOS: shasum -a 256 -c)
+ssh-keygen -Y verify -f allowed_signers -I <signer-id> -n file -s SHA256SUMS.sig < SHA256SUMS
+git verify-tag vX.Y.Z                               # authenticity of the source (tag = root of trust)
+```
+
+Without `--allowed-signers` the helper checks **integrity only** and warns that authenticity is
+unverified — supply the maintainer's published signing key (an `allowed_signers` line) to verify the
+signature.
 
 On a node, `node-bootstrap.sh --allowed-signers <file>` performs the tag/commit signature check automatically (`verify_signed_ref`, fail-closed) before applying a fetched ref — so the same key that signs the release also gates every node update.
 
