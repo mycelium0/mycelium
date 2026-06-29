@@ -15,8 +15,8 @@ import (
 // the SINGLE source both the bash resolver (control/lib/nb_engine_manifest.sh) and the Go deploy-plan
 // preview read, so the printed/resolved pins cannot diverge from what the installer would use.
 type EngineManifest struct {
-	Version int                    `json:"version"`
-	Engines map[string]EnginePins  `json:"engines"`
+	Version int                   `json:"version"`
+	Engines map[string]EnginePins `json:"engines"`
 }
 
 // EnginePins is one engine's pinned version + download base + per-(normalised-)arch archive SHA256.
