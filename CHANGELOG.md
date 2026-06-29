@@ -36,6 +36,14 @@ truth for the version is `internal/spec.Version`.
   open the firewall; (5) the doc contract is corrected (an absent `reachable` key renders public for
   byte-identity). New gate `reachable_firewall_loopback` pins the firewall half (public ports opened,
   loopback never opened) + `node_cli_no_actuation` now asserts the `reachable` verb is dispatched.
+- **RP-0011 Operability & Release, REL-1 — release artifact (`make dist`)**: a `dist` Makefile target builds a
+  DETERMINISTIC source tarball (= the AGPL Corresponding Source) of the committed tree via `git archive`,
+  named `mycelium-<spec.Version>.tar.gz` (the name cannot drift from the spine version), plus a `SHA256SUMS`.
+  `git archive` ships ONLY tracked files (per-node identity/secrets/rendered configs are gitignored + never
+  tracked → they can never leak into the artifact) and `gzip -n` makes two builds byte-identical. The release
+  is authenticated by a SIGNED git tag (ADR-0015 SSH-sig, the scheme `verify_signed_ref` already uses) — not
+  produced here (the maintainer signs locally; see `docs/RELEASING.md`). New gate `release_dist_sane` pins
+  version-naming, contents, secret-freeness, and reproducibility (SKIPS without a git work tree).
 
 ## [0.2.22] — 2026-06-21
 ### Added
