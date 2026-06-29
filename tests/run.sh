@@ -160,6 +160,11 @@
 #                               byte-identical), BEFORE a still-present fail-closed die, with
 #                               nb_engine_manifest sourced in lockstep (node-bootstrap loop + the
 #                               node_update_artifact_root NB_LIBS list). OFFLINE
+#   * fungi_scoped.sh — scripts/fungi (RP-0011 chunk C-4, the one-command entrypoint) stays SCOPED +
+#                               orchestration-only: deploy/update/apply actuate ONLY by exec-ing
+#                               node-bootstrap.sh, fungi runs no service-mutating systemctl / engine /
+#                               live-config write, embeds no render/validate/promote logic, and `plan`
+#                               delegates to deploy-plan. OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -230,6 +235,7 @@ GATES=(
 	"tests/conformance/release_verify_failclosed.sh"
 	"tests/conformance/engine_manifest_shape.sh"
 	"tests/conformance/engine_manifest_additive.sh"
+	"tests/conformance/fungi_scoped.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"

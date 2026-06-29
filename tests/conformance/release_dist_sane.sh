@@ -82,7 +82,7 @@ fi
 if [ -f "$tarball" ]; then
 	listing="$(tar tzf "$tarball" 2>/dev/null)"
 	miss=""
-	for f in LICENSE go.mod Makefile scripts/node-bootstrap.sh cmd/myceliumctl/main.go internal/spec/version.go control/lib/nb_install.sh; do
+	for f in LICENSE go.mod Makefile scripts/node-bootstrap.sh scripts/fungi cmd/myceliumctl/main.go internal/spec/version.go control/lib/nb_install.sh control/engines.manifest.json; do
 		printf '%s\n' "$listing" | grep -qx "mycelium-$ver/$f" || miss="$miss $f"
 	done
 	[ -z "$miss" ] && ok "tarball carries the bootstrap+build source (LICENSE, go.mod, Makefile, node-bootstrap, cmd, internal/spec, control/lib)" \

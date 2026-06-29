@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Copyright © 2026 mindicator & silicon bags quartet.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
+# later. See the LICENSE file in the repository root.
+#
+# fungi — the one-command operator entrypoint for a Mycelium node (RP-0011 chunk C-4).
+#
+# ORCHESTRATION ONLY. fungi is a thin verb wrapper: it NEVER renders, validates, promotes, restarts, or
+# writes a live config itself. All actuation is delegated to scripts/node-bootstrap.sh (the existing
+# fail-closed render -> validate -> promote -> rollback actuator), all preview logic to myceliumctl. Its
+# only job is a friendly one-command surface; the control logic stays in the existing spine. Engine pins
+# (--singbox-*/--xray-*) are filled from control/engines.manifest.json by node-bootstrap itself
+# (RP-0011 C-2), so the operator passes none.
+#
+#   fungi deploy [opts]   stand up / converge this node            (-> node-bootstrap.sh)
+#   fungi update [opts]   fetch + re-render + validate + rollback  (-> node-bootstrap.sh --update)
+#   fungi apply  [opts]   apply the node descriptor to the node    (-> node-bootstrap.sh --node-apply)
+#   fungi plan   [args]   preview the deploy (resolve pins, print)  (-> myceliumctl deploy-plan; read-only)
+#   fungi status          read-only: what this node is running
+#
+# Exit: forwards the delegated command's exit; 2 = usage, 3 = the Go spine for `plan` is unavailable.
+
+set -euo pipefail
+
+src="${BASH_SOURCE[0]}"
+while [ -h "$src" ]; do dir="$(cd -P "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"; [ "${src#/}" = "$src" ] && src="$dir/$src"; done
+FUNGI_SELF="$(cd -P "$(dirname "$src")" && pwd)/$(basename "$src")"
+REPO_ROOT="$(cd -P "$(dirname "$FUNGI_SELF")/.." && pwd)"
+NODE_BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
+
+usage() {
+	sed -n '7,21p' "$FUNGI_SELF" | sed 's/^# \{0,1\}//; s/^#$//'
+}
+
+# Resolve the Go spine binary that speaks `deploy-plan` (install_spine builds it at
+# $TOOLING_DIR/bin/myceliumctl-go; a checkout build lands beside the repo). Fall back gracefully.
+resolve_myctl_go() {
+	local c
+	for c in "${TOOLING_DIR:-/usr/local/lib/mycelium}/bin/myceliumctl-go" "$REPO_ROOT/myceliumctl-go"; do
+		[ -x "$c" ] && { printf '%s\n' "$c"; return 0; }
+	done
+	return 1
+}
+
+# READ-ONLY status probe: report what the node is running; never start/stop/restart/mutate anything.
+fungi_status() {
+	local svc state
+	printf 'services:\n'
+	if command -v systemctl >/dev/null 2>&1; then
+		for svc in sing-box xray myceliumd; do
+			state="$(systemctl is-active "$svc" 2>/dev/null || true)"
+			[ -n "$state" ] && [ "$state" != "inactive" ] || systemctl list-unit-files "$svc.service" >/dev/null 2>&1 || continue
+			printf '  %-10s %s (NRestarts=%s)\n' "$svc" "${state:-unknown}" "$(systemctl show "$svc" -p NRestarts --value 2>/dev/null || echo '?')"
+		done
+	else
+		printf '  (systemctl unavailable)\n'
+	fi
+	printf 'public listeners:\n'
+	if command -v ss >/dev/null 2>&1; then
+		ss -ltnH 2>/dev/null | awk '{print $4}' | grep -vE '127\.0\.0\.1|\[::1\]' | sort -u | sed 's/^/  /' || true
+	fi
+	printf 'engine versions:\n'
+	command -v sing-box >/dev/null 2>&1 && printf '  sing-box %s\n' "$(sing-box version 2>/dev/null | sed -n 's/.*version[[:space:]]*//p' | head -1)"
+	command -v xray >/dev/null 2>&1 && printf '  xray %s\n' "$(xray version 2>/dev/null | sed -n 's/^Xray[[:space:]]*//p' | awk '{print $1}' | head -1)"
+	return 0
+}
+
+[ -x "$NODE_BOOTSTRAP" ] || { echo "fungi: actuator not found: $NODE_BOOTSTRAP" >&2; exit 2; }
+
+case "${1:-}" in
+	deploy) shift; exec "$NODE_BOOTSTRAP" "$@" ;;
+	update) shift; exec "$NODE_BOOTSTRAP" --update "$@" ;;
+	apply)  shift; exec "$NODE_BOOTSTRAP" --node-apply "$@" ;;
+	plan)   shift
+		mc="$(resolve_myctl_go)" || { echo "fungi plan: the Go spine (myceliumctl-go) is not built here; run 'fungi deploy' first, or use 'myceliumctl deploy-plan' from a checkout." >&2; exit 3; }
+		# Run from REPO_ROOT so deploy-plan's relative default --manifest (control/engines.manifest.json)
+		# resolves regardless of the operator's cwd (the live descriptor default is an absolute path).
+		cd "$REPO_ROOT" && exec "$mc" deploy-plan "$@" ;;
+	status) shift; fungi_status ;;
+	help|-h|--help) usage; exit 0 ;;
+	"") usage >&2; exit 2 ;;
+	*) echo "fungi: unknown verb '$1' (deploy|update|apply|plan|status)" >&2; usage >&2; exit 2 ;;
+esac
