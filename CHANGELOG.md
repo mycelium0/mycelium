@@ -11,6 +11,20 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.24] — 2026-06-30
+### Added
+- **RP-0011 Operability & Release, chunk C-3 — pure `deploy-plan` verb + `spec.EngineManifest`**: a new
+  read-only Go type `internal/spec.EngineManifest` parses `control/engines.manifest.json` and resolves
+  `{version, sha256, dl_base}` for an engine on a normalised arch (amd64/arm64; armv7 uncovered →
+  required-flag fallback). New CLI verb `myceliumctl deploy-plan [FILE] [--arch A] [--manifest F]`:
+  parses the node descriptor, reads the manifest READ-ONLY, resolves the pinned engine version + archive
+  SHA256 for the target arch, and PRINTS the one-command on-ramp plus the equivalent direct
+  node-bootstrap invocation with the pins filled in. It is PURE — reads the two input files and prints,
+  spawns nothing, touches no live node state — so `node_cli_no_actuation` stays green (its dispatch check
+  now also asserts `deploy-plan`). Verified on a Go node: resolves the correct per-arch pins for the
+  example descriptor (amd64 vs arm64), both arg forms, suite 60/60. Builds on chunks C-1 (the committed
+  manifest + resolver) and C-2 (node-bootstrap reads it as default pins).
+
 ## [0.2.23] — 2026-06-21
 ### Added
 - **RP-0011 Operability & Release, chunk D — reachability posture (ADR-0034 §3)**: a node can be

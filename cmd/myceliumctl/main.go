@@ -18,6 +18,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -82,6 +84,8 @@ func run(args []string) error {
 		return cmdTransport(rest)
 	case "reachable":
 		return cmdReachable(rest)
+	case "deploy-plan":
+		return cmdDeployPlan(rest)
 	case "reality-keys":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -896,6 +900,111 @@ func cmdReachable(args []string) error {
 	return nil
 }
 
+// cmdDeployPlan previews standing up a node from its descriptor (RP-0011 chunk C-3). It parses the
+// node profile, reads control/engines.manifest.json READ-ONLY, resolves the pinned engine version +
+// archive SHA256 for the target arch, and PRINTS the one-command `fungi deploy` line plus the
+// equivalent direct node-bootstrap invocation with the pins filled in. It is PURE: it reads the two
+// input files and prints; it spawns nothing and never touches or mutates live node state.
+func cmdDeployPlan(args []string) error {
+	// A leading positional descriptor path: the stdlib flag parser stops at the first non-flag arg, so
+	// pull it off the front before parsing the flags (lets `deploy-plan FILE --arch X` work, not just
+	// `deploy-plan --arch X FILE`).
+	posCfg := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		posCfg = args[0]
+		args = args[1:]
+	}
+	fs := flag.NewFlagSet("deploy-plan", flag.ContinueOnError)
+	cfgPath := fs.String("config", defaultNodeConfig, "node profile descriptor to read")
+	manifestPath := fs.String("manifest", "control/engines.manifest.json", "engine manifest to read")
+	arch := fs.String("arch", spec.NormArch(runtime.GOARCH), "target arch (amd64|arm64)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	switch fs.NArg() {
+	case 0:
+	case 1:
+		if posCfg != "" {
+			return fmt.Errorf("deploy-plan: descriptor path given twice")
+		}
+		posCfg = fs.Arg(0)
+	default:
+		return fmt.Errorf("deploy-plan: at most one descriptor path")
+	}
+	if posCfg != "" {
+		*cfgPath = posCfg
+	}
+
+	// Descriptor — an absent file means "the default-on transport set" (a fresh node), not an error.
+	var p spec.NodeProfile
+	if data, rerr := os.ReadFile(*cfgPath); rerr == nil {
+		parsed, perr := spec.ParseNodeProfile(bytes.NewReader(data))
+		if perr != nil {
+			return fmt.Errorf("deploy-plan: %s is invalid: %w", *cfgPath, perr)
+		}
+		p = parsed
+	} else if !os.IsNotExist(rerr) {
+		return fmt.Errorf("deploy-plan: read %s: %w", *cfgPath, rerr)
+	}
+
+	mdata, err := os.ReadFile(*manifestPath)
+	if err != nil {
+		return fmt.Errorf("deploy-plan: read manifest %s: %w", *manifestPath, err)
+	}
+	m, err := spec.ParseEngineManifest(bytes.NewReader(mdata))
+	if err != nil {
+		return fmt.Errorf("deploy-plan: parse manifest %s: %w", *manifestPath, err)
+	}
+
+	// Which engines does this descriptor's transport set need? (xray only if an xray-engine proto is on.)
+	needXray := false
+	for _, t := range p.Transports {
+		if d, ok := spec.ProtoByName(t); ok && d.Engine == spec.EngineXray {
+			needXray = true
+		}
+	}
+
+	pins := ""
+	if v, s, _, ok := m.Pin("singbox", *arch); ok {
+		pins += fmt.Sprintf(" --singbox-version %s --singbox-sha256 %s", v, s)
+	} else {
+		pins += " --singbox-version <PIN> --singbox-sha256 <PIN>"
+	}
+	if needXray {
+		if v, s, _, ok := m.Pin("xray", *arch); ok {
+			pins += fmt.Sprintf(" --xray-version %s --xray-sha256 %s", v, s)
+		} else {
+			pins += " --xray-version <PIN> --xray-sha256 <PIN>"
+		}
+	}
+
+	transports := "default-on set"
+	if len(p.Transports) > 0 {
+		transports = strings.Join(p.Transports, ", ")
+	}
+	engines := "sing-box"
+	if needXray {
+		engines = "sing-box + xray"
+	}
+	pinNote := ""
+	if _, _, _, ok := m.Pin("singbox", *arch); !ok {
+		pinNote = "  (arch not in the manifest — supply --singbox-sha256 / --xray-sha256 by hand)\n"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "deploy-plan  (%s, arch=%s)\n", *cfgPath, *arch)
+	fmt.Fprintf(&b, "  transports: %s\n", transports)
+	fmt.Fprintf(&b, "  engines:    %s\n", engines)
+	fmt.Fprintf(&b, "  reachable:  %t\n", p.Reachable)
+	b.WriteString(pinNote)
+	b.WriteString("\nOne command (resolves the engine pins, then stands the node up):\n")
+	b.WriteString("  scripts/fungi deploy --clients <names> --node-address <host> --allowed-signers <key>\n")
+	b.WriteString("\nEquivalent direct invocation:\n")
+	fmt.Fprintf(&b, "  scripts/node-bootstrap.sh%s --clients <names> --node-address <host> --allowed-signers <key>\n", pins)
+	fmt.Print(b.String())
+	return nil
+}
+
 // cmdTransport is the operator-facing transport catalog surface (read-only).
 func cmdTransport(args []string) error {
 	if len(args) == 0 {
@@ -1026,6 +1135,7 @@ Commands:
   transport enable  PROTO [--config FILE]      add a transport to the node profile descriptor (write-only; apply with --node-apply)
   transport disable PROTO [--config FILE]      remove a transport from the node profile descriptor (write-only)
   reachable on|off [--config FILE]             set the node's public-entry posture (off = bind loopback; write-only, apply with --node-apply)
+  deploy-plan [FILE] [--arch A] [--manifest F] preview a node's deploy: resolve engine pins + print the command (read-only)
   version                                      print the spine version
   help                                         show this help
 
