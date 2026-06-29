@@ -50,6 +50,9 @@ docs/audits/
 # only the template + abstracted rationale (docs/runbooks/node-as-inventory.md).
 docs/runbooks/node-as-inventory.local.md
 
+# Release artifacts (`make dist` output) — built on demand / in CI, never committed
+/dist/
+
 # Stray scratch / tool output — never commit
 .checkout.txt
 /.scan_tmp/
