@@ -23,6 +23,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/mycelium0/mycelium/internal/diag"
 	"github.com/mycelium0/mycelium/internal/identity"
 	"github.com/mycelium0/mycelium/internal/rotate"
 	"github.com/mycelium0/mycelium/internal/spec"
@@ -86,6 +87,8 @@ func run(args []string) error {
 		return cmdReachable(rest)
 	case "deploy-plan":
 		return cmdDeployPlan(rest)
+	case "diag":
+		return cmdDiag(rest)
 	case "reality-keys":
 		return fmt.Errorf("%q is not yet ported to the Go spine; use the shell tool control/myceliumctl for now (RP-0002 W7)", cmd)
 	case "help", "-h", "--help":
@@ -1005,6 +1008,28 @@ func cmdDeployPlan(args []string) error {
 	return nil
 }
 
+// cmdDiag is the node diagnostics surface (RP-0011 chunk E). Its first, gating subcommand is `redact`:
+// it reads stdin and writes the PII-scrubbed text (internal/diag.Redact) to stdout, so any
+// diagnostics — engine logs, unit status, gate output — can be made safe to attach to a public bug
+// report. (The `collect` subcommand that assembles the bundle is a follow-on; the redactor + the
+// log_bundle_redaction gate land first, before any collector exists.)
+func cmdDiag(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("diag: a subcommand is required (redact)")
+	}
+	switch args[0] {
+	case "redact":
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("diag redact: read stdin: %w", err)
+		}
+		fmt.Print(diag.Redact(string(data)))
+		return nil
+	default:
+		return fmt.Errorf("diag: unknown subcommand %q (redact)", args[0])
+	}
+}
+
 // cmdTransport is the operator-facing transport catalog surface (read-only).
 func cmdTransport(args []string) error {
 	if len(args) == 0 {
@@ -1136,6 +1161,7 @@ Commands:
   transport disable PROTO [--config FILE]      remove a transport from the node profile descriptor (write-only)
   reachable on|off [--config FILE]             set the node's public-entry posture (off = bind loopback; write-only, apply with --node-apply)
   deploy-plan [FILE] [--arch A] [--manifest F] preview a node's deploy: resolve engine pins + print the command (read-only)
+  diag redact                                  read stdin, write it PII-scrubbed to stdout (safe to attach to a bug report)
   version                                      print the spine version
   help                                         show this help
 

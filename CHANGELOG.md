@@ -11,6 +11,19 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.25] — 2026-06-30
+### Added
+- **RP-0011 Operability & Release, chunk E-1 — diagnostics PII-redactor (AC-9, gate-before-collector)**:
+  a new pure Go package `internal/diag` whose `Redact()` scrubs every PII class the project forbids
+  collecting (SECURITY.md §4.2) from arbitrary text — IPv4/IPv6, FQDN/hostname/SNI, client UUIDs, key
+  material (64-hex + base64url), long opaque secrets/PSKs, AS numbers — fail-safe by over-redaction,
+  and preserves structural context (it redacts values, not the `key=` labels). New thin verb
+  `myceliumctl diag redact` (stdin → scrubbed stdout) so any diagnostics can be made safe to attach to
+  a public bug report. New gate `log_bundle_redaction` seeds a synthetic bundle with fake PII of every
+  class, pipes it through `diag redact`, and asserts NONE survive (+ requires the Go runtime redaction
+  test) — it lands BEFORE any `diag collect` collector. Verified on a Go node: TestRedactScrubsEveryNeedle
+  + idempotency, full offline suite 62/62.
+
 ## [0.2.24] — 2026-06-30
 ### Added
 - **RP-0011 Operability & Release, chunk C-3 — pure `deploy-plan` verb + `spec.EngineManifest`**: a new

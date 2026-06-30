@@ -165,6 +165,10 @@
 #                               node-bootstrap.sh, fungi runs no service-mutating systemctl / engine /
 #                               live-config write, embeds no render/validate/promote logic, and `plan`
 #                               delegates to deploy-plan. OFFLINE
+#   * log_bundle_redaction.sh — the diagnostics redactor (RP-0011 chunk E / AC-9) is PII-SAFE: a synthetic
+#                               bundle seeded with fake IPv4/IPv6/FQDN/UUID/key/PSK/ASN, run through
+#                               `myceliumctl diag redact`, leaks NONE of them; requires the Go runtime
+#                               redaction test. Gate-BEFORE-collector. SKIPS without Go. OFFLINE
 #   * readme_badges_honest.sh — the README badge row is HONEST: the version + Go pills equal
 #                               internal/spec.Version and the go.mod go directive (no silent drift),
 #                               the badge block makes no operated-network/uptime/online claim
@@ -236,6 +240,7 @@ GATES=(
 	"tests/conformance/engine_manifest_shape.sh"
 	"tests/conformance/engine_manifest_additive.sh"
 	"tests/conformance/fungi_scoped.sh"
+	"tests/conformance/log_bundle_redaction.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"
