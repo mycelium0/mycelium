@@ -24,4 +24,9 @@ regexes = [
 ]
 paths = [
   '''\.claude/''',
+  # PII-FIXTURE files: these exist solely to hold FAKE, documentation-range PII (TEST-NET IPs, a fake
+  # UUID, fake key/PSK strings) that the redactor must scrub — no real secret by construction (RP-0011
+  # chunk E / AC-9); gitleaks flags the high-entropy fakes as candidates.
+  '''internal/diag/redact_test\.go''',
+  '''tests/conformance/log_bundle_redaction\.sh''',
 ]
