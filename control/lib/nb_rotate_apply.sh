@@ -285,6 +285,26 @@ rotate_apply_dryrun() {
 	die "rotation: candidate failed 'sing-box check' (fail-closed; nothing changed)."
 }
 
+# update_measure_active_ref TO_REF — after a rotation promotes a sibling, point the MEASURE plane's
+# active_ref at it (the daemon re-reads measure.config each tick), so the loop measures the PROMOTED
+# member instead of the impaired incumbent and CONVERGES (verdict clean) rather than re-deciding the same
+# rotation every cooldown. On an all-transports-on node a "promote-sibling" rotation leaves the served set
+# unchanged (the sibling is already up); this active_ref move is what makes the rotation VISIBLE and
+# convergent — the node's primary preference shifts, and client traffic recovers independently via the
+# bundle's failover. No-op if the ref is empty or not a configured member.
+update_measure_active_ref() {
+	local to_ref="$1" mc="$STATE_DIR/measure.config.json"
+	[ -n "$to_ref" ] && [ "$to_ref" != "?" ] && [ "$to_ref" != "null" ] || return 0
+	[ -f "$mc" ] || return 0
+	jq -e --arg r "$to_ref" '.members[]? | select(.ref==$r)' "$mc" >/dev/null 2>&1 || return 0
+	if jq --arg r "$to_ref" '.active_ref=$r' "$mc" >"$mc.tmp" 2>/dev/null; then
+		mv -f "$mc.tmp" "$mc"
+		log "rotation: MEASURE active_ref -> $to_ref (the loop now measures the promoted member; it converges)."
+	else
+		rm -f "$mc.tmp"
+	fi
+}
+
 # --- LIVE executor (armed + --apply-rotation + DRY_RUN=0 only) ----------------------------------------
 rotate_apply_live() {
 	local plan="$1" from to
@@ -323,6 +343,7 @@ rotate_apply_live() {
 	if [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then
 		rm -f "$candidate" 2>/dev/null || true
 		persist_rotation_state "$plan"
+		update_measure_active_ref "$to"
 		log "rotation: candidate identical to the live config; sibling already serving (no restart). Overlay kept."
 		return 0
 	fi
@@ -334,6 +355,7 @@ rotate_apply_live() {
 	install_singbox_unit
 	if apply_singbox && verify_post_apply; then
 		persist_rotation_state "$plan"
+		update_measure_active_ref "$to"
 		render_serve_bundle
 		log "rotation: LIVE apply verified ($from -> $to). Sibling promoted; between-tick state persisted."
 		return 0
