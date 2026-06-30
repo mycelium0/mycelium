@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -1008,14 +1009,14 @@ func cmdDeployPlan(args []string) error {
 	return nil
 }
 
-// cmdDiag is the node diagnostics surface (RP-0011 chunk E). Its first, gating subcommand is `redact`:
-// it reads stdin and writes the PII-scrubbed text (internal/diag.Redact) to stdout, so any
-// diagnostics — engine logs, unit status, gate output — can be made safe to attach to a public bug
-// report. (The `collect` subcommand that assembles the bundle is a follow-on; the redactor + the
-// log_bundle_redaction gate land first, before any collector exists.)
+// cmdDiag is the node diagnostics surface (RP-0011 chunk E). `redact` reads stdin and writes the
+// PII-scrubbed text (internal/diag.Redact); `collect` assembles a node bundle (versions / unit status /
+// recent engine log) and pipes the WHOLE thing through Redact, so it is safe to attach to a public bug
+// report. This dispatcher stays free of any subprocess/live-state read so the node_cli_no_actuation
+// guard is unaffected; the read-only collector (cmdDiagCollect) lives below usage(), outside that block.
 func cmdDiag(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("diag: a subcommand is required (redact)")
+		return fmt.Errorf("diag: a subcommand is required (redact | collect)")
 	}
 	switch args[0] {
 	case "redact":
@@ -1025,8 +1026,10 @@ func cmdDiag(args []string) error {
 		}
 		fmt.Print(diag.Redact(string(data)))
 		return nil
+	case "collect":
+		return cmdDiagCollect(args[1:])
 	default:
-		return fmt.Errorf("diag: unknown subcommand %q (redact)", args[0])
+		return fmt.Errorf("diag: unknown subcommand %q (redact | collect)", args[0])
 	}
 }
 
@@ -1162,6 +1165,7 @@ Commands:
   reachable on|off [--config FILE]             set the node's public-entry posture (off = bind loopback; write-only, apply with --node-apply)
   deploy-plan [FILE] [--arch A] [--manifest F] preview a node's deploy: resolve engine pins + print the command (read-only)
   diag redact                                  read stdin, write it PII-scrubbed to stdout (safe to attach to a bug report)
+  diag collect                                 assemble a PII-redacted node diagnostics bundle (versions / units / recent log)
   version                                      print the spine version
   help                                         show this help
 
@@ -1170,4 +1174,67 @@ Not yet ported to the Go spine (use the shell tool control/myceliumctl):
 
 Default state file: %s
 `, spec.Version, defaultState)
+}
+
+// cmdDiagCollect assembles a node diagnostics bundle and pipes the WHOLE thing through diag.Redact, so
+// the output is PII-safe by construction — safe to attach to a public bug report (RP-0011 chunk E,
+// AC-9). It is READ-ONLY: it runs only status / version / log-read commands (is-active, version,
+// journalctl), never a mutating one. It lives below usage(), OUTSIDE the node_cli_no_actuation block,
+// because reading live node state via a subprocess is that gate's concern for the EDIT verbs — but it
+// is the whole point of a diagnostics collector.
+func cmdDiagCollect(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("diag collect: takes no arguments")
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# mycelium diag bundle\nspine: %s", spec.Version)
+	if spec.SourceRev != "" {
+		fmt.Fprintf(&b, " (rev %s)", spec.SourceRev)
+	}
+	b.WriteByte('\n')
+
+	b.WriteString("\n## engine versions\n")
+	for _, e := range []struct{ label, bin, arg string }{{"sing-box", "sing-box", "version"}, {"xray", "xray", "version"}} {
+		if out, ok := diagRun(e.bin, e.arg); ok {
+			fmt.Fprintf(&b, "  %-10s %s\n", e.label, firstLine(out))
+		} else {
+			fmt.Fprintf(&b, "  %-10s (not installed)\n", e.label)
+		}
+	}
+
+	b.WriteString("\n## services\n")
+	for _, svc := range []string{"sing-box", "xray", "myceliumd"} {
+		state, _ := diagRun("systemctl", "is-active", svc)
+		nr, _ := diagRun("systemctl", "show", svc, "-p", "NRestarts", "--value")
+		fmt.Fprintf(&b, "  %-10s %s (NRestarts=%s)\n", svc, strings.TrimSpace(state), strings.TrimSpace(nr))
+	}
+
+	b.WriteString("\n## recent sing-box log\n")
+	if out, ok := diagRun("journalctl", "-u", "sing-box", "--since", "1 hour ago", "--no-pager", "-n", "60"); ok {
+		b.WriteString(out)
+	} else {
+		b.WriteString("  (journal unavailable)\n")
+	}
+
+	// PII-SAFE BY CONSTRUCTION: redact the entire assembled bundle before it leaves the process.
+	fmt.Print(diag.Redact(b.String()))
+	return nil
+}
+
+// diagRun runs a READ-ONLY diagnostics command and returns its combined output. It mutates nothing; a
+// missing binary or a non-zero exit with no output yields ("", false).
+func diagRun(name string, args ...string) (string, bool) {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return "", false
+	}
+	return string(out), true
+}
+
+// firstLine returns the first line of s, trimmed (for one-line version / status fields).
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
