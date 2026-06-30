@@ -11,6 +11,29 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.27] — 2026-06-30
+### Security
+- **Harden the diagnostics redactor (`internal/diag`) — close PII gaps found in a pre-release review of
+  chunk E**. The bundle is meant to be attached to a public bug report, so the redactor must leave NO
+  PII; the prior rules missed several classes that real journal lines carry:
+  - **Bare single-label hostnames** (no dot) are now scrubbed via a labelled-field pass — `_HOSTNAME=`,
+    `hostname=`, `host=`, `sni=`, `server_name=`, `peer=`, `domain=` — which the dotted-FQDN rule could
+    not match. The collector now also (a) reads the journal with `-o cat` so no per-line
+    `<time> <hostname> <unit>` prefix is emitted at all, and (b) scrubs the node's own hostname by exact
+    match. Field secrets (`password=`, `psk=`, `private_key=`, `short_id=`, …) are redacted whole,
+    length- and charset-agnostic.
+  - **Short hex tokens (≥8)** — e.g. a REALITY `short_id` — that fell in the gap between the UUID/64-hex
+    rules and the ≥32-char secret pass are now redacted.
+  - **IPv6**: the rule is re-anchored (a captured leading delimiter, since `\b` cannot anchor before a
+    leading `:`) so `::`-compressed and IPv4-mapped (`::ffff:a.b.c.d`) forms are caught; it is also
+    tightened so a clock time `HH:MM:SS` is **not** over-redacted (log chronology is preserved).
+  - Added **MAC address**, **ASN variants** (`ASN 64999`, `as=…`), and **`$HOME` username** passes.
+  - `Redact` is now **idempotent** (a second pass over redacted text is a no-op). The runtime test and
+    the `log_bundle_redaction` gate seed every new class so the gaps cannot regress. Verified on a Go node.
+  - Known residual (honest scope): a free-floating bare hostname or sub-8-char opaque secret that appears
+    with no labelling key and no dot is not redacted — labelling every dot-less word would destroy the
+    bundle's usefulness; structured fields, addresses, and dotted names are covered.
+
 ## [0.2.26] — 2026-06-30
 ### Added
 - **RP-0011 Operability & Release, chunk E-2 — `diag collect` collector**: `myceliumctl diag collect`
