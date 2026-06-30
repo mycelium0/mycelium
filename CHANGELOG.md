@@ -80,6 +80,11 @@ truth for the version is `internal/spec.Version`.
   class, pipes it through `diag redact`, and asserts NONE survive (+ requires the Go runtime redaction
   test) — it lands BEFORE any `diag collect` collector. Verified on a Go node: TestRedactScrubsEveryNeedle
   + idempotency, full offline suite 62/62.
+  > **Note (superseded scope).** The "scrubs every PII class" wording above describes the *structured*
+  > classes only. v0.2.27/v0.2.28 + [ADR-0035](docs/adr/0035-diagnostics-bundle-redaction-contract.md)
+  > record the honest contract: fail-safe by over-redaction with a small **named residual** (a
+  > free-floating, unlabelled, dot-less, sub-8-char value the operator reviews). Read this entry against
+  > that contract, not as an absolute guarantee.
 
 ## [0.2.24] — 2026-06-30
 ### Added
