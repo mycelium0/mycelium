@@ -365,7 +365,19 @@ flow_rotate() {
 	jq -e . "$plan" >/dev/null 2>&1 || die "rotation: plan $plan is not valid JSON (fail-closed)."
 	[ -f "$PARAMS_JSON" ] || die "rotation: params.json missing ($PARAMS_JSON); bootstrap first."
 	if [ "$(jq -r '.act // false' "$plan")" != "true" ]; then
-		log "rotation plan is a HOLD (reason=$(jq -r '.reason // "?"' "$plan"); $(jq -r '.held_because // ""' "$plan")) — nothing to apply."
+		# Persist the plan's next_state (the advanced impaired-streak + rate-limit window) BEFORE returning.
+		# The executor MUST persist NextState every tick — HOLD included (internal/rotate/rotate.go: "persist
+		# NextState, apply, then RecordOutcome"). Without this a self-driven HOLD DISCARDS the incremented
+		# streak: it resets 0->1 every tick and the loop can NEVER reach FlipConfirmations, so an unattended
+		# node detects a block but never rotates. The MEASURE plane folds this rotate_state.json back into the
+		# next PlanInput, so the streak accumulates across ticks until the planner emits act=true. (The live
+		# apply path's RecordOutcome owns the post-apply state, so this HOLD-only persist cannot conflict.)
+		if jq -e '.next_state' "$plan" >/dev/null 2>&1; then
+			jq -c '.next_state' "$plan" >"$STATE_DIR/rotate_state.json.tmp" 2>/dev/null \
+				&& mv -f "$STATE_DIR/rotate_state.json.tmp" "$STATE_DIR/rotate_state.json" \
+				|| rm -f "$STATE_DIR/rotate_state.json.tmp"
+		fi
+		log "rotation plan is a HOLD (reason=$(jq -r '.reason // "?"' "$plan"); $(jq -r '.held_because // ""' "$plan")) — nothing to apply (next_state persisted: streak=$(jq -r '.next_state.impaired_streak // 0' "$plan"))."
 		return 0
 	fi
 	if [ "${ROTATE_APPLY:-0}" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
