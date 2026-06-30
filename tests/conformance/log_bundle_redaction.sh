@@ -29,6 +29,19 @@ badln() { printf '  FAIL  %s\n' "$1"; fail=1; }
 
 printf '== diagnostics bundle is PII-safe (RP-0011 chunk E / AC-9) ==\n'
 
+# The collector, if present, must be PII-safe BY CONSTRUCTION: cmdDiagCollect must pipe its assembled
+# bundle through diag.Redact before printing (it must never fmt.Print the raw builder).
+MAIN="$REPO_ROOT/cmd/myceliumctl/main.go"
+if [ -f "$MAIN" ] && grep -q 'func cmdDiagCollect' "$MAIN"; then
+	body="$(awk '/^func cmdDiagCollect\(/{f=1} f{print} /^}/{if(f)exit}' "$MAIN")"
+	if printf '%s' "$body" | grep -qE 'fmt\.Print\(diag\.Redact\('; then
+		ok "diag collect prints only diag.Redact(...) output (PII-safe by construction)"
+	else
+		badln "cmdDiagCollect does not pipe its bundle through diag.Redact before printing"
+	fi
+	printf '%s' "$body" | grep -qE 'fmt\.Print\((&?b|b\.String)' && badln "cmdDiagCollect prints the RAW builder (must redact first)" || true
+fi
+
 # The Go runtime redaction proof must exist + assert the invariant (cannot be silently dropped).
 if [ -f "$TST" ] && grep -q 'piiNeedles' "$TST" && grep -qiE 'survived redaction|PII' "$TST"; then
 	ok "Go runtime redaction test present + asserts the no-PII invariant: ${TST#"$REPO_ROOT"/}"

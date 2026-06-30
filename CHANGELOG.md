@@ -11,6 +11,18 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.26] — 2026-06-30
+### Added
+- **RP-0011 Operability & Release, chunk E-2 — `diag collect` collector**: `myceliumctl diag collect`
+  assembles a node diagnostics bundle — spine version, engine versions (sing-box/xray), unit status
+  (is-active + NRestarts for sing-box/xray/myceliumd), and the recent sing-box journal — and pipes the
+  WHOLE bundle through `internal/diag.Redact` before printing, so it is **PII-safe by construction**
+  (AC-9): an operator can attach it to a public bug report. It is READ-ONLY (only is-active / version /
+  journalctl), and lives below `usage()` — OUTSIDE the `node_cli_no_actuation` block — because reading
+  live state via a subprocess is that gate's concern for the edit verbs but is the point of a collector.
+  `log_bundle_redaction` now also pins that the collector prints only `diag.Redact(...)` output (never
+  the raw builder). Closes chunk E (the redactor E-1 + the collector E-2). Verified on a Go node.
+
 ## [0.2.25] — 2026-06-30
 ### Added
 - **RP-0011 Operability & Release, chunk E-1 — diagnostics PII-redactor (AC-9, gate-before-collector)**:
