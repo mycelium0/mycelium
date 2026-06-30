@@ -1209,15 +1209,25 @@ func cmdDiagCollect(args []string) error {
 		fmt.Fprintf(&b, "  %-10s %s (NRestarts=%s)\n", svc, strings.TrimSpace(state), strings.TrimSpace(nr))
 	}
 
-	b.WriteString("\n## recent sing-box log\n")
-	if out, ok := diagRun("journalctl", "-u", "sing-box", "--since", "1 hour ago", "--no-pager", "-n", "60"); ok {
+	// `-o cat` emits only the message body — NO per-line "<time> <hostname> <unit>[pid]:" prefix — so
+	// the node's own (possibly location-coded) hostname is never stamped onto every line. Lines stay in
+	// chronological order; absolute timestamps are intentionally dropped (they are PII-adjacent and the
+	// ordering is what a triage needs).
+	b.WriteString("\n## recent sing-box log (message bodies only)\n")
+	if out, ok := diagRun("journalctl", "-u", "sing-box", "--since", "1 hour ago", "--no-pager", "-o", "cat", "-n", "60"); ok {
 		b.WriteString(out)
 	} else {
 		b.WriteString("  (journal unavailable)\n")
 	}
 
-	// PII-SAFE BY CONSTRUCTION: redact the entire assembled bundle before it leaves the process.
-	fmt.Print(diag.Redact(b.String()))
+	// PII-SAFE BY CONSTRUCTION. Belt-and-suspenders: scrub THIS node's own hostname (which a message
+	// body could still echo) by exact match, then redact the whole bundle through the pure class-based
+	// redactor before anything leaves the process.
+	raw := b.String()
+	if self, err := os.Hostname(); err == nil && self != "" {
+		raw = strings.ReplaceAll(raw, self, "[redacted-host]")
+	}
+	fmt.Print(diag.Redact(raw))
 	return nil
 }
 

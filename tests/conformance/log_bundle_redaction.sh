@@ -62,22 +62,39 @@ if ! ( cd "$REPO_ROOT" && go build -o "$WORK/mc" ./cmd/myceliumctl ) 2>"$WORK/bu
 	printf 'FAIL\n' >&2; exit 1
 fi
 
-# Seeded fake PII (one per class) embedded in plausible log/journal lines.
+# Seeded fake PII (one per class, incl. the classes a pre-release audit found leaking: BARE location-
+# coded hostnames, short REALITY short_ids, '::'/mapped IPv6, MAC, sub-32 field secret, ASN variants,
+# $HOME usernames, a hex-leading FQDN that must not fragment) embedded in plausible log/journal lines.
 NEEDLES=(
 	"203.0.113.47"
 	"2001:db8::dead:beef"
+	"fe80::cafe"
+	"203.0.113.5"
 	"node7.secret-provider.example"
+	"deadbeef99.tracker.example"
+	"nl1-amsterdam"
+	"kz1-almaty"
 	"11111111-2222-4333-8444-555555555555"
 	"AOz1pK3rJ8XwVxqLmNbCdEfGhIjKlMnOpQrStUvWxY"
 	"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	"0123abcd"
 	"c29tZXNlY3JldHBza3ZhbHVlMTIzNDU2Nzg5MA=="
+	"hunter2pw"
+	"de:ad:be:ef:00:11"
 	"AS64500"
+	"64999"
+	"operator7"
 )
 cat >"$WORK/bundle.txt" <<EOF
 level=error msg="handshake from client" src=203.0.113.47 uuid=11111111-2222-4333-8444-555555555555
-_HOSTNAME=node7.secret-provider.example sni=node7.secret-provider.example
-reality private_key=AOz1pK3rJ8XwVxqLmNbCdEfGhIjKlMnOpQrStUvWxY short_id=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-shadowsocks psk=c29tZXNlY3JldHBza3ZhbHVlMTIzNDU2Nzg5MA== peer=[2001:db8::dead:beef] as=AS64500
+_HOSTNAME=nl1-amsterdam sni=kz1-almaty server_name=node7.secret-provider.example
+reality private_key=AOz1pK3rJ8XwVxqLmNbCdEfGhIjKlMnOpQrStUvWxY short_id=0123abcd
+long short_id ref deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+shadowsocks psk=c29tZXNlY3JldHBza3ZhbHVlMTIzNDU2Nzg5MA== password=hunter2pw
+peer=[2001:db8::dead:beef] addr fe80::cafe mapped ::ffff:203.0.113.5 mac de:ad:be:ef:00:11
+as=AS64500 also ASN 64999 owner User=operator3 path /home/operator7/.config
+free-floating FQDN deadbeef99.tracker.example must not fragment
+Jun 30 12:34:56 some-service started ok
 EOF
 
 out="$("$WORK/mc" diag redact <"$WORK/bundle.txt" 2>"$WORK/redact.err")" || { badln "diag redact failed: $(tr '\n' ' ' <"$WORK/redact.err")"; }
@@ -88,11 +105,14 @@ for n in "${NEEDLES[@]}"; do
 		leaked=1
 	fi
 done
-[ "$leaked" -eq 0 ] && ok "every seeded PII class (IPv4/IPv6/FQDN/UUID/key/secret/ASN) is scrubbed by 'diag redact'"
+[ "$leaked" -eq 0 ] && ok "every seeded PII class (IPv4/IPv6/MAC/FQDN/bare-host/UUID/key/short_id/secret/ASN/user) is scrubbed by 'diag redact'"
 
 # the redacted output should still carry the structural scaffolding (we scrub values, not whole lines)
 printf '%s' "$out" | grep -q 'level=error' && ok "structural context preserved (values redacted, lines kept)" \
 	|| badln "redaction destroyed structural context (should redact values only)"
+# a clock time must survive — the IPv6 rule must not eat HH:MM:SS (would destroy log chronology)
+printf '%s' "$out" | grep -q '12:34:56' && ok "clock timestamp preserved (IPv6 rule does not over-redact HH:MM:SS)" \
+	|| badln "redaction ate a clock timestamp as if it were IPv6"
 
 if [ "$fail" -eq 0 ]; then
 	printf 'PASS: the diagnostics redactor scrubs every PII class; bundle output is safe for a public report.\n'
