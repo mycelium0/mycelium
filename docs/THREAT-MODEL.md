@@ -128,6 +128,31 @@ profile-update-interval cadence. This adds a new surface, treated as follows:
   (advisory-only) per [ADR-0025](adr/0025-no-global-abuse-oracle.md), so a served bundle cannot become
   a network-wide health/reputation signal. Distribution design: [RP-0007](proposals/0007-phase1-distribution-health-xhttp.md).
 
+## Attack surface: the node diagnostics bundle (diag collect)
+
+`myceliumctl diag collect` assembles a node diagnostics bundle (spine/engine versions, unit states, the
+recent engine journal) that an operator may **attach to a public bug report** — so it leaves the node and
+must carry none of the PII the project forbids collecting (SECURITY.md §4.2, asset #1 operator/node
+identity and location). It is treated as follows:
+
+- **Redacted by construction, fail-safe by over-redaction.** The collector pipes the whole bundle through
+  `internal/diag.RedactBundle` before anything is printed; the bundle is never emitted raw
+  (`log_bundle_redaction` pins this). The redactor scrubs every **structured** PII class — labelled
+  `key=value` fields, dial/lookup/connect error operands, IPv4/IPv6/MAC addresses, dotted FQDNs/SNI,
+  UUIDs, key material and opaque tokens (≥8 hex / ≥32 chars), AS numbers — and when in doubt scrubs more,
+  never less. The node's own (possibly location-coded) hostname is additionally scrubbed by a
+  word-anchored exact match, and the journal is read with `-o cat` so no per-line `<host>` prefix is
+  emitted at the source.
+- **Read-only; collects nothing new.** The collector runs only `is-active` / `version` / `journalctl`
+  with a bounded timeout; it mutates no node state and stores nothing — it redacts an artifact that
+  already exists locally. It is not telemetry: no aggregation, no transmission by the tool itself.
+- **Documented residual + operator obligation.** A free-floating, **unlabelled, dot-less, sub-8-char**
+  opaque value with no surrounding key or verb is indistinguishable from ordinary prose and is left
+  intact (redacting every dot-less word would destroy the bundle). The operator therefore remains
+  responsible for a final eyeball before publishing a bundle. This residual is recorded in the
+  `internal/diag` package doc and the CHANGELOG; it carries no structured identity/location linkage, so
+  it does not by itself constitute a `USER_DEANON`.
+
 ## Attack surface: download-direction throughput degradation and the out-of-region path
 
 The capability above (**destination-AS / subnet download-direction throughput degradation**) defeats

@@ -11,6 +11,28 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [0.2.28] — 2026-06-30
+### Security
+- **Diagnostics-redactor audit remediation (RP-0011 chunk E)** — close the conditions a planned PR audit
+  (refactoring.md §4.1, full 10-lens panel) raised on the v0.2.27 hardening:
+  - **Bounded own-hostname scrub.** The collector's node-hostname scrub moved into the diag package as
+    `diag.RedactBundle(s, selfHost)` — a WORD-ANCHORED, length-floored (≥4) match instead of an
+    unbounded `strings.ReplaceAll`, so a short/common hostname can no longer corrupt the bundle.
+    `diag redact` (stdin) now applies the same belt. Covered by `TestRedactBundleSelfHost`.
+  - **Dial/lookup/connect error operands** (`dial tcp <host>:443`, `lookup <host>`) are now redacted —
+    closes the unlabelled bare-hostname residual the audit raised to S1.
+  - **Quoted field values** (`password="a b"`) are redacted whole.
+  - **ASN rule** is AS/ASN-anchored + case-sensitive, so the English word "as" followed by digits is no
+    longer over-redacted.
+  - **Subprocess timeout.** `diagRun` uses `exec.CommandContext` with a 10s deadline, so a wedged
+    journald / D-Bus can no longer hang `diag collect`.
+  - **Honest docstrings.** The `internal/diag` package header + `Redact` doc no longer claim "NONE of
+    the PII" / "every PII class"; they state the over-redaction guarantee and the documented residual.
+  - **Docs.** THREAT-MODEL.md gains an *"Attack surface: the node diagnostics bundle (diag collect)"*
+    section and SECURITY.md §4.2 cross-references it (closes the THREAT_MODEL_DRIFT finding).
+  - The runtime test + `log_bundle_redaction` gate now pin the new classes, the rule-order invariant
+    (no FQDN fragmentation), and the non-over-redaction invariants (clock time + "as"+digits survive).
+
 ## [0.2.27] — 2026-06-30
 ### Security
 - **Harden the diagnostics redactor (`internal/diag`) — close PII gaps found in a pre-release review of

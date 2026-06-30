@@ -208,6 +208,11 @@ stable identifier linking requests from the same user (`PII_LEAK` / `USER_DEANON
 - The target posture for nodes is **no-logs by design**, RAM-only / diskless, with a third-party
   no-logs audit. What is not collected cannot be seized, logged, or compelled (knowledge
   minimisation).
+- The one operator-facing artifact that may **leave the node** — the diagnostics bundle produced by
+  `myceliumctl diag collect` for a public bug report — is **redacted by construction** (`internal/diag`
+  scrubs every structured PII class, fail-safe by over-redaction, with a small documented residual the
+  operator reviews). Its full treatment is in
+  [THREAT-MODEL.md](docs/THREAT-MODEL.md) → *"Attack surface: the node diagnostics bundle"*.
 
 ### 4.3. No backdoors and no hidden channels
 

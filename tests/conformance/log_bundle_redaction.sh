@@ -30,16 +30,17 @@ badln() { printf '  FAIL  %s\n' "$1"; fail=1; }
 printf '== diagnostics bundle is PII-safe (RP-0011 chunk E / AC-9) ==\n'
 
 # The collector, if present, must be PII-safe BY CONSTRUCTION: cmdDiagCollect must pipe its assembled
-# bundle through diag.Redact before printing (it must never fmt.Print the raw builder).
+# bundle through diag.RedactBundle (own-hostname scrub + the class-based redactor) before printing — it
+# must never fmt.Print the raw builder.
 MAIN="$REPO_ROOT/cmd/myceliumctl/main.go"
 if [ -f "$MAIN" ] && grep -q 'func cmdDiagCollect' "$MAIN"; then
 	body="$(awk '/^func cmdDiagCollect\(/{f=1} f{print} /^}/{if(f)exit}' "$MAIN")"
-	if printf '%s' "$body" | grep -qE 'fmt\.Print\(diag\.Redact\('; then
-		ok "diag collect prints only diag.Redact(...) output (PII-safe by construction)"
+	if printf '%s' "$body" | grep -qE 'fmt\.Print\(diag\.RedactBundle\('; then
+		ok "diag collect prints only diag.RedactBundle(...) output (PII-safe by construction)"
 	else
-		badln "cmdDiagCollect does not pipe its bundle through diag.Redact before printing"
+		badln "cmdDiagCollect does not pipe its bundle through diag.RedactBundle before printing"
 	fi
-	printf '%s' "$body" | grep -qE 'fmt\.Print\((&?b|b\.String)' && badln "cmdDiagCollect prints the RAW builder (must redact first)" || true
+	printf '%s' "$body" | grep -qE 'fmt\.Print\((&?b|b\.String\(\))' && badln "cmdDiagCollect prints the RAW builder (must redact first)" || true
 fi
 
 # The Go runtime redaction proof must exist + assert the invariant (cannot be silently dropped).
@@ -84,6 +85,9 @@ NEEDLES=(
 	"AS64500"
 	"64999"
 	"operator7"
+	"pl1-warsaw"
+	"nl4-rotterdam"
+	"secret pass phrase"
 )
 cat >"$WORK/bundle.txt" <<EOF
 level=error msg="handshake from client" src=203.0.113.47 uuid=11111111-2222-4333-8444-555555555555
@@ -94,6 +98,10 @@ shadowsocks psk=c29tZXNlY3JldHBza3ZhbHVlMTIzNDU2Nzg5MA== password=hunter2pw
 peer=[2001:db8::dead:beef] addr fe80::cafe mapped ::ffff:203.0.113.5 mac de:ad:be:ef:00:11
 as=AS64500 also ASN 64999 owner User=operator3 path /home/operator7/.config
 free-floating FQDN deadbeef99.tracker.example must not fragment
+level=error dial tcp pl1-warsaw:443: connect: connection refused
+lookup nl4-rotterdam: no such host
+shadowsocks password="secret pass phrase" enabled=true
+note downloaded as 12345 chunks in 3 batches
 Jun 30 12:34:56 some-service started ok
 EOF
 
@@ -113,6 +121,12 @@ printf '%s' "$out" | grep -q 'level=error' && ok "structural context preserved (
 # a clock time must survive — the IPv6 rule must not eat HH:MM:SS (would destroy log chronology)
 printf '%s' "$out" | grep -q '12:34:56' && ok "clock timestamp preserved (IPv6 rule does not over-redact HH:MM:SS)" \
 	|| badln "redaction ate a clock timestamp as if it were IPv6"
+# the English word "as" + digits must survive — the ASN rule must be AS/ASN-anchored, not prose-eating
+printf '%s' "$out" | grep -q 'downloaded as 12345 chunks' && ok "English \"as\"+digits preserved (ASN rule is AS-anchored, not prose-eating)" \
+	|| badln "ASN rule over-redacted the English word \"as\"+digits"
+# the rule-order invariant: a hex-leading FQDN is redacted WHOLE, not fragmented
+printf '%s' "$out" | grep -q 'FQDN \[redacted-host\] must not fragment' && ok "rule-order invariant: hex-leading FQDN redacted whole" \
+	|| badln "rule-order invariant violated: hex-leading FQDN fragmented or not redacted whole"
 
 if [ "$fail" -eq 0 ]; then
 	printf 'PASS: the diagnostics redactor scrubs every PII class; bundle output is safe for a public report.\n'
