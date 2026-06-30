@@ -12,6 +12,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -1024,7 +1025,8 @@ func cmdDiag(args []string) error {
 		if err != nil {
 			return fmt.Errorf("diag redact: read stdin: %w", err)
 		}
-		fmt.Print(diag.Redact(string(data)))
+		self, _ := os.Hostname()
+		fmt.Print(diag.RedactBundle(string(data), self))
 		return nil
 	case "collect":
 		return cmdDiagCollect(args[1:])
@@ -1220,21 +1222,21 @@ func cmdDiagCollect(args []string) error {
 		b.WriteString("  (journal unavailable)\n")
 	}
 
-	// PII-SAFE BY CONSTRUCTION. Belt-and-suspenders: scrub THIS node's own hostname (which a message
-	// body could still echo) by exact match, then redact the whole bundle through the pure class-based
-	// redactor before anything leaves the process.
-	raw := b.String()
-	if self, err := os.Hostname(); err == nil && self != "" {
-		raw = strings.ReplaceAll(raw, self, "[redacted-host]")
-	}
-	fmt.Print(diag.Redact(raw))
+	// PII-SAFE BY CONSTRUCTION: RedactBundle scrubs this node's own hostname (which a message body could
+	// echo unlabelled) by a word-anchored, length-floored match, then runs the full class-based redactor,
+	// before anything leaves the process.
+	self, _ := os.Hostname()
+	fmt.Print(diag.RedactBundle(b.String(), self))
 	return nil
 }
 
 // diagRun runs a READ-ONLY diagnostics command and returns its combined output. It mutates nothing; a
-// missing binary or a non-zero exit with no output yields ("", false).
+// missing binary, a non-zero exit with no output, or a timeout (a wedged journald / D-Bus) yields
+// ("", false) — a bounded, typed fault path so `diag collect` can never hang forever.
 func diagRun(name string, args ...string) (string, bool) {
-	out, err := exec.Command(name, args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	if err != nil && len(out) == 0 {
 		return "", false
 	}
