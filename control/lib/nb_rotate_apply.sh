@@ -62,7 +62,7 @@ rotate_disarm() {
 # then the loop applies whatever rotate_plan.json a producer has written (the no-op short-circuit makes a
 # repeated identical plan a zero-restart no-op). Arming the loop is a separate, individually-revertible
 # operator decision taken AFTER the RP-0012 §6 go/no-go.
-ROTATE_LOOP_INTERVAL="${ROTATE_LOOP_INTERVAL:-5min}"
+ROTATE_LOOP_INTERVAL="${ROTATE_LOOP_INTERVAL:-90s}"
 
 rotate_enable_loop() {
 	need_root

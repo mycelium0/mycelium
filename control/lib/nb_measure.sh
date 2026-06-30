@@ -22,6 +22,16 @@
 
 MEASURE_LISTEN="${MEASURE_LISTEN:-127.0.0.1:9551}"
 MEASURE_WATCHDOG_SEC="${MEASURE_WATCHDOG_SEC:-120}"
+# Self-drive CADENCE defaults — tuned so an armed node recovers within single-digit minutes (the Phase-2
+# DoD-1 bar): detection over a 2-min reach window (15s own-listener probes) + a 30s assemble tick, with
+# the rotate loop checking every 90s. These trade a little anti-flap headroom for recovery speed; an
+# operator can widen them per environment. tick_ms MUST stay >= the probe interval (the daemon fail-closes
+# otherwise). The planner's own anti-flap (flip_confirmations=3) + the 30-min post-rotation cooldown still
+# bound how often a node actually actuates, regardless of how fast it CHECKS.
+MEASURE_TICK_MS="${MEASURE_TICK_MS:-30000}"
+MEASURE_REACH_WINDOW_MS="${MEASURE_REACH_WINDOW_MS:-120000}"
+MEASURE_REACH_PROBE_MS="${MEASURE_REACH_PROBE_MS:-15000}"
+MEASURE_REACH_TIMEOUT_MS="${MEASURE_REACH_TIMEOUT_MS:-3000}"
 
 _measure_unit() { printf '%s' "/etc/systemd/system/mycelium-measure.service"; }
 _measure_reach_cfg()   { printf '%s' "$STATE_DIR/reach.config.json"; }
@@ -56,9 +66,10 @@ generate_measure_configs() {
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would write $reach_cfg + $measure_cfg ($n member(s), active=$active)"; return 0; fi
 	run install -d -m 0755 "$STATE_DIR"
 	# reach: own-listener TCP probe per member (window 10m, probe 30s, timeout 5s).
-	printf '%s' "$members" | jq '{
-		version: 1, window_ms: 600000,
-		targets: [ .[] | { ref: .ref, method: "tcp", address: ("127.0.0.1:" + (.port|tostring)), interval_ms: 30000, timeout_ms: 5000 } ]
+	printf '%s' "$members" | jq \
+		--argjson win "$MEASURE_REACH_WINDOW_MS" --argjson probe "$MEASURE_REACH_PROBE_MS" --argjson tmo "$MEASURE_REACH_TIMEOUT_MS" '{
+		version: 1, window_ms: $win,
+		targets: [ .[] | { ref: .ref, method: "tcp", address: ("127.0.0.1:" + (.port|tostring)), interval_ms: $probe, timeout_ms: $tmo } ]
 	}' >"$reach_cfg.tmp" && mv -f "$reach_cfg.tmp" "$reach_cfg"
 	# measure: members + active incumbent + the rotation policy (reuse rotate_limits.json if present so
 	# the daemon's PlanInput limits match the rotate loop's; else the documented defaults). tick 60s >=
@@ -73,8 +84,9 @@ generate_measure_configs() {
 		--arg active "$active" \
 		--arg out "$STATE_DIR/rotate_plan_input.json" \
 		--arg state "$STATE_DIR/rotate_state.json" \
-		--argjson limits "$limits" '{
-		version: 1, tick_ms: 60000, active_ref: $active,
+		--argjson limits "$limits" \
+		--argjson tick "$MEASURE_TICK_MS" '{
+		version: 1, tick_ms: $tick, active_ref: $active,
 		output_path: $out, state_path: $state, limits: $limits,
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
