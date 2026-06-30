@@ -328,8 +328,8 @@ angles:
 - **anonymity/privacy** (what the node knows about the user);
 - **operational resilience** (degradation, rerouting).
 
-The lenses are divided into **general-engineering** (McConnell, Parnas, Brooks,
-Dijkstra) and **domain** (Security/Threat, Network-persistence,
+The lenses are divided into **general-engineering** (Cormen, Tanenbaum, McConnell,
+Parnas, Brooks, Dijkstra) and **domain** (Security/Threat, Network-persistence,
 Anonymity/Privacy, Operational-resilience). Domain lenses matter more for this
 project than general ones: the project's value is not "clean code" but remaining
 persistently reachable and safe.
@@ -360,7 +360,128 @@ was assigned, with a reference to the actual state of the repo/RP/ADR/tests.
 
 ---
 
-### 6.1.1. McConnell Lens — construction quality, maintainability, refactoring discipline
+### 6.1.1. Cormen Lens — algorithmic rigor and invariants
+
+Checks how far the system behaves like a correctly specified formal construction:
+clear invariants, states, transitions, contracts, and checkable properties. For
+Mycelium this maps onto the fail-closed render→validate→promote→rollback pipeline,
+the detector/rotation state machines, the byte-equivalence contracts, and the
+closed vocabularies — correctness must be a property of the design, not of "how it
+happens to be called."
+
+Checked:
+
+- is there an explicit invariant for each critical flow (render→validate→promote→
+  rollback; reach→detect→tune→plan; rotation apply/record);
+- does correctness depend on an implicit order of side effects;
+- are state transitions formalized (detector states, rotation states) and
+  expressible as a finite set of phases / a table;
+- is failure behaviour bounded and fail-closed (§2.6 / §15.5);
+- is there idempotency for repeated commands (node-apply no-op short-circuit; a
+  re-run that does not double-actuate; a redactor that is idempotent);
+- is there monotonicity where required (version/SourceRev never regresses;
+  decay/hysteresis floors);
+- does a hidden heuristic appear where an owner-owned contract is required (a
+  closed vocabulary / single source of truth, ADR-0012);
+- are invariants covered by conformance / property tests (the byte-equivalence
+  gates, the no-PII gate);
+- is there `magic` branching that cannot be explained through the canon (an ADR/RP).
+
+Good-state examples:
+
+- a flow has an explicit order: descriptor → validate → render → `sing-box check`
+  → promote → reload → verify → rollback;
+- the external client does not set the internal server target (ingress endpoints
+  are rendered, not client-chosen);
+- one source of truth (`spec.Version`; `vocab.json`; the engine manifest);
+- a duplicate / byte-identical apply is a no-op, not a second mutation;
+- a failed validate has a defined outcome (nothing promoted; node byte-identical).
+
+Red flags:
+
+- "it works because of how it is called right now";
+- implicit ordering without a conformance gate;
+- a heuristic living in a downstream component while the contract owner is another layer;
+- an undefined failure path (a broad swallow in the detector / rotation loop);
+- a state transition that cannot be written as a table;
+- unknown retry / duplicate / restart behaviour.
+
+```text
+Cormen Lens: N / 10
+Strengths:
+- ...
+Concerns:
+- ...
+Required findings:
+- ...
+```
+
+---
+
+### 6.1.2. Tanenbaum Lens — OS/runtime, processes, and fault tolerance
+
+Checks whether a Mycelium node behaves like a well-structured operating runtime
+layered on its substrate OS, rather than a bag of connected scripts. The node
+**orchestrates** the substrate (systemd, ufw, the engine binaries); it must not
+re-implement it.
+
+Checked:
+
+- is there a clear boundary between the substrate OS (systemd / ufw / the kernel)
+  and the Mycelium control runtime — does Mycelium drive systemd/ufw rather than
+  become a replacement for them;
+- is there a process lifecycle for the managed units (sing-box / xray / myceliumd:
+  active / inactive / failed, NRestarts), with supervision and a recovery strategy
+  (systemd restart + validate→promote→rollback);
+- are runtime fabric, routing, policy, state, and history cleanly separated (the
+  data / control / routing / discovery planes; ADR-0034 engine-vs-transport-vs-capability);
+- is there a clear engine / adapter boundary (the sing-box and xray engines; the
+  renderer delegates per-engine; an adapter describes capability, it does not own policy);
+- is there a timeout / cancel / retry / fault taxonomy for the device-edge — the
+  engine subprocess calls (`sing-box check`, `xray run -test`, `journalctl`,
+  `systemctl is-active`): a failed/absent binary or unreadable journal yields a
+  typed, bounded outcome, not a crash or a silent success;
+- does the node survive restart without losing safe state (idempotent build keyed
+  on SourceRev; promoted-config persistence);
+- is local autonomy preserved (a node keeps working without a coordinator — the
+  Phase 1/2 posture);
+- are host / IO faults isolated from domain semantics (a journalctl failure →
+  "(journal unavailable)", not a panic);
+- are protocol form, transport, and capability meaning kept distinct, not conflated.
+
+Good-state examples:
+
+- the substrate Linux owns the machine; Mycelium owns the node's serve/rotation world;
+- the engine (sing-box/xray) owns dataplane transport, not control policy;
+- node-bootstrap drives systemd units + ufw; it does not re-implement them;
+- a failed `sing-box check` rolls back: the live config is untouched, NRestarts unchanged;
+- the read-only diag collector runs only `is-active` / `version` / `journalctl` and
+  degrades to "(journal unavailable)" on fault.
+
+Red flags:
+
+- a control/domain component talks directly to a vendor/engine internal instead of
+  through the render/validate contract;
+- an adapter stores routing/policy meaning;
+- a policy check living in engine/driver code;
+- a normal serve path mutating persistent node state as a side effect;
+- a restart losing authority / promoted state;
+- a physical/IO failure with no typed fault path;
+- the engine-edge becoming an unbounded plugin zoo.
+
+```text
+Tanenbaum Lens: N / 10
+OS/runtime strengths:
+- ...
+Operational gaps:
+- ...
+Required findings:
+- ...
+```
+
+---
+
+### 6.1.3. McConnell Lens — construction quality, maintainability, refactoring discipline
 
 Checks the system's construction quality: readability, complexity localization,
 documentation synchrony, and the team's ability to continue development safely.
@@ -396,7 +517,7 @@ Required findings:
 
 ---
 
-### 6.1.2. Parnas Lens — information hiding and modularity
+### 6.1.4. Parnas Lens — information hiding and modularity
 
 Checks whether decisions are hidden inside the correct layers, or whether the
 system has begun leaking internal details outward. For Mycelium, this is primarily
@@ -438,7 +559,7 @@ Required findings:
 
 ---
 
-### 6.1.3. Brooks Lens — conceptual integrity and accidental complexity
+### 6.1.5. Brooks Lens — conceptual integrity and accidental complexity
 
 Checks whether the system maintains a single conceptual form as it grows, or is
 becoming a collection of locally sensible but globally incompatible decisions.
@@ -477,7 +598,7 @@ Required findings:
 
 ---
 
-### 6.1.4. Dijkstra Lens — simplicity, correctness, and avoidance of cleverness
+### 6.1.6. Dijkstra Lens — simplicity, correctness, and avoidance of cleverness
 
 Checks whether the system is solving a simple problem with an overly clever
 mechanism and whether complexity is being masked behind appealing names. In a
@@ -515,7 +636,7 @@ Required findings:
 
 ---
 
-### 6.1.5. Security / Threat Lens — threat-model compliance (domain, mandatory)
+### 6.1.7. Security / Threat Lens — threat-model compliance (domain, mandatory)
 
 The primary domain lens. Checks that the implementation **has not fallen behind
 [THREAT-MODEL.md](THREAT-MODEL.md)**: every known attack has a working response,
@@ -557,7 +678,7 @@ Required findings:
 
 ---
 
-### 6.1.6. Network-persistence Lens — indistinguishability, sybil/enumeration, AS diversity (domain, mandatory)
+### 6.1.8. Network-persistence Lens — indistinguishability, sybil/enumeration, AS diversity (domain, mandatory)
 
 Checks the project's key property: **does the system maintain reachability** under a
 realistic adversary (large-scale behavioral-layer blocking, ML-based traffic classification, AS-level
@@ -602,7 +723,7 @@ Required findings:
 
 ---
 
-### 6.1.7. Anonymity / Privacy Lens — what the node knows about the user (domain, mandatory)
+### 6.1.9. Anonymity / Privacy Lens — what the node knows about the user (domain, mandatory)
 
 Checks the "knowledge minimization" principle: the node, coordinator, and
 telemetry know the **minimum** about the user; what is not collected cannot be
@@ -644,7 +765,7 @@ Required findings:
 
 ---
 
-### 6.1.8. Operational-resilience Lens — degradation and rerouting (domain, mandatory)
+### 6.1.10. Operational-resilience Lens — degradation and rerouting (domain, mandatory)
 
 Checks the "degradation, not failure" principle: the loss of a node, coordinator,
 or transport slows but does not stop the network; recovery is managed and
@@ -702,6 +823,8 @@ Every full-scale audit must contain the following block:
 | Network-persistence | N / 10 | ... |
 | Anonymity / Privacy | N / 10 | ... |
 | Operational-resilience | N / 10 | ... |
+| Cormen | N / 10 | ... |
+| Tanenbaum | N / 10 | ... |
 | McConnell | N / 10 | ... |
 | Parnas | N / 10 | ... |
 | Brooks | N / 10 | ... |
@@ -725,7 +848,7 @@ Minimum mandatory lenses (always):
 routing/control/discovery, for every post-incident audit, and for every phase
 transition.
 
-Parnas, Brooks, and Dijkstra are mandatory for:
+Cormen, Tanenbaum, Parnas, Brooks, and Dijkstra are mandatory for:
 
 - adding a new transport or transport profile;
 - changing discovery / sybil resistance / trust model;
@@ -771,10 +894,12 @@ persistent reachability and user safety, not code beauty):
 | Network-persistence | 20% |
 | Anonymity / Privacy | 20% |
 | Operational-resilience | 15% |
-| McConnell | 10% |
-| Parnas | 5% |
-| Brooks | 5% |
-| Dijkstra | 5% |
+| Cormen | 5% |
+| Tanenbaum | 5% |
+| McConnell | 7% |
+| Parnas | 3% |
+| Brooks | 3% |
+| Dijkstra | 2% |
 
 The summary score is used only as a readability aid. It is **not** a merge gate
 in itself. The merge gate remains the severity model from §7 and the gate
@@ -1395,7 +1520,7 @@ phase discipline.)
 - [ ] Rerouting works and does not leak the path
 - [ ] Transition to the next phase remains possible without rewriting contracts
 - [ ] Domain Expert Lens Scores assigned: Security/Threat, Network-persistence, Anonymity/Privacy
-- [ ] McConnell score assigned; where applicable — Operational-resilience, Parnas/Brooks/Dijkstra
+- [ ] McConnell score assigned; where applicable — Operational-resilience, Cormen/Tanenbaum/Parnas/Brooks/Dijkstra
 - [ ] The lowest lens score is explained by a finding/action item
 - [ ] No domain lens below 5.0 with an open S0/S1 before a phase transition
 
