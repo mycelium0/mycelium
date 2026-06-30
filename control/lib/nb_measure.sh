@@ -116,6 +116,15 @@ IOSchedulingClass=idle
 [Install]
 WantedBy=multi-user.target
 UNIT
+	# Retire a legacy reach-only myceliumd.service (the RP-0010 C5c deploy seam) before enabling this
+	# reach+measure superset. The legacy unit binds the SAME loopback endpoint ($MEASURE_LISTEN), so
+	# leaving it active makes mycelium-measure.service fail-closed on 'address already in use' and the arm
+	# path silently never starts the plane. mycelium-measure.service is a strict superset (it folds the
+	# reach snapshot AND assembles the PlanInput), so retiring the superseded unit is safe + idempotent.
+	if systemctl cat myceliumd.service >/dev/null 2>&1; then
+		log "measure: retiring the legacy myceliumd.service (superseded by mycelium-measure.service; frees $MEASURE_LISTEN)."
+		run systemctl disable --now myceliumd.service 2>/dev/null || true
+	fi
 	run systemctl daemon-reload
 	run systemctl enable --now mycelium-measure.service || die "measure: could not enable mycelium-measure.service (fail-closed)."
 	log "measure: mycelium-measure.service ENABLED — this node now assembles a node-local rotate.PlanInput (ADVISORY; it does NOT rotate). Disable with '$0 --measure-disable'."
