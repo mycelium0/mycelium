@@ -45,15 +45,13 @@ SCRIPT="$REPO_ROOT/scripts/node-bootstrap.sh"
 REAL_DONOR="$REPO_ROOT/nodes/dataplane/donor-sni-candidates.json"
 REAL_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 REAL_LIB_DIR="$REPO_ROOT/control/lib"
-# RP-0009: the orchestrator now SOURCES its libs (nb_*.sh) from ARTIFACT_ROOT/control/lib. The fake
-# checkout must carry the FULL set the sourcing loop expects, or the (fail-closed) loop aborts before
-# any flow runs. C1 leaf libs + C2 render/serve control-logic libs (nb_render_params, nb_serve_bundle) +
-# C3 routing/split-tunnel libs (nb_two_hop, nb_render_awg) + C4 apply-state-machine/observability libs
-# (nb_update_apply — the render_candidate/promote/validate path THIS gate exercises after the re-exec —
-# nb_rotate_apply — the RP-0012 C4b dry-run rotation seam that reuses that same render/validate path —
-# and nb_observability) — keep this list in lockstep with the `for _lib in …` loop in
-# scripts/node-bootstrap.sh.
-NB_LIBS="nb_identity nb_donor nb_harden nb_engine_manifest nb_install nb_render_params nb_serve_bundle nb_front nb_two_hop nb_render_awg nb_update_apply nb_rotate_apply nb_measure nb_observability"
+# RP-0009: the orchestrator SOURCES its libs (nb_*.sh) from ARTIFACT_ROOT/control/lib. The fake checkout
+# must carry the FULL set the sourcing loop expects, or the (fail-closed) loop aborts before any flow
+# runs. DERIVE the set straight from the entrypoint's `for _lib in nb_...` loop so this stays in lockstep
+# AUTOMATICALLY — a lib added to the loop can never again be forgotten here (that exact drift red-CI'd the
+# L7 self-test lib on its first push). The loop is the single source of truth.
+NB_LIBS="$(grep -oE 'for _lib in nb_[a-z_ ]+' "$SCRIPT" | head -1 | sed -E 's/for _lib in //')"
+[ -n "$NB_LIBS" ] || { printf 'FAIL: could not derive the nb_* lib list from the source loop in %s\n' "$SCRIPT" >&2; exit 2; }
 
 command -v git >/dev/null 2>&1 || { printf 'SKIP: git not available; cannot stage a fake checkout.\n'; exit 0; }
 [ -f "$SCRIPT" ]        || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$SCRIPT" >&2; exit 2; }
