@@ -11,8 +11,9 @@
 #      operator flag is never overwritten, so a flag-passing caller is byte-identical;
 #   3. the fail-closed pin die ([ -n "$X_VERSION" ] || die ...) is STILL PRESENT, and the fill sits
 #      BEFORE it — so an unfillable pin (no manifest / uncovered arch) still fails closed;
-#   4. nb_engine_manifest is sourced in lockstep — present in BOTH the node-bootstrap `for _lib in …`
-#      loop AND the node_update_artifact_root NB_LIBS list (else the --update re-exec can't resolve it).
+#   4. nb_engine_manifest is sourced in lockstep — present in the node-bootstrap `for _lib in …` loop,
+#      which node_update_artifact_root now DERIVES its staged-lib set from (so the --update re-exec is
+#      guaranteed to resolve it; we assert both the loop membership and that the derivation is in place).
 # OFFLINE + INSPECT-ONLY (the runtime additive/byte-identity behaviour is proven by the m1 drill).
 #
 # Exit: 0 = additive + fail-closed + sourced in lockstep, 1 = a violation, 2 = usage/env error.
@@ -65,9 +66,12 @@ check_installer install_xray    xray    XRAY_VERSION    XRAY_SHA256
 grep -qE '^for _lib in .*\bnb_engine_manifest\b' "$NB" \
 	&& ok "nb_engine_manifest is in the node-bootstrap lib-sourcing loop" \
 	|| badln "nb_engine_manifest missing from the node-bootstrap 'for _lib in …' loop"
-grep -qE '^NB_LIBS=".*\bnb_engine_manifest\b' "$ART" \
-	&& ok "nb_engine_manifest is in node_update_artifact_root NB_LIBS (lockstep)" \
-	|| badln "nb_engine_manifest missing from node_update_artifact_root NB_LIBS — the --update re-exec would fail to source it"
+# node_update_artifact_root DERIVES its staged-lib set straight from the entrypoint's `for _lib in …`
+# loop (single source of truth), so being in the loop (checked above) already guarantees the --update
+# re-exec stages nb_engine_manifest. Assert the derivation is in place rather than a literal lib name.
+grep -qE '^NB_LIBS="\$\(grep -oE .for _lib in nb_' "$ART" \
+	&& ok "node_update_artifact_root derives NB_LIBS from the entrypoint loop (nb_engine_manifest staged in lockstep)" \
+	|| badln "node_update_artifact_root NB_LIBS no longer derives from the entrypoint loop — the --update re-exec may fail to source nb_engine_manifest"
 
 if [ "$fail" -eq 0 ]; then
 	printf 'PASS: the manifest read fills only absent pins, before a still-present fail-closed die, sourced in lockstep.\n'
