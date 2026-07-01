@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "note": "Curated REALITY donor-SNI candidates. PUBLIC hostnames only, drawn from large, long-lived, reputable sites and deliberately spread across the brand origins of multiple regions (not concentrated in any single market) so the network's donor handshakes are geographically diverse and not fingerprintable to one locale. The node bootstrap picks ONE at random per node and re-verifies it at runtime (openssl s_client -groups x25519 -tls1_3 must negotiate TLSv1.3, with HTTP/2 where offered) before committing it; correctness is therefore filtered on-node and stale or non-conforming entries simply fail over to the next. No secrets, IPs, or locations live here. License is documented in nodes/dataplane/README.md (pure JSON carries no header).",
+  "note": "Curated REALITY donor-SNI candidates. PUBLIC hostnames only, drawn from large, long-lived, reputable sites and deliberately spread across the brand origins of multiple regions (not concentrated in any single market) so the network's donor handshakes are geographically diverse and not fingerprintable to one locale. The node bootstrap picks ONE at random per node and re-verifies it at runtime — a cheap TLSv1.3 pre-filter, THEN an AUTHORITATIVE ephemeral REALITY-handshake loopback (a throwaway REALITY server with dest=host + client, same uTLS fingerprint clients use) — before committing it. A TLS-fine host can still break REALITY's handshake-steal (www.microsoft.com negotiates TLSv1.3/x25519/h2 yet fails REALITY; www.samsung.com works despite not advertising the PQ group apple/google do — indistinguishable at the openssl layer), so ONLY the REALITY handshake decides. Correctness is therefore filtered on-node from THIS node's egress, and stale or non-conforming entries simply fail over to the next. No secrets, IPs, or locations live here. License is documented in nodes/dataplane/README.md (pure JSON carries no header).",
   "selection": {
-    "verify_with": "openssl s_client -groups x25519 -tls1_3 -servername <host> -connect <host>:443",
-    "require": "TLSv1.3 negotiated AND X25519 group AND HTTP/2 (h2) ALPN where offered",
+    "pre_filter": "openssl s_client -groups x25519 -tls1_3 -servername <host> -connect <host>:443  (cheap reject of non-TLSv1.3 hosts)",
+    "verify_with": "ephemeral REALITY loopback handshake with dest=<host> (control/lib/nb_donor.sh donor_verify_reality) — the authoritative gate",
+    "require": "REALITY handshake completes AND (soft-preferred) HTTP/2 (h2) ALPN where offered",
     "reselect_on_failure": true
   },
   "candidates": [
-    "www.microsoft.com",
     "www.apple.com",
     "www.amazon.com",
     "www.adobe.com",
