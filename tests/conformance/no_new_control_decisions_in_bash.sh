@@ -83,6 +83,23 @@ else
 	okln "no known control-logic function is defined in the entrypoint (they live in control/lib/nb_*.sh)"
 fi
 
+# 4. Every control/lib/nb_*.sh module is REGISTERED in the entrypoint's `for _lib in nb_...` source loop.
+#    A module that exists on disk but is not named in the loop is SILENTLY never sourced — its functions
+#    are undefined at call time (the RP-0009 decomposition splits control logic INTO libs, so a lib the
+#    entrypoint forgot to source is a latent "command not found"). Diff the loop's list against disk.
+loop_libs="$(grep -oE 'for _lib in nb_[a-z_ ]+' "$NB" | head -1 | sed -E 's/for _lib in //')"
+missing_from_loop=""
+for f in "$REPO_ROOT"/control/lib/nb_*.sh; do
+	[ -e "$f" ] || continue
+	base="$(basename "$f" .sh)"
+	printf '%s\n' $loop_libs | grep -qx "$base" || missing_from_loop="$missing_from_loop $base"
+done
+if [ -n "$missing_from_loop" ]; then
+	badln "control/lib module(s) exist but are NOT in the entrypoint source loop (never sourced -> functions undefined):$missing_from_loop"
+else
+	okln "every control/lib/nb_*.sh module is registered in the entrypoint's source loop"
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: node-bootstrap.sh is not orchestration-only — a control decision leaked back into the entrypoint.\n' >&2
