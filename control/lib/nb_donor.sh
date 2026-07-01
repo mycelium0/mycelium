@@ -21,17 +21,65 @@ donor_candidates() {
 	jq -r '.candidates[]?' "$DONOR_LIST"
 }
 
-donor_verify() {
-	# donor_verify HOST -> 0 if HOST negotiates TLSv1.3 over an x25519 group (REALITY's HARD
-	# requirement). The donor list's "require" also promises h2 ALPN "where offered"; that is a
-	# best-effort PREFERENCE, not a hard gate (see donor_offers_h2 + pick_donor), so the script's
-	# check and the JSON's promise agree (we do not over-promise).
+donor_verify_tls() {
+	# donor_verify_tls HOST -> 0 if HOST negotiates TLSv1.3 over an x25519 group. This is a CHEAP
+	# PRE-FILTER only (rejects dead / non-TLSv1.3 hosts before the heavier REALITY handshake); it is
+	# NOT sufficient on its own — a TLS-fine host can still break REALITY (see donor_verify_reality).
 	local host="$1"
-	have openssl || { warn "openssl missing; cannot verify donor '$host' — treating as unverified."; return 1; }
-	# Fail-closed: a non-TLSv1.3 / non-x25519 donor is rejected so a bad SNI never reaches the config.
+	have openssl || { warn "openssl missing; cannot pre-filter donor '$host' — treating as unverified."; return 1; }
 	echo | openssl s_client -groups x25519 -tls1_3 \
 		-servername "$host" -connect "$host:443" 2>/dev/null \
 		| grep -q 'TLSv1.3'
+}
+
+donor_verify_reality() {
+	# donor_verify_reality HOST -> 0 iff HOST completes a REAL REALITY handshake AS THE DEST, probed from
+	# THIS node's egress. THE AUTHORITATIVE donor gate. openssl TLS-level checks CANNOT distinguish a
+	# REALITY-viable donor from a TLS-fine-but-REALITY-broken one: www.microsoft.com negotiates
+	# TLSv1.3/x25519 (and even passes h2) yet breaks REALITY's handshake-steal, while a KNOWN-GOOD donor
+	# (www.samsung.com) does NOT advertise the PQ group the way apple/google do — the two are
+	# indistinguishable at the openssl layer, so only the REALITY handshake itself decides. Spins an
+	# EPHEMERAL loopback REALITY server (dest=HOST) + client on 127.0.0.1 spare ports (the main engine
+	# service is not yet running at donor-pick time) with the SAME uTLS fingerprint clients use, and
+	# confirms a request traverses the tunnel. Returns 2 (not 1) when the engine binary is absent, so the
+	# caller can degrade to the TLS-only pre-filter instead of hard-failing. Self-cleaning.
+	local host="$1"
+	have "$SINGBOX_BIN" || return 2
+	local dir; dir="$(mktemp -d 2>/dev/null)" || return 1
+	local kp priv pub sid uuid sport=29443 cport=29444 sp cp rc=1
+	kp="$("$SINGBOX_BIN" generate reality-keypair 2>/dev/null)" || { rm -rf "$dir"; return 1; }
+	priv="$(printf '%s' "$kp" | awk 'tolower($0) ~ /private/ {print $NF}')"
+	pub="$(printf  '%s' "$kp" | awk 'tolower($0) ~ /public/  {print $NF}')"
+	sid="$(openssl rand -hex 8 2>/dev/null)"
+	uuid="$("$SINGBOX_BIN" generate uuid 2>/dev/null)"
+	printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"vless\",\"listen\":\"127.0.0.1\",\"listen_port\":$sport,\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$host\",\"server_port\":443},\"private_key\":\"$priv\",\"short_id\":[\"$sid\"]}}}],\"outbounds\":[{\"type\":\"direct\"}]}" >"$dir/s.json"
+	printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"socks\",\"listen\":\"127.0.0.1\",\"listen_port\":$cport}],\"outbounds\":[{\"type\":\"vless\",\"tag\":\"v\",\"server\":\"127.0.0.1\",\"server_port\":$sport,\"uuid\":\"$uuid\",\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"$pub\",\"short_id\":\"$sid\"}}},{\"type\":\"direct\"}],\"route\":{\"final\":\"v\"}}" >"$dir/c.json"
+	"$SINGBOX_BIN" run -c "$dir/s.json" >/dev/null 2>&1 &
+	sp=$!
+	"$SINGBOX_BIN" run -c "$dir/c.json" >/dev/null 2>&1 &
+	cp=$!
+	sleep 3
+	curl -s -o /dev/null --max-time 8 --socks5-hostname "127.0.0.1:$cport" "https://$host/" 2>/dev/null && rc=0
+	kill "$sp" "$cp" 2>/dev/null
+	wait "$sp" "$cp" 2>/dev/null
+	rm -rf "$dir"
+	return "$rc"
+}
+
+donor_verify() {
+	# donor_verify HOST -> 0 iff HOST is a usable REALITY donor FROM THIS NODE. Two gates: a cheap TLSv1.3
+	# pre-filter, then the AUTHORITATIVE REALITY handshake. The donor list's "require" also promises h2 ALPN
+	# "where offered" — a best-effort PREFERENCE (donor_offers_h2 + pick_donor), not a hard gate. Degrades to
+	# the TLS-only result ONLY when the engine binary is unavailable (rc 2), loudly, so a pre-engine caller
+	# still bootstraps instead of hard-failing.
+	local host="$1"
+	donor_verify_tls "$host" || return 1
+	donor_verify_reality "$host"
+	case "$?" in
+		0) return 0 ;;
+		2) warn "donor '$host': engine unavailable for the REALITY-layer check — accepting on the TLSv1.3 pre-filter ALONE (weaker; cannot catch a REALITY-broken dest such as www.microsoft.com)."; return 0 ;;
+		*) warn "donor candidate '$host' passes TLSv1.3 but FAILS the REALITY handshake (a TLS-fine-but-REALITY-broken dest); rejecting."; return 1 ;;
+	esac
 }
 
 donor_offers_h2() {
