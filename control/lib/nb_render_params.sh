@@ -270,6 +270,16 @@ write_params() {
 	# connect insecurely. Re-enabling them requires the cert-pin client path (tracked follow-up);
 	# until then keep them OFF. An operator can still override per node (the toggles below + the
 	# firewall/render pipeline honour whatever is set here).
+	# GENUINE-TLS SNI (the own-cert families: vless-ws-tls / vless-xhttp-tls). It is the node's OWN domain
+	# — a hostname under its served wildcard cert — NEVER the donor (the donor is the REALITY cover, a
+	# SEPARATE field donor_sni). Derive it from the served wildcard cert's SAN: *.ZONE -> m.ZONE (the
+	# mycelium convention), so the rendered genuine-TLS server_name AND the subscription's own-cert
+	# outbound SNI both agree with the presented cert (C03). Fall back to the donor ONLY when no wildcard
+	# cert is present — the C03 guard in render_singbox.sh then still refuses an empty tls_sni for an
+	# enabled own-cert family, so a misconfigured node fails closed rather than shipping a cert/SNI tell.
+	local tls_domain
+	tls_domain="$(openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null | grep -oE 'DNS:\*\.[A-Za-z0-9.-]+' | head -1 | sed 's/^DNS:\*\./m./')"
+	[ -n "$tls_domain" ] || tls_domain="$donor"
 	local tmp
 	tmp="$(mktemp "${STATE_DIR}/.params.XXXXXX")"
 	jq -n \
@@ -278,12 +288,13 @@ write_params() {
 		--arg clash "$clash" \
 		--arg node_address "$node_address" \
 		--arg tls_cert "$TLS_DIR/fullchain.pem" --arg tls_key "$TLS_DIR/privkey.pem" \
+		--arg tls_domain "$tls_domain" \
 		'{
 			node_address: $node_address,
 			donor_host: $donor, donor_sni: $donor,
 			reality_private_key: $priv, reality_public_key: $pub,
 			short_ids: [ $sid ],
-			tls_sni: $donor,
+			tls_sni: $tls_domain,
 			tls_certificate_path: $tls_cert, tls_key_path: $tls_key,
 			grpc_service_name: "grpc.health.v1.Health",
 			xhttp_path: "/",
