@@ -94,3 +94,87 @@ PROBE_EOF
 	log "L7 self-test: all $tested client-facing transport(s) accept a real client handshake."
 	return 0
 }
+
+# measure_l7_probe — node-local, low-fingerprint L7 liveness for the CLIENT-FACING transports, for the
+# MEASURE loop (RP-0010 AC-6 clarification: the own-cert/cover-path signal, NOT an external beacon).
+# For each enabled client-facing inbound in the LIVE config it does a HANDSHAKE-only liveness check,
+# per transport type:
+#   * a REALITY listener's failure mode (a broken dest, e.g. www.microsoft.com) completes ordinary TLS
+#     and the server's UNAUTHENTICATED fallback relay — only the AUTHENTICATED steal breaks — so a plain
+#     openssl handshake would MISS it. We instead run the authenticated ephemeral REALITY handshake
+#     against dest (donor_verify_reality — the same steal-viability the live server depends on), which
+#     catches the exact broken-dest failure (the 2026-07-01 regression) the L4 reach probe cannot see.
+#     It contacts ONLY the node's own cover/dest host (the cover traffic REALITY already produces — the
+#     lowest-fingerprint external contact, not a third-party beacon), never a tunnel/third party.
+#   * a genuine-TLS listener presents its OWN cert over loopback, so an openssl handshake to
+#     127.0.0.1:<port> completes + the cert is non-expired IFF the TLS is healthy — PURE loopback, no
+#     external contact at all.
+# Emits $STATE_DIR/l7_selftest.json = {observed_at, checked, dead:[REFS]} keyed by MEASURE ref (the
+# inbound tag minus its "-in" suffix, matching nb_measure's member refs). The myceliumd measure loop
+# reads this marker (fail-safe: absent/stale -> healthy). Best-effort: missing openssl/jq -> no marker
+# (the daemon then folds healthy). A member is marked dead only after it fails EVERY retry within the run
+# (a probe-side debounce, since the persisted marker would otherwise turn a one-off flake into a
+# sustained-blocked verdict downstream). A healthy member passes on the first attempt, so the steady cost
+# is one check per inbound; meant to run on a budgeted, jittered cadence (the hyphal-probe invariants,
+# VIS-0004), NOT every tick. Self-cleaning.
+measure_l7_probe() {
+	have openssl && have jq || return 0
+	[ -f "$SINGBOX_CONFIG" ] || return 0
+	local marker="$STATE_DIR/l7_selftest.json" dead="" tested=0 row
+	local TO=""; command -v timeout >/dev/null 2>&1 && TO="timeout 8"
+	while IFS= read -r row; do
+		[ -n "$row" ] || continue
+		local tag ref port reality sni dest drc ok=0 attempt
+		tag="$(printf '%s'     "$row" | jq -r '.tag')"
+		port="$(printf '%s'    "$row" | jq -r '.port')"
+		reality="$(printf '%s' "$row" | jq -r '.reality')"
+		sni="$(printf '%s'     "$row" | jq -r '.sni // ""')"
+		dest="$(printf '%s'    "$row" | jq -r '.dest // ""')"
+		ref="${tag%-in}"
+		# RETRY within the run so a SINGLE transient blip (e.g. the cover host briefly unreachable) never
+		# writes a dead marker. The marker PERSISTS across many daemon ticks, so downstream anti-flap
+		# (which counts ticks, not probe runs) would read a one-off flake as SUSTAINED-blocked and
+		# spuriously rotate a healthy transport. A healthy member passes attempt 1 (no retry cost); only a
+		# member that fails EVERY attempt is marked dead. This probe-side debounce is the containment the
+		# tick-side cannot provide.
+		if [ "$reality" = "true" ]; then
+			# REALITY: the broken-dest failure (e.g. www.microsoft.com) still completes TLS *and* the
+			# server's UNAUTHENTICATED fallback relay — only the AUTHENTICATED steal breaks. A plain openssl
+			# handshake rides that fallback and would MISS it. Use the authenticated ephemeral REALITY
+			# handshake against dest (donor_verify_reality — the same steal-viability the live server
+			# depends on); it contacts only the node's own cover/dest host, not a third party.
+			[ -n "$dest" ] || { tested=$(( tested + 1 )); continue; }
+			for attempt in 1 2 3; do
+				donor_verify_reality "$dest"; drc=$?
+				# 0 = steal-viable, 2 = engine unavailable (cannot judge) -> NOT dead; 1 = broken -> retry.
+				[ "$drc" -ne 1 ] && { ok=1; break; }
+				sleep 1
+			done
+		else
+			# genuine-TLS: own-cert loopback handshake + non-expired cert (pure loopback, no external
+			# contact). A missing/expired own-cert or a dead listener yields no cert -> x509 fails.
+			[ -n "$sni" ] || { tested=$(( tested + 1 )); continue; }
+			for attempt in 1 2 3; do
+				if echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null \
+					| openssl x509 -noout -checkend 0 >/dev/null 2>&1; then ok=1; break; fi
+				sleep 1
+			done
+		fi
+		tested=$(( tested + 1 ))
+		[ "$ok" -eq 1 ] || dead="$dead $ref"
+	done <<PROBE_EOF
+$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-ws-tls-in")
+	| {tag, port:.listen_port, reality:((.tls.reality.enabled)//false), sni:(.tls.server_name),
+	   dest:(.tls.reality.handshake.server // .tls.server_name)}' "$SINGBOX_CONFIG" 2>/dev/null)
+PROBE_EOF
+	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	printf '{"observed_at":"%s","checked":%d,"dead":[%s]}\n' "$ts" "$tested" \
+		"$(for d in $dead; do printf '"%s",' "$d"; done | sed 's/,$//')" >"$marker.tmp" 2>/dev/null \
+		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+	if [ -n "$dead" ]; then
+		warn "L7 measure-probe: client-DEAD transport(s):$dead (own-listener handshake failed)."
+		return 1
+	fi
+	log "L7 measure-probe: all $tested client-facing transport(s) complete the own-listener handshake."
+	return 0
+}
