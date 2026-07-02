@@ -190,8 +190,11 @@ myc_sb_render_server() {
 	# require an explicit, non-donor tls_sni.
 	case " $enabled " in
 		*" vless-xhttp-tls "*|*" vless-ws-tls "*)
-			local _tls_sni_explicit; _tls_sni_explicit="$(myc_params_get "$params" '.tls_sni' '')"
-			[ -n "$_tls_sni_explicit" ] || myc_die "render-server: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — the own-cert family must carry its OWN SNI (never the donor_sni/localhost fallback; that is a cert/SNI mismatch tell). Set params.tls_sni." ;;
+			local _tls_sni_explicit _donor_sni
+			_tls_sni_explicit="$(myc_params_get "$params" '.tls_sni' '')"
+			_donor_sni="$(myc_params_get "$params" '.donor_sni' '')"
+			[ -n "$_tls_sni_explicit" ] || myc_die "render-server: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — the own-cert family must carry its OWN SNI (never the donor_sni/localhost fallback; that is a cert/SNI mismatch tell). Set params.tls_sni."
+			[ -n "$_donor_sni" ] && [ "$_tls_sni_explicit" = "$_donor_sni" ] && myc_die "render-server: an own-cert genuine-TLS family is enabled but params.tls_sni EQUALS donor_sni ($_donor_sni) — serving the node's OWN cert under the REALITY donor SNI is a cert/SNI-mismatch tell AND correlates the genuine-TLS family with REALITY (Audit-0007 S2). Set params.tls_sni to the node's own cert domain." ;;
 	esac
 
 	# Protocol secrets (placeholders in params; real values from sing-box/openssl).

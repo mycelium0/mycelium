@@ -273,13 +273,17 @@ write_params() {
 	# GENUINE-TLS SNI (the own-cert families: vless-ws-tls / vless-xhttp-tls). It is the node's OWN domain
 	# — a hostname under its served wildcard cert — NEVER the donor (the donor is the REALITY cover, a
 	# SEPARATE field donor_sni). Derive it from the served wildcard cert's SAN: *.ZONE -> m.ZONE (the
-	# mycelium convention), so the rendered genuine-TLS server_name AND the subscription's own-cert
-	# outbound SNI both agree with the presented cert (C03). Fall back to the donor ONLY when no wildcard
-	# cert is present — the C03 guard in render_singbox.sh then still refuses an empty tls_sni for an
-	# enabled own-cert family, so a misconfigured node fails closed rather than shipping a cert/SNI tell.
-	local tls_domain
-	tls_domain="$(openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null | grep -oE 'DNS:\*\.[A-Za-z0-9.-]+' | head -1 | sed 's/^DNS:\*\./m./')"
-	[ -n "$tls_domain" ] || tls_domain="$donor"
+	# mycelium convention), else the first concrete (non-wildcard) DNS SAN — so the rendered genuine-TLS
+	# server_name AND the subscription's own-cert outbound SNI both agree with the presented cert (C03).
+	# We NEVER fall back to the REALITY donor: serving the node's OWN cert under the donor SNI is a
+	# cert/SNI-mismatch active-probe tell AND correlates the genuine-TLS family with REALITY by shared SNI
+	# (Audit-0007 S2). If no own-cert domain is derivable, tls_domain stays EMPTY and the C03 guard in
+	# render_singbox.sh fail-closes an ENABLED own-cert family; a REALITY-only node has no own-cert family,
+	# so an empty tls_sni is fine for it.
+	local tls_domain tls_san
+	tls_san="$(openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null)"
+	tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:\*\.[A-Za-z0-9.-]+' | head -1 | sed 's/^DNS:\*\./m./')"
+	[ -n "$tls_domain" ] || tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:[A-Za-z0-9.-]+' | grep -vE 'DNS:\*' | head -1 | sed 's/^DNS://')"
 	local tmp
 	tmp="$(mktemp "${STATE_DIR}/.params.XXXXXX")"
 	jq -n \
