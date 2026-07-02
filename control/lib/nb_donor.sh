@@ -32,6 +32,23 @@ donor_verify_tls() {
 		| grep -q 'TLSv1.3'
 }
 
+_donor_wait_listen() {
+	# _donor_wait_listen PORT -> 0 if 127.0.0.1:PORT is accepting within ~3s, else 1. Confirms an
+	# ephemeral engine actually BOUND before donor_verify_reality reads a probe failure as a broken
+	# donor: a port collision / bind failure is "cannot judge" (rc 2), never "dead" (rc 1). Prefers ss;
+	# falls back to a raw bash /dev/tcp connect where ss is absent.
+	local p="$1" i
+	for i in 1 2 3 4 5 6; do
+		if have ss; then
+			ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$p\$" && return 0
+		elif (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+			return 0
+		fi
+		sleep 0.5
+	done
+	return 1
+}
+
 donor_verify_reality() {
 	# donor_verify_reality HOST -> 0 iff HOST completes a REAL REALITY handshake AS THE DEST, probed from
 	# THIS node's egress. THE AUTHORITATIVE donor gate. openssl TLS-level checks CANNOT distinguish a
@@ -39,31 +56,66 @@ donor_verify_reality() {
 	# TLSv1.3/x25519 (and even passes h2) yet breaks REALITY's handshake-steal, while a KNOWN-GOOD donor
 	# (www.samsung.com) does NOT advertise the PQ group the way apple/google do — the two are
 	# indistinguishable at the openssl layer, so only the REALITY handshake itself decides. Spins an
-	# EPHEMERAL loopback REALITY server (dest=HOST) + client on 127.0.0.1 spare ports (the main engine
-	# service is not yet running at donor-pick time) with the SAME uTLS fingerprint clients use, and
-	# confirms a request traverses the tunnel. Returns 2 (not 1) when the engine binary is absent, so the
-	# caller can degrade to the TLS-only pre-filter instead of hard-failing. Self-cleaning.
+	# EPHEMERAL loopback REALITY server (dest=HOST) + client with the SAME uTLS fingerprint clients use,
+	# and confirms a request traverses the tunnel.
+	#   RETURNS: 0 = steal-viable; 1 = TLS-fine-but-REALITY-BROKEN (dead); 2 = COULD-NOT-JUDGE — the engine
+	#   binary or curl is absent, keypair generation failed, or no ephemeral port pair would bind — so the
+	#   caller degrades to the TLS pre-filter / treats the transport as NOT-dead instead of hard-failing.
+	# Audit-0007 S2: the ephemeral ports are RANDOMIZED per attempt (not the fixed 29443/29444 that two
+	# overlapping runs would collide on) and the whole handshake runs under an flock, so a deploy-time
+	# donor pick and a timer-fired L7 probe cannot race for ports — a race would false-DEAD a healthy donor
+	# and trigger a spurious rotation. A bind failure returns 2 (cannot judge), never 1 (dead). Self-cleaning.
 	local host="$1"
 	have "$SINGBOX_BIN" || return 2
-	local dir; dir="$(mktemp -d 2>/dev/null)" || return 1
-	local kp priv pub sid uuid sport=29443 cport=29444 sp cp rc=1
-	kp="$("$SINGBOX_BIN" generate reality-keypair 2>/dev/null)" || { rm -rf "$dir"; return 1; }
-	priv="$(printf '%s' "$kp" | awk 'tolower($0) ~ /private/ {print $NF}')"
-	pub="$(printf  '%s' "$kp" | awk 'tolower($0) ~ /public/  {print $NF}')"
-	sid="$(openssl rand -hex 8 2>/dev/null)"
-	uuid="$("$SINGBOX_BIN" generate uuid 2>/dev/null)"
-	printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"vless\",\"listen\":\"127.0.0.1\",\"listen_port\":$sport,\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$host\",\"server_port\":443},\"private_key\":\"$priv\",\"short_id\":[\"$sid\"]}}}],\"outbounds\":[{\"type\":\"direct\"}]}" >"$dir/s.json"
-	printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"socks\",\"listen\":\"127.0.0.1\",\"listen_port\":$cport}],\"outbounds\":[{\"type\":\"vless\",\"tag\":\"v\",\"server\":\"127.0.0.1\",\"server_port\":$sport,\"uuid\":\"$uuid\",\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"$pub\",\"short_id\":\"$sid\"}}},{\"type\":\"direct\"}],\"route\":{\"final\":\"v\"}}" >"$dir/c.json"
-	"$SINGBOX_BIN" run -c "$dir/s.json" >/dev/null 2>&1 &
-	sp=$!
-	"$SINGBOX_BIN" run -c "$dir/c.json" >/dev/null 2>&1 &
-	cp=$!
-	sleep 3
-	curl -s -o /dev/null --max-time 8 --socks5-hostname "127.0.0.1:$cport" "https://$host/" 2>/dev/null && rc=0
-	kill "$sp" "$cp" 2>/dev/null
-	wait "$sp" "$cp" 2>/dev/null
-	rm -rf "$dir"
-	return "$rc"
+	# The lock lives under STATE_DIR (node-shared) so a deploy-time donor pick and a timer-fired L7 probe
+	# actually serialize — a systemd unit with PrivateTmp= would NOT share a /tmp lock. Falls back to /tmp
+	# only if STATE_DIR is unset (pre-entrypoint callers); flock is best-effort either way (a failed open
+	# just degrades to unserialized, and the random ports + bind check still contain any race).
+	local lockf="${STATE_DIR:-${TMPDIR:-/tmp}}/donor-verify.lock"
+	# fd 9 is opened INSIDE the subshell, so it is scoped to the subshell (auto-closed on exit, releasing
+	# the flock) and cannot clash with the entrypoint's descriptors. The subshell's EXIT status IS the
+	# verdict. flock -w 30 bounds the wait so a wedged holder degrades to unserialized (random ports +
+	# the bind check still contain a race) instead of hanging.
+	(
+		# Declare the cleanup handles + arm the EXIT trap BEFORE anything can exit, so an early `exit 2`
+		# (curl/mktemp/keypair) fires a trap that references only already-bound vars (set -u safe).
+		local dir="" sp="" cp=""
+		trap 'kill ${sp:-} ${cp:-} 2>/dev/null || :; [ -n "${dir:-}" ] && rm -rf "$dir" 2>/dev/null || :' EXIT
+		if have flock; then exec 9>"$lockf" 2>/dev/null && flock -w 30 9 2>/dev/null || true; fi
+		have curl || exit 2
+		dir="$(mktemp -d 2>/dev/null)" || exit 2
+
+		local kp priv pub sid uuid
+		kp="$("$SINGBOX_BIN" generate reality-keypair 2>/dev/null)" || exit 2
+		priv="$(printf '%s' "$kp" | awk 'tolower($0) ~ /private/ {print $NF}')"
+		pub="$(printf  '%s' "$kp" | awk 'tolower($0) ~ /public/  {print $NF}')"
+		sid="$(openssl rand -hex 8 2>/dev/null || :)"
+		uuid="$("$SINGBOX_BIN" generate uuid 2>/dev/null || :)"
+		[ -n "$priv" ] && [ -n "$pub" ] && [ -n "$sid" ] && [ -n "$uuid" ] || exit 2
+
+		# Try up to 3 RANDOM ephemeral port pairs, chosen BELOW the OS ephemeral range to dodge the
+		# kernel's own outbound sockets. A pair that will not bind is a collision, not a broken donor:
+		# retry with fresh ports, and if none binds exit 2 (cannot judge).
+		local attempt sport cport rc=1
+		for attempt in 1 2 3; do
+			sport=$(( 10000 + RANDOM % 20000 ))
+			cport=$(( sport + 1 ))
+			printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"vless\",\"listen\":\"127.0.0.1\",\"listen_port\":$sport,\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$host\",\"server_port\":443},\"private_key\":\"$priv\",\"short_id\":[\"$sid\"]}}}],\"outbounds\":[{\"type\":\"direct\"}]}" >"$dir/s.json"
+			printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"socks\",\"listen\":\"127.0.0.1\",\"listen_port\":$cport}],\"outbounds\":[{\"type\":\"vless\",\"tag\":\"v\",\"server\":\"127.0.0.1\",\"server_port\":$sport,\"uuid\":\"$uuid\",\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"$pub\",\"short_id\":\"$sid\"}}},{\"type\":\"direct\"}],\"route\":{\"final\":\"v\"}}" >"$dir/c.json"
+			"$SINGBOX_BIN" run -c "$dir/s.json" >/dev/null 2>&1 & sp=$!
+			"$SINGBOX_BIN" run -c "$dir/c.json" >/dev/null 2>&1 & cp=$!
+			# Only read a probe failure as DEAD once BOTH ephemeral engines have actually bound; a bind
+			# failure (port taken / crash) is a collision, not a broken donor.
+			if _donor_wait_listen "$sport" && _donor_wait_listen "$cport"; then
+				curl -s -o /dev/null --max-time 8 --socks5-hostname "127.0.0.1:$cport" "https://$host/" 2>/dev/null && rc=0
+				exit "$rc"
+			fi
+			kill ${sp:-} ${cp:-} 2>/dev/null || :
+			wait ${sp:-} ${cp:-} 2>/dev/null || :
+			sp=""; cp=""
+		done
+		exit 2
+	)
 }
 
 donor_verify() {
@@ -77,7 +129,7 @@ donor_verify() {
 	donor_verify_reality "$host"
 	case "$?" in
 		0) return 0 ;;
-		2) warn "donor '$host': engine unavailable for the REALITY-layer check — accepting on the TLSv1.3 pre-filter ALONE (weaker; cannot catch a REALITY-broken dest such as www.microsoft.com)."; return 0 ;;
+		2) warn "donor '$host': the REALITY-layer check could not run (engine/curl absent, or no ephemeral port would bind) — accepting on the TLSv1.3 pre-filter ALONE (weaker; cannot catch a REALITY-broken dest such as www.microsoft.com)."; return 0 ;;
 		*) warn "donor candidate '$host' passes TLSv1.3 but FAILS the REALITY handshake (a TLS-fine-but-REALITY-broken dest); rejecting."; return 1 ;;
 	esac
 }

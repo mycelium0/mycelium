@@ -72,8 +72,12 @@ measure_l7_probe() {
 			# depends on); it contacts only the node's own cover/dest host, not a third party.
 			[ -n "$dest" ] || { tested=$(( tested + 1 )); continue; }
 			for attempt in 1 2 3; do
-				donor_verify_reality "$dest"; drc=$?
-				# 0 = steal-viable, 2 = engine unavailable (cannot judge) -> NOT dead; 1 = broken -> retry.
+				# `drc=0; ... || drc=$?` is REQUIRED, not stylistic: on the timer/dispatch path this probe
+				# runs under `set -e` in a NON-exempt context, so a bare `donor_verify_reality; drc=$?`
+				# would trip errexit on a broken-dest return (rc 1) and abort BEFORE the marker is written
+				# — silently defeating the very broken-REALITY detection this probe exists for.
+				drc=0; donor_verify_reality "$dest" || drc=$?
+				# 0 = steal-viable, 2 = cannot judge (engine/curl/port) -> NOT dead; 1 = broken -> retry.
 				[ "$drc" -ne 1 ] && { ok=1; break; }
 				sleep 1
 			done
