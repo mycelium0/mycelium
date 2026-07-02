@@ -13,7 +13,7 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Added
-- **L7 own-cert/cover-path liveness detection — closes the reach L4-only blind spot (DoD-1 detection-fidelity).**
+- **L7 own-cert/cover-path liveness detection — closes the reach L4-only blind spot for the REALITY + genuine-TLS families (DoD-1 detection-fidelity).**
   A bound listener that is client-DEAD at L7 (a broken REALITY dest) previously probed healthy (TCP connect
   only), so the self-drive loop never rotated off it. Now `measure_l7_probe` (`control/lib/nb_selftest.sh`)
   does a node-local handshake per client-facing transport — genuine-TLS: an own-cert loopback handshake;

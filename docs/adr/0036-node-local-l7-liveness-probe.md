@@ -107,6 +107,14 @@ sing-box + openssl + `crypto/tls` only.
 - **REALITY liveness is inseparable from `dest` viability:** a flaky `dest` can produce a fresh-but-wrong
   DEAD marker; contained by the in-run debounce + the detector hysteresis + the rotate `MinInterval`
   ([ADR-0030](0030-advisory-network-awareness.md)), not eliminated.
+- **Marker replay vs. anti-flap (known limitation — Audit-0007 S2):** the daemon re-reads the marker every
+  tick until it ages past `L7_MAX_AGE_MS`, so a single DEAD probe *generation* faults the detector on every
+  tick inside that window rather than once — one (already in-run-debounced) probe run can satisfy the
+  tick-based anti-flap on its own. The blast radius is bounded (the `MinInterval`/`MaxPerWindow` limits cap
+  it at one rotation then a cooldown), but requiring the marker to name a ref DEAD across ≥N *distinct*
+  `observed_at` generations before it faults — so a rotation reflects sustained, not replayed, evidence — is
+  a planned hardening. It is deferred because it shifts the drilled detect→rotate latency and so needs a
+  self-drive re-drill to confirm the loop still rotates within the DoD-1 budget.
 - **VIS-0004 phase table** is amended to record this L7 liveness loop as the sanctioned early realization
   of the Plane-2 own-cert/cover-path signal, armed only under `--measure-enable` (ships-disabled).
 
