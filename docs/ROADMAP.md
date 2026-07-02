@@ -191,6 +191,17 @@ migration (phase 2). UDP paths are provisioned but not relied upon as the primar
 
 ## Phase 2 — Single-node adaptivity (self-tuning)
 
+> **Status: CLOSED — GO-signed 2026-07-03** (Phase-2 → Phase-3 transition authorized). On a live node the
+> node-local `measure → detect → tune → rotate → rollback` loop closed **autonomously**: an induced
+> degradation was detected, the impaired streak persisted to the flip threshold under the anti-flap guard,
+> the planner emitted a rotation, and the rotation was recorded with the rate/latch limits and rollback
+> path in force. Detector decisions are measurable (precision/recall on labelled incidents), and the
+> L4-only detection blind spot is closed for the REALITY + genuine-TLS families
+> ([ADR-0036](adr/0036-node-local-l7-liveness-probe.md); the detection-fidelity hardening — Audit-0007 S1 +
+> all of S2 — is landed and CI-green). Authoritative status + acceptance evidence + named Phase-3
+> carry-forwards (end-to-end client recovery, the marker-replay anti-flap hardening, the audit S3/NOTE
+> tail, cadence-default tuning) are in the [Phase-2 acceptance ledger](phase2-acceptance-ledger.md).
+
 **Goal.** What operators previously did by hand over hours in response to a blocking event
 (migrating VLESS-TCP → REALITY/gRPC/CDN), a **single node does itself in minutes**. Phase 2 is
 scoped to exactly one thing: the node-local **measure → detect → tune → rotate → rollback** loop
@@ -237,8 +248,11 @@ gated live apply + rollback.
 emitted is aggregate, noised, identity-free (Phase 3, [THREAT-MODEL.md](THREAT-MODEL.md)). ML
 amplifies the heuristics, it never replaces them.
 
-**Status.** CLOSED as single-node adaptivity — detector + tuner + measure + planner + gated rotation
-+ rollback are built and the node-local self-drive is proven on a live node.
+**Status. CLOSED — GO-signed 2026-07-03** (Phase-2 → Phase-3 transition authorized;
+[phase2-acceptance-ledger.md](phase2-acceptance-ledger.md)). Detector + tuner + measure + planner +
+gated rotation + rollback are built and the node-local self-drive **closed autonomously on a live
+node**; detection fidelity is hardened (ADR-0036 + Audit-0007 S1/all-S2, CI-green). End-to-end client
+recovery, the release track, and the advisory/fungi boundary are **Phase 3**.
 
 ---
 
