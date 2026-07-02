@@ -201,6 +201,53 @@ func TestTickActiveProbeFaultsBlocked(t *testing.T) {
 // TestAssembleClosesLoopActs is the end-to-end proof: an impaired active that then idles out of the
 // snapshot evaporates below a still-clean sibling by the margin, so the assembled input drives the
 // planner to rotate. This closes the measure -> detect -> tune -> assemble -> plan loop.
+// TestTickMarksCandidateL7Dead: a NON-active member the node's own L7 probe reports dead
+// (activeProbe[ref]==false) is surfaced on its ranked candidate as L7Dead=true, so the planner can
+// exclude it from the pool (never rotate onto a co-failed sibling — Audit-0007 S2). Only an explicit
+// false marks a member; the active (unset here) stays eligible, and a nil map leaves every candidate
+// live (the control).
+func TestTickMarksCandidateL7Dead(t *testing.T) {
+	at := t0
+	a := newAsm(t)
+	deadCand := map[string]bool{candRef: false} // the CANDIDATE is L7-dead; the active is unset (healthy)
+	var pi rotate.PlanInput
+	var err error
+	for i := 0; i < 3; i++ {
+		at = at.Add(time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, deadCand)
+		if err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+	if len(pi.Ranked) != 1 {
+		t.Fatalf("ranked = %+v, want exactly one sibling", pi.Ranked)
+	}
+	if !pi.Ranked[0].L7Dead {
+		t.Errorf("candidate %q marked dead in the probe map must carry L7Dead=true", pi.Ranked[0].Proto)
+	}
+	if pi.Active.L7Dead {
+		t.Errorf("active member (unset in the probe map) must not be marked L7Dead")
+	}
+
+	// Control: the identical fold with a nil probe map leaves the candidate eligible (L7Dead=false), so
+	// the flag above is attributable to the probe signal, not the fold.
+	b := newAsm(t)
+	at = t0
+	var pc rotate.PlanInput
+	for i := 0; i < 3; i++ {
+		at = at.Add(time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil)
+		if err != nil {
+			t.Fatalf("control tick %d: %v", i, err)
+		}
+	}
+	if pc.Ranked[0].L7Dead {
+		t.Error("a nil probe map must leave the candidate eligible (L7Dead=false)")
+	}
+}
+
 func TestAssembleClosesLoopActs(t *testing.T) {
 	a := newAsm(t)
 	// Phase 1: active failing, candidate clean — active verdict latches impaired, candidate climbs.

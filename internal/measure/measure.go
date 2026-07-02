@@ -247,6 +247,17 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 			Promoted: a.weights[ref].Promoted(),
 			Weight:   a.weights[ref].Value(now),
 		}
+		// Carry this member's own-cert/cover-path L7 liveness onto the candidate so the planner can
+		// exclude an L7-dead sibling from the pool (never rotate ONTO a member sharing the same broken
+		// dest as the failing active — Audit-0007 S2). Only an EXPLICIT false marks it dead; an unset ref
+		// (or a nil map) leaves L7Dead false (eligible), preserving the pre-L7 behaviour. This is the same
+		// signal that faults the member's ActiveProbeOK above, surfaced as a hard pool-exclusion so a
+		// still-high (not-yet-decayed) weight cannot make a dead sibling win before its pheromone fades.
+		if activeProbe != nil {
+			if live, ok := activeProbe[ref]; ok && !live {
+				c.L7Dead = true
+			}
+		}
 		if ref == activeRef {
 			c.Action = spec.RotationActionNone // the incumbent carries no move
 			active = c

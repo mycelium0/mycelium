@@ -206,6 +206,43 @@ func TestPlanTargetNotPromoted(t *testing.T) {
 	}
 }
 
+// TestPlanExcludesL7DeadCandidate: a candidate this node's own L7 probe reports client-DEAD is
+// excluded from the pool BEFORE the margin/promote checks — even when it would otherwise win — so a
+// rotation never lands on a co-failed sibling. With the dead candidate the only option, the planner
+// holds no-better-candidate (NOT target-not-promoted: the exclusion happens before anyBetterByMargin,
+// so a dead-but-promoted candidate cannot mislabel the hold reason). Audit-0007 S2.
+func TestPlanExcludesL7DeadCandidate(t *testing.T) {
+	in := base()
+	dead := cand("vless-reality-grpc", 0.9, true) // beats the 0.2 incumbent by the 0.1 margin AND is promoted
+	dead.L7Dead = true
+	in.Ranked = []spec.RotationCandidate{dead}
+	p, err := Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Act {
+		t.Fatalf("must not rotate onto an L7-dead sibling, rotated to %q", p.To.Proto)
+	}
+	if p.Reason != spec.RotationReasonNoBetterCandidate {
+		t.Fatalf("an excluded dead candidate must hold no-better-candidate, got %q", p.Reason)
+	}
+}
+
+// TestPlanRotatesPastL7DeadToLiveSibling: when the highest-weight candidate is L7-dead, the planner
+// skips it and rotates to the next LIVE candidate that still beats the margin — the degraded active is
+// recovered without landing on a co-failed sibling. Audit-0007 S2.
+func TestPlanRotatesPastL7DeadToLiveSibling(t *testing.T) {
+	in := base()
+	deadTop := cand("vless-ws-tls", 0.95, true)
+	deadTop.L7Dead = true
+	live := cand("vless-reality-grpc", 0.7, true) // still > 0.2 + 0.1 margin
+	in.Ranked = []spec.RotationCandidate{deadTop, live}
+	p := mustPlan(t, in)
+	if !p.Act || p.To.Proto != "vless-reality-grpc" {
+		t.Fatalf("must skip the L7-dead top candidate and rotate to the live sibling, got act=%v to=%q", p.Act, p.To.Proto)
+	}
+}
+
 func TestPlanPicksHighestWeightDeterministically(t *testing.T) {
 	in := base()
 	in.Ranked = []spec.RotationCandidate{

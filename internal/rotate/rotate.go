@@ -143,6 +143,13 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		if c.Proto == in.Active.Proto {
 			continue
 		}
+		// Never rotate ONTO a member this node's own L7 probe reports client-DEAD — a co-failed sibling
+		// (e.g. a second REALITY member sharing the same broken dest as the failing active). Excluded
+		// BEFORE the margin/promote checks so a dead candidate neither becomes the target nor sets
+		// anyBetterByMargin (which would mislabel the hold as "target not promoted"). Audit-0007 S2.
+		if c.L7Dead {
+			continue
+		}
 		if c.Weight < in.Active.Weight+in.Limits.MinWeightMargin {
 			continue
 		}
