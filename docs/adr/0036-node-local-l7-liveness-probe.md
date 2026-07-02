@@ -115,8 +115,12 @@ sing-box + openssl + `crypto/tls` only.
   rotation reflects sustained, not replayed, evidence; a fresh-clean generation or an absent/stale marker
   resets that ref's streak (fail-safe), and an explicit `1` restores the pre-gate behaviour. This shifts the
   detect→rotate latency (a rotation now needs ≥2 probe generations of deadness on top of the detector
-  hysteresis), so an on-node self-drive **re-drill at the shipped cadence** is the remaining acceptance step
-  for the default before it can be called field-proven.
+  hysteresis). **Field-confirmed on a live node (2026-07-03):** on the gated daemon at the live tick, one
+  dead generation replayed across ticks held the active verdict **clean**, and a second **distinct**
+  generation flipped it to **blocked / active-probe-failure** (stable) — the gate faults at exactly N=2
+  distinct generations and replay is harmless. (The re-drill drove the generations directly to exercise the
+  gate; the end-to-end wall-clock at the default L7 cadence follows arithmetically — ≈2 probe intervals for
+  the two generations, then the detector hysteresis, then the rotation.)
 - **Zero-sample reach window vs. the L7 fold:** the L7 signal is applied *inside* a member's detector
   `Observe`, which the assembler runs only for a member that has fresh reach samples this tick (a
   zero-sample window carries no information and is skipped — "no data" must never read as a black-hole).
