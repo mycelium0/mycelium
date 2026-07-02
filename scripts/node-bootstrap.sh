@@ -728,12 +728,16 @@ verify_post_apply() {
 	systemctl is-active --quiet sing-box || { warn "sing-box not active after settle."; return 1; }
 	# Confirm the expected ports are bound (reuse the live-config port set + an ss check).
 	verify_listen_ports || return 1
-	# L7 ACCEPTANCE (advisory): a bound port is L4-only — it cannot distinguish a client-USABLE transport
-	# from a client-DEAD one (a REALITY donor that breaks the handshake-steal, an expired/unreadable own
-	# cert). verify_transports_l7 runs a REAL client handshake per client-facing transport from the
-	# loopback. ADVISORY for now: a failure WARNs + records a marker but does NOT roll back — a transient
-	# probe blip must never revert a healthy config; promotable to fail-closed once field-trusted.
-	verify_transports_l7 || warn "post-apply L7 self-test flagged a client-dead transport (marker: $STATE_DIR/l7_selftest.json) — the listener is bound but a real client could not handshake."
+	# L7 LIVENESS (advisory): a bound port is L4-only — it cannot distinguish a client-USABLE transport
+	# from a client-DEAD one (a broken REALITY dest that fails the authenticated steal, an expired/mismatched
+	# own cert). measure_l7_probe runs the ADR-0036 own-cert/cover-path handshake per client-facing transport
+	# (genuine-TLS = loopback openssl; REALITY = authenticated ephemeral steal against the node's OWN
+	# dest/cover host — NO third-party beacon). We pass a DISTINCT marker path ($STATE_DIR/l7_postapply.json)
+	# so this deploy-time acceptance NEVER clobbers the daemon's own marker $STATE_DIR/l7_selftest.json
+	# (single producer per marker — Audit-0007 S2). ADVISORY for now: a failure WARNs + records the marker
+	# but does NOT roll back — a transient probe blip must never revert a healthy config; promotable to
+	# fail-closed once field-trusted.
+	measure_l7_probe "$STATE_DIR/l7_postapply.json" || warn "post-apply L7 liveness flagged a client-dead transport (marker: $STATE_DIR/l7_postapply.json) — the listener is bound but a real client could not handshake."
 	return 0
 }
 
