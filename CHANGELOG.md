@@ -11,6 +11,35 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 `internal/*`). Format: Keep a Changelog; versioning: SemVer. The single runtime source of
 truth for the version is `internal/spec.Version`.
 
+## [Unreleased]
+### Added
+- **L7 own-cert/cover-path liveness detection — closes the reach L4-only blind spot (DoD-1 detection-fidelity).**
+  A bound listener that is client-DEAD at L7 (a broken REALITY dest) previously probed healthy (TCP connect
+  only), so the self-drive loop never rotated off it. Now `measure_l7_probe` (`control/lib/nb_selftest.sh`)
+  does a node-local handshake per client-facing transport — genuine-TLS: an own-cert loopback handshake;
+  REALITY: an authenticated ephemeral-loopback steal against `dest` (`donor_verify_reality`) — with a
+  probe-side retry-debounce, and writes `$STATE_DIR/l7_selftest.json`. `cmd/myceliumd` folds a *fresh* marker
+  into `spec.DetectorSignal.ActiveProbeOK` (`loadL7Liveness`; fail-safe: absent/stale/malformed → healthy, so a
+  probe outage never rotates a healthy transport), so `detect.Classify` flips the active to
+  `blocked`/`active-probe-failure`. `nb_measure.sh` emits `l7_liveness_path` + `l7_max_age_ms` into
+  `measure.config` and installs a budgeted, jittered `mycelium-l7probe.timer` (ships-disabled, armed by
+  `--measure-enable`); the entrypoint gains `--l7-probe`. Proven on m1: an induced L7-dead active drives an
+  autonomous recorded rotation, a too-soon second rotation is correctly rate-limited, and the node recovers to
+  clean once the fault clears.
+### Changed
+- **RP-0010 AC-6 clarified** — "no new active-probing fingerprint" means no new EXTERNAL / third-party
+  fingerprint. A node-local loopback own-cert/cover-path probe (genuine-TLS pure-loopback; REALITY touching
+  only the node's own cover/`dest` host — the cover traffic REALITY already produces) is the sanctioned
+  realization of the Plane-2 `active-probe response failure (own-cert / cover path)` signal, under the
+  hyphal-probe invariants (budgeted, jittered, bounded).
+### Fixed
+- **Genuine-TLS `tls_sni` = the node's own cert-SAN domain, not the donor SNI** — the client bundles were
+  emitting the donor SNI against a `*.mycelium.host` certificate.
+- **REALITY donor validation** — donors are validated with a real ephemeral-loopback REALITY handshake
+  (`donor_verify_reality`); `www.microsoft.com` (TLS-fine but steal-breaking) dropped from the candidate set.
+- **Conformance-gate lockstep** — `node_update_artifact_root` derives its staged-lib set from the entrypoint
+  source loop (single source of truth), and `nb_selftest` is registered in that loop.
+
 ## [0.2.28] — 2026-06-30
 ### Security
 - **Diagnostics-redactor audit remediation (RP-0011 chunk E)** — close the conditions a planned PR audit
