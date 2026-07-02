@@ -58,6 +58,15 @@ truth for the version is `internal/spec.Version`.
   `STATE_DIR`), and a bind failure returns *cannot-judge* rather than *dead*; the `measure_l7_probe` call
   site is made `set -e`-safe so a broken-dest verdict on the timer path can no longer abort the probe before
   its marker is written.
+- **L7 marker replay no longer defeats the anti-flap** (Audit-0007 S2) — the daemon re-reads the L7 marker
+  every tick, so a single DEAD probe *generation* used to fault the detector on every tick until it aged
+  out, letting one probe run satisfy the tick-based anti-flap on its own. `cmd/myceliumd` now gates the
+  fault through an `l7GenerationGate`: a member must read DEAD across ≥`l7_min_dead_generations` **distinct**
+  `observed_at` generations (default **2**) before it faults, so a rotation reflects sustained, not replayed,
+  evidence; a fresh-clean or absent/stale marker resets the streak (fail-safe), and an explicit `1` restores
+  the prior behaviour. Also fail-closes `donor_verify` on an un-judgeable REALITY donor at deploy (rc 2 →
+  reject, since the engine is present before donor selection), and the genuine-TLS probe now requires the
+  SNI in the leaf's SAN (a wrong-domain cert is caught; a self-signed own-cert still passes).
 
 ## [0.2.28] — 2026-06-30
 ### Security

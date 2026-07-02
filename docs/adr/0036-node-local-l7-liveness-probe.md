@@ -107,14 +107,16 @@ sing-box + openssl + `crypto/tls` only.
 - **REALITY liveness is inseparable from `dest` viability:** a flaky `dest` can produce a fresh-but-wrong
   DEAD marker; contained by the in-run debounce + the detector hysteresis + the rotate `MinInterval`
   ([ADR-0030](0030-advisory-network-awareness.md)), not eliminated.
-- **Marker replay vs. anti-flap (known limitation — Audit-0007 S2):** the daemon re-reads the marker every
-  tick until it ages past `L7_MAX_AGE_MS`, so a single DEAD probe *generation* faults the detector on every
-  tick inside that window rather than once — one (already in-run-debounced) probe run can satisfy the
-  tick-based anti-flap on its own. The blast radius is bounded (the `MinInterval`/`MaxPerWindow` limits cap
-  it at one rotation then a cooldown), but requiring the marker to name a ref DEAD across ≥N *distinct*
-  `observed_at` generations before it faults — so a rotation reflects sustained, not replayed, evidence — is
-  a planned hardening. It is deferred because it shifts the drilled detect→rotate latency and so needs a
-  self-drive re-drill to confirm the loop still rotates within the DoD-1 budget.
+- **Marker replay vs. anti-flap — hardened (Audit-0007 S2):** the daemon re-reads the marker every tick
+  until it ages past `L7_MAX_AGE_MS`, so a single DEAD probe *generation* would fault the detector on every
+  tick inside that window — one (already in-run-debounced) probe run satisfying the tick-based anti-flap on
+  its own. The daemon now gates the fault through `l7GenerationGate`: a member must read DEAD across **≥N
+  distinct `observed_at` generations** (default `l7_min_dead_generations = 2`) before it faults, so a
+  rotation reflects sustained, not replayed, evidence; a fresh-clean generation or an absent/stale marker
+  resets that ref's streak (fail-safe), and an explicit `1` restores the pre-gate behaviour. This shifts the
+  detect→rotate latency (a rotation now needs ≥2 probe generations of deadness on top of the detector
+  hysteresis), so an on-node self-drive **re-drill at the shipped cadence** is the remaining acceptance step
+  for the default before it can be called field-proven.
 - **Zero-sample reach window vs. the L7 fold:** the L7 signal is applied *inside* a member's detector
   `Observe`, which the assembler runs only for a member that has fresh reach samples this tick (a
   zero-sample window carries no information and is skipped — "no data" must never read as a black-hole).

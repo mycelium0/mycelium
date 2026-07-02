@@ -60,6 +60,12 @@ type measureConfig struct {
 	// L7MaxAgeMS is the freshness window for that marker: a marker older than this (by its observed_at)
 	// is ignored (fail-safe healthy). Required (> 0) when L7LivenessPath is set.
 	L7MaxAgeMS int `json:"l7_max_age_ms,omitempty"`
+	// L7MinDeadGenerations is the marker-replay hardening (Audit-0007 S2): a member must be named DEAD
+	// across at least this many DISTINCT marker generations (distinct observed_at) before the daemon faults
+	// it, so one dead probe run replayed across many ticks cannot satisfy the tick-based anti-flap on its
+	// own. Unset (<= 0) defaults to defaultL7MinDeadGenerations (2); an explicit 1 restores the pre-gate
+	// fault-on-first-generation behaviour.
+	L7MinDeadGenerations int `json:"l7_min_dead_generations,omitempty"`
 }
 
 // members converts the config rows to internal/measure.Member descriptors.
@@ -195,35 +201,123 @@ type l7LivenessMarker struct {
 	Dead       []string  `json:"dead"`
 }
 
-// loadL7Liveness reads the L7 liveness marker at path and returns a SPARSE map of member ref -> false
-// for each FRESH dead ref (an unset ref defaults to healthy in measure.Tick). It is deliberately
-// fail-safe — an empty path or non-positive maxAge, a missing/unreadable/malformed marker, an unstamped
-// or stale marker (older than maxAge by observed_at), or an empty dead set all yield nil (no L7 signal),
-// so the fold behaves exactly as it did pre-L7. ONLY a fresh, well-formed marker naming dead refs faults
-// them: a probe outage must never spuriously rotate a healthy transport.
-func loadL7Liveness(path string, now time.Time, maxAge time.Duration) map[string]bool {
+// readL7Marker reads the L7 liveness marker at path and returns the FRESH dead-ref list, the marker
+// generation stamp (observed_at), and whether a fresh well-formed dead-naming marker was read at all. It
+// is deliberately fail-safe — an empty path or non-positive maxAge, a missing/unreadable/malformed marker,
+// an unstamped or stale marker (older than maxAge by observed_at), or an empty dead set all yield
+// (nil, zero, false): no L7 signal. ONLY a fresh, well-formed marker naming dead refs is present==true.
+func readL7Marker(path string, now time.Time, maxAge time.Duration) (dead []string, observedAt time.Time, present bool) {
 	if path == "" || maxAge <= 0 {
-		return nil
+		return nil, time.Time{}, false
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return nil, time.Time{}, false
 	}
 	var m l7LivenessMarker
 	if json.Unmarshal(data, &m) != nil {
-		return nil
+		return nil, time.Time{}, false
 	}
 	if m.ObservedAt.IsZero() || now.Sub(m.ObservedAt) > maxAge {
-		return nil
+		return nil, time.Time{}, false
 	}
-	out := make(map[string]bool, len(m.Dead))
 	for _, ref := range m.Dead {
 		if ref != "" {
-			out[ref] = false
+			dead = append(dead, ref)
 		}
 	}
-	if len(out) == 0 {
+	if len(dead) == 0 {
+		return nil, time.Time{}, false
+	}
+	return dead, m.ObservedAt, true
+}
+
+// loadL7Liveness returns the SPARSE map of member ref -> false for every FRESH dead ref (an unset ref
+// defaults to healthy in measure.Tick), UNGATED by generation count. It is the raw single-generation
+// reader; the daemon applies l7GenerationGate on top so marker replay cannot fault on one probe run.
+func loadL7Liveness(path string, now time.Time, maxAge time.Duration) map[string]bool {
+	dead, _, present := readL7Marker(path, now, maxAge)
+	if !present {
 		return nil
+	}
+	out := make(map[string]bool, len(dead))
+	for _, ref := range dead {
+		out[ref] = false
+	}
+	return out
+}
+
+// defaultL7MinDeadGenerations is the fault threshold when the config leaves it unset (<= 0): a rotation
+// requires the transport to read DEAD across at least this many DISTINCT probe generations. 2 (the
+// operator decision, 2026-07-03) makes a rotation reflect sustained, not replayed, evidence; an explicit
+// 1 in the config restores the pre-gate behaviour (fault on the first dead generation).
+const defaultL7MinDeadGenerations = 2
+
+func effectiveL7MinGenerations(configured int) int {
+	if configured >= 1 {
+		return configured
+	}
+	return defaultL7MinDeadGenerations
+}
+
+// l7GenerationGate hardens the L7 fault against marker REPLAY (Audit-0007 S2): the daemon re-reads the
+// marker every tick, so a single DEAD probe generation would otherwise fault the detector on every tick
+// until it ages out — satisfying the tick-based anti-flap from ONE probe run. The gate requires a member
+// ref to be named DEAD across >= MinGenerations DISTINCT marker generations (distinct observed_at) before
+// it faults, so a rotation reflects sustained, not replayed, evidence. A generation with the ref absent (a
+// fresh-but-clean marker), or an absent/stale marker (no fresh evidence at all), resets that ref's streak.
+// Stateful across ticks; NOT persisted (a daemon restart conservatively re-accumulates — fail-safe).
+type l7GenerationGate struct {
+	minGenerations int
+	lastDead       map[string]time.Time // ref -> the last observed_at seen naming it dead
+	streak         map[string]int       // ref -> consecutive DISTINCT dead generations
+}
+
+func newL7GenerationGate(minGenerations int) *l7GenerationGate {
+	if minGenerations < 1 {
+		minGenerations = 1
+	}
+	return &l7GenerationGate{
+		minGenerations: minGenerations,
+		lastDead:       make(map[string]time.Time),
+		streak:         make(map[string]int),
+	}
+}
+
+// fold advances the gate with one marker read (dead + observedAt + present, as readL7Marker returns) and
+// returns the ref -> false map of members that have reached the >= MinGenerations threshold — the refs to
+// actually fault (ActiveProbeOK=false). Refs below the threshold are absent from the map (healthy).
+func (g *l7GenerationGate) fold(dead []string, observedAt time.Time, present bool) map[string]bool {
+	if !present {
+		// No fresh evidence this read: a dead streak is only meaningful while evidence keeps arriving, and
+		// a stopped/expired probe must never keep a fault latched. Reset everything (fail-safe).
+		g.lastDead = make(map[string]time.Time)
+		g.streak = make(map[string]int)
+		return map[string]bool{}
+	}
+	deadSet := make(map[string]bool, len(dead))
+	for _, r := range dead {
+		if r != "" {
+			deadSet[r] = true
+		}
+	}
+	// A FRESH marker that no longer names a ref dead means it recovered (or was never dead) -> reset it.
+	for r := range g.streak {
+		if !deadSet[r] {
+			delete(g.streak, r)
+			delete(g.lastDead, r)
+		}
+	}
+	out := make(map[string]bool)
+	for r := range deadSet {
+		if last, seen := g.lastDead[r]; !seen || observedAt.After(last) {
+			g.streak[r]++ // a NEW distinct dead generation
+			g.lastDead[r] = observedAt
+		}
+		// observedAt == last -> a REPLAY of the same generation -> no increment.
+		if g.streak[r] >= g.minGenerations {
+			out[r] = false
+		}
 	}
 	return out
 }
@@ -314,6 +408,11 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 		memberRefs[m.Ref] = true
 	}
 
+	// The L7 generation gate persists across ticks (like the assembler): its per-ref distinct-dead-
+	// generation streaks are what make marker replay harmless. Its policy (MinGenerations) is fixed at
+	// startup from initial, alongside the members/limits.
+	l7gate := newL7GenerationGate(effectiveL7MinGenerations(initial.L7MinDeadGenerations))
+
 	tick := func() {
 		// Re-read the config for the current active ref / paths; the assembler's members and limits are
 		// fixed at startup, so a re-read that fails just keeps the last good values.
@@ -330,9 +429,12 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 			// reach/measure ref mismatch the operator should reconcile.
 			log.Printf("myceliumd: measure: dropped %d reach anchor(s) not in the member set (ref mismatch?)", dropped)
 		}
-		// Fold this tick's node-local L7 liveness (own-cert/cover-path) into the detector: a fresh marker
-		// naming an L7-dead member faults it blocked; absent/stale -> healthy (fail-safe).
-		l7 := loadL7Liveness(cur.L7LivenessPath, now, time.Duration(cur.L7MaxAgeMS)*time.Millisecond)
+		// Fold this tick's node-local L7 liveness (own-cert/cover-path) into the detector, THROUGH the
+		// generation gate (Audit-0007 S2): a member must read DEAD across >= MinGenerations DISTINCT marker
+		// generations before it faults blocked, so marker replay across ticks cannot satisfy the anti-flap
+		// from one probe run. An absent/stale marker resets the gate and yields no fault (fail-safe).
+		dead, observedAt, present := readL7Marker(cur.L7LivenessPath, now, time.Duration(cur.L7MaxAgeMS)*time.Millisecond)
+		l7 := l7gate.fold(dead, observedAt, present)
 		out, err := assemblePlanInput(asm, snap, cur.ActiveRef, loadRotationState(cur.StatePath), now, l7)
 		if err != nil {
 			log.Printf("myceliumd: measure: assemble failed (no plan input written this tick): %v", err)
