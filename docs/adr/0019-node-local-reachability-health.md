@@ -22,7 +22,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** ADR-0019
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
-- **Status:** accepted
+- **Status:** accepted (probe shape **extended by [ADR-0036](0036-node-local-l7-liveness-probe.md)** — a node-local L7 own-cert/cover-path liveness probe added alongside this TCP/TLS shape, 2026-07-02)
 - **Layer(s):** control plane (the `myceliumd` spine, [ADR-0012](0012-go-primary-control-plane-language.md)); cross-cutting **Measurement** track
 - **Phase:** Phase 0 (basic observability — see [../ROADMAP.md](../ROADMAP.md) Phase-0 scope/DoD; the
   classifying detector + auto-rotation are Phase 2, the off-node aggregated surface is the Measurement track)

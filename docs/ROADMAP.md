@@ -212,7 +212,7 @@ on one node.
 - **Network-state detector** ([RP-0010](proposals/0010-phase2-adaptivity.md)). Classifies the node's
   own channel state from by-product signals: handshake timeouts, TCP RST injection, throughput
   collapse after a successful connect (the AS-level "data dies" pattern), own-cert/cover-path L7
-  liveness (ADR-0036, pending), rising loss/jitter. States:
+  liveness ([ADR-0036](adr/0036-node-local-l7-liveness-probe.md)), rising loss/jitter. States:
   `clean / throttled / blocked / shutdown`.
 - **Auto-rotation loop** ([RP-0012](proposals/0012-phase2-auto-rotation-actuation.md)). On a
   degradation: rotate transport/port/SNI, regenerate REALITY parameters, switch address, fall back to
