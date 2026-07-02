@@ -119,7 +119,7 @@ Full term list: [docs/GLOSSARY.md](docs/GLOSSARY.md). Architecture layers and th
 - **[docs/vision/0001-mycelium-vision-and-scope.md](docs/vision/0001-mycelium-vision-and-scope.md)** — founding vision and scope.
 - **[docs/vision/0002-carrier-agnostic-mycelial-doctrine.md](docs/vision/0002-carrier-agnostic-mycelial-doctrine.md)** — carrier-agnostic mycelial doctrine.
 - **[docs/vision/0005-network-weather-explorer.md](docs/vision/0005-network-weather-explorer.md)** — public, privacy-preserving network-weather explorer (aggregated, not a map).
-- **[docs/ROADMAP.md](docs/ROADMAP.md)** — phases 0→7, scope, Definition of Done, risks.
+- **[docs/ROADMAP.md](docs/ROADMAP.md)** — phases 0→8, scope, Definition of Done, risks.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — layers, transport matrix, carrier adapters, mesh design, stack.
 - **[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)** — adversary, attack surface, honest limits.
 - **[docs/GLOSSARY.md](docs/GLOSSARY.md)** — terminology.
@@ -154,14 +154,21 @@ and runbooks.
 self-replenishing endpoint bundle, and a self-updating subscription — validated hands-on over real
 cellular and Wi-Fi links.
 
-**Phase 2 — Adaptation layer (in progress):** the control plane that *measures and adapts* — a
-deterministic network-state detector, a reinforce-and-decay self-tuner, and a node-local
-auto-rotation loop that moves the active transport off a degraded path within rate limits, with
-anti-flapping and automatic rollback. In parallel the control logic is consolidating into a typed Go
-spine — *the shell renders and deploys; the Go binary decides and adapts.*
+**Phase 2 — Single-node adaptivity (closed):** the node-local control loop that *measures → detects →
+tunes → rotates → rolls back* — a deterministic network-state detector, a reinforce-and-decay
+self-tuner, and a gated auto-rotation loop that moves the active transport off a degraded path within
+rate limits, with anti-flapping and automatic rollback — proven driving itself on a live node. In
+parallel the control logic consolidated into a typed Go spine — *the shell renders and deploys; the Go
+binary decides and adapts.*
+
+**Phase 3 — Living node (in progress):** turning the self-adapting node into one an operator can run
+and share — end-to-end client recovery under a real block, a signed release + deploy/management CLI a
+second operator installs cleanly, and the **inert seams** for advisory network-weather and the fungi
+face-to-face **hypha** boundary (no live federation yet). The first public release cuts after this
+phase.
 
 The scaffold is deploy-ready for any operator to self-host on their own server; the project itself
-runs no public network. The roadmap spans phases 0→7; each phase is useful on its own and ships to
+runs no public network. The roadmap spans phases 0→8; each phase is useful on its own and ships to
 production, and the mesh is extended on top of something already working, not instead of it.
 
 ## Principles
@@ -189,7 +196,7 @@ node. What is governed **separately** (not under the AGPL) is the project's **sh
 the **Mycelium name, logo, bootstrap seeds, trust roots, and spore-signing keys** — see
 [TRADEMARKS.md](TRADEMARKS.md), [ACCEPTABLE-USE.md](ACCEPTABLE-USE.md), and
 [GOVERNANCE.md](GOVERNANCE.md). That identity is **community-owned**: there is no single owner, and
-from Phase 1–2 onward decisions move to community/organization **consensus** ("fungi voting"), not a
+as the network grows, decisions move to community/organization **consensus** ("fungi voting"), not a
 single person. A fork is welcome but must use its own name and may not present itself as carrying the
 shared Mycelium identity. Commercial allies (small hosts, NGOs, university spin-offs, cooperatives,
 security auditors, emergency-connectivity providers) are welcome under those terms.
