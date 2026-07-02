@@ -27,7 +27,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** accepted
 - **Layer(s):** project governance, legal/positioning, discovery/membership (cross-cutting)
-- **Phase:** cross-cutting; binds positioning from now; governance shifts to consensus in Phase 1-2
+- **Phase:** cross-cutting; binds positioning from now; governance shifts to consensus in Phase 1-3
 - **Related:** ADR-0003 (licensing/jurisdiction), ADR-0014 (per-operator credentials), ADR-0015
   (network delivery), GOVERNANCE.md, README separation statement
 
@@ -57,7 +57,7 @@ ADR records the corrected posture and the move to consensus governance.
    shared identity**, not any individual's property. No person is the network's owner or operator;
    "holding the name" is not operating a network, and the project operates none.
 
-3. **Governance by consensus.** From **Phase 1-2**, changes and shared-identity decisions (including
+3. **Governance by consensus.** From **Phase 1-3**, changes and shared-identity decisions (including
    network updates/merges) are approved by **community/organization consensus ("fungi voting")**,
    replacing single-maintainer approval. The pre-consensus **interim deliberately accepts updates
    UNSIGNED** (the network updater runs in its no-signature mode): there is intentionally no single legal

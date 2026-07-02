@@ -35,7 +35,7 @@ later. See the LICENSE file in the repository root.
   closed-by-default node posture is **already true** — per-operator credentials, no open relay, no
   public egress, local rate limits, local quarantine; the cross-Commune machinery (immune signals,
   bridges, governance, cross-Commune trust) is **inert schema hooks only**. Immune-signal *emission*
-  and scoped cuts that propagate are Phase 3–4; trust-gradient and cross-Commune actuation are Phase 5.
+  and scoped cuts that propagate are Phase 4–5; trust-gradient and cross-Commune actuation are Phase 6.
 - **Layer(s):** governance / trust, control plane, discovery / membership, bridging (cross-cutting).
   **NOTE — this Vision introduces a NEW first-class entity, the *Commune*, which is NOT one of the
   architectural layer-*planes*.** The four layers (data plane, control plane, routing plane,
@@ -80,7 +80,7 @@ and one that invites exactly the wholesale, collateral-damage blocking the proje
 The existing canon already anticipated the *inward* version of this — a captured, coerced, or
 taken-over node — and answered it with the THREAT-MODEL's **detect → quarantine → revoke scoped trust
 → decay poisoned routes → reroute around the captured region → never crown a permanent centre**
-sequence (Phase 5 self-healing), and with VIS-0004's concept 9 **Compartment wound response** (a
+sequence (Phase 6 self-healing), and with VIS-0004's concept 9 **Compartment wound response** (a
 suspicious region seals into a healing scope *before any global action*). This Vision does two things
 the canon had not: it (a) **generalizes that immune response from the single node/region to the whole
 ecosystem** — including the cross-society case — and (b) **names the sovereign entity that holds the
@@ -111,7 +111,7 @@ an attack. Healing and clotting are the same organism's two reflexes; the user g
   state, not a broadcast.
 - [x] **Phase discipline.** Local safe-defaults / local cuts / local rate-limits / local quarantine are
   current node posture; cross-Commune immune signals, Anastomosis Bridges, Commune governance, and
-  cross-Commune trust are Phase 4–5 with **inert schema hooks** definable now
+  cross-Commune trust are Phase 5–6 with **inert schema hooks** definable now
   ([../adr/0013-mycelial-vocabulary-and-phase-discipline.md](../adr/0013-mycelial-vocabulary-and-phase-discipline.md)).
 - [x] **No global authority / no master map.** The immune system has **no global abuse oracle** (§10),
   exactly as the observability layer has no central collector (ADR-0021) and the topology has no master
@@ -280,22 +280,22 @@ credentials ([ADR-0014](../adr/0014-per-operator-node-credentials.md)), no open 
 egress (THREAT-MODEL; ARCHITECTURE Layer 3 — ingress and egress coincide on one node in Phase 0–2,
 nothing is an open relay), no topology sharing (no gossip runs), the host firewall opening no exporter
 port (VIS-0006 §7). Local rate-limits and local quarantine are near-term node-local behaviors. What is
-**Phase 4–5** is the *propagating* machinery: cross-Commune immune signals, capability-class
+**Phase 5–6** is the *propagating* machinery: cross-Commune immune signals, capability-class
 negotiation across an Anastomosis Bridge, and trust-gradient-driven hand-out of higher-risk
-capabilities (Phase 5). The schemas for all of it are inert hooks definable now (§13).
+capabilities (Phase 6). The schemas for all of it are inert hooks definable now (§13).
 
 ## 13. Phase path & what this spawns
 
 **Phase discipline ([ADR-0013](../adr/0013-mycelial-vocabulary-and-phase-discipline.md)).** Phases 0–2
 ship inert typed schemas + the already-true local closed-by-default posture; gossip / DHT / membership
 (and therefore propagating immune signals, cuts that cross a scope boundary, and Anastomosis Bridges)
-are Phase 3–4; the trust-gradient that grades cross-Commune capability is Phase 5.
+are Phase 4–5; the trust-gradient that grades cross-Commune capability is Phase 6.
 
 - **Phase 0–2 (now):** local safe-defaults, local rate-limits, local quarantine, the closed-by-default
   node posture — **running**. Commune / genetics / immune-signal / bridge schemas — **inert hooks**.
-- **Phase 3–4:** immune-signal *emission* over scoped gossip; cuts that propagate within scope;
+- **Phase 4–5:** immune-signal *emission* over scoped gossip; cuts that propagate within scope;
   Anastomosis Bridge contracts established and revoked; fungi-signed warnings (advisory) published.
-- **Phase 5:** trust-gradient grading of higher-risk capability classes; cross-Commune trust
+- **Phase 6:** trust-gradient grading of higher-risk capability classes; cross-Commune trust
   propagation; cut/quarantine actuation across a bridge — always reversible, scoped, TTL-bounded.
 
 **ADRs this Vision spawns (0023–0026, all written):**

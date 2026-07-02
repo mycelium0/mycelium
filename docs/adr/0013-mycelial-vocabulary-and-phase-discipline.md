@@ -30,7 +30,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** accepted
 - **Layer(s):** cross-cutting track (governs data plane, control plane, routing/orchestration, discovery/membership)
-- **Phase:** cross-cutting; binds Phase 0-2 hard, scopes what Phase 3-4 is allowed to wire
+- **Phase:** cross-cutting; binds Phase 0-2 hard (plus the new Phase-3 inert seam), scopes what Phase 4-5 is allowed to wire live
 - **Related:** VIS-0002, VIS-0003, VIS-0004 (forthcoming), ADR-0002, ADR-0011, ADR-0012,
   [../ROADMAP.md](../ROADMAP.md) (Scope discipline / finding MYC-F006; Phase-transition principle),
   `internal/spec` types
@@ -55,7 +55,7 @@ Two failure modes threaten that asset, and both must be closed before code accre
 
 - **Premature behavior.** The same vocabulary names emergent network behaviors — autonomous cord
   promotion, gradient-driven routing, gossip-backed distributed awareness, DHT rendezvous — that
-  VIS-0003 §4 explicitly defers to Phase 3-7 and that the ROADMAP fences behind Scope discipline
+  VIS-0003 §4 explicitly defers to Phase 4-8 and that the ROADMAP fences behind Scope discipline
   (finding MYC-F006) and the Phase-transition principle. If Phase 0-2 ships *running* mesh behavior
   under those names, the project violates its own phase order, expands the attack surface before the
   threat model covers it, and ships a global topology / distributed registry that no document yet
@@ -80,7 +80,7 @@ Two failure modes threaten that asset, and both must be closed before code accre
    mycelial names and let early phases prototype mesh behavior under them.
    - Pros: fast to write; reads evocatively.
    - Cons: destroys the metaphor as a review tool; produces undefined "bio-terms" that mean nothing;
-     invites Phase 3-7 behavior into Phase 0-2 with no threat-model coverage.
+     invites Phase 4-8 behavior into Phase 0-2 with no threat-model coverage.
    - Impact on indistinguishability / survivability: severe negative — a live, under-specified mesh in
      early phases enlarges the enumerable surface and can crown a de-facto permanent center.
 
@@ -101,7 +101,7 @@ Two failure modes threaten that asset, and both must be closed before code accre
      the canon types now without shipping behavior; aligns one-to-one with development.md §1.1
      (one source of truth per name) and the ROADMAP phase fences.
    - Cons: requires reviewers and a conformance gate to police both the naming rule and the
-     inertness rule; some forward-shaped types sit unused until Phase 3-4.
+     inertness rule; some forward-shaped types sit unused until Phase 4-5.
    - Impact on indistinguishability / survivability: positive — nothing observable runs early, the
      network map is never assembled, and the canon stays trustworthy as the system grows.
 
@@ -152,10 +152,11 @@ contract and ADR-0012). Concretely, Phase 0-2 must **not** ship, run, or auto-en
 - **autonomous cord promotion** — `CordPromotion` is a typed object with no automatic promoter;
   promotion requires measurement and is wired no earlier than its ROADMAP phase.
 
-Behavior is wired in **Phase 3-4** (and later, per VIS-0003 §4: distributed registry over DHT+gossip
-→ Phase 4; trust-gradient routing → Phase 5; carrier-bridged island merge → Phase 6; autonomous cord
-promotion → Phase 7), under the future Vision VIS-0004 and its follow-on ADRs, and only after the
-Phase-transition principle (ROADMAP) is met for the preceding phase in production with real users.
+Behavior is wired live in **Phase 4-5** (the new Phase 3 lands only the INERT fungi/advisory seam, no
+live federation; and later, per VIS-0003 §4: distributed registry over DHT+gossip → Phase 5;
+trust-gradient routing → Phase 6; carrier-bridged island merge → Phase 7; autonomous cord promotion →
+Phase 8), under the future Vision VIS-0004 and its follow-on ADRs, and only after the Phase-transition
+principle (ROADMAP) is met for the preceding phase in production with real users.
 
 The forthcoming `internal/spec` objects named by the directive — `SporeEnvelope`, `StressSignal`,
 `TopologyFragment`, `TransportHealth`, `GradientSignal`, `EdgeState`, `CordPromotion`, `DecayPolicy`,
@@ -172,11 +173,11 @@ no announcer), so that "not yet wired" cannot silently become "accidentally live
 ## Consequences
 
 - **Positive:** the metaphor stays a falsifiable engineering vocabulary, not branding; `internal/spec`
-  can carry the full canon type set now, giving Phase 3-4 a stable contract to wire against; the
+  can carry the full canon type set now, giving Phase 4-5 a stable contract to wire against; the
   GLOSSARY can define every canon term against a concrete contract; phase order and the ROADMAP fences
   are mechanically defensible.
 - **Negative / cost:** ongoing review and a conformance gate must police both rules; some forward-shaped
-  types sit unused until Phase 3-4; contributors must learn the canon list and the inertness boundary.
+  types sit unused until Phase 4-5; contributors must learn the canon list and the inertness boundary.
 - **Impact on user security (requirement №1):** strictly protective. Nothing observable runs in Phase
   0-2: no DHT, no gossip, no announce, no global map. No node and no coordinator assembles a global
   topology, so there is no early map to enumerate or coerce, and no permanent center is crowned.

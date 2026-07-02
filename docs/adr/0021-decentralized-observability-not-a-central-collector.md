@@ -22,7 +22,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** accepted
 - **Layer(s):** observability / measurement, control plane (cross-cutting)
-- **Phase:** cross-cutting Measurement track (the decision binds now; running aggregation is Phase 2 / 3–4)
+- **Phase:** cross-cutting Measurement track (the decision binds now; running aggregation is Phase 3 / 4–5)
 - **Related:** [../vision/0006-decentralized-observability.md](../vision/0006-decentralized-observability.md) (the doctrine);
   [0016-software-releases-not-an-operated-network.md](0016-software-releases-not-an-operated-network.md) (no central operated service);
   [0017-network-weather-data-contract.md](0017-network-weather-data-contract.md), [0018-fungi-role-and-opt-in-publish.md](0018-fungi-role-and-opt-in-publish.md),
@@ -105,12 +105,12 @@ and aggregate-and-forget; **no cross-operator central collector is built in any 
   cross-operator raw store, edge reports floored/coarsened at source; the residual risks (in-memory raw
   during aggregation, the per-operator monitor's own history) are named and bounded.
 - **Impact on observability/measurements:** the **in-region blind spot is the priority gap** to close, not
-  an accepted loss — the model's central deliverable is opt-in **edge reporting** (VIS-0006 §4), Phase-2
+  an accepted loss — the model's central deliverable is opt-in **edge reporting** (VIS-0006 §4), Phase-3
   Measurement-track work. Until it lands, the project is honest that it sees only operator-side host health
   and the operator's own-network reachability.
 - **Follow-on actions required:** ADR-0021 spawns the schema-hardening ADR (NoisePolicy + closed ReasonCode
-  enum + cumulative-disclosure model), the Phase-3–4 gossip+sketch ADR, and depends on RP-0004 (publisher +
-  fail-closed gate); it reconciles ADR-0018 §3 / VIS-0005 to place the opt-in digest path at **Phase 2**,
+  enum + cumulative-disclosure model), the Phase-4–5 gossip+sketch ADR, and depends on RP-0004 (publisher +
+  fail-closed gate); it reconciles ADR-0018 §3 / VIS-0005 to place the opt-in digest path at **Phase 3**,
   not "Phase 0 onward".
 - **What is now forbidden:** building a cross-operator scrape coordinator / node directory / discovery
   service in any phase; exposing node health off loopback; claiming noise/forget/verifier/anti-Sybil-caps
@@ -120,7 +120,7 @@ and aggregate-and-forget; **no cross-operator central collector is built in any 
 - No tracked config or deploy path stands up a cross-operator collector or exposes an exporter port on a
   public interface (exporters stay loopback; the host firewall opens no exporter port — verifiable on a node
   and in the bootstrap/observability surface).
-- The opt-in digest/edge-reporting path is documented as **Phase 2**, not Phase 0 (ADR-0018 / VIS-0005
+- The opt-in digest/edge-reporting path is documented as **Phase 3**, not Phase 0 (ADR-0018 / VIS-0005
   reconciled).
 - Before any digest is published: a `NoisePolicy` field + a closed `ReasonCode` enum exist in
   `internal/spec` with `Validate()` enforcement, and the publisher's fail-closed gate exists and passes

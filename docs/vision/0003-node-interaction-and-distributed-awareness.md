@@ -12,7 +12,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-12
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Horizon:** primary Phase 3–4 (with inert Phase 0–2 interfaces); deferred pieces in Phase 5 (trust-gradient routing), Phase 6 (carrier-bridged island merge) and Phase 7 (autonomous cord promotion) — see [../ROADMAP.md](../ROADMAP.md)
+- **Horizon:** primary Phase 4–5 (with inert Phase 0–2 interfaces; the new Phase 3 lands the inert fungi/advisory seam) — deferred pieces in Phase 6 (trust-gradient routing), Phase 7 (carrier-bridged island merge) and Phase 8 (autonomous cord promotion) — see [../ROADMAP.md](../ROADMAP.md)
 - **Layer(s):** discovery, control plane, routing, cross-cutting
 - **Related:** [0001-mycelium-vision-and-scope.md](0001-mycelium-vision-and-scope.md),
   [0002-carrier-agnostic-mycelial-doctrine.md](0002-carrier-agnostic-mycelial-doctrine.md),
@@ -115,8 +115,8 @@ routing metrics survive without exposing full state to any one node.
 
 - **Observe (hyphae sensing the mesh).** A joining hypha discovers *currently reachable* neighbours
   through metadata sufficient for integration only — endpoint, transport capabilities, trust scope —
-  via the Phase-3 coordinator (coordinator-mediated observation) and then via peer-to-peer gossip in
-  Phase 4. Disclosure is **graduated**: unvouched or low-trust peers receive less; no peer receives a
+  via the Phase-4 coordinator (coordinator-mediated observation) and then via peer-to-peer gossip in
+  Phase 5. Disclosure is **graduated**: unvouched or low-trust peers receive less; no peer receives a
   neighbour list by asking. The **first-contact trust anchor is the inviter**: a fresh node's join
   capability (a biscuit-style join token) cryptographically binds the joiner to the inviter who
   issued it, so the joiner's *first* edges and diversity seed are inviter-vouched rather than
@@ -129,8 +129,8 @@ routing metrics survive without exposing full state to any one node.
   ports are **not** broadcast to low-trust peers (capability classes, not exact ports — exact tuples
   are a soft operator-fingerprint and a target-selection aid; §10 PII). This generalises the existing
   config-distribution bundle (one node's endpoint/transport/health metadata) into a mesh reachability
-  record. Phase 3 announce is coordinator-mediated (auto-onboarding: a new node joins with one
-  command, receives role + config); Phase 4 announce is gossip into the mesh.
+  record. Phase 4 announce is coordinator-mediated (auto-onboarding: a new node joins with one
+  command, receives role + config); Phase 5 announce is gossip into the mesh.
 - **Distributed registry (the local picture, replicated).** Each node keeps a **local, trust-scoped,
   gossip-replicated registry** of reachable nodes within its scope, updated incrementally by
   anti-entropy reconciliation; it is the authoritative source for *local* routing and for
@@ -138,7 +138,7 @@ routing metrics survive without exposing full state to any one node.
   **until the node has locally validated/probed them**: gossip and anti-entropy may *carry* an entry
   into the local view, but an entry the node has never contacted carries no standing until local
   observation backs it, so import-before-validation cannot poison routing. A genuinely *distributed*
-  registry is the Phase-4 libp2p Kademlia DHT + GossipSub layer that replaces the Phase-3 coordinator
+  registry is the Phase-5 libp2p Kademlia DHT + GossipSub layer that replaces the Phase-4 coordinator
   registry. The DHT is a **hint / rendezvous layer only — never the membership root or the trust
   root.** Reachability advertisement uses **rotating/ephemeral, closeness/PSI-style rendezvous** (not
   long-lived deterministic keys), because *who publishes under a key and who reads it* links advertiser
@@ -195,24 +195,24 @@ routing metrics survive without exposing full state to any one node.
 
 ### Deferred → future phase/Vision
 
-- **Genuinely distributed registry over DHT + gossip → Phase 4** (the Phase-3 coordinator registry
-  dissolves into it). Trust-gradient-driven routing → Phase 5. Autonomous cord promotion from measured
-  link weights → Phase 7.
+- **Genuinely distributed registry over DHT + gossip → Phase 5** (the Phase-4 coordinator registry
+  dissolves into it). Trust-gradient-driven routing → Phase 6. Autonomous cord promotion from measured
+  link weights → Phase 8.
 - **Carrier-bridged island merge** (two separated fragments reconciling registries/topology over any
-  bridge, scoped-summaries-first) → Phase 6. Caching *as a topology-survival mechanism within a
-  connected mesh* is Phase 4–5; reconciling *across* a partition boundary over a carrier is Phase 6.
+  bridge, scoped-summaries-first) → Phase 7. Caching *as a topology-survival mechanism within a
+  connected mesh* is Phase 5–6; reconciling *across* a partition boundary over a carrier is Phase 7.
 - The formal state-model ADR (`NodeState`, `EdgeState`, `RouteState`, `CarrierCapability`,
   `SporeEnvelope`, `StressSignal`, `TrustScope`, `CordPromotion`, `DecayPolicy`, `QuarantinePolicy`,
   and the route-score contract) that turns this Vision's vocabulary into typed state machines.
 
 ### Non-goals — phase discipline (what must NOT appear in Phases 0–2)
 
-Distributed awareness is **Phase 3–4 territory.** Per the Scope-discipline fence (MYC-F006,
+Distributed awareness is **Phase 4–5 territory.** Per the Scope-discipline fence (MYC-F006,
 [../ROADMAP.md](../ROADMAP.md)), the following must **not be running behaviour** in Phases 0–2; early
 phases may define only inert data models / interfaces, and only ones that do not block the future:
 
 - **No DHT and no gossip transport running.** Discovery interfaces may be *shaped* so they can later be
-  backed by gossip or a DHT — but no DHT runs (that is Phase 4) and no gossip propagates.
+  backed by gossip or a DHT — but no DHT runs (that is Phase 5) and no gossip propagates.
 - **No distributed registry.** Phase 0–2 membership is static config / config-distribution endpoint;
   the operator owns everything. The `coordinator` role is present but inert/deferred in Phase 0.
 - **No peer-to-peer observation and no announce-into-mesh.** A single node (Phases 0–1) and 1–N
@@ -220,8 +220,8 @@ phases may define only inert data models / interfaces, and only ones that do not
 - **No master map, no permanent centre, no raw telemetry.** Pulling these forward would smuggle in
   exactly what the non-negotiable constraints forbid. Phase 0–2 telemetry is deferred, opt-in,
   PII-safe, aggregated, no correlation, no identity binding.
-- **No trust gradient driving routing** (Phase 5) and **no autonomous cord promotion without
-  measurement** (Phase 7). Trust *fields* and path-weight *fields* may exist in data models, inert.
+- **No trust gradient driving routing** (Phase 6) and **no autonomous cord promotion without
+  measurement** (Phase 8). Trust *fields* and path-weight *fields* may exist in data models, inert.
 - **Phase-transition rule:** do not begin Phase N+1 until Phase N meets its DoD in production with
   real users. This Vision does not authorise starting discovery as running code while Phases 0–2 are
   unmet.
@@ -229,7 +229,7 @@ phases may define only inert data models / interfaces, and only ones that do not
 ## 5. Target audience and scenarios
 
 - **Who:** a node operator / volunteer running a home machine behind NAT · a community maintaining a
-  mesh segment · the network coordinator operator in Phase 3 · a new node owner onboarding for the first
+  mesh segment · the network coordinator operator in Phase 4 · a new node owner onboarding for the first
   time.
 - **Key scenarios:**
   - *Joining.* A new node boots, presents its inviter-bound join token, observes reachable neighbours
@@ -273,12 +273,12 @@ phases may define only inert data models / interfaces, and only ones that do not
   - *Adaptation speed ↔ false-migration / false-quarantine risk.* Fast reaction to a stress or
     revocation signal risks acting on a poisoned or false signal; decay, hysteresis, witness
     corroboration, and measure-before-acting slow this down on purpose.
-  - *Centralisation (simplicity) ↔ decentralisation (resilience).* The Phase-3 coordinator registry is
-    simple and capturable; the Phase-4 DHT is resilient and harder to reason about. We accept the
+  - *Centralisation (simplicity) ↔ decentralisation (resilience).* The Phase-4 coordinator registry is
+    simple and capturable; the Phase-5 DHT is resilient and harder to reason about. We accept the
     centralised form as a temporary target.
-- **Technical debt accepted knowingly:** the **Phase-3 coordinator registry is a deliberate temporary
+- **Technical debt accepted knowingly:** the **Phase-4 coordinator registry is a deliberate temporary
   centre** — it issues membership and aggregates block-intelligence in one place — accepted on the
-  explicit plan to dissolve it into the Phase-4 DHT + gossip layer. It must never be allowed to become
+  explicit plan to dissolve it into the Phase-5 DHT + gossip layer. It must never be allowed to become
   a kill-switch or a permanent master map in the meantime.
 
 ## 7. Definition of Done (measurable, not a slogan)
@@ -323,7 +323,7 @@ phases may define only inert data models / interfaces, and only ones that do not
   finds **no PII, no full topology, no complete peer list, no relationship graph, and no
   timing-ordered interaction trace** — only redacted, TTL-bounded, scoped facts; the log carries no
   wall-clock resolution fine enough to reconstruct who-saw-what-when.
-- [ ] Taking the coordinator (Phase 3) or the log/witnesses (Phase 4) offline degrades the mesh to
+- [ ] Taking the coordinator (Phase 4) or the log/witnesses (Phase 5) offline degrades the mesh to
   TTL-expiry trust and local routing — it does **not** freeze or kill it.
 
 ## 8. Measurability and observability
@@ -361,7 +361,7 @@ honour the aggregation floor, and bind no identity before any signal leaves a no
   discovery/telemetry/spore data model lives first as a non-blocking interface).
 - **External stack/infra:** libp2p (go-libp2p primary; Rust daemon allowed per ADR-0012), Kademlia
   DHT, GossipSub, AutoNAT, Circuit-Relay/ICE/STUN/TURN, Snowflake-style ephemeral ingress;
-  Headscale/Nebula-lighthouse coordinator pattern (Phase 3). Candidate primitives for the registry/
+  Headscale/Nebula-lighthouse coordinator pattern (Phase 4). Candidate primitives for the registry/
   state store and their hardening (subject to the ADRs): Brahms (Byzantine peer sampling); SWIM +
   Lifeguard (failure detection with low false-positive eviction); S/Kademlia disjoint-path lookup
   with per-bucket diversity (a **hard requirement, not a mere candidate, for any record that carries
@@ -542,9 +542,9 @@ quarantine ratchet or trust teleport across a partition boundary.
 
 With distributed awareness in place, the mesh can route on a local picture instead of static config;
 self-heal from neighbour caches; and carry stress memory that survives node loss. This is the
-substrate Phase 5 needs for **trust-gradient-driven routing** and Phase 7 needs for **autonomous cord
+substrate Phase 6 needs for **trust-gradient-driven routing** and Phase 8 needs for **autonomous cord
 promotion from measured link weights** — gradients can guide only once nodes sense their neighbourhood.
-It is also the precondition for VIS-0002's **carrier-bridged island merge** (Phase 6): two islands can
+It is also the precondition for VIS-0002's **carrier-bridged island merge** (Phase 7): two islands can
 reconcile scoped summaries only if each already keeps a local registry and topology fragments to
 summarise. The mesh is extended on top of something working, not instead of it.
 
@@ -555,8 +555,8 @@ summarise. The mesh is extended on top of something working, not instead of it.
   `CordPromotion`, `DecayPolicy`, `QuarantinePolicy`, the route-score contract, the
   *candidate → probed → active → reinforced → cord → degraded → decayed → pruned* lifecycle as state
   machines, and the import-inert-until-validated rule for gossiped/anti-entropy entries.
-- [ ] **ADR — discovery, registry & gossip** (`docs/adr/NNNN-...`): the Phase-3 coordinator-registry →
-  Phase-4 Kademlia-DHT + GossipSub evolution; replication factor / erasure-coding + anti-entropy-repair
+- [ ] **ADR — discovery, registry & gossip** (`docs/adr/NNNN-...`): the Phase-4 coordinator-registry →
+  Phase-5 Kademlia-DHT + GossipSub evolution; replication factor / erasure-coding + anti-entropy-repair
   parameters and the sensitivity→replication-cap policy; the inviter-binding bootstrap anchor;
   S/Kademlia disjoint-path + per-bucket diversity as a requirement for revocation/quarantine records;
   the anti-enumeration / graduated-disclosure rules **including trust-scoped anti-entropy and
@@ -572,5 +572,5 @@ summarise. The mesh is extended on top of something working, not instead of it.
 - [ ] **research-note** on the Sybil/eclipse bound calibration, signed non-reputational attack-edge
   accounting, micro-PoW sizing, witness-count / aggregation-floor calibration, and erasure-coding
   parameters (`docs/research/...`).
-- [ ] **Trigger an event-driven audit** when the discovery layer (Phase 4) is connected, per
+- [ ] **Trigger an event-driven audit** when the discovery layer (Phase 5) is connected, per
   [../refactoring.md](../refactoring.md).

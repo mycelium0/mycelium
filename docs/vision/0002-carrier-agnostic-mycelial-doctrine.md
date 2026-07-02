@@ -13,7 +13,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-11
 - **Author:** mindicator & silicon bags quartet
 - **Status:** proposed
-- **Horizon:** Phase 0-7
+- **Horizon:** Phase 0-8
 - **Layer(s):** cross-cutting
 - **Related:** `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/THREAT-MODEL.md`,
   `docs/adr/0011-carrier-agnostic-bridging.md`,

@@ -32,7 +32,7 @@ later. See the LICENSE file in the repository root.
 - **Horizon:** cross-cutting **Routing & reachability** track. Today (Phase 0–2): a **manual,
   operator-built two-hop corridor** and **per-client split-tunnel route sets** are a **current-posture
   deployment pattern** — an operator can configure them by hand now. **Automated** route selection,
-  automated split-tunnel classification, and automated cross-node corridor selection are **Phase 3–5**
+  automated split-tunnel classification, and automated cross-node corridor selection are **Phase 4–6**
   (they require the gossip/measurement/membership machinery that does not run before then). Inert typed
   schemas (the corridor/route-set descriptors) are definable now under phase discipline.
 - **Layer(s):** routing plane (split-tunnel decision, region-scoped route sets), data plane (the
@@ -138,7 +138,7 @@ declines to grow where reach is already direct.
   disclosure surface (no user-direct out-of-region termination at a compellable party).
 - [x] **Phase discipline ([ADR-0013](../adr/0013-mycelial-vocabulary-and-phase-discipline.md)).** A
   **manual** operator two-hop corridor and **manual** per-client split-tunnel route sets are
-  current-posture; **automated** route/corridor/split-tunnel decision-making is Phase 3–5; the descriptor
+  current-posture; **automated** route/corridor/split-tunnel decision-making is Phase 4–6; the descriptor
   schemas are inert hooks definable now (§13).
 - [x] **Not a universal bypass substrate ([ADR-0016](../adr/0016-software-releases-not-an-operated-network.md)).**
   Selective Growth is the operational expression of the Canonical Rule: the fabric grows into an impaired
@@ -172,7 +172,7 @@ This is doctrine, not optimization. Its three obligations:
   impaired is the **vantage problem** ([VIS-0006](0006-decentralized-observability.md) §1;
   [ADR-0021](../adr/0021-decentralized-observability-not-a-central-collector.md)): it cannot be answered
   from the operator's clean network — only from in-region signal. So a Selective-Growth classification is
-  ultimately an **edge/in-region** decision, which is exactly why the *automated* form is Phase 3–5 (it
+  ultimately an **edge/in-region** decision, which is exactly why the *automated* form is Phase 4–6 (it
   needs the in-region signal the measurement track is building), while the *manual* form is current
   posture (the operator encodes a known-impaired set by hand).
 
@@ -229,7 +229,7 @@ never terminated for the user at a compellable third party.*
   [ADR-0021](../adr/0021-decentralized-observability-not-a-central-collector.md)).** Selective Growth's
   entry condition — "is this native path impaired?" — is the vantage problem restated as a *routing*
   decision. The operator's clean network cannot answer it; only in-region signal can. This is the direct
-  reason the **automated** classifier is Phase 3–5 (it consumes in-region measurement the project is still
+  reason the **automated** classifier is Phase 4–6 (it consumes in-region measurement the project is still
   building) and the **manual** known-impaired set is current posture. L0 reachability/health sensing
   ([ADR-0019](../adr/0019-node-local-reachability-health.md)) *informs* the operator but does **not**
   actuate a split-tunnel decision in Phase 0–2.
@@ -257,7 +257,7 @@ never terminated for the user at a compellable third party.*
 - Any end-user client application is **out of scope** (consumption interface unchanged: standard clients
   connect to standard endpoints).
 - **Automated** route selection, **automated** split-tunnel classification, and **automated**
-  cross-node/cross-Commune corridor selection — **Phase 3–5** (they need the gossip/measurement/membership
+  cross-node/cross-Commune corridor selection — **Phase 4–6** (they need the gossip/measurement/membership
   machinery that does not run before then).
 - Any **default-on** corridor, any **default** out-of-region egress, or treating out-of-region egress as a
   primitive — forbidden by [ADR-0026](../adr/0026-anastomosis-bridges-and-safe-defaults.md) regardless of
@@ -265,9 +265,9 @@ never terminated for the user at a compellable third party.*
 - Any path that **terminates the user's TLS at a third party** to "front" an out-of-region destination.
 
 ### Deferred → future phase/Vision
-- The automated Selective-Growth classifier consuming in-region edge signal (Phase 3–5, depends on
+- The automated Selective-Growth classifier consuming in-region edge signal (Phase 4–6, depends on
   [VIS-0006](0006-decentralized-observability.md) edge reporting).
-- The cross-Commune egress-corridor **Bridge contract** specialization (Phase 4–5, under
+- The cross-Commune egress-corridor **Bridge contract** specialization (Phase 5–6, under
   [ADR-0026](../adr/0026-anastomosis-bridges-and-safe-defaults.md)).
 
 ## 8. Measurability and observability
@@ -299,7 +299,7 @@ no map, in-region signal floored at source.
   available.
 - **Out-of-region egress is high-risk by class.** A node-to-node egress hop carries the egress capability
   class; the Sybil/abuse hazards of cross-node and cross-Commune egress are **bounded** by
-  [ADR-0026](../adr/0026-anastomosis-bridges-and-safe-defaults.md)'s contract grammar (Phase 4–5), not
+  [ADR-0026](../adr/0026-anastomosis-bridges-and-safe-defaults.md)'s contract grammar (Phase 5–6), not
   solved here.
 
 ## 10. Phase path & what this spawns
@@ -313,9 +313,9 @@ no map, in-region signal floored at source.
   precisely. L0 reachability sensing ([ADR-0019](../adr/0019-node-local-reachability-health.md))
   **informs** but does not **actuate**. The corridor/route-set descriptor schemas are **inert hooks**
   (data + `Validate()` only).
-- **Phase 3–4:** **automated** Selective-Growth classification consuming scoped in-region signal;
+- **Phase 4–5:** **automated** Selective-Growth classification consuming scoped in-region signal;
   automated split-tunnel decisions; node-to-node egress corridor establishment over scoped gossip.
-- **Phase 5:** cross-Commune egress corridor as an Anastomosis **Bridge** with a full contract
+- **Phase 6:** cross-Commune egress corridor as an Anastomosis **Bridge** with a full contract
   ([ADR-0026](../adr/0026-anastomosis-bridges-and-safe-defaults.md)); trust-graded selection of which peer
   performs the out-of-region egress.
 
@@ -324,7 +324,7 @@ no map, in-region signal floored at source.
   with the impaired-path entry condition; (b) the Reachability Topology invariant (in-region ingress
   load-bearing; out-of-region egress node-to-node, never user-direct, never third-party-TLS-terminated);
   (c) the engine-granularity split (domain-aware precise vs. CIDR-only region-exclude approximation); (d)
-  the phase split (manual current-posture vs. automated Phase 3–5); and the honest trade-offs.
+  the phase split (manual current-posture vs. automated Phase 4–6); and the honest trade-offs.
 
 **Inert schemas (`internal/spec`, data + `Validate()` only — [ADR-0013](../adr/0013-mycelial-vocabulary-and-phase-discipline.md)):**
 a `ReachabilityCorridor` descriptor (ordered hops; each hop a carrier capability + risk +

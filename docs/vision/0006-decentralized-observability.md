@@ -33,7 +33,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
 - **Horizon:** cross-cutting **Measurement** track. Today: node-local sensing only (L0, deployed). The
-  decentralized aggregation layers are Phase 2 (opt-in edge telemetry) and Phase 3–4 (mesh-native gossip).
+  decentralized aggregation layers are Phase 2 (opt-in edge telemetry) and Phase 4–5 (mesh-native gossip).
 - **Layer(s):** observability / measurement, control plane (cross-cutting)
 - **Related:** [0003-node-interaction-and-distributed-awareness.md](0003-node-interaction-and-distributed-awareness.md),
   [0004-living-network-doctrine.md](0004-living-network-doctrine.md),
@@ -81,9 +81,9 @@ unbuilt mechanisms are fenced as future work, never presented as canon ([../adr/
 |---|---|---|---|
 | **L0 — sensory hyphae** (node-local probing) | a hyphal tip senses its own microenvironment | `internal/reach` Monitor + node_exporter + dataplane-stats → fast-class `spec.TransportHealth`, loopback only | **RUNNING today** (ADR-0019). The entire genuinely-Phase-0 story. |
 | **L1 — local digestion** | a compartment emits a bounded, decaying stress signal and forgets the stimulus | reduce raw L0 observations to a redacted, scoped, **floored** (+ noised, once a field exists) medium-class `spec.StressSignal`; forget the raw | **schema inert** now; **running generation/emission is Phase 2** (opt-in telemetry track) |
-| **L1.5 — fungi niche** | a fruiting body forms, sheds, dissolves | `spec.NodeRole` cache-custodian niche: a node opts into a temporary, reversible aggregator role over its own scope | niche **enum inert** now; **occupancy/aggregation is Phase 3–4** |
-| **L2 — anastomosis** | hyphae fuse and exchange signals locally | scope-bounded gossip + probabilistic-sketch merge (SWIM/phi-accrual, push-sum, count-min/HyperLogLog/t-digest, CRDT) bounded by `TrustScope.MaxHops` | **Phase 3–4; NO schema exists yet** — contract TBD in a gossip ADR |
-| **L2.5 — compartment wound response** | a compartment seals an infected zone; false seals self-heal | threshold-signed `spec.SporeEnvelope` (hard-class) on k-of-n corroboration | **signalling Phase 3–4; routing actuation Phase 5** (signalling ≠ actuation) |
+| **L1.5 — fungi niche** | a fruiting body forms, sheds, dissolves | `spec.NodeRole` cache-custodian niche: a node opts into a temporary, reversible aggregator role over its own scope | niche **enum inert** now; **occupancy/aggregation is Phase 4–5** |
+| **L2 — anastomosis** | hyphae fuse and exchange signals locally | scope-bounded gossip + probabilistic-sketch merge (SWIM/phi-accrual, push-sum, count-min/HyperLogLog/t-digest, CRDT) bounded by `TrustScope.MaxHops` | **Phase 4–5; NO schema exists yet** — contract TBD in a gossip ADR |
+| **L2.5 — compartment wound response** | a compartment seals an infected zone; false seals self-heal | threshold-signed `spec.SporeEnvelope` (hard-class) on k-of-n corroboration | **signalling Phase 4–5; routing actuation Phase 6** (signalling ≠ actuation) |
 | **L3 — fruiting / spore release** | a mushroom releases redacted spores | off-network publisher → static `network-weather.json` (VIS-0005) | **spawned but UNBUILT** (RP-0004); a hard prerequisite before any publish |
 
 ## 4. In-region measurement — the priority, not a deferred loss
@@ -120,7 +120,7 @@ point of this Vision.
 2. **Obfuscate at the source, not the sink.** The aggregation floor `k` is applied at the source today
    (`StressSignal.Validate`); **noise is aspirational until a `NoisePolicy` field exists** in
    `internal/spec` and is pinned in an ADR (§9) — it does not exist yet.
-3. **Aggregate-and-forget is a coercion guarantee only with an enforced bound.** A Phase-3–4 aggregator
+3. **Aggregate-and-forget is a coercion guarantee only with an enforced bound.** A Phase-4–5 aggregator
    MUST bound the raw-input retention window and zeroise raw inputs immediately after emitting a digest,
    so a fungi seized mid-digest leaks only a bounded window. (The interim per-operator monitor is
    explicitly NOT aggregate-and-forget — it retains durable per-own-node history.)
@@ -131,13 +131,13 @@ point of this Vision.
 5. **Signal-speed non-escalation** — a fast (`TransportHealth`) or medium (`StressSignal`) signal can never
    by itself alter trust or trigger revocation/quarantine; only a threshold-signed hard `SporeEnvelope`
    can. **Signalling ≠ actuation:** no seal actuates routing before its phase (single-node Phase 2,
-   network-level Phase 3+, hard quarantine Phase 5).
+   network-level Phase 4+, hard quarantine Phase 6).
 6. **Scope-bounded propagation** — every digest carries a `TrustScope` with `MaxHops`; bounded fanout + TTL
-   prevent any node from seeing all corners (Phase 3–4 behaviour; the field is inert now).
+   prevent any node from seeing all corners (Phase 4–5 behaviour; the field is inert now).
 7. **TTL-bounded, signed, replay-safe artifacts** — every digest is a `SporeEnvelope` with issue/expiry
    and a standard-primitive signature ([../adr/0002-no-custom-cryptography.md](../adr/0002-no-custom-cryptography.md)).
    *Today `SporeEnvelope.Validate()` checks the presence of a signature, not its verification* — a verifier
-   is Phase-3–4 and unbuilt.
+   is Phase-4–5 and unbuilt.
 8. **Opaque, location-free fields, closed vocabularies.** Scope ids are opaque (no geography/ASN); classes
    not nodes, percentages not counts, order-of-magnitude buckets not exact sizes. `StressSignal.ReasonCode`
    MUST be pinned to a **closed enum** with `Validate()` rejecting non-members (today it is a free string
@@ -180,12 +180,12 @@ With no central master and no running mesh, the operator is sighted at **L0 only
 - **Phase 2 (Measurement track):** L1 generation/emission as the network-state detector + **opt-in edge
   reporting** (§4) — the priority. Requires first: a `NoisePolicy` field, a closed `ReasonCode` enum, the
   publisher + its fail-closed gate + signature verifier + per-source caps. No off-node gossip yet.
-- **Phase 3–4:** L1.5/L2/L2.5-signalling — fungi niche occupancy, mesh-native digest spores over gossip,
+- **Phase 4–5:** L1.5/L2/L2.5-signalling — fungi niche occupancy, mesh-native digest spores over gossip,
   push-sum + sketch merge bounded by `MaxHops`, SWIM/phi-accrual liveness, CRDT `EdgeState` convergence,
   compartment-seal *signalling*. The central publisher dissolves into mesh ingestion; the public contract
   unchanged.
-- **Phase 5+:** trust-gradient routing; compartment-seal *actuation* at network level; hard-class
-  revocation/quarantine via a future `QuarantinePolicy`; Phase 7 local-rule flow optimization.
+- **Phase 6+:** trust-gradient routing; compartment-seal *actuation* at network level; hard-class
+  revocation/quarantine via a future `QuarantinePolicy`; Phase 8 local-rule flow optimization.
 
 ## 9. What this spawns
 - **ADR-0021** — the bound decision: decentralized aggregate-and-forget observability vs. a central
@@ -194,7 +194,7 @@ With no central master and no running mesh, the operator is sighted at **L0 only
 - **A stress-digest schema-hardening ADR** (fold into ADR-0017 or new) — add a typed `NoisePolicy`/privacy
   budget to `StressSignal`; pin `ReasonCode` to a closed enum; commit a cumulative-disclosure model. These
   are blocking prerequisites before any digest is emitted.
-- **A Phase-3–4 gossip + sketch ADR** — SWIM/push-sum/CMS/HLL/t-digest/CRDT, the bounded-fanout/TTL/MaxHops
+- **A Phase-4–5 gossip + sketch ADR** — SWIM/push-sum/CMS/HLL/t-digest/CRDT, the bounded-fanout/TTL/MaxHops
   rule, the aggregator's bounded-retention + zeroise-after-digest constraint, and whether sketch bytes are
   an optional `StressSignal` field or a new spore type. This is the home for the "anastomosis" contract,
   which does not exist today.
@@ -207,7 +207,7 @@ With no central master and no running mesh, the operator is sighted at **L0 only
 - **No cross-operator collector, ever** — not in any phase. The per-operator own-network monitor (§7) is the
   only collector, and only over one's own boxes.
 - **No gossip / DHT / mesh / announce-into-mesh / running aggregation in Phase 0–2** — inert schemas + L0
-  only. Those are Phase 3–4.
+  only. Those are Phase 4–5.
 - **No raw telemetry collected in Phase 0–2.** Edge/digest emission is opt-in Phase-2 behaviour.
 - **Biology is load-bearing only where it names a real contract.** "Anastomosis = gossip+sketch", "fruiting
   body = publisher", "quorum-sensing = density-gated emitter" name unbuilt mechanisms and are fenced as

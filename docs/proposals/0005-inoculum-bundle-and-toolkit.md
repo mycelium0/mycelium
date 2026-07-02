@@ -19,7 +19,10 @@ later. See the LICENSE file in the repository root.
 > for the loaded word "client": Mycelium ships **no** consumer client and operates **no** public
 > network ([ADR-0016](../adr/0016-software-releases-not-an-operated-network.md)).
 >
-> **Phase.** Not before **Phase 2**. Phases 0–1 may only **mention** the Inoculum as future work;
+> **Phase.** Not before **Phase 3** (the Living-node recovery/release/advisory phase — the Inoculum
+> operator starter bundle + toolkit is release/operability-adjacent, so it moves with the release track
+> from the narrowed single-node-adaptivity Phase 2 into the new Phase 3). Phases 0–2 may only **mention**
+> the Inoculum as future work;
 > nothing in this RP is built, wired, or auto-enabled before its phase. The schema and tooling are
 > designed now so the future does not have to break them (the same posture
 > [ADR-0013](../adr/0013-mycelial-vocabulary-and-phase-discipline.md) takes for `internal/spec`).
@@ -31,7 +34,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Phase:** **not before Phase 2** (concept + v0 schema + toolkit + CLI; Phases 0–1 may only mention it). See [../ROADMAP.md](../ROADMAP.md).
+- **Phase:** **not before Phase 3** (concept + v0 schema + toolkit + CLI; the operator starter-bundle + toolkit is release/operability-adjacent, so it rides the new Phase 3 release track, not the narrowed single-node-adaptivity Phase 2; Phases 0–2 may only mention it). See [../ROADMAP.md](../ROADMAP.md).
 - **Related documents:**
   [ADR-0013](../adr/0013-mycelial-vocabulary-and-phase-discipline.md) (mycelial vocabulary discipline — "Inoculum"/"spore"/"fungi" name real contracts; Phase 0-2 inert schemas);
   [ADR-0016](../adr/0016-software-releases-not-an-operated-network.md) (software releases, not an operated network — the project ships no client and operates no public network);
@@ -128,7 +131,7 @@ concept, fixes the v0 schema, and specifies the toolkit. It builds **no** runnin
 
 | Component | Role in this RP | Status | External tech | Why not existing tool |
 |---|---|---|---|---|
-| Inoculum v0 schema (`*.myc-inoculum.json`) | The signed, TTL-bounded bundle format this RP defines: operator identity, trust scope, node/transport profiles (public keys + pins only), optional spores, signatures, export targets, local policy hints | deferred (Phase 2 design; defined here, built no earlier) | none (JSON + standard-primitive signature) | A bundle/manifest *format* is project canon, not a third-party tool; signatures are delegated to a standard primitive ([ADR-0002](../adr/0002-no-custom-cryptography.md)). |
+| Inoculum v0 schema (`*.myc-inoculum.json`) | The signed, TTL-bounded bundle format this RP defines: operator identity, trust scope, node/transport profiles (public keys + pins only), optional spores, signatures, export targets, local policy hints | deferred (Phase 3 design; defined here, built no earlier) | none (JSON + standard-primitive signature) | A bundle/manifest *format* is project canon, not a third-party tool; signatures are delegated to a standard primitive ([ADR-0002](../adr/0002-no-custom-cryptography.md)). |
 | validator | Checks an Inoculum against the v0 schema and the safety invariants (no private material, valid TTL, present scope/signature) before any export | deferred | jq / a Go validator per [ADR-0012](../adr/0012-go-primary-control-plane-language.md) | Pure schema + invariant checking is project logic over a standard JSON parser; no external validator knows these invariants. |
 | signer / verifier | Produces and checks the detached signature over the immutable bundle content; refuses on bad/missing signature | deferred | `ssh-keygen -Y sign/verify` / standard signing tool (operator choice) | Signing is delegated to an audited standard primitive ([ADR-0002](../adr/0002-no-custom-cryptography.md)); the project invents no scheme. |
 | inspector | Renders an Inoculum's public, non-sensitive contents human-readably for review (issuer, scope, expiry, transports present, export targets) — **connects nowhere** | deferred | jq / Go | Read-only presentation of a local file; no service. |
@@ -342,7 +345,7 @@ socket; the CLI is a transformer, not a client.
 
 ### 5.7 Relation to current subscriptions
 Today: node/operator state → **direct** sing-box/Clash render
-([control/lib/render_singbox.sh](../../control/lib/render_singbox.sh)). With Inoculum v0 (Phase 2+),
+([control/lib/render_singbox.sh](../../control/lib/render_singbox.sh)). With Inoculum v0 (Phase 3+),
 the same public values flow through an **intermediate, signed artifact**:
 
 ```
@@ -483,7 +486,7 @@ runtime checks below bind the **future** implementation.
 - **Autonomous cord promotion** ([internal/spec/network.go](../../internal/spec/network.go)
   `CordPromotion` stays inert/operator-driven).
 - Any **implementation** — this RP is specification only; the build lands under a later RP, not before
-  **Phase 2**.
+  **Phase 3**.
 
 ## 8. Documentation changes
 - [ ] `docs/adr/NNNN-<slug>.md` (**new**, authored alongside the implementing RP) — *"Inoculum: a
@@ -500,8 +503,8 @@ runtime checks below bind the **future** implementation.
 - [ ] [../THREAT-MODEL.md](../THREAT-MODEL.md) — record the artifact-provenance posture (signature +
   TTL + safety invariants) and confirm the toolkit adds no telemetry, no map, and no operated-network
   surface.
-- [ ] [../ROADMAP.md](../ROADMAP.md) — note the Inoculum bundle + toolkit as **Phase 2+** work; Phases
-  0–1 may **mention** it only.
+- [ ] [../ROADMAP.md](../ROADMAP.md) — note the Inoculum bundle + toolkit as **Phase 3+** work; Phases
+  0–2 may **mention** it only.
 - [ ] [internal/spec/network.go](../../internal/spec/network.go) (**future**, with the implementing RP)
   — an inert `Inoculum` typed schema + `Validate()` reusing `TrustScope`/`SporeEnvelope`, with the §5.4
   exclusions as validation invariants; `NetworkStateVersion`-style versioning.

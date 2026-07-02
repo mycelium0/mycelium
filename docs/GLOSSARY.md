@@ -70,9 +70,9 @@ and [research/](research/).
 - **Snowflake** — a Tor transport: broker + ephemeral WebRTC proxies contributed by volunteers;
   a reference model for distributed relay meshes.
 - **DHT** (Kademlia) — a distributed hash table for peer discovery without a central server
-  (Phase 3-4; not run in Phase 0-2).
+  (Phase 4-5; not run in Phase 0-2).
 - **Gossip / GossipSub** — epidemic propagation of messages (reachability, blocking intelligence)
-  across the mesh (Phase 3-4; not run in Phase 0-2).
+  across the mesh (Phase 4-5; not run in Phase 0-2).
 - **NAT traversal / hole-punching** — establishing a direct connection through NAT
   (ICE/STUN/TURN) so that a non-public machine can become a node.
 - **Multi-hop / onion routing** — a path ingress→intermediate→egress where no single hop knows
@@ -97,7 +97,7 @@ it defines a real contract — a schema, a state machine, a policy rule, or a me
   profiles (VIS-0002 §3).
 - **Cord** — a promoted path or path-set with measured usefulness and reversible demotion. A cord
   is reinforced because measurement shows it is useful, and it is demoted back when usefulness
-  decays; promotion is never autonomous before measurement (Phase 7).
+  decays; promotion is never autonomous before measurement (Phase 8).
 - **Hyphal probe** — a bounded, cheap exploration probe. The metabolically inexpensive unit of
   "explore cheaply": a single low-cost reach attempt with strict bounds, not an open-ended scan.
 - **Gradient** — a measured bias affecting exploration or routing. A directional field derived
@@ -128,13 +128,13 @@ it defines a real contract — a schema, a state machine, a policy rule, or a me
 ## Distributed awareness
 
 - **Distributed awareness** — the local, trust-scoped, replicated neighbourhood picture; no node
-  and no coordinator ever holds the global topology (VIS-0003 §2). Phase 3-4 territory.
+  and no coordinator ever holds the global topology (VIS-0003 §2). Phase 4-5 territory.
 - **Import-inert-until-validated** — the rule that any imported artifact (spore, fragment, summary)
   has no effect on local state until it passes validation; receipt alone never mutates the fabric.
 - **Anti-entropy (repair)** — periodic reconciliation that lets a node self-heal scoped state from
   neighbour caches; the replication path, distinct from lookup, and a cumulative-enumeration
   surface that uses graduated disclosure and trust-scoped reconciliation.
-- **Coordinator** — a Phase-3 temporary, scoped centre that dissolves into the Phase-4 DHT;
+- **Coordinator** — a Phase-4 temporary, scoped centre that dissolves into the Phase-5 DHT;
   present but inert in Phase 0 (VIS-0003). Never a permanent centre.
 
 ## Network weather (public measurement surface)
@@ -170,7 +170,7 @@ path is impaired; everything natively reachable routes direct. The path that sur
 traverses the high-interference border filter — in-region ingress, with out-of-region egress carried
 node-to-node (an anastomosis hop), never user-direct to an out-of-region node. The manual operator-built
 two-hop and the per-client split-tunnel here are **current-posture** deployment patterns (allowed now);
-their *automated* cross-node selection and route-set assembly are Phase 3-5 (gossip/route promotion), not
+their *automated* cross-node selection and route-set assembly are Phase 4-6 (gossip/route promotion), not
 near-term node behaviour.
 
 - **Selective Growth** — the principle that the tunnel carries **only** traffic whose native path is
@@ -181,7 +181,7 @@ near-term node behaviour.
   exposed surface, cost, and the amount of traffic an observer can attribute to the tunnel. **Engine
   note:** domain-aware split (the geo-routing of the xray-class transports) is the precise instrument for
   this; CIDR-only transports (the WireGuard-class / AmneziaWG) can only approximate it via region-exclude
-  route sets. The manual operator-built form is current posture; automated selection is Phase 3-5.
+  route sets. The manual operator-built form is current posture; automated selection is Phase 4-6.
 - **In-region ingress** — an entry node reached over an **in-region path**, so the user's first hop never
   crosses the high-interference border filter. The user connects to a node whose path is native-reachable;
   the impaired out-of-region reach is taken on **behind** the ingress, node-to-node, not from the user's
@@ -206,7 +206,7 @@ near-term node behaviour.
   ingress: the deployment-level instance of **anastomosis** ("two exploring paths fuse where useful")
   applied to the egress leg, so the impaired path is crossed node-to-node and never user-direct. The
   manual operator-built form (a deliberate two-hop an operator stands up) is **current posture**;
-  *automated* discovery and promotion of such a hop is Phase 3-5, and a hop that crosses **between**
+  *automated* discovery and promotion of such a hop is Phase 4-6, and a hop that crosses **between**
   Communes is an **Anastomosis Bridge** governed by an explicit contract (ADR-0026), not an implicit
   route.
 
@@ -288,7 +288,7 @@ turns a network into an attack substrate. Builds on opt-in publish + cache-custo
 (ADR-0018), trust scope / spore / knowledge gradient (VIS-0003), carrier-agnostic bridging (ADR-0011),
 cords (VIS-0004), decentralized observability with no central collector (VIS-0006/ADR-0021),
 per-operator credentials (ADR-0014), and software-not-an-operated-network with consensus governance
-(ADR-0016). The cross-Commune machinery (bridges, immune signals, cross-Commune trust) is Phase 4-5
+(ADR-0016). The cross-Commune machinery (bridges, immune signals, cross-Commune trust) is Phase 5-6
 with inert schema hooks definable now (ADR-0013); local safe defaults, rate limits, and quarantine are
 already-true Phase-0 node posture.
 
@@ -310,8 +310,19 @@ already-true Phase-0 node posture.
 - **Anastomosis Bridge** — an explicit, contracted link between two Communes (the inter-Commune form
   of anastomosis — "fuse where useful"). A bridge defines trust relationships, allowed and forbidden
   traffic classes, abuse-propagation rules, quarantine rules, revocation rules, recovery rules, and
-  evidence requirements. Default rule: **no bridge exists unless explicitly established** (Phase 4-5;
+  evidence requirements. Default rule: **no bridge exists unless explicitly established** (Phase 5-6;
   inert schema hooks definable now).
+- **hypha** — an **intra-Commune**, **same-operator**, F2F (face-to-face) node-to-node bond: the
+  **edge-fusion** sense of anastomosis (two of one operator's own nodes fusing a path). It is the
+  intra-Commune counterpart to the cross-Commune **Anastomosis Bridge** above — where a Bridge is
+  **society-fusion** (a contracted link *between* two Communes), a hypha is **edge-fusion** *within* a
+  single Commune under one operator's own genetics. A hypha is contract-bound and operator-provisioned,
+  never implicit, and operator-label-opaque (no per-node row, ADR-0030). Its **inert seam** lands in the
+  new **Phase 3** (living node: recovery/release, and the fungi/advisory inert seam); the **live** hypha
+  corridor / multi-hop is **Phase 4+**. Relates to the **anastomosis hop (egress)** above (the
+  deployment-level edge-fusion an operator stands up between their own nodes): the manual operator-built
+  two-hop is current posture, its automated selection is Phase 4-6, and a hop that crosses **between**
+  Communes is an Anastomosis Bridge, not a hypha.
 - **Immunity** — a Commune's capacity to defend itself rather than optimize for universal
   availability at any cost. A Commune must be capable of protecting against DDoS traffic, scanning,
   credential attacks, malware command-and-control, hostile relay use, abuse transit, infrastructure
@@ -326,7 +337,7 @@ already-true Phase-0 node posture.
   `abuse_signal`, `quarantine_signal`, `cut_signal`, `rate_limit_signal`, `corridor_revocation`,
   `bridge_risk_signal`, `commune_policy_signal`. A signal must **NEVER** contain raw traffic, user
   identities, locations, or complete topology maps. A signal **should** contain scope, severity,
-  reason code, TTL, evidence class, signer or quorum, and a reversible action hint (Phase 4-5; inert
+  reason code, TTL, evidence class, signer or quorum, and a reversible action hint (Phase 5-6; inert
   schema hooks definable now).
 - **Sovereign Defense** — the principle that every Commune may set and enforce its own defensive
   posture: accepting (e.g.) educational, emergency, or update traffic while rejecting anonymous relay,

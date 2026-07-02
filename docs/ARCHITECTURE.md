@@ -95,8 +95,8 @@ and its port and own-cert posture are in [PORTS.md](../nodes/dataplane/PORTS.md)
 
 ## Layer 2. Control plane + adaptation layer
 
-The brain of adaptation. Evolution: phases 0–2 — a local agent on the node; phase 3 — a network
-coordinator; phases 4–5 — distributed consensus over gossip.
+The brain of adaptation. Evolution: phases 0–2 — a local agent on the node; phase 4 — a network
+coordinator; phases 5–6 — distributed consensus over gossip.
 
 **Components:**
 - **Identity and keys:** issuance and revocation of node/client identities, rotation of
@@ -157,10 +157,10 @@ Path selection from the ingress node to a clean egress, and route reconstruction
   "tainted" reputation); the egress node has a clean reputation. In phases 0–2 they coincide.
 - **Rerouting:** if egress E is unreachable from region R, traffic from R is automatically
   redirected to an alternate egress; the path is rebuilt around the failed segment.
-- **Multi-hop (phase 4+):** onion/garlic style — ingress → relay → egress; no single hop knows
+- **Multi-hop (phase 5+):** onion/garlic style — ingress → relay → egress; no single hop knows
   the full path. The latency ↔ reachability ↔ anonymity trade-off is selected per scenario.
 - **Selection policy:** takes into account geography, node health, current block-intelligence,
-  and node trust score (phase 5).
+  and node trust score (phase 6).
 
 ---
 
@@ -172,8 +172,8 @@ evolution track.
 | Phase | Mechanism | Trust model | NAT traversal |
 |---|---|---|---|
 | 0–2 | Static config / config distribution endpoint (Phase 0: out-of-band hand-off, no public always-on endpoint — ADR-0020 §1; matured endpoint is Phase 1) | Operator owns everything | Nodes on public IPs |
-| 3 | Coordinator registry (Headscale-style) | Central coordinator issues membership | Coordinator DERP relays |
-| 4–5 | DHT + gossip (libp2p Kademlia + GossipSub) | Invitation tree / social graph / PoW | ICE/STUN/TURN, hole-punching, circuit-relay |
+| 4 | Coordinator registry (Headscale-style) | Per-Commune coordinator issues membership | Coordinator DERP relays |
+| 5–6 | DHT + gossip (libp2p Kademlia + GossipSub) | Invitation tree / social graph / PoW | ICE/STUN/TURN, hole-punching, circuit-relay |
 
 **Sybil-resistance** is critical from the moment joining becomes open: without it an adversary
 floods the mesh with surveillance nodes, enumerates ingress points, and blocks or de-anonymises
@@ -247,8 +247,8 @@ without modification.
 | Tunnel + transport multiplexing | **sing-box** (primary engine); **Xray-core** (optional alternative) | One server, many protocols (REALITY/Vision/gRPC/XHTTP, Hysteria2, TUIC, Shadowsocks-2022, ShadowTLS, Trojan); see [ADR-0010](adr/0010-phase0-transport-set.md) |
 | Non-TLS fallback | **AmneziaWG** | Obfuscated WireGuard; Phase 0 uses a single network-shared dialect (per-node dialect diversification is a Phase-2 deliverable) |
 | Cover / anti-probing | **Caddy/nginx** + real donor site | Legitimate response to any probe |
-| Coordinator (phase 3) | **Headscale** or custom Noise control plane | Proven WireGuard control-plane pattern |
-| P2P / mesh (phase 4+) | **libp2p** (Kademlia, GossipSub, AutoNAT, circuit-relay) | Mature DHT/gossip/NAT-traversal primitives |
+| Coordinator (phase 4) | **Headscale** or custom Noise control plane | Proven WireGuard control-plane pattern |
+| P2P / mesh (phase 5+) | **libp2p** (Kademlia, GossipSub, AutoNAT, circuit-relay) | Mature DHT/gossip/NAT-traversal primitives |
 | Browser ephemeral ingress | **Snowflake** pattern (WebRTC + broker) | Proven volunteer-node model |
 | Fronting / last resort | **Cloudflare** (CDN-front, WARP) | Best survivability in combination with REALITY |
 | Infrastructure / deploy | **Terraform + Ansible** | Reproducibility; fast IP/AS migration |
