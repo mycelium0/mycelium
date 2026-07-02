@@ -42,6 +42,20 @@ truth for the version is `internal/spec.Version`.
   (`donor_verify_reality`); `www.microsoft.com` (TLS-fine but steal-breaking) dropped from the candidate set.
 - **Conformance-gate lockstep** — `node_update_artifact_root` derives its staged-lib set from the entrypoint
   source loop (single source of truth), and `nb_selftest` is registered in that loop.
+- **Rotation never lands on a co-failed sibling** (Audit-0007 S2) — the auto-rotation planner
+  (`internal/rotate`) now excludes any candidate this node's own L7 probe reports client-DEAD from the
+  ranked pool. A new `spec.RotationCandidate.L7Dead` (zero value = eligible) is set in `measure.Tick` from
+  the same node-local liveness map that faults the active's `ActiveProbeOK`, and `rotate.Plan` skips a dead
+  candidate BEFORE the weight-margin/promote checks — so a broken REALITY `dest` can no longer make the loop
+  rotate from a dead `reality-vision` onto an equally-dead `reality-grpc` that shares it, and a dead-but-
+  promoted candidate no longer mislabels the hold as *target-not-promoted*.
+- **REALITY donor probe: no false-DEAD from a port race** (Audit-0007 S2) — `donor_verify_reality` spun its
+  ephemeral loopback server/client on the FIXED ports 29443/29444, so a deploy-time donor pick overlapping a
+  timer-fired L7 probe collided on the bind and reported a *healthy* donor DEAD (→ a spurious rotation). The
+  ports are now randomized per attempt (retried), the handshake runs under an `flock` (node-shared under
+  `STATE_DIR`), and a bind failure returns *cannot-judge* rather than *dead*; the `measure_l7_probe` call
+  site is made `set -e`-safe so a broken-dest verdict on the timer path can no longer abort the probe before
+  its marker is written.
 
 ## [0.2.28] — 2026-06-30
 ### Security

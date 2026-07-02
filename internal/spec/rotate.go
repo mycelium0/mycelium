@@ -109,19 +109,22 @@ func (r RotationReason) IsValid() bool {
 
 // RotationCandidate is one transport member the planner ranks/selects. Weight is the node-local
 // tuner score (copied in by the caller from tune.Weight.Value); Promoted mirrors the tuner's
-// hysteretic promote flag. It carries NO endpoint/SNI/identity — only a closed-vocab proto/class,
-// the canonical ports, the score, and the move to apply. The fine detector cause that triggered a
-// rotation is NOT stored here: it stays in the node-local verdict the caller holds, and the rotation
-// is logged class-level only (the RotationPlan's own RotationReason explains the decision), so the
-// fine detector-cause vocabulary never enters the rotation schema.
+// hysteretic promote flag; L7Dead mirrors this node's own L7 own-cert/cover-path liveness probe (the
+// planner excludes an L7-dead member from the pool so a rotation never lands on a co-failed sibling).
+// It carries NO endpoint/SNI/identity — only a closed-vocab proto/class, the canonical ports, the
+// score, the liveness flag, and the move to apply. The fine detector cause that triggered a rotation
+// is NOT stored here: it stays in the node-local verdict the caller holds, and the rotation is logged
+// class-level only (the RotationPlan's own RotationReason explains the decision), so the fine
+// detector-cause vocabulary never enters the rotation schema.
 type RotationCandidate struct {
-	Proto    string         `json:"proto"`     // closed-registry proto id (TransportRegistry)
-	Class    TransportClass `json:"class"`     // its coarse family (closed vocab)
-	Action   RotationAction `json:"action"`    // the move to reach/apply it
-	FromPort int            `json:"from_port"` // current canonical port (0 if not port-toggled)
-	ToPort   int            `json:"to_port"`   // target canonical port (0 if unchanged / not toggled)
-	Promoted bool           `json:"promoted"`  // tuner promote flag for this member
-	Weight   float64        `json:"weight"`    // node-local tuner weight in [0,1]
+	Proto    string         `json:"proto"`             // closed-registry proto id (TransportRegistry)
+	Class    TransportClass `json:"class"`             // its coarse family (closed vocab)
+	Action   RotationAction `json:"action"`            // the move to reach/apply it
+	FromPort int            `json:"from_port"`         // current canonical port (0 if not port-toggled)
+	ToPort   int            `json:"to_port"`           // target canonical port (0 if unchanged / not toggled)
+	Promoted bool           `json:"promoted"`          // tuner promote flag for this member
+	Weight   float64        `json:"weight"`            // node-local tuner weight in [0,1]
+	L7Dead   bool           `json:"l7_dead,omitempty"` // this node's own L7 probe reports the member client-DEAD; the planner excludes it (Audit-0007 S2). Zero value = eligible.
 }
 
 // Validate checks the candidate is within the closed transport set (the AC-5 anchor): a non-empty
