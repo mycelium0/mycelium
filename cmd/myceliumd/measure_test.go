@@ -207,6 +207,88 @@ func TestLoadL7Liveness(t *testing.T) {
 	}
 }
 
+func TestEffectiveL7MinGenerations(t *testing.T) {
+	for _, c := range []struct{ in, want int }{{0, 2}, {-3, 2}, {1, 1}, {2, 2}, {5, 5}} {
+		if got := effectiveL7MinGenerations(c.in); got != c.want {
+			t.Errorf("effectiveL7MinGenerations(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// TestL7GenerationGate covers the marker-replay hardening (Audit-0007 S2): a member faults only after it
+// reads DEAD across >= N DISTINCT observed_at generations; replay of one generation, a fresh-clean
+// generation, or an absent/stale marker never advance (or reset) the streak.
+func TestL7GenerationGate(t *testing.T) {
+	g0 := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	gen := func(i int) time.Time { return g0.Add(time.Duration(i) * time.Minute) }
+	faulted := func(out map[string]bool, ref string) bool { _, ok := out[ref]; return ok }
+
+	t.Run("one generation does not fault at N=2", func(t *testing.T) {
+		g := newL7GenerationGate(2)
+		if out := g.fold([]string{"a"}, gen(1), true); faulted(out, "a") {
+			t.Fatalf("one dead generation must not fault at N=2: %+v", out)
+		}
+	})
+
+	t.Run("replay of the same generation never advances", func(t *testing.T) {
+		g := newL7GenerationGate(2)
+		for i := 0; i < 5; i++ {
+			if out := g.fold([]string{"a"}, gen(1), true); faulted(out, "a") { // SAME observedAt each read
+				t.Fatalf("replay of one generation must not fault (read %d): %+v", i, out)
+			}
+		}
+	})
+
+	t.Run("two distinct generations fault at N=2 (ref->false)", func(t *testing.T) {
+		g := newL7GenerationGate(2)
+		g.fold([]string{"a"}, gen(1), true)
+		out := g.fold([]string{"a"}, gen(2), true)
+		if v, ok := out["a"]; !ok || v != false {
+			t.Fatalf("two distinct dead generations must fault ref->false: %+v", out)
+		}
+	})
+
+	t.Run("a fresh-clean generation resets the streak", func(t *testing.T) {
+		g := newL7GenerationGate(2)
+		g.fold([]string{"a"}, gen(1), true) // a streak 1
+		g.fold([]string{"b"}, gen(2), true) // a absent in a fresh marker -> a resets
+		if out := g.fold([]string{"a"}, gen(3), true); faulted(out, "a") {
+			t.Fatalf("a fresh-clean generation must reset a's streak: %+v", out)
+		}
+	})
+
+	t.Run("an absent/stale marker resets even a faulted ref", func(t *testing.T) {
+		g := newL7GenerationGate(2)
+		g.fold([]string{"a"}, gen(1), true)
+		if out := g.fold([]string{"a"}, gen(2), true); !faulted(out, "a") {
+			t.Fatalf("precondition: a should be faulted after 2 distinct generations")
+		}
+		g.fold(nil, time.Time{}, false) // no fresh marker -> reset all (fail-safe)
+		if out := g.fold([]string{"a"}, gen(3), true); faulted(out, "a") {
+			t.Fatalf("an absent marker must reset the streak: %+v", out)
+		}
+	})
+
+	t.Run("refs are tracked independently", func(t *testing.T) {
+		g := newL7GenerationGate(2)
+		g.fold([]string{"a", "b"}, gen(1), true)
+		out := g.fold([]string{"a"}, gen(2), true) // a: 2 distinct gens -> faulted; b: dropped -> reset
+		if !faulted(out, "a") {
+			t.Fatalf("a across 2 generations must fault: %+v", out)
+		}
+		if faulted(out, "b") {
+			t.Fatalf("b (dropped this generation) must not fault: %+v", out)
+		}
+	})
+
+	t.Run("N=1 restores fault-on-first-generation", func(t *testing.T) {
+		g := newL7GenerationGate(1)
+		if out := g.fold([]string{"a"}, gen(1), true); !faulted(out, "a") {
+			t.Fatalf("N=1 must fault on the first dead generation: %+v", out)
+		}
+	})
+}
+
 func TestLoadMeasureConfigRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "measure.config.json")

@@ -40,6 +40,11 @@ MEASURE_REACH_TIMEOUT_MS="${MEASURE_REACH_TIMEOUT_MS:-3000}"
 MEASURE_L7_MAX_AGE_MS="${MEASURE_L7_MAX_AGE_MS:-900000}"
 MEASURE_L7_INTERVAL_SEC="${MEASURE_L7_INTERVAL_SEC:-300}"
 MEASURE_L7_JITTER_SEC="${MEASURE_L7_JITTER_SEC:-120}"
+# Marker-replay hardening (Audit-0007 S2): the daemon faults a member only after it reads DEAD across
+# >= this many DISTINCT probe generations, so one dead run replayed across ~tick-interval reads cannot
+# satisfy the tick-based anti-flap on its own. Default 2 (operator decision 2026-07-03); set 1 to restore
+# the pre-gate fault-on-first-generation behaviour.
+MEASURE_L7_MIN_DEAD_GEN="${MEASURE_L7_MIN_DEAD_GEN:-2}"
 
 _measure_unit() { printf '%s' "/etc/systemd/system/mycelium-measure.service"; }
 _l7probe_service_unit() { printf '%s' "/etc/systemd/system/mycelium-l7probe.service"; }
@@ -105,11 +110,12 @@ generate_measure_configs() {
 		--arg state "$STATE_DIR/rotate_state.json" \
 		--arg l7path "$(_measure_l7_marker)" \
 		--argjson l7age "$MEASURE_L7_MAX_AGE_MS" \
+		--argjson l7gen "$MEASURE_L7_MIN_DEAD_GEN" \
 		--argjson limits "$limits" \
 		--argjson tick "$MEASURE_TICK_MS" '{
 		version: 1, tick_ms: $tick, active_ref: $active,
 		output_path: $out, state_path: $state, limits: $limits,
-		l7_liveness_path: $l7path, l7_max_age_ms: $l7age,
+		l7_liveness_path: $l7path, l7_max_age_ms: $l7age, l7_min_dead_generations: $l7gen,
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."
