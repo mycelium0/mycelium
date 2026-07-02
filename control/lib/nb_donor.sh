@@ -59,8 +59,11 @@ donor_verify_reality() {
 	# EPHEMERAL loopback REALITY server (dest=HOST) + client with the SAME uTLS fingerprint clients use,
 	# and confirms a request traverses the tunnel.
 	#   RETURNS: 0 = steal-viable; 1 = TLS-fine-but-REALITY-BROKEN (dead); 2 = COULD-NOT-JUDGE — the engine
-	#   binary or curl is absent, keypair generation failed, or no ephemeral port pair would bind — so the
-	#   caller degrades to the TLS pre-filter / treats the transport as NOT-dead instead of hard-failing.
+	#   binary or curl is absent, keypair generation failed, or no ephemeral port pair would bind. The two
+	#   callers treat rc 2 DIFFERENTLY, by design: the DEPLOY gate (donor_verify) fail-CLOSES on it (a donor
+	#   that can't be validated must not be accepted — the engine is present by then, so rc 2 = broken node),
+	#   while the DAEMON L7 probe (measure_l7_probe) treats it as NOT-dead (an advisory runtime signal must
+	#   never spuriously rotate a healthy transport on a transient can't-judge).
 	# Audit-0007 S2: the ephemeral ports are RANDOMIZED per attempt (not the fixed 29443/29444 that two
 	# overlapping runs would collide on) and the whole handshake runs under an flock, so a deploy-time
 	# donor pick and a timer-fired L7 probe cannot race for ports — a race would false-DEAD a healthy donor
@@ -121,15 +124,18 @@ donor_verify_reality() {
 donor_verify() {
 	# donor_verify HOST -> 0 iff HOST is a usable REALITY donor FROM THIS NODE. Two gates: a cheap TLSv1.3
 	# pre-filter, then the AUTHORITATIVE REALITY handshake. The donor list's "require" also promises h2 ALPN
-	# "where offered" — a best-effort PREFERENCE (donor_offers_h2 + pick_donor), not a hard gate. Degrades to
-	# the TLS-only result ONLY when the engine binary is unavailable (rc 2), loudly, so a pre-engine caller
-	# still bootstraps instead of hard-failing.
+	# "where offered" — a best-effort PREFERENCE (donor_offers_h2 + pick_donor), not a hard gate. FAIL-CLOSED
+	# (Audit-0007 S3, operator decision 2026-07-03): if the REALITY handshake cannot be judged (rc 2 —
+	# engine/curl absent, or no ephemeral port would bind), the donor is REJECTED, not accepted on the
+	# TLS-only pre-filter. `install_singbox` runs BEFORE donor selection (flow_bootstrap), so rc 2 here
+	# signals a genuinely broken node, not a normal pre-engine condition — refusing to bootstrap beats
+	# bringing up a node whose REALITY-donor viability could not be authoritatively validated.
 	local host="$1"
 	donor_verify_tls "$host" || return 1
 	donor_verify_reality "$host"
 	case "$?" in
 		0) return 0 ;;
-		2) warn "donor '$host': the REALITY-layer check could not run (engine/curl absent, or no ephemeral port would bind) — accepting on the TLSv1.3 pre-filter ALONE (weaker; cannot catch a REALITY-broken dest such as www.microsoft.com)."; return 0 ;;
+		2) warn "donor '$host': the REALITY-layer check could not run (engine/curl absent, or no ephemeral port would bind) — REJECTING (fail-closed): a donor whose REALITY viability cannot be authoritatively validated must not be accepted. The engine is installed before donor selection, so this signals a broken node; fix the install/curl and re-run."; return 1 ;;
 		*) warn "donor candidate '$host' passes TLSv1.3 but FAILS the REALITY handshake (a TLS-fine-but-REALITY-broken dest); rejecting."; return 1 ;;
 	esac
 }
