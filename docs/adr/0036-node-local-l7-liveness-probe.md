@@ -115,6 +115,14 @@ sing-box + openssl + `crypto/tls` only.
   `observed_at` generations before it faults — so a rotation reflects sustained, not replayed, evidence — is
   a planned hardening. It is deferred because it shifts the drilled detect→rotate latency and so needs a
   self-drive re-drill to confirm the loop still rotates within the DoD-1 budget.
+- **Zero-sample reach window vs. the L7 fold:** the L7 signal is applied *inside* a member's detector
+  `Observe`, which the assembler runs only for a member that has fresh reach samples this tick (a
+  zero-sample window carries no information and is skipped — "no data" must never read as a black-hole).
+  So a member with a fresh DEAD L7 marker but **no reach samples that tick** is not L7-faulted until its
+  next non-empty reach window. In practice the reach probe (own-listener TCP, ~tens of seconds) is far
+  more frequent than the L7 probe (minutes), so a live listener always has reach samples when its L7
+  marker matters; a member with *neither* reach samples nor a fresh L7 marker simply evaporates on its
+  tuner decay, as intended. Documented so the coupling is explicit, not accidental.
 - **VIS-0004 phase table** is amended to record this L7 liveness loop as the sanctioned early realization
   of the Plane-2 own-cert/cover-path signal, armed only under `--measure-enable` (ships-disabled).
 
