@@ -87,12 +87,24 @@ measure_l7_probe() {
 				sleep 1
 			done
 		else
-			# genuine-TLS: own-cert loopback handshake + non-expired cert (pure loopback, no external
-			# contact). A missing/expired own-cert or a dead listener yields no cert -> x509 fails.
+			# genuine-TLS: own-cert loopback handshake; the presented leaf must be non-expired AND carry
+			# $sni in its SAN (pure loopback, no external contact). A dead listener / missing cert yields no
+			# leaf; a WRONG-domain cert (a mis-render, or a stale cert for another host) is caught by the SAN
+			# match (Audit-0007 S3). We grep the SAN rather than `-verify_hostname -verify_return_error`
+			# ON PURPOSE: the latter also demands the leaf chain to a TRUSTED CA, which would false-DEAD a
+			# node serving a legitimate SELF-SIGNED own-cert. $parent = $sni minus its first label, so a
+			# wildcard SAN (`*.parent`) matches too. Dots are literal-enough for an own-cert loopback probe
+			# (no adversary controls this cert); the trailing class anchors the DNS name so a suffix
+			# (`$sni.evil.tld`) cannot match.
 			[ -n "$sni" ] || { tested=$(( tested + 1 )); continue; }
+			local parent="${sni#*.}" leaf san
 			for attempt in 1 2 3; do
-				if echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null \
-					| openssl x509 -noout -checkend 0 >/dev/null 2>&1; then ok=1; break; fi
+				leaf="$(echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null \
+					| openssl x509 2>/dev/null)"
+				[ -n "$leaf" ] || { sleep 1; continue; }
+				printf '%s' "$leaf" | openssl x509 -noout -checkend 0 >/dev/null 2>&1 || { sleep 1; continue; }
+				san="$(printf '%s' "$leaf" | openssl x509 -noout -ext subjectAltName 2>/dev/null)"
+				if printf '%s' "$san" | grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)"; then ok=1; break; fi
 				sleep 1
 			done
 		fi
