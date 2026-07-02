@@ -265,9 +265,9 @@ the fungi F2F boundary are in place — with **no live federation runtime**. The
 is cut after this phase closes honestly.
 
 **Scope.**
-- **End-to-end client recovery.** A stock client on a standard subscription, holding a sibling
-  endpoint, survives a real/artificial block and recovers within minutes — measured at the **client**,
-  not "node-side serving ok".
+- **End-to-end client recovery** ([RP-0013](proposals/0013-phase3-e2e-client-recovery.md), draft). A stock
+  client on a standard subscription, holding a sibling endpoint, survives a real/artificial block and
+  recovers within minutes — measured at the **client**, not "node-side serving ok".
 - **Operability & release.** `make dist` + signed release; the fungi deploy/management CLI (install,
   status, plan, apply); node diagnostics with a redacted bug-report bundle; the **unified node
   descriptor** — engine/ingress/CDN-front/reachability as default-off *capabilities*, not node variants
