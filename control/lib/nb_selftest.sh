@@ -44,6 +44,11 @@
 # sustained-blocked verdict downstream). A healthy member passes on the first attempt, so the steady cost
 # is one check per inbound; meant to run on a budgeted, jittered cadence (the hyphal-probe invariants,
 # VIS-0004), NOT every tick. Self-cleaning.
+# COVERAGE (Audit-0007 S2, honest scope): this probe covers ONLY the three tags below whose L7 failure the
+# L4 reach window cannot see — the two REALITY families (vless-reality-vision/-grpc) and genuine-TLS
+# (vless-ws-tls). The other enrolled transports (hysteria2/tuic/shadowtls/trojan/xhttp) are NOT L7-probed
+# here and keep an L4-only verdict, so "the reach L4-only blind spot is closed" is scoped to these three
+# families, per ADR-0036. Extending coverage to the remaining families is future work, not a silent claim.
 measure_l7_probe() {
 	have openssl && have jq || return 0
 	[ -f "$SINGBOX_CONFIG" ] || return 0
@@ -106,6 +111,6 @@ PROBE_EOF
 		warn "L7 measure-probe: client-DEAD transport(s):$dead (own-listener handshake failed)."
 		return 1
 	fi
-	log "L7 measure-probe: all $tested client-facing transport(s) complete the own-listener handshake."
+	log "L7 measure-probe: all $tested L7-covered transport(s) (REALITY + genuine-TLS; other families are L4-only) complete the own-listener handshake."
 	return 0
 }
