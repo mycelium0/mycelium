@@ -226,7 +226,12 @@ myc_sb_render_server() {
 	# are not correlatable by an identical plaintext path. Defaults to xhttp_path only when unset
 	# (back-compat); MUST match render_bundle.sh's resolution so server and Link agree.
 	xhttp_path_tls="$(myc_params_get "$params" '.xhttp_path_tls' "$xhttp_path")"
-	stls_handshake="$(myc_params_get "$params" '.shadowtls_handshake_server' "${donor_host:-www.microsoft.com}")"
+	# ShadowTLS does a GENUINE outer TLS handshake to (and relays from) this host — so it must be a
+	# TLS-solid, ubiquitous site. It defaults to the node's picked REALITY donor when present; the bare
+	# fallback is a curated ubiquitous host, NOT www.microsoft.com (dropped from the REALITY donor set as
+	# steal-breaking — a stale reference here would re-endorse it; Audit-0007 S3). Ideally this draws from
+	# the curated donor-candidate list (donor_candidates) rather than a literal — a follow-up.
+	stls_handshake="$(myc_params_get "$params" '.shadowtls_handshake_server' "${donor_host:-www.apple.com}")"
 	# Reachability posture (RP-0011 chunk D / ADR-0034 §3): node_bind is the listen address for every
 	# PUBLIC inbound. Default "::" (byte-identical to today); apply_node_profile stamps "127.0.0.1" only
 	# when the descriptor declares reachable:false. The hidden detour SS inbound stays 127.0.0.1.

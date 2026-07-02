@@ -74,6 +74,14 @@ generate_measure_configs() {
 	n="$(printf '%s' "$members" | jq 'length' 2>/dev/null || echo 0)"
 	[ "$n" -ge 1 ] || die "measure: no enabled sing-box transports in params — nothing to measure (enable at least one <proto>_enabled)."
 	active="$(printf '%s' "$members" | jq -r '.[0].ref')"
+	# L7 cadence cross-check (Audit-0007 S3): the daemon folds a marker only while it is younger than
+	# MAX_AGE; the probe refreshes it every INTERVAL +/- JITTER. If MAX_AGE is shorter than the worst-case
+	# gap between two probe completions, a marker can expire BEFORE the next one lands -> the L7 signal
+	# intermittently drops to "healthy" even while a transport is dead. Advisory probe -> warn, not fatal.
+	local _l7_gap_ms=$(( (MEASURE_L7_INTERVAL_SEC + MEASURE_L7_JITTER_SEC) * 1000 ))
+	if [ "$MEASURE_L7_MAX_AGE_MS" -lt "$_l7_gap_ms" ]; then
+		warn "measure: MEASURE_L7_MAX_AGE_MS=$MEASURE_L7_MAX_AGE_MS is SHORTER than the worst-case probe gap ${_l7_gap_ms}ms (interval ${MEASURE_L7_INTERVAL_SEC}s + jitter ${MEASURE_L7_JITTER_SEC}s): the L7 marker can go stale between probes, so L7 liveness will intermittently fold as healthy. Raise MAX_AGE (>= 2x the gap recommended) or lower the interval/jitter."
+	fi
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would write $reach_cfg + $measure_cfg ($n member(s), active=$active)"; return 0; fi
 	run install -d -m 0755 "$STATE_DIR"
 	# reach: own-listener TCP probe per member (window 10m, probe 30s, timeout 5s).
