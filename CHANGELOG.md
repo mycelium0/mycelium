@@ -23,7 +23,10 @@ truth for the version is `internal/spec.Version`.
   probe outage never rotates a healthy transport), so `detect.Classify` flips the active to
   `blocked`/`active-probe-failure`. `nb_measure.sh` emits `l7_liveness_path` + `l7_max_age_ms` into
   `measure.config` and installs a budgeted, jittered `mycelium-l7probe.timer` (ships-disabled, armed by
-  `--measure-enable`); the entrypoint gains `--l7-probe`. Proven on m1: an induced L7-dead active drives an
+  `--measure-enable`); the entrypoint gains `--l7-probe`. The deploy-time post-apply acceptance hook shares
+  the *same* probe, writing a DISTINCT `$STATE_DIR/l7_postapply.json` so it never clobbers the daemon marker
+  (single producer per marker), and no probe egresses a third-party beacon — genuine-TLS is pure loopback and
+  REALITY touches only the node's own cover/`dest` host (ADR-0036). Proven on m1: an induced L7-dead active drives an
   autonomous recorded rotation, a too-soon second rotation is correctly rate-limited, and the node recovers to
   clean once the fault clears.
 ### Changed
