@@ -32,10 +32,21 @@ MEASURE_TICK_MS="${MEASURE_TICK_MS:-30000}"
 MEASURE_REACH_WINDOW_MS="${MEASURE_REACH_WINDOW_MS:-120000}"
 MEASURE_REACH_PROBE_MS="${MEASURE_REACH_PROBE_MS:-15000}"
 MEASURE_REACH_TIMEOUT_MS="${MEASURE_REACH_TIMEOUT_MS:-3000}"
+# L7 own-cert/cover-path liveness probe (RP-0010 AC-6 clarification): the daemon honors a marker up to
+# MAX_AGE old (a few probe-intervals, so a FRESH dead marker faults but a STOPPED probe self-expires to
+# healthy — fail-safe); the probe itself runs OUT of the daemon on a budgeted+jittered oneshot timer
+# (INTERVAL +/- JITTER), a slower cadence than the 30s tick — the expensive, bounded hyphal probe, never
+# every tick. It closes the reach L4-only blind spot (a bound listener that is client-DEAD at L7).
+MEASURE_L7_MAX_AGE_MS="${MEASURE_L7_MAX_AGE_MS:-900000}"
+MEASURE_L7_INTERVAL_SEC="${MEASURE_L7_INTERVAL_SEC:-300}"
+MEASURE_L7_JITTER_SEC="${MEASURE_L7_JITTER_SEC:-120}"
 
 _measure_unit() { printf '%s' "/etc/systemd/system/mycelium-measure.service"; }
+_l7probe_service_unit() { printf '%s' "/etc/systemd/system/mycelium-l7probe.service"; }
+_l7probe_timer_unit()   { printf '%s' "/etc/systemd/system/mycelium-l7probe.timer"; }
 _measure_reach_cfg()   { printf '%s' "$STATE_DIR/reach.config.json"; }
 _measure_cfg()         { printf '%s' "$STATE_DIR/measure.config.json"; }
+_measure_l7_marker()   { printf '%s' "$STATE_DIR/l7_selftest.json"; }
 _measure_vocab()       { printf '%s' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"; }
 
 # generate_measure_configs (--measure-configure) — write the node-local reach + measure configs from
@@ -84,10 +95,13 @@ generate_measure_configs() {
 		--arg active "$active" \
 		--arg out "$STATE_DIR/rotate_plan_input.json" \
 		--arg state "$STATE_DIR/rotate_state.json" \
+		--arg l7path "$(_measure_l7_marker)" \
+		--argjson l7age "$MEASURE_L7_MAX_AGE_MS" \
 		--argjson limits "$limits" \
 		--argjson tick "$MEASURE_TICK_MS" '{
 		version: 1, tick_ms: $tick, active_ref: $active,
 		output_path: $out, state_path: $state, limits: $limits,
+		l7_liveness_path: $l7path, l7_max_age_ms: $l7age,
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."
@@ -140,6 +154,39 @@ UNIT
 	run systemctl daemon-reload
 	run systemctl enable --now mycelium-measure.service || die "measure: could not enable mycelium-measure.service (fail-closed)."
 	log "measure: mycelium-measure.service ENABLED — this node now assembles a node-local rotate.PlanInput (ADVISORY; it does NOT rotate). Disable with '$0 --measure-disable'."
+
+	# L7 liveness probe (RP-0010 AC-6): a budgeted + jittered ONESHOT timer runs '--l7-probe' OUT of the
+	# daemon, writing the marker the measure loop folds into DetectorSignal.ActiveProbeOK — closing the
+	# reach L4-only blind spot (a bound listener that is client-DEAD at L7, e.g. a broken REALITY dest).
+	# Armed alongside the measure plane (both are the explicit --measure-enable); removed by --measure-disable.
+	cat >"$(_l7probe_service_unit)" <<UNIT
+[Unit]
+Description=Mycelium MEASURE L7 liveness probe (RP-0010 AC-6) — node-local own-cert/cover-path handshake
+After=network-online.target sing-box.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$NB_SELF --l7-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
+Nice=10
+IOSchedulingClass=idle
+UNIT
+	cat >"$(_l7probe_timer_unit)" <<UNIT
+[Unit]
+Description=Mycelium MEASURE L7 liveness probe cadence (budgeted + jittered hyphal probe)
+
+[Timer]
+OnBootSec=${MEASURE_L7_INTERVAL_SEC}
+OnUnitActiveSec=${MEASURE_L7_INTERVAL_SEC}
+RandomizedDelaySec=${MEASURE_L7_JITTER_SEC}
+
+[Install]
+WantedBy=timers.target
+UNIT
+	run systemctl daemon-reload
+	run systemctl enable --now mycelium-l7probe.timer || die "measure: could not enable mycelium-l7probe.timer (fail-closed)."
+	run systemctl start mycelium-l7probe.service 2>/dev/null || true  # seed the marker now so the daemon has an L7 signal before the first timer fire
+	log "measure: mycelium-l7probe.timer ENABLED (~every ${MEASURE_L7_INTERVAL_SEC}s +/-${MEASURE_L7_JITTER_SEC}s jitter) — folds L7 own-cert/cover-path liveness into detection."
 }
 
 MEASURE_PLAN_MAX_STALE_SEC="${MEASURE_PLAN_MAX_STALE_SEC:-180}"
@@ -179,9 +226,10 @@ refresh_rotate_plan_from_daemon() {
 # measure_disable (--measure-disable) — disable + remove the unit (revert to no MEASURE daemon).
 measure_disable() {
 	need_root
-	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would disable + remove mycelium-measure.service"; return 0; fi
+	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would disable + remove mycelium-measure.service + mycelium-l7probe.timer"; return 0; fi
+	run systemctl disable --now mycelium-l7probe.timer 2>/dev/null || true
 	run systemctl disable --now mycelium-measure.service 2>/dev/null || true
-	rm -f "$(_measure_unit)"
+	rm -f "$(_l7probe_timer_unit)" "$(_l7probe_service_unit)" "$(_measure_unit)"
 	run systemctl daemon-reload
-	log "measure: mycelium-measure.service DISABLED + removed; the node no longer assembles a PlanInput."
+	log "measure: mycelium-measure.service + mycelium-l7probe.timer DISABLED + removed; the node no longer assembles a PlanInput or probes L7 liveness."
 }

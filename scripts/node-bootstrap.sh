@@ -139,7 +139,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -254,6 +254,7 @@ while [ "$#" -gt 0 ]; do
 		--measure-enable)    MODE="measure-enable"; shift ;;
 		--measure-disable)   MODE="measure-disable"; shift ;;
 		--measure-configure) MODE="measure-configure"; shift ;;
+		--l7-probe)          MODE="l7-probe"; shift ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;
@@ -792,6 +793,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		measure-enable)    measure_enable ;;
 		measure-disable)   measure_disable ;;
 		measure-configure) generate_measure_configs ;;
+		l7-probe)          measure_l7_probe ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
 fi
