@@ -43,7 +43,7 @@ A large-scale network operator (the adversary) with the following capabilities:
   services; legal frameworks targeting distribution and operation of persistent private network
   tools; pressure on hosting providers and app distribution platforms.
 - **Adversarial mesh participation** — running surveillance nodes to enumerate ingress points,
-  correlate traffic, and de-anonymise users (the primary threat for phases 4–5).
+  correlate traffic, and de-anonymise users (the primary threat for phases 5–6).
 
 What the adversary does not currently do at scale, but could: full allowlist-only internet
 (at that point only CDN-fronting via indispensable CDNs and offline/LAN channels survive).
@@ -56,7 +56,7 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 3. **Ingress reachability** — the mere existence of working entry points.
 4. **Node operators** — their identities and infrastructure.
 5. **Network map** — who is connected to whom (the most valuable prize for the adversary in
-   phases 4–5).
+   phases 5–6).
 
 ## Attack surface and mitigations
 
@@ -72,7 +72,7 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 | Sybil / ingress enumeration | discovery | Invitation trees, social-graph/history trust, PoW, graduated knowledge |
 | Eclipse / route poisoning | discovery / routing | Reputation scoring, peer diversity, verifiability |
 | Traffic-timing correlation | routing | Multi-hop, padding, mixing (at latency cost) |
-| Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 3–4 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
+| Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 4–5 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
 | Operator coercion | people | Minimal logging, plausible deniability, jurisdictional distribution |
 
 ## Attack surface: TLS-in-TLS detection and the two-family mitigation
@@ -190,7 +190,7 @@ whose data direction never traverses the high-interference border filter as out-
   **node-to-node** — an in-region ingress hands the flow to an out-of-region node over a node-to-node
   hop — so the user is **never** pointed directly at an out-of-region node, and no user-direct flow
   crosses the degraded border class. This separates ingress from egress across nodes and is therefore
-  an **automated cross-node** posture (Phase 3-5, see [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md)
+  an **automated cross-node** posture (Phase 4-6, see [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md)
   and the ingress/egress-separation note in the table above). In the **current** posture it is available
   as an **operator-built two-hop**: an operator manually stands up an in-region ingress and an
   out-of-region egress under their own genetics, with the egress reached only over the node-to-node hop —
@@ -249,7 +249,7 @@ sound but, on its 2087 default, reachable on such a network only behind a 443 fr
 Treating any carrier that moves authenticated bytes as a possible bridge (the carrier-agnostic model
 of [ADR-0011](adr/0011-carrier-agnostic-bridging.md)) widens reachability — and widens the attack
 surface. Each bridge and each spore is *potentially useful and potentially dangerous*; capability and
-risk are characterised before routing through it. These attacks become first-class from Phase 6 (and
+risk are characterised before routing through it. These attacks become first-class from Phase 7 (and
 their data-model interfaces are anticipated earlier — see the roadmap's scope-discipline note).
 
 | Attack | Where it strikes | Project mitigation |
@@ -264,10 +264,10 @@ their data-model interfaces are anticipated earlier — see the roadmap's scope-
 | False bridge-capability advertisement | bridges | Measure before promotion; a bridge is never a cord without measurement; risk descriptor verified against behaviour |
 | Local-island Eclipse | discovery (islands) | Peer/bridge diversity; scoped trust on merge; no single bridge defines an island's view |
 | Over-trusting satellite / radio carriers | carriers | Explicit risk descriptors; treat satellite/radio as untrusted transport, not as inherently safe |
-| Mesh capture / takeover | full stack / mesh | Detect → quarantine → revoke scoped trust → decay poisoned routes → reroute around the captured region; never crown a permanent centre (Phase 5 self-healing) |
+| Mesh capture / takeover | full stack / mesh | Detect → quarantine → revoke scoped trust → decay poisoned routes → reroute around the captured region; never crown a permanent centre (Phase 6 self-healing) |
 
 **Mesh capture / takeover → self-healing response.** Beyond outside blocking, the mesh must withstand
-compromise from the inside: a captured, coerced, or taken-over node. The response is the Phase 5
+compromise from the inside: a captured, coerced, or taken-over node. The response is the Phase 6
 self-healing path: **detect** the compromised/coerced node from local signals (anomalous routing,
 poisoning attempts, failed verification, stress patterns); **quarantine** it so it carries no scoped
 traffic; **revoke scoped trust** through signed revocation spores; **decay poisoned routes** so bad
@@ -288,26 +288,26 @@ network — or a peer Commune — as a weapon. The mitigations below are **polic
 first-class deployment entity, distinct from the architectural data/control/routing/discovery
 **planes**, which keep their names) defends itself; no global authority defends it for it. The
 cross-Commune machinery (immune signals, Anastomosis-bridge contracts, cross-Commune trust) is
-Phase 4–5 with inert typed schema hooks definable now ([ADR-0013](adr/0013-mycelial-vocabulary-and-phase-discipline.md));
+Phase 5–6 with inert typed schema hooks definable now ([ADR-0013](adr/0013-mycelial-vocabulary-and-phase-discipline.md));
 the closed-by-default node posture, local rate limits, and local quarantine are already the
 Phase-0 posture (per-operator credentials, no open relay or egress).
 
 | Attack | Where it strikes | Project mitigation |
 |---|---|---|
-| Abuse transit / Mycelium used as a universal bypass substrate | full stack / capability classes | Capability classes — anonymous egress is **not** a default primitive; higher-risk classes (relay, egress, unknown bulk) require stronger trust and stronger immunity policy; safe-default closed posture (Phase 4–5 classes; Phase-0 default already refuses open relay/egress) |
-| One Commune attacking through another (peer Commune as attack platform) | bridges / Communes | Anastomosis-bridge contracts: no bridge exists unless explicitly established; each bridge enumerates allowed and forbidden traffic classes, abuse-propagation rules, and revocation/recovery rules; a Commune is never required to relay all traffic or trust all Communes (Phase 4–5) |
+| Abuse transit / Mycelium used as a universal bypass substrate | full stack / capability classes | Capability classes — anonymous egress is **not** a default primitive; higher-risk classes (relay, egress, unknown bulk) require stronger trust and stronger immunity policy; safe-default closed posture (Phase 5–6 classes; Phase-0 default already refuses open relay/egress) |
+| One Commune attacking through another (peer Commune as attack platform) | bridges / Communes | Anastomosis-bridge contracts: no bridge exists unless explicitly established; each bridge enumerates allowed and forbidden traffic classes, abuse-propagation rules, and revocation/recovery rules; a Commune is never required to relay all traffic or trust all Communes (Phase 5–6) |
 | Hostile relay use | relay / egress | No open relay and no public egress by default; relay/egress are trust-gated capability classes; local/community traffic preferred over external transit; scoped reversible cut isolates a misused corridor |
 | Scanning / enumeration originating inside the mesh | node / discovery | Bulk scanning is rejected by default; rate limits for untrusted scopes; quarantine of scanning behaviour; no topology sharing by default starves the scanner of a map |
 | Malware command-and-control over the network | data plane / capability classes | Unknown bulk transit is the highest-risk class and closed by default; quarantine of suspicious nodes; scoped reversible cut of the C2 corridor; capability policy, not content inspection, gates the class |
 | DDoS traffic / amplification through nodes | node / transport | Rate limits for untrusted scopes; custody/transit quotas; no node is required to relay all traffic; scoped reversible cut of the abusive source or corridor; clotting isolates the flood without a global topology change |
 | Coerced global ban / network-wide kill switch | governance (S0) | **No global abuse oracle**: there is never a single authority that can ban a node or Commune network-wide. Fungi may *sign* warnings; Communes may *subscribe to* or *ignore* them; bridge contracts decide which signals bind. A global ban power is itself an S0 attack surface — coerce it once and the whole Mycobiome is captured (see "Immunity and sovereign defense") |
-| Immune-signal abuse (poisoned cut/quarantine/abuse signals) | immune signals (Phase 4–5) | Signals carry only scope, severity, reason code, TTL, evidence class, signer/quorum, and a reversible action hint — **never** raw traffic, user identities, locations, or a complete topology map; signed/quorum-gated; cuts are scoped, reversible, and time-bounded so a forged signal cannot become a permanent or global outage |
+| Immune-signal abuse (poisoned cut/quarantine/abuse signals) | immune signals (Phase 5–6) | Signals carry only scope, severity, reason code, TTL, evidence class, signer/quorum, and a reversible action hint — **never** raw traffic, user identities, locations, or a complete topology map; signed/quorum-gated; cuts are scoped, reversible, and time-bounded so a forged signal cannot become a permanent or global outage |
 
 **Scoped reversible cuts (clotting).** A living organism must be able to clot. Mycelium supports
 temporary, scoped cuts: a cut may isolate a node, a route, a transport, a bridge, a corridor, a
 trust scope, or a Commune. Every cut is **scoped, reversible, time-bounded, auditable inside the
 affected Commune, minimally revealing, and independent of any global topology**. This is the immune
-counterpart to the Phase-5 self-healing path above: self-healing reroutes *around* compromise; a cut
+counterpart to the Phase-6 self-healing path above: self-healing reroutes *around* compromise; a cut
 *stops* infection from spreading while healing runs. The ability to heal requires the ability to
 clot — and because a cut is scoped and time-bounded, it can never degrade into the global kill
 switch that the No-Global-Abuse-Oracle rule forbids.
@@ -425,7 +425,7 @@ Design implications (not merely a disclaimer):
   hands and under different legal regimes, so that compromising or coercing one actor does not
   expose the rest.
 - **Operator protection.** Plausible deniability of participation; clear liability boundaries;
-  informed consent for volunteers contributing bandwidth in phases 4–5.
+  informed consent for volunteers contributing bandwidth in phases 5–6.
 - **User safety above functionality.** If a feature improves convenience at the cost of
   identity exposure, it does not ship. User safety is functional requirement #1.
 

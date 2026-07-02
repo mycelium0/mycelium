@@ -25,7 +25,7 @@ later. See the LICENSE file in the repository root.
 - **Status:** accepted
 - **Layer(s):** discovery/membership, control plane, project governance (cross-cutting)
 - **Phase:** cross-cutting; the prohibition **binds now**; warning signing/subscription and bridge-bound
-  enforcement are Phase 4–5 (gossip/membership), with **inert typed schema hooks** definable now
+  enforcement are Phase 5–6 (gossip/membership), with **inert typed schema hooks** definable now
   ([ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md))
 - **Related:** [../vision/0008-immunity-communes-mycobiome.md](../vision/0008-immunity-communes-mycobiome.md) (the doctrine);
   [0021-decentralized-observability-not-a-central-collector.md](0021-decentralized-observability-not-a-central-collector.md)
@@ -157,7 +157,7 @@ Specifically, the following bind:
 
 **Phase discipline** ([ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md)): the *prohibition*
 binds immediately and applies to every phase. The *machinery* — signed warnings, subscription, and
-bridge-bound enforcement — is Phase 4–5 (it depends on gossip/membership, which do not exist before then);
+bridge-bound enforcement — is Phase 5–6 (it depends on gossip/membership, which do not exist before then);
 only **inert, typed schema hooks** (e.g. a closed `ReasonCode` enum, a `Warning`/immune-signal schema with
 `Validate()` and no runtime consumer) may be defined earlier. The closed-by-default local posture (option
 2's "local decisions stay local" floor: no open relay, no public egress, local rate-limits, local
@@ -188,7 +188,7 @@ quarantine) is **already-true Phase-0 node posture** and is framed as current, n
 - **Impact on observability/measurements:** none added to the collection path; warnings are an
   **advisory output** of existing redacted signals, not a new collector. Any binding cross-Commune effect
   is gated on an explicit bridge contract, not on a measurement feed.
-- **Follow-on actions required:** the Phase-4–5 immune-signal schema ADR (closed `ReasonCode` enum,
+- **Follow-on actions required:** the Phase-5–6 immune-signal schema ADR (closed `ReasonCode` enum,
   `Warning`/`AbuseSignal` typed schema with `Validate()`, evidence-class taxonomy) — inert hooks only
   until gossip/membership land; the bridge-contract binding-grammar (ADR-0024) must define how a contract
   clause makes a signal class binding; an RP for the warning publish/subscribe path that reuses the

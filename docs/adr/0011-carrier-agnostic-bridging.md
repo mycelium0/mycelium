@@ -14,7 +14,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** proposed
 - **Layer(s):** cross-cutting; data plane, control plane, discovery, bootstrapping
-- **Phase:** cross-cutting; interfaces begin in Phase 0, full behavior Phase 4+
+- **Phase:** cross-cutting; interfaces begin in Phase 0, full behavior Phase 5+
 - **Related:** `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, `docs/THREAT-MODEL.md`,
   the internal research baseline (maintainers' knowledge base)
 

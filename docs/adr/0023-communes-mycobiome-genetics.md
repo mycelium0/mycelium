@@ -38,9 +38,10 @@ later. See the LICENSE file in the repository root.
 - **Layer(s):** cross-cutting track (a society/governance model that spans all four layer-planes — data
   plane, control plane, routing & orchestration, discovery & membership — without modifying any of them)
 - **Phase:** cross-cutting. The **entity model** binds now and may be encoded only as **inert typed
-  schema hooks** in Phase 0-2 (per [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md));
-  **live Communes, genetic exchange, cross-Commune trust, and the Mycobiome fabric are Phase 4-5**
-  (gossip/DHT/membership = Phase 3-4; trust-gradient = Phase 5). The closed-by-default node posture
+  schema hooks** in Phase 0-2 (per [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md)); the
+  new Phase 3 introduces its **inert F2F seam** only; **live Communes, genetic exchange, cross-Commune
+  trust, and the Mycobiome fabric are Phase 5-6** (gossip/DHT/membership = Phase 4-5; trust-gradient =
+  Phase 6). The closed-by-default node posture
   this entity model formalises is **already true today** (per-operator credentials, no shared key
   material, no open relay/egress — [ADR-0014](0014-per-operator-node-credentials.md)).
 - **Related:** the **Operator Doctrine** (Immunity, Communes, Sovereign Defense — the canonical source
@@ -97,7 +98,7 @@ everyone.
 [VIS-0003](../vision/0003-node-interaction-and-distributed-awareness.md)'s **`TrustScope`** (scoped,
 bounded trust), the signed **`SporeEnvelope`** (TTL-bounded, signer-attributed artifact — signature is
 a standard primitive per [ADR-0002](0002-no-custom-cryptography.md), never custom crypto), the inert
-**`DiscoveryBackend`** interface (Phase 3-4 membership, deferred), and **`NodeRole`** niches. A
+**`DiscoveryBackend`** interface (Phase 4-5 membership, deferred), and **`NodeRole`** niches. A
 Commune's *genetics* is, concretely, a **named, signed bundle of those scopes, signer sets, and
 policies** — not a new cryptographic system. Per
 [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md), any schema introduced for it in Phase 0-2
@@ -178,8 +179,8 @@ What becomes **canon**:
    typed schema hooks only** (e.g. a `Commune`/`Genetics` record with `Validate()` referencing existing
    inert types) — **no** live Commune membership, **no** genetic exchange, **no** cross-Commune trust,
    **no** Mycobiome fabric runs before its phase ([ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md)).
-   **Live Communes and genetics are Phase 4-5** (membership/gossip/DHT = Phase 3-4; trust-gradient =
-   Phase 5). The **closed-by-default node posture** the model formalises — per-operator credentials, no
+   **Live Communes and genetics are Phase 5-6** (membership/gossip/DHT = Phase 4-5; trust-gradient =
+   Phase 6). The **closed-by-default node posture** the model formalises — per-operator credentials, no
    shared key material, no open relay/egress, no bridge without explicit trust — is **already current**
    ([ADR-0014](0014-per-operator-node-credentials.md)).
 
@@ -217,7 +218,7 @@ global authority owns the Mycobiome.* This rule is now canon and may not be wate
   capability classes); add **Commune / Genetics / Mycobiome** to [GLOSSARY.md](../GLOSSARY.md) under a
   Mycelial-doctrine section, each cross-referencing the layer-plane entry to mark the distinction;
   define the **inert** `Commune`/`Genetics` schema hook in `internal/spec` when its track is scheduled
-  (per [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md), inert until Phase 4-5).
+  (per [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md), inert until Phase 5-6).
 - **What is now forbidden:** (a) any **global authority, roster, owner, or membership service** for the
   Mycobiome, in any phase; (b) treating Mycobiome membership as an **obligation** to trust, relay, or
   stay connected; (c) **renaming or repurposing** the architectural layer-planes (data / control /
@@ -239,7 +240,7 @@ How to verify the decision is respected in practice:
   separation check).
 - **`spec_inert` / `no_premature_mesh` gates** ([ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md))
   — any `Commune`/`Genetics` type added to `internal/spec` must be inert (pure data + `Validate()`, no
-  live gossip/DHT/membership/promotion) until its Phase 4-5 track is authorized.
+  live gossip/DHT/membership/promotion) until its Phase 5-6 track is authorized.
 - **`no_custom_crypto`** ([ADR-0002](0002-no-custom-cryptography.md)) — genetics signing/verification
   must use standard audited primitives (opaque `signer_key_id` + raw `signature` bytes), never a
   bespoke scheme.

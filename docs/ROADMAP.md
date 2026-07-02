@@ -7,7 +7,7 @@ later. See the LICENSE file in the repository root.
 
 # Roadmap
 
-The path from a single node to an autonomous, self-healing mesh. Eight phases (0–7). Each phase ships
+The path from a single node to an autonomous, self-healing mesh. Nine phases (0–8). Each phase ships
 to production, delivers working access **on its own**, and leaves an artefact (code / infra /
 measurements) that the next phase builds on.
 
@@ -15,26 +15,21 @@ Cross-cutting tracks (running through all phases) are described at the end — t
 deferred to "later".
 
 ```
-Phase 0      Phase 1        Phase 2          Phase 3          Phase 4          Phase 5
-Foundation → Distribution → Adaptation    → Network with    → Decentrali-   → Autonomous
-+ multi-     + health +     layer           centralised      sation:          self-healing
-protocol     failover       (self-tuning)   coordination     mesh             mesh
-data plane   maturity                                                          (incl. under
-1 node       1 node,        1–N nodes,     N own nodes,    N nodes +        capture)
-many         priorities/    self-tuning    coordinator     volunteers,      any machine
-transports   health/        + IP migration DHT/mesh         a node           in a LAN = a node
-             failover
-                                  Phase 6                       Phase 7
-                              → Carrier-agnostic           → Biological-flow
-                                bridging & spores             optimization
-                                DTN store/carry/forward,      local-rule route
-                                non-IP carriers,              adaptation at scale
-                                island merge                  (Physarum/fungal-flow
-                                                              spirit)
+Phase 0  Foundation + multi-protocol data plane      1 node, many transports
+Phase 1  Distribution + health + failover maturity   1 node, priorities / health / failover
+Phase 2  Single-node adaptivity (self-tuning)        1 node: measure→detect→tune→rotate→rollback
+Phase 3  Living node — recovery, release,            client recovers e2e; a 2nd operator installs
+         fungi/advisory INERT seam  ◀ FIRST RELEASE  from a signed release; advisory + hypha seams (inert)
+Phase 4  Node network (per-Commune, no global centre) N own nodes, the operator's OWN coordinator
+Phase 5  Decentralisation: the mesh                  N nodes + volunteers; DHT/mesh; NAT'd home box = a node
+Phase 6  Autonomous self-healing mesh                heals around blocks, even when part is captured
+Phase 7  Carrier-agnostic bridging & spores          DTN store/carry/forward; non-IP carriers; island merge
+Phase 8  Biological-flow optimization                local-rule route adaptation at scale (Physarum spirit)
 ```
 
-Phases 0–5 build the mesh and make it self-heal. Phases 6–7 are the later, research- and
-compute-heavier endgame: bridging across any carrier, and optimizing flow with biological local rules.
+Phases 0–6 build the mesh and make it self-heal (the first public release cuts at the end of Phase 3,
+the living single node). Phases 7–8 are the later, research- and compute-heavier endgame: bridging
+across any carrier, and optimizing flow with biological local rules.
 
 Timelines are relative (team of 1–3). These are directions, not deadlines.
 
@@ -108,7 +103,7 @@ endpoint. Engine and protocol versions pinned to concrete tags (see
   PPTP, SSTP, IKEv2) is present on the node ([ADR-0010](adr/0010-phase0-transport-set.md)).
 
 **Risks / notes.** A single node is still a single point of blockage at the IP/AS level — multiple
-transports do not change that; node migration (phase 2) and a network (phase 3) address it. Avoid IP
+transports do not change that; node migration (phase 2) and a network (phase 4) address it. Avoid IP
 ranges with a known-tainted reputation; keep 1–2 fresh IPs in different ASes in reserve. Keeping
 the exposed surface minimal (per-protocol toggling) is the operator's lever against the larger
 attack surface that breadth introduces.
@@ -159,7 +154,7 @@ clients failover automatically, and block visibility emerges: *what exactly* is 
   of all ingress + a one-shot enumeration/coercion target
   (`SINGLE_POINT_OF_BLOCK` / `FORBIDDEN_TOPOLOGY_CENTRALIZATION`, [refactoring.md](refactoring.md) §7,
   §15.2, §15.6) and is prohibited here. The **signed, TTL-bounded, cross-node** form of the same
-  convenience is the Inoculum bundle (deferred Phase-2 design,
+  convenience is the Inoculum bundle (deferred Phase-3 design,
   [RP-0005](proposals/0005-inoculum-bundle-and-toolkit.md)); Phase 1 ships only the
   standard-subscription self-update plus client-side merge.
 - **Per-transport health and failover:** per-endpoint metrics (handshake success rate,
@@ -194,66 +189,114 @@ migration (phase 2). UDP paths are provisioned but not relied upon as the primar
 
 ---
 
-## Phase 2 — Adaptation layer and self-tuning (≈ 6–10 weeks)
+## Phase 2 — Single-node adaptivity (self-tuning)
 
 **Goal.** What operators previously did by hand over hours in response to a blocking event
-(migrating VLESS-TCP → REALITY/gRPC/CDN), the node does **itself in minutes**. This is the
-core of the adaptation layer.
+(migrating VLESS-TCP → REALITY/gRPC/CDN), a **single node does itself in minutes**. Phase 2 is
+scoped to exactly one thing: the node-local **measure → detect → tune → rotate → rollback** loop
+on one node.
 
-> **Scope discipline (operator directive, 2026-06-17).** Phase 2 is **ADAPTIVITY, not new
-> transports.** The transport *set* is already universal and closed ([ADR-0010](adr/0010-phase0-transport-set.md));
-> Phase 1's on-device proof confirmed the existing shapes are sufficient ([phase1-acceptance-ledger.md](phase1-acceptance-ledger.md)).
-> Phase 2 makes the node adapt the **route and behaviour** (detect → adapt → self-tune), not grow the
-> protocol list. Adding/studying new protocols is explicitly **out of scope** for Phase 2 unless the
-> pre-Phase-2 research proves a specific gap the closed set cannot cover. And — **compose proven patterns,
-> do not reinvent**: where a mature primitive fits a Phase-2/3+ need, ADOPT/WRAP it rather than build from
-> scratch (build-vs-reuse principle below).
->
-> **Phase-2 deliverables (operator directive, 2026-06-17):** alongside the adaptivity loop ([RP-0010](proposals/0010-phase2-adaptivity.md)), Phase 2 also (a) **continues the shell → Go migration** ([RP-0008](proposals/0008-go-spine-distribution-rendering.md) P3 — chunks 2+), and (b) **packages a release with a minimal deployment/management CLI for the fungi role** ([RP-0011](proposals/0011-phase2-fungi-packaging-and-cli.md)) so other operators can stand up a fungi and **anastomosis can be tested at the Phase-2 → 3 boundary**. The constrained introduction mechanism ("a fungi MAY introduce, MUST NOT enumerate"; double-opt-in, 1–2-hop depth, TTL, no neighbour-list sharing) ships in Phase 2; the live bridge runtime is Phase 3–4.
->
-> Deliverable (b) is the Phase-2 **Operability & Release track** (expanded 2026-06-20): a single **unified node form** — one node-local descriptor where engine/ingress/CDN-front/reachability are default-off *capabilities*, not node variants ([ADR-0034](adr/0034-unified-node-profile.md)) — plus the installer + management CLI, node diagnostics with a redacted bug-report bundle, and the CI/release/badges surface. It is a **sibling** of the cross-cutting Advisory Network Awareness increment ([ADR-0030](adr/0030-advisory-network-awareness.md)) and, by the same precedent, is **not** a phase renumber (no "Phase 2.5", no fold into the Phase-3 coordinator) — it stays Phase-2 operability.
+> **Scope (operator directive; roadmap honestly re-phased 2026-07-02).** Phase 2 is **single-node
+> adaptivity, and nothing else.** The transport *set* is already universal and closed
+> ([ADR-0010](adr/0010-phase0-transport-set.md)); Phase 1's on-device proof confirmed the existing
+> shapes suffice ([phase1-acceptance-ledger.md](phase1-acceptance-ledger.md)). Phase 2 adapts the
+> **route and behaviour** on one node — it does not grow the protocol list — and it **composes proven
+> patterns, does not reinvent** (build-vs-reuse, [ADR-0031](adr/0031-build-vs-reuse-compose-proven-patterns.md)).
+> The work Phase 2 originally over-reached into — **end-to-end client recovery, the operability/release
+> track, and the advisory/fungi boundary** — is the **new Phase 3** (the re-phasing: Phase 2 grew beyond
+> its plan, so it is honestly closed as single-node adaptivity, and its release-and-federation-adjacent
+> tail becomes Phase 3; old Phases 3–7 renumber to 4–8). The shell → Go migration
+> ([RP-0008](proposals/0008-go-spine-distribution-rendering.md) P3) is a cross-cutting track, not a phase.
 
 **Scope.**
-- **Network-state detector.** Classifies the channel state from signals: handshake timeouts,
-  TCP RST injection, throughput collapse after a successful connect (the AS-level "data dies"
-  pattern), active-probing failures, rising loss/jitter. States:
+- **Network-state detector** ([RP-0010](proposals/0010-phase2-adaptivity.md)). Classifies the node's
+  own channel state from by-product signals: handshake timeouts, TCP RST injection, throughput
+  collapse after a successful connect (the AS-level "data dies" pattern), own-cert/cover-path L7
+  liveness (ADR-0036, pending), rising loss/jitter. States:
   `clean / throttled / blocked / shutdown`.
-- **Auto-rotation loop.** On a block event: rotate transport/port/SNI, regenerate REALITY
-  parameters, bring up/switch to a fresh IP, fall back to CDN-fronted path as last resort. All
-  without human intervention, with rate limits and rollback.
-- **Telemetry and online learning.** Nodes (and, with opt-in consent, anonymised signals from
-  connected clients) send block events. These build a policy of "which transport is alive where
-  right now". The same dataset drives an **optional ML classifier** for channel-state estimation
-  (a symmetric answer to the adversary's ML-based traffic classification): not "guess the
-  protocol", but "diagnose the channel faster and more accurately".
-- **A/B obfuscation self-tuning.** AmneziaWG junk-packet parameters, ClientHello padding
-  (Reality-Vision), packet sizes and timings — tuned by survivability feedback.
+- **Auto-rotation loop** ([RP-0012](proposals/0012-phase2-auto-rotation-actuation.md)). On a
+  degradation: rotate transport/port/SNI, regenerate REALITY parameters, switch address, fall back to
+  a non-degraded shape — under rate limits, anti-flap, and **rollback**, on the node itself.
+- **Self-tuning** (A/B obfuscation). AmneziaWG junk-packet parameters, ClientHello padding, packet
+  sizes/timings — tuned by survivability feedback (the reinforce-and-evaporate decay law).
+- **Node-local diagnosis.** The node classifies its own channel as a **node-local** signal;
+  *publishing* it as advisory network weather is Phase 3.
 
-**Stack.** Lightweight control agent on the node (Go — ADR-0012); telemetry queue; signal store;
-optional online classifier; IP provider integration for fast address rotation.
+**Stack.** Go control agent ([ADR-0012](adr/0012-go-primary-control-plane-language.md)): the pure
+`internal/detect` + `internal/tune` + `internal/measure` + `internal/rotate` spine, `myceliumd`
+gated live apply + rollback.
 
 **Definition of Done.**
-- Artificially blocking the active transport → clients recover **without human action** within
-  single-digit minutes; the node publishes a block event with diagnosis.
-- Transport-selection policy differs by region and updates from telemetry.
-- Detector decisions are measurable (precision/recall on labelled incidents); anti-flapping and
-  false-migration protection is in place.
+- An active transport degrades → the node produces a rotation **plan** → **dry-run** preview + gated
+  **live apply** work → **rollback** works → stale/noisy signals are **refused** (anti-flap +
+  staleness guard). (End-to-end *client* recovery — a stock client recovering unattended — is the
+  **Phase-3** bar, not Phase 2.)
+- Detector decisions are measurable (precision/recall on labelled incidents).
 
-**Risks / notes.** Telemetry is itself a signal and an attack surface — aggregate, add noise, do
-not tie to identity (see [THREAT-MODEL.md](THREAT-MODEL.md)). ML amplifies the heuristics; it
-does not replace them: heuristics must work without ML.
+**Risks / notes.** Telemetry is itself a signal — the node-local signal stays on the node; anything
+emitted is aggregate, noised, identity-free (Phase 3, [THREAT-MODEL.md](THREAT-MODEL.md)). ML
+amplifies the heuristics, it never replaces them.
+
+**Status.** CLOSED as single-node adaptivity — detector + tuner + measure + planner + gated rotation
++ rollback are built and the node-local self-drive is proven on a live node.
 
 ---
 
-## Phase 3 — Node network with centralised coordination (≈ 8–12 weeks)
+## Phase 3 — Living node: recovery, release, and the fungi / advisory inert seam (≈ 6–10 weeks)
 
-**Goal.** Many nodes an operator runs, coordinated through a single coordinator they control.
-True cross-node rerouting and shared block-intelligence emerge. This is a "proto-mesh" with a
-centre — an intentionally simple step before decentralisation.
+**Goal.** Turn the self-adapting single node into a **living node an operator can actually run and
+share**: a real client recovers end-to-end without human action; a second operator installs a node
+from a signed release with no manual fixes; and the **inert seams** for advisory network-weather and
+the fungi F2F boundary are in place — with **no live federation runtime**. The first public release
+is cut after this phase closes honestly.
 
 **Scope.**
-- **Coordinator** (Headscale / Nebula-lighthouse pattern): node registry, config distribution,
-  block-intelligence aggregation, serving the best ingress to a client by geography/health.
+- **End-to-end client recovery.** A stock client on a standard subscription, holding a sibling
+  endpoint, survives a real/artificial block and recovers within minutes — measured at the **client**,
+  not "node-side serving ok".
+- **Operability & release.** `make dist` + signed release; the fungi deploy/management CLI (install,
+  status, plan, apply); node diagnostics with a redacted bug-report bundle; the **unified node
+  descriptor** — engine/ingress/CDN-front/reachability as default-off *capabilities*, not node variants
+  ([ADR-0034](adr/0034-unified-node-profile.md)).
+- **Advisory / fungi boundary — INERT SEAM only.** Class-aggregate network weather (no per-node row,
+  k-floored, TTL, signed — [ADR-0030](adr/0030-advisory-network-awareness.md)); the **F2F hypha** seam
+  — an intra-Commune, same-operator node-to-node bond (edge-fusion), with the constrained introduction
+  mechanism ("a fungi MAY introduce, MUST NOT enumerate"; double-opt-in, 1–2-hop depth, TTL, no
+  neighbour-list sharing) and the Anastomosis-Bridge / capability-class schemas typed **inert**
+  ([ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md)). A *hypha* is the intra-Commune
+  counterpart to the cross-Commune **Anastomosis Bridge**; both are contract-bound, never implicit.
+
+**Stack.** The Phase-2 Go spine + the release/packaging surface; the advisory + hypha/bridge schemas
+as **inert typed data** ([ADR-0013](adr/0013-mycelial-vocabulary-and-phase-discipline.md)); no gossip,
+DHT, or live bridge runtime.
+
+**Definition of Done.**
+- A stock client recovers **end-to-end, unattended**, under a real block (repeatable auto-test).
+- A **second operator** installs a node from the signed release with **no manual fixes**.
+- The advisory-weather + fungi/hypha layers exist as **safe inert seams** — schemas + introduction
+  mechanism only, **no live federation**. **First public release cut here.**
+
+**Risks / notes.** The temptation is to light up live federation in this phase — resist it. The live
+hypha corridor / bridge runtime, autonomous multi-hop, and any node-to-node discovery are **Phase 4+**.
+Reuse proven substrate when federation goes live (Nebula / WireGuard-Noise (Noise-IK) for
+mutual-authenticated node links; private libp2p for NAT'd peers) — do not reinvent
+([ADR-0031](adr/0031-build-vs-reuse-compose-proven-patterns.md)).
+
+---
+
+## Phase 4 — Node network (≈ 8–12 weeks)
+
+**Goal.** Many nodes **an operator runs, coordinated by that operator for their own Commune** — not a
+global centre. True cross-node rerouting and shared block-intelligence *within a Commune* emerge. Each
+Commune is self-governed by its node operators ([ADR-0016](adr/0016-software-releases-not-an-operated-network.md),
+[ADR-0023](adr/0023-communes-mycobiome-genetics.md)); there is **no central coordinator over the
+network as a whole** — only each operator's own, per-Commune control point, an intentionally simple
+step before full decentralisation.
+
+**Scope.**
+- **Per-Commune coordinator** (Headscale / Nebula-lighthouse pattern; the operator's OWN, never a
+  global authority): node registry, config distribution, block-intelligence aggregation within the
+  Commune, serving the best ingress to a client by geography/health.
 - **Network-level rerouting:** if egress A is unreachable from region R, clients in R are
   automatically redirected to egress B; ingress and egress can be different nodes (ingress is
   nearby, egress has a clean reputation).
@@ -274,12 +317,12 @@ anycast/CDN fronts for the coordinator itself; service discovery.
 - The coordinator remains reachable when its primary domain is blocked (via fallback channels).
 
 **Risks / notes.** The coordinator is the highest-value target: its compromise exposes the
-network map. Minimise what it knows; design its replacement starting now (phase 4). This is a
+per-Commune network map. Minimise what it knows; design its replacement starting now (phase 5). This is a
 deliberate, tracked technical debt.
 
 ---
 
-## Phase 4 — Decentralisation: the mesh (≈ 3–6 months)
+## Phase 5 — Decentralisation: the mesh (≈ 3–6 months)
 
 **Goal.** Remove the mandatory centre. Nodes discover one another, maintain a shared map, and
 route **without a single point of control**. This phase also admits **home machines behind NAT**
@@ -305,7 +348,7 @@ as full participants.
 WebRTC for browser-based ingress; invitation/trust scheme; onion routing over Noise channels.
 
 **Definition of Done.**
-- The mesh continues to operate with the phase 3 coordinator **switched off**.
+- The mesh continues to operate with the phase 4 coordinator **switched off**.
 - A new node behind a home NAT joins the mesh and carries third-party traffic.
 - Blocking a set of ingress nodes **does not partition** the mesh; routes converge around the
   failure.
@@ -318,7 +361,7 @@ day one of this phase.
 
 ---
 
-## Phase 5 — Autonomous self-healing mesh (ongoing)
+## Phase 6 — Autonomous self-healing mesh (ongoing)
 
 **Goal.** The target property: reliable private connectivity for the people and groups who need
 it, given some internet connectivity and **at least one reachable mesh node (including one in the
@@ -369,7 +412,7 @@ must leave users connected — even if the next phase never ships.
 
 ---
 
-## Phase 6 — Carrier-agnostic bridging & spores (research- and engineering-heavy)
+## Phase 7 — Carrier-agnostic bridging & spores (research- and engineering-heavy)
 
 **Goal.** Let separated islands reconnect through **any carrier that can move authenticated bytes**,
 not only continuous IP links. The mesh keeps working across intermittent, low-rate, and non-IP
@@ -417,7 +460,7 @@ carriers as "safe by default".
 
 ---
 
-## Phase 7 — Biological-flow optimization (the science / compute-heavy endgame)
+## Phase 8 — Biological-flow optimization (the science / compute-heavy endgame)
 
 **Goal.** Optimize routing and capacity allocation with **local rules in the spirit of Physarum and
 fungal flow networks** — bounded exploration, reinforcement of useful paths, fusion of independent
@@ -441,7 +484,7 @@ self-healing mesh.
 - **Decay everywhere.** Every edge, route, reputation signal, bridge capability, and bootstrap hint
   carries age and decay semantics, so the optimized network never ossifies around stale state.
 
-**Stack.** Distributed local-rule adaptation over the Phase 4–6 substrate (gossip, scoped trust,
+**Stack.** Distributed local-rule adaptation over the Phase 5–7 substrate (gossip, scoped trust,
 carrier adapters, spores); measurement and simulation (netem/netsim, flow-network models) to validate
 that local rules converge to good global behaviour. Heuristics must work without ML; any learning is an
 amplifier, not a dependency, and uses only approved redacted inputs.
@@ -457,8 +500,8 @@ amplifier, not a dependency, and uses only approved redacted inputs.
 
 **Risks / notes.** This is an asymptote and the heaviest research bet: convergence, stability, and
 oscillation (flapping) are real risks, and "biological" is a design metaphor, not a correctness proof.
-Every adaptation must be measurable, bounded, and reversible. The mesh from Phase 5 already delivers
-real, self-healing access; Phase 7 makes it more efficient, it is not a precondition for usefulness.
+Every adaptation must be measurable, bounded, and reversible. The mesh from Phase 6 already delivers
+real, self-healing access; Phase 8 makes it more efficient, it is not a precondition for usefulness.
 
 ---
 
@@ -467,12 +510,12 @@ real, self-healing access; Phase 7 makes it more efficient, it is not a precondi
 | Track | Essence | Why it cannot wait |
 |---|---|---|
 | **Bootstrapping / first contact** | How a node or new participant finds the very first working ingress when everything is blocked: bootstrap configs (file/LAN/Bluetooth/Wi-Fi Direct), CDN rendezvous, domain-fronting | A fundamental limitation of all persistent private networks; without it the mesh "works" only for those already inside |
-| **Carrier-agnostic bootstrapping** | Treat any carrier that moves authenticated bytes (IP, LTE/5G, satellite, Wi-Fi Direct, Bluetooth, LoRa-style radio, WebRTC, QR/file/USB hand-off) as a possible bridge for compact signed spores — so first contact and recovery do not depend on continuous IP reachability. Full model in [ADR-0011](adr/0011-carrier-agnostic-bridging.md) | If carrier and spore *interfaces* are not anticipated early, later phases (esp. Phase 6) become a rewrite; the data models must not block future store/carry/forward |
+| **Carrier-agnostic bootstrapping** | Treat any carrier that moves authenticated bytes (IP, LTE/5G, satellite, Wi-Fi Direct, Bluetooth, LoRa-style radio, WebRTC, QR/file/USB hand-off) as a possible bridge for compact signed spores — so first contact and recovery do not depend on continuous IP reachability. Full model in [ADR-0011](adr/0011-carrier-agnostic-bridging.md) | If carrier and spore *interfaces* are not anticipated early, later phases (esp. Phase 7) become a rewrite; the data models must not block future store/carry/forward |
 | **Security and anonymity** | De-anonymisation threats, traffic-correlation attacks, node compromise; what a node knows about users | Baked into the protocol from the start — cannot be bolted on later |
 | **Measurement** | OONI-style measurements of "what is blocked where and how", replacing guesswork with ground truth. Its public, privacy-preserving surface is the **network-weather explorer** ([vision/0005](vision/0005-network-weather-explorer.md)): opt-in `fungi` nodes emit redacted aggregated digests; the explorer shows fabric health, never a map | Feeds the adaptation layer; without data, adaptation is blind |
-| **Advisory network awareness** (operator-local) | The bridge between Phase-2 self-healing and Phase-3 coordination: several self-healing nodes share **signed, class-aggregate, TTL-bound** advisory weather (per-**class** transport health, bundle freshness, degraded coarse buckets) through an operator-local fungi-lite publisher + `cell-pack` (`aggregate --sign --ttl`). **Federation, not coordination** — no map, no coordinator, no per-node row, no transmitted node id, advisory-never-actuates. Decision + the 10 proof gates in [ADR-0030](adr/0030-advisory-network-awareness.md) | Without it the Phase-2 → Phase-3 jump is a cliff (each node heals itself → a central coordinator, with no rung between). This rides Phase-2 self-healing, gives the inert weather/immunity `internal/spec` schemas their first caller behind proof gates, and tests the future fungi/explorer model **before any mesh exists**. The advisory shape must be class-aggregate by construction — the per-node-digest design reconstructs the network map (rejected, ADR-0030) |
+| **Advisory network awareness** (operator-local) | The bridge between Phase-2 self-healing and Phase-4 coordination: several self-healing nodes share **signed, class-aggregate, TTL-bound** advisory weather (per-**class** transport health, bundle freshness, degraded coarse buckets) through an operator-local fungi-lite publisher + `cell-pack` (`aggregate --sign --ttl`). **Federation, not coordination** — no map, no coordinator, no per-node row, no transmitted node id, advisory-never-actuates. Decision + the 10 proof gates in [ADR-0030](adr/0030-advisory-network-awareness.md) | Without it the Phase-3 → Phase-4 jump is a cliff (each node heals itself → a per-Commune coordinator, with no rung between). This rides Phase-2 self-healing, gives the inert weather/immunity `internal/spec` schemas their first caller behind proof gates, and tests the future fungi/explorer model **before any mesh exists**. The advisory shape must be class-aggregate by construction — the per-node-digest design reconstructs the network map (rejected, ADR-0030) |
 | **Legal and operational security** | Distribution/operation of persistent private network tools is subject to legal pressure in some jurisdictions; exit-node liability; operator and user protection | A legal error is irreversible; detailed legal and compliance analysis is maintained in the maintainers' internal knowledge base |
-| **Governance and funding** | Who pays for nodes, how decisions are made, how mesh segments federate | Determines whether the project reaches phases 4–5 |
+| **Governance and funding** | Who pays for nodes, how decisions are made, how mesh segments federate | Determines whether the project reaches phases 5–6 |
 
 ## Scope discipline (finding MYC-F006)
 
@@ -485,10 +528,10 @@ What Phases 0–2 *may* do is define **data models and interfaces only** — and
 block** future implementation:
 
 - carrier capability + risk descriptors and spore schemas may be sketched as data models, but no
-  store/carry/forward, custody, or non-IP carrier behaviour runs yet (that is Phase 6);
+  store/carry/forward, custody, or non-IP carrier behaviour runs yet (that is Phase 7);
 - discovery interfaces may be shaped so they can later be backed by gossip or a DHT, but no DHT runs
-  (that is Phase 4);
-- trust fields may exist in data models, but no trust gradient drives routing (that is Phase 5);
+  (that is Phase 5);
+- trust fields may exist in data models, but no trust gradient drives routing (that is Phase 6);
 - telemetry interfaces may be defined, but no learning federation runs and no raw telemetry is
   collected;
 - path-weight fields may exist, but no autonomous cord promotion happens without measurement.
@@ -508,10 +551,10 @@ primitive fits a need, **ADOPT or WRAP** it (license permitting — AGPL-3.0-or-
 Indicative prior art per need (the per-component ADOPT/WRAP/BUILD/DEFER decisions are pinned in
 [ADR-0031](adr/0031-build-vs-reuse-compose-proven-patterns.md), informed by the pre-Phase-2 research):
 
-- **P2P substrate** (Phase 3+ peer identity, multi-transport, NAT traversal, hole-punching, relays) — libp2p.
+- **P2P substrate** (Phase 4+ peer identity, multi-transport, NAT traversal, hole-punching, relays) — libp2p.
 - **Store-carry-forward "spores"** (signed TTL-bounded bootstrap/route/trust/revocation artifacts, NOT the
   data path) — DTN / Bundle Protocol v7 (RFC 9171) thinking; Briar for carrier-agnostic sync.
-- **Encrypted self-healing mesh overlay** (Phase 4/5) — Yggdrasil / cjdns.
+- **Encrypted self-healing mesh overlay** (Phase 5/6) — Yggdrasil / cjdns.
 - **Mature anonymous overlay + the telemetry lesson** — I2P (direct health/latency measurement is a
   identity exposure minefield → indirect/profile-based only; binds [ADR-0025](adr/0025-no-global-abuse-oracle.md)/[ADR-0030](adr/0030-advisory-network-awareness.md)).
 - **Volunteer/federated blocking-resistant edges** (ADR-0029) — Tor Snowflake (and its real costs: broker,
@@ -533,7 +576,7 @@ defense** — is canonical (see [GLOSSARY](GLOSSARY.md) and [THREAT-MODEL](THREA
 network that cannot defend itself becomes an attack substrate: a network that cannot cut infection is
 not alive, it is already captured. This doctrine maps onto the phase discipline exactly like every
 other advanced mechanism here — **safe-default node posture is current behaviour; the cross-Commune
-machinery is inert schema now and live only in Phases 4–5** ([ADR-0013](adr/0013-mycelial-vocabulary-and-phase-discipline.md)).
+machinery is inert schema now and live only in Phases 5–6** ([ADR-0013](adr/0013-mycelial-vocabulary-and-phase-discipline.md)).
 
 **Terminology guard.** A **Mycelium Commune** is a *new first-class entity* — a sovereign Mycelium
 society (family, company, university, municipal, NGO, emergency-response, state) with its own trust
@@ -557,11 +600,11 @@ constraints ([VIS-0003](vision/0003-node-interaction-and-distributed-awareness.m
 | **Local rate limits + local quarantine** for untrusted scopes; quarantine suspicious behaviour | **Phase 0–1 node policy** | Per-node, per-operator enforcement; no cross-Commune coordination required, so no membership/trust dependency. |
 | **Traffic capability classes** (local control, emergency coordination, messaging, signed content replication, software updates, real-time media, relay, egress, unknown bulk) — higher-risk capabilities require stronger trust and immunity policy | **Phase 0–2 as typed schema; enforced per class as capabilities ship** | Define the class taxonomy as an inert descriptor early; classes gate behaviour only once the relevant transport/relay capability exists. |
 | **Inert immune / cut / Commune / bridge schemas** — typed, no runtime behaviour: `abuse_signal`, `quarantine_signal`, `cut_signal`, `rate_limit_signal`, `corridor_revocation`, `bridge_risk_signal`, `commune_policy_signal`; Commune genetics; bridge-contract descriptors | **Phase 0–2 (data models / interfaces only)** | Sketched the same way carrier/spore/discovery/trust schemas are — defined so as **not to block** later implementation, with **no** gossip, membership, or cross-Commune action running ([ADR-0013](adr/0013-mycelial-vocabulary-and-phase-discipline.md)). Signals carry only: scope, severity, reason code, TTL, evidence class, signer/quorum, reversible action hint — **never** raw traffic, identities, locations, or complete topology maps. |
-| **Temporary cuts (clotting)** — scoped, reversible, time-bounded, auditable inside the affected Commune, minimally revealing, independent of any global topology — isolating a node, route, transport, bridge, corridor, trust scope, or Commune | **Local cut of a node/route/transport: Phase 1–2** (operator-scoped). **Cut of a bridge / corridor / trust scope / Commune: Phase 4–5** | The ability to heal requires the ability to clot. Local clotting needs no membership; Commune-scoped cuts ride on Phase 4–5 trust/membership. |
-| **Live Communes + Commune genetics** (trust roots, accepted signers, governance, bridge/immunity/transport/observability policies, trust-propagation rules) | **Phase 4–5** | Communes are first-class once membership and trust exist; two Communes may run identical software with completely different genetics. |
-| **Anastomosis Bridges** — explicit inter-Commune bridges defining trust relationships, allowed/forbidden traffic classes, abuse-propagation/quarantine/revocation/recovery rules, evidence requirements | **Phase 4–5** | **No bridge exists unless explicitly established.** (Distinct from the Phase-7 biological *anastomosis* of local **paths** at §[Phase 7](#phase-7--biological-flow-optimization-the-science--compute-heavy-endgame); a Bridge is a governed inter-Commune contract, not a fused route.) Builds on carrier-agnostic bridging ([ADR-0011](adr/0011-carrier-agnostic-bridging.md)). |
-| **Immune signals in flight + cross-Commune cuts** — gossiped abuse/quarantine/cut/revocation signals; subscription and weighting per bridge contract | **Phase 4–5** | Requires gossip/DHT and trust gradient; honours the no-global-abuse-oracle invariant — signals are advisory unless a bridge contract makes them binding. |
-| **Governance / quorum / federation** — Commune governance, fungi quorum, how Communes cooperate, coexist, isolate, specialise, or evolve independent genetics | **Phase 4–5** | Decentralised and consensus-based; global Mycelium does not own Communes ([ADR-0016](adr/0016-software-releases-not-an-operated-network.md)). |
+| **Temporary cuts (clotting)** — scoped, reversible, time-bounded, auditable inside the affected Commune, minimally revealing, independent of any global topology — isolating a node, route, transport, bridge, corridor, trust scope, or Commune | **Local cut of a node/route/transport: Phase 1–2** (operator-scoped). **Cut of a bridge / corridor / trust scope / Commune: Phase 5–6** | The ability to heal requires the ability to clot. Local clotting needs no membership; Commune-scoped cuts ride on Phase 5–6 trust/membership. |
+| **Live Communes + Commune genetics** (trust roots, accepted signers, governance, bridge/immunity/transport/observability policies, trust-propagation rules) | **Phase 6–7** | Communes are first-class once membership and trust exist; two Communes may run identical software with completely different genetics. |
+| **Anastomosis Bridges** — explicit inter-Commune bridges defining trust relationships, allowed/forbidden traffic classes, abuse-propagation/quarantine/revocation/recovery rules, evidence requirements | **Phase 6–7** | **No bridge exists unless explicitly established.** (Distinct from the Phase-8 biological *anastomosis* of local **paths** at §[Phase 8](#phase-8--biological-flow-optimization-the-science--compute-heavy-endgame); a Bridge is a governed inter-Commune contract, not a fused route.) Builds on carrier-agnostic bridging ([ADR-0011](adr/0011-carrier-agnostic-bridging.md)). |
+| **Immune signals in flight + cross-Commune cuts** — gossiped abuse/quarantine/cut/revocation signals; subscription and weighting per bridge contract | **Phase 6–7** | Requires gossip/DHT and trust gradient; honours the no-global-abuse-oracle invariant — signals are advisory unless a bridge contract makes them binding. |
+| **Governance / quorum / federation** — Commune governance, fungi quorum, how Communes cooperate, coexist, isolate, specialise, or evolve independent genetics | **Phase 6–7** | Decentralised and consensus-based; global Mycelium does not own Communes ([ADR-0016](adr/0016-software-releases-not-an-operated-network.md)). |
 
 **Sovereign defense (cross-cutting posture).** Every Commune must be *capable* of self-defense —
 accepting educational/emergency/update traffic while rejecting anonymous relay, unknown egress, bulk
@@ -569,7 +612,7 @@ scanning, or specific bridges, and quarantining suspicious nodes. No Commune is 
 traffic, to trust all other Communes, or to remain connected during active abuse. These are
 policy-driven choices, never controlled by a global authority. The closed-by-default end of this
 posture is **already** the Phase-0–1 node default above; the Commune-scoped policy engine that makes it
-expressive arrives with membership in Phases 4–5.
+expressive arrives with membership in Phases 5–6.
 
 **Canonical rule.** Mycelium is not a universal bypass substrate. It is a Mycobiome composed of
 sovereign Communes: the Core provides compatibility, Communes provide life. Communes may cooperate,

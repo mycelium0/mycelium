@@ -51,7 +51,7 @@ later. See the LICENSE file in the repository root.
   local quarantine, and the closed-by-default safe-defaults posture are **already-true / near-term**
   Phase-0 node behaviour (they follow from per-operator credentials and no open relay/egress, not from
   any cross-deployment machinery); **live** cross-deployment immune behaviour (gossiped immune signals,
-  cross-Commune cut propagation, bridge-bound abuse propagation, quorum signers) is **Phase 4-5**.
+  cross-Commune cut propagation, bridge-bound abuse propagation, quorum signers) is **Phase 5-6**.
 - **Related:** the companion immunity/Communes Vision (the doctrine — Communes, Mycobiome, genetics,
   Anastomosis Bridges, sovereign defence, no global abuse oracle); VIS-0003 §4 (revocation/quarantine,
   merge-dominant quarantine, no auto-quarantine without an observable signal and a reversal path);
@@ -141,7 +141,7 @@ compartment wound response. This ADR records the **bound decision** those pieces
      standard-primitive signers (ADR-0002/ADR-0014).
    - Cons: a *local* cut cannot stop a fabric-wide abuser by itself (no global ejection — by design);
      requires careful signal design so the immune signal does not leak topology; cross-deployment
-     propagation (Phase 4-5) re-introduces the false-quarantine-ratchet and merge-dominance hazards
+     propagation (Phase 5-6) re-introduces the false-quarantine-ratchet and merge-dominance hazards
      VIS-0003 §4 flags, which must be bounded (threshold/quorum, TTL, reversal path), not assumed away.
    - Impact on indistinguishability / survivability: strongly positive — no global target exists; a
      cut reveals minimal metadata, is reversible, and decays; the fabric clots locally and heals.
@@ -216,7 +216,7 @@ An immune signal **MUST carry** exactly this decision metadata, and no free text
 - **reversible action hint** — the defined un-cut / recovery path for the action, so reversibility
   (Decision 1) is carried in the signal itself.
 
-### Decision 3 — Local defence is near-term; cross-deployment immune behaviour is Phase 4-5
+### Decision 3 — Local defence is near-term; cross-deployment immune behaviour is Phase 5-6
 
 - **Already-true / near-term (Phase-0 node posture).** Local defence that needs **no** cross-deployment
   machinery is current or near-term, because it follows from the existing closed-by-default posture
@@ -229,9 +229,9 @@ An immune signal **MUST carry** exactly this decision metadata, and no free text
   `Validate()`, signature only via standard primitive — **no emitter, no consumer, no propagation runs**
   (ADR-0013 Decision 2). A `cut_signal` you can *construct and validate* is not a `cut_signal` anything
   *acts on* before its phase.
-- **Phase 4-5 (live).** **Cross-deployment** immune behaviour — gossiped immune signals, cross-Commune
+- **Phase 5-6 (live).** **Cross-deployment** immune behaviour — gossiped immune signals, cross-Commune
   cut propagation, bridge-bound abuse propagation, quorum signers, subscribe/ignore of fungi-signed
-  warnings — runs **no earlier than Phase 4-5**, after the Phase-transition principle is met, and only
+  warnings — runs **no earlier than Phase 5-6**, after the Phase-transition principle is met, and only
   with the false-quarantine-ratchet and merge-dominance bounds VIS-0003 §4 requires (threshold/quorum
   signing, TTL self-heal, an observable signal + a reversal path — **no auto-quarantine without both**).
 
@@ -279,10 +279,10 @@ provide life.**
   - A **local cut cannot stop a fabric-wide abuser** by itself — that is the deliberate price of
     refusing a global oracle; mitigation is per-Commune policy + bridge-bound, subscribable warnings,
     not a central ban.
-  - **Cross-deployment propagation (Phase 4-5) re-opens the false-quarantine-ratchet and
+  - **Cross-deployment propagation (Phase 5-6) re-opens the false-quarantine-ratchet and
     merge-dominance hazards** (VIS-0003 §4): a coerced node could assert false quarantines that
     dominate future merges. These are **bounded, not solved here** — they need threshold/quorum
-    signing, TTL self-heal, and a reversal path, pinned by the spawned Phase-4-5 ADR, before any
+    signing, TTL self-heal, and a reversal path, pinned by the spawned Phase-5-6 ADR, before any
     cross-Commune cut runs.
   - **A poorly designed signal could leak topology**; the closed reason/severity/evidence-class enums
     and the no-free-text rule are load-bearing and must be enforced, not assumed.
@@ -298,7 +298,7 @@ provide life.**
   **inert typed** schemas (Decision 3) with `Validate()` and ADR-0002-compliant signer fields; add the
   Commune / Mycobiome / Anastomosis Bridge / immune-signal terms to [../GLOSSARY.md](../GLOSSARY.md)
   (distinguishing **Commune** from the architectural **planes**); land the companion immunity/Communes
-  Vision as the home for the full doctrine; spawn the **Phase-4-5 cross-deployment immune ADR**
+  Vision as the home for the full doctrine; spawn the **Phase-5-6 cross-deployment immune ADR**
   (gossiped signals, cross-Commune cut propagation, quorum signers, with the false-quarantine /
   merge-dominance bounds); add the immune attack/abuse cases to [../THREAT-MODEL.md](../THREAT-MODEL.md)
   (the cut-as-weapon and abuse-of-fabric rows); reconcile the [refactoring.md](../refactoring.md) §7
@@ -309,7 +309,7 @@ provide life.**
   map, or that carries free-text where a closed enum is required; auto-quarantine without an observable
   signal **and** a reversal path; binding a Commune to a warning it did not subscribe to, or propagating
   a binding decision across a bridge without an explicit bridge contract (ADR-0011); running any
-  cross-deployment immune propagation before Phase 4-5; renaming the architectural data/control/routing/
+  cross-deployment immune propagation before Phase 5-6; renaming the architectural data/control/routing/
   discovery **planes** to "Commune".
 
 ## Compliance
@@ -327,7 +327,7 @@ How the decision is verified in practice:
   unscoped or unbounded (no-TTL) cut. A cut that cannot expire or cannot be reversed fails the gate.
 - **`spec_inert` / `no_premature_mesh` (ADR-0013)** — the cut and immune-signal types import no network,
   file-I/O, or process-execution packages and link no emitter/consumer/propagation path; any
-  cross-deployment immune propagation wired before Phase 4-5 fails the merge gate.
+  cross-deployment immune propagation wired before Phase 5-6 fails the merge gate.
 - **`no_global_oracle` review checkpoint** — code/doc review rejects any blocklist, ban list, or
   authority that is consulted fabric-wide or that can eject a node/Commune outside its own scope; a
   warning path must be advisory (signable, subscribable, ignorable), never a command, and any
@@ -336,6 +336,6 @@ How the decision is verified in practice:
   referencing a standard primitive only; defining any signature/threshold scheme fails.
 - **Audit checkpoint** — a merge introducing an immune type also updates the GLOSSARY (with the
   Commune-vs-plane distinction) and the THREAT-MODEL immune rows, and references the companion Vision /
-  the Phase-4-5 ADR; reviewers reject any softening of the hard NEVERs (global kill switch; raw
+  the Phase-5-6 ADR; reviewers reject any softening of the hard NEVERs (global kill switch; raw
   traffic/identity/location/full-map in a signal; anonymous egress as a default; a bridge without a
   contract) and any cut that is not scoped-reversible-time-bounded-auditable-minimally-revealing-non-global.
