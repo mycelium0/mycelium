@@ -16,7 +16,9 @@ truth for the version is `internal/spec.Version`.
 - **L7 own-cert/cover-path liveness detection — closes the reach L4-only blind spot for the REALITY + genuine-TLS families (DoD-1 detection-fidelity).**
   A bound listener that is client-DEAD at L7 (a broken REALITY dest) previously probed healthy (TCP connect
   only), so the self-drive loop never rotated off it. Now `measure_l7_probe` (`control/lib/nb_selftest.sh`)
-  does a node-local handshake per client-facing transport — genuine-TLS: an own-cert loopback handshake;
+  does a node-local handshake per client-facing transport — genuine-TLS: an own-cert loopback handshake
+  whose leaf must be non-expired **and** carry the SNI in its SAN (a wrong-domain cert is caught; a
+  self-signed own-cert still passes — the check is a SAN match, not CA-chain trust);
   REALITY: an authenticated ephemeral-loopback steal against `dest` (`donor_verify_reality`) — with a
   probe-side retry-debounce, and writes `$STATE_DIR/l7_selftest.json`. `cmd/myceliumd` folds a *fresh* marker
   into `spec.DetectorSignal.ActiveProbeOK` (`loadL7Liveness`; fail-safe: absent/stale/malformed → healthy, so a
