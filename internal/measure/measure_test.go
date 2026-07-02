@@ -83,14 +83,14 @@ func TestNewFailClosed(t *testing.T) {
 
 func TestTickFailClosed(t *testing.T) {
 	a := newAsm(t)
-	if _, err := a.Tick(nil, "no-such-ref", spec.RotationState{}, t0); err == nil {
+	if _, err := a.Tick(nil, "no-such-ref", spec.RotationState{}, t0, nil); err == nil {
 		t.Error("Tick with unknown active ref: want error")
 	}
-	if _, err := a.Tick([]spec.TransportHealth{health("ghost-ref", 5, 0, t0)}, activeRef, spec.RotationState{}, t0); err == nil {
+	if _, err := a.Tick([]spec.TransportHealth{health("ghost-ref", 5, 0, t0)}, activeRef, spec.RotationState{}, t0, nil); err == nil {
 		t.Error("Tick with snapshot ref not a member: want error")
 	}
 	dup := []spec.TransportHealth{health(candRef, 6, 0, t0), health(candRef, 0, 6, t0)}
-	if _, err := a.Tick(dup, activeRef, spec.RotationState{}, t0); err == nil {
+	if _, err := a.Tick(dup, activeRef, spec.RotationState{}, t0, nil); err == nil {
 		t.Error("Tick with a duplicate ref in one snapshot: want fail-closed error (one window double-folded otherwise)")
 	}
 }
@@ -101,7 +101,7 @@ func TestTickFailClosed(t *testing.T) {
 func TestZeroSampleWindowIsNoData(t *testing.T) {
 	a := newAsm(t)
 	// Establish a clean verdict for the active.
-	pi, err := a.Tick([]spec.TransportHealth{health(activeRef, 6, 0, t0), health(candRef, 6, 0, t0)}, activeRef, spec.RotationState{}, t0)
+	pi, err := a.Tick([]spec.TransportHealth{health(activeRef, 6, 0, t0), health(candRef, 6, 0, t0)}, activeRef, spec.RotationState{}, t0, nil)
 	if err != nil {
 		t.Fatalf("warm tick: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestZeroSampleWindowIsNoData(t *testing.T) {
 	}
 	// The active now reports a 0/0 window (probes lapsed). It must NOT be classified Shutdown.
 	at := t0.Add(time.Minute)
-	pi, err = a.Tick([]spec.TransportHealth{health(activeRef, 0, 0, at), health(candRef, 6, 0, at)}, activeRef, spec.RotationState{}, at)
+	pi, err = a.Tick([]spec.TransportHealth{health(activeRef, 0, 0, at), health(candRef, 6, 0, at)}, activeRef, spec.RotationState{}, at, nil)
 	if err != nil {
 		t.Fatalf("no-data tick: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestTickFoldGolden(t *testing.T) {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 0, 6, at), health(candRef, 6, 0, at)}
 		var err error
-		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at)
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil)
 		if err != nil {
 			t.Fatalf("Tick %d: %v", i, err)
 		}
@@ -154,6 +154,50 @@ func TestTickFoldGolden(t *testing.T) {
 	}
 }
 
+// TestTickActiveProbeFaultsBlocked proves the DoD-1 detection-fidelity seam (RP-0010 AC-6 clarification):
+// a member whose L4 reach window is HEALTHY (the port connects, the fast-class ratio is clean) but whose
+// node-local own-cert/cover-path L7 liveness is DEAD (activeProbe[ref]==false) is classified BLOCKED, not
+// clean — the exact L4-only blind spot the loopback L7 probe closes. The control proves the signal is what
+// flips it: the SAME healthy window with the probe unset (nil map) stays clean.
+func TestTickActiveProbeFaultsBlocked(t *testing.T) {
+	dead := map[string]bool{activeRef: false}
+	a := newAsm(t)
+	var pi rotate.PlanInput
+	for i := 0; i < 6; i++ {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		// L4 healthy for both members; only the active's node-local L7 own-cert probe is dead.
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		var err error
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, dead)
+		if err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+	if pi.ActiveVerdict.State != spec.ConnStateBlocked {
+		t.Errorf("L4-healthy + L7-dead active: verdict = %q, want %q (a high success ratio must not mask a boolean active-probe fault)", pi.ActiveVerdict.State, spec.ConnStateBlocked)
+	}
+	if pi.ActiveVerdict.Reason != spec.ReasonActiveProbeFailure {
+		t.Errorf("reason = %q, want %q", pi.ActiveVerdict.Reason, spec.ReasonActiveProbeFailure)
+	}
+
+	// Control: the identical L4-healthy window with the L7 probe unset (nil map -> default healthy) stays
+	// clean, so the block above is attributable to the L7 signal, not the fold.
+	b := newAsm(t)
+	var pc rotate.PlanInput
+	for i := 0; i < 6; i++ {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		var err error
+		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil)
+		if err != nil {
+			t.Fatalf("control tick %d: %v", i, err)
+		}
+	}
+	if pc.ActiveVerdict.State != spec.ConnStateClean {
+		t.Errorf("L4-healthy + L7 unset active: verdict = %q, want clean", pc.ActiveVerdict.State)
+	}
+}
+
 // TestAssembleClosesLoopActs is the end-to-end proof: an impaired active that then idles out of the
 // snapshot evaporates below a still-clean sibling by the margin, so the assembled input drives the
 // planner to rotate. This closes the measure -> detect -> tune -> assemble -> plan loop.
@@ -163,7 +207,7 @@ func TestAssembleClosesLoopActs(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 0, 6, at), health(candRef, 6, 0, at)}
-		if _, err := a.Tick(snap, activeRef, spec.RotationState{}, at); err != nil {
+		if _, err := a.Tick(snap, activeRef, spec.RotationState{}, at, nil); err != nil {
 			t.Fatalf("phase-1 tick %d: %v", i, err)
 		}
 	}
@@ -176,7 +220,7 @@ func TestAssembleClosesLoopActs(t *testing.T) {
 		// Inject the impaired streak the real loop accumulates; +1 this tick reaches FlipConfirmations.
 		st := spec.RotationState{ImpairedStreak: rotate.DefaultRotationLimits().FlipConfirmations - 1}
 		var err error
-		pi, err = a.Tick(snap, activeRef, st, at)
+		pi, err = a.Tick(snap, activeRef, st, at, nil)
 		if err != nil {
 			t.Fatalf("phase-2 tick %d: %v", i, err)
 		}
@@ -204,8 +248,8 @@ func TestTickDeterministic(t *testing.T) {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, i%2, 6, at), health(candRef, 6, 0, at)}
 		st := spec.RotationState{ImpairedStreak: i}
-		p1, err1 := a1.Tick(snap, activeRef, st, at)
-		p2, err2 := a2.Tick(snap, activeRef, st, at)
+		p1, err1 := a1.Tick(snap, activeRef, st, at, nil)
+		p2, err2 := a2.Tick(snap, activeRef, st, at, nil)
 		if err1 != nil || err2 != nil {
 			t.Fatalf("tick %d errors: %v / %v", i, err1, err2)
 		}
@@ -224,7 +268,7 @@ func TestIdleMemberEvaporatesAndCarriesVerdict(t *testing.T) {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
 		var err error
-		before, err = a.Tick(snap, activeRef, spec.RotationState{}, at)
+		before, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil)
 		if err != nil {
 			t.Fatalf("warmup tick %d: %v", i, err)
 		}
@@ -233,7 +277,7 @@ func TestIdleMemberEvaporatesAndCarriesVerdict(t *testing.T) {
 		t.Fatalf("active verdict after clean warmup = %q, want clean", before.ActiveVerdict.State)
 	}
 	// Two hours later, only the candidate reports; the active idles.
-	after, err := a.Tick([]spec.TransportHealth{health(candRef, 6, 0, t0.Add(2*time.Hour))}, activeRef, spec.RotationState{}, t0.Add(2*time.Hour))
+	after, err := a.Tick([]spec.TransportHealth{health(candRef, 6, 0, t0.Add(2*time.Hour))}, activeRef, spec.RotationState{}, t0.Add(2*time.Hour), nil)
 	if err != nil {
 		t.Fatalf("idle tick: %v", err)
 	}

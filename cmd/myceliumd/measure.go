@@ -175,9 +175,11 @@ func loadRotationState(path string) spec.RotationState {
 // assemblePlanInput folds one reach snapshot through the assembler and marshals the resulting
 // rotate.PlanInput as indented JSON (ready for `myceliumctl rotate-plan`). It is the pure, testable
 // core of the daemon's measure tick — no I/O of its own; the caller supplies the snapshot, active
-// ref, state and clock.
+// ref, state and clock. The node-local L7-liveness map is nil here: increment-1 lands the Tick seam
+// inert (the loopback own-keys probe that populates it is wired in the follow-on), so the daemon
+// folds exactly as before until that probe ships.
 func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time) ([]byte, error) {
-	pi, err := asm.Tick(snap, activeRef, state, now)
+	pi, err := asm.Tick(snap, activeRef, state, now, nil)
 	if err != nil {
 		return nil, err
 	}

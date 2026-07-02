@@ -151,35 +151,44 @@ func New(members []Member, limits spec.RotationLimits, th detect.Thresholds, p t
 	return a, nil
 }
 
-// detectorSignal derives a DetectorSignal from one reach health window (RP-0010 AC-6: no new probe
-// surface). reach reports only success/failure counts, so the per-observation flags are inferred
-// from the window: at least one success proves the channel both connected and handshaked at least
-// once (so the channel is not a black-hole), while zero successes means no probe established a
-// connection (ConnectOK false -> the classifier's shutdown/unreachable branch). The by-products
-// reach does not measure are presented as non-faulted (ActiveProbeOK true; no reset, no post-connect
-// collapse, no single-stream comparison) so they never spuriously classify; a connecting-but-lossy
-// channel is then graded by the success ratio inside the detector, not here.
-func detectorSignal(cls spec.TransportClass, h spec.TransportHealth) spec.DetectorSignal {
+// detectorSignal derives a DetectorSignal from one reach health window plus this ref's node-local L7
+// liveness (RP-0010 AC-6 clarification). reach reports only success/failure counts, so the L4 flags
+// are inferred from the window: at least one success proves the channel connected and (at the reach
+// layer) handshaked at least once, while zero successes means no probe connected (ConnectOK false ->
+// the classifier's shutdown branch). activeProbeOK carries the own-cert/cover-path L7 liveness (the
+// Plane-2 "active-probe response failure" signal): a loopback own-keys handshake against this node's
+// OWN listener, so a listener that is bound-but-client-DEAD at L7 (a broken REALITY dest, a bad
+// own-cert) faults ActiveProbeOK -> the classifier's blocked branch, catching what the L4 reach window
+// cannot see. Absent L7 evidence the caller passes true (non-faulted), preserving the pre-L7 behaviour;
+// the remaining by-products reach does not measure (reset, post-connect collapse, single-stream) stay
+// non-faulted so they never spuriously classify. A connecting-but-lossy channel with no boolean fault
+// is then graded by the success ratio inside the detector, not here.
+func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbeOK bool) spec.DetectorSignal {
 	connected := h.Successes > 0
 	return spec.DetectorSignal{
 		Class:         cls,
 		Health:        h,
 		ConnectOK:     connected,
 		HandshakeOK:   connected,
-		ActiveProbeOK: true,
+		ActiveProbeOK: activeProbeOK,
 		ObservedAt:    h.WindowEnd,
 	}
 }
 
 // Tick folds one reach snapshot into the plane and assembles the current rotate.PlanInput. activeRef
 // names the currently-active member (the incumbent). state is the caller-held between-tick rotation
-// memory, passed straight through to the plan input. now is the injected clock.
+// memory, passed straight through to the plan input. now is the injected clock. activeProbe maps a
+// member ref to its node-local own-cert/cover-path L7 liveness (RP-0010 AC-6 clarification): an
+// explicit false faults that ref's active-probe -> the classifier's blocked branch (catching an
+// L7-dead listener the L4 window cannot see); a ref absent from the map, or a nil map, defaults to
+// healthy (the pre-L7 behaviour, so a caller with no L7 signal folds exactly as before).
 //
 // A member present in the snapshot has its detector and tuner advanced; a member absent from the
 // snapshot (no fresh samples this tick) keeps its carried verdict and is ranked on its decayed
 // weight, read at now. A snapshot ref with no known member, or an unknown activeRef, is refused
-// (fail-closed) rather than silently dropped. Deterministic for a given snapshot stream and clock.
-func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time) (rotate.PlanInput, error) {
+// (fail-closed) rather than silently dropped. Deterministic for a given snapshot stream, clock, and
+// activeProbe map.
+func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe map[string]bool) (rotate.PlanInput, error) {
 	if _, ok := a.members[activeRef]; !ok {
 		return rotate.PlanInput{}, fmt.Errorf("measure: tick: active ref %q is not a known member", activeRef)
 	}
@@ -205,7 +214,15 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 		if h.Successes == 0 && h.Failures == 0 {
 			continue
 		}
-		v, err := a.detectors[h.TransportRef].Observe(detectorSignal(cls, h))
+		// activeProbe carries this ref's node-local own-cert/cover-path L7 liveness; an unset ref (or a
+		// nil map) defaults to healthy, so a caller with no L7 signal folds exactly as it did pre-L7.
+		ap := true
+		if activeProbe != nil {
+			if live, ok := activeProbe[h.TransportRef]; ok {
+				ap = live
+			}
+		}
+		v, err := a.detectors[h.TransportRef].Observe(detectorSignal(cls, h, ap))
 		if err != nil {
 			return rotate.PlanInput{}, fmt.Errorf("measure: tick: observe %q: %w", h.TransportRef, err)
 		}
