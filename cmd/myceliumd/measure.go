@@ -49,6 +49,17 @@ type measureConfig struct {
 	StatePath  string              `json:"state_path,omitempty"` // optional: the shared rotate_state.json (between-tick RotationState)
 	Limits     spec.RotationLimits `json:"limits"`               // the rotation policy
 	Members    []measureMember     `json:"members"`              // the closed transport set the node rotates among
+
+	// L7LivenessPath (optional) points at the node-local own-cert/cover-path L7 liveness marker the
+	// loopback own-keys probe writes ($STATE_DIR/l7_selftest.json). When set, the daemon folds it into
+	// each tick's DetectorSignal.ActiveProbeOK so a bound-but-client-DEAD-at-L7 member (a broken REALITY
+	// dest) faults blocked — the L4-only blind spot the loopback probe closes (RP-0010 AC-6 clarification).
+	// It is fail-safe: an absent/stale/malformed marker yields no L7 signal (healthy), so a probe outage
+	// never spuriously faults a member.
+	L7LivenessPath string `json:"l7_liveness_path,omitempty"`
+	// L7MaxAgeMS is the freshness window for that marker: a marker older than this (by its observed_at)
+	// is ignored (fail-safe healthy). Required (> 0) when L7LivenessPath is set.
+	L7MaxAgeMS int `json:"l7_max_age_ms,omitempty"`
 }
 
 // members converts the config rows to internal/measure.Member descriptors.
@@ -133,6 +144,9 @@ func (c *measureConfig) Validate() error {
 	if c.ActiveRef == "" {
 		return fmt.Errorf("measure config: active_ref is required")
 	}
+	if c.L7LivenessPath != "" && c.L7MaxAgeMS <= 0 {
+		return fmt.Errorf("measure config: l7_max_age_ms must be > 0 when l7_liveness_path is set")
+	}
 	return nil
 }
 
@@ -172,14 +186,55 @@ func loadRotationState(path string) spec.RotationState {
 	return st
 }
 
+// l7LivenessMarker is the node-local own-cert/cover-path L7 liveness marker (RP-0010 AC-6 clarification)
+// the loopback own-keys probe writes. Dead lists the member refs whose L7 handshake failed on the last
+// probe; ObservedAt stamps it for freshness. Extra fields the probe writes (e.g. a checked count) are
+// ignored. Absent/stale/malformed -> no L7 signal, so a probe outage never faults a member.
+type l7LivenessMarker struct {
+	ObservedAt time.Time `json:"observed_at"`
+	Dead       []string  `json:"dead"`
+}
+
+// loadL7Liveness reads the L7 liveness marker at path and returns a SPARSE map of member ref -> false
+// for each FRESH dead ref (an unset ref defaults to healthy in measure.Tick). It is deliberately
+// fail-safe — an empty path or non-positive maxAge, a missing/unreadable/malformed marker, an unstamped
+// or stale marker (older than maxAge by observed_at), or an empty dead set all yield nil (no L7 signal),
+// so the fold behaves exactly as it did pre-L7. ONLY a fresh, well-formed marker naming dead refs faults
+// them: a probe outage must never spuriously rotate a healthy transport.
+func loadL7Liveness(path string, now time.Time, maxAge time.Duration) map[string]bool {
+	if path == "" || maxAge <= 0 {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var m l7LivenessMarker
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	if m.ObservedAt.IsZero() || now.Sub(m.ObservedAt) > maxAge {
+		return nil
+	}
+	out := make(map[string]bool, len(m.Dead))
+	for _, ref := range m.Dead {
+		if ref != "" {
+			out[ref] = false
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // assemblePlanInput folds one reach snapshot through the assembler and marshals the resulting
 // rotate.PlanInput as indented JSON (ready for `myceliumctl rotate-plan`). It is the pure, testable
-// core of the daemon's measure tick — no I/O of its own; the caller supplies the snapshot, active
-// ref, state and clock. The node-local L7-liveness map is nil here: increment-1 lands the Tick seam
-// inert (the loopback own-keys probe that populates it is wired in the follow-on), so the daemon
-// folds exactly as before until that probe ships.
-func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time) ([]byte, error) {
-	pi, err := asm.Tick(snap, activeRef, state, now, nil)
+// core of the daemon's measure tick — no I/O of its own; the caller supplies the snapshot, active ref,
+// state, clock, and the node-local L7-liveness map (a member ref -> false for a fresh L7-dead member;
+// a nil/unset map folds as healthy, the pre-L7 behaviour).
+func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe map[string]bool) ([]byte, error) {
+	pi, err := asm.Tick(snap, activeRef, state, now, activeProbe)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +330,10 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 			// reach/measure ref mismatch the operator should reconcile.
 			log.Printf("myceliumd: measure: dropped %d reach anchor(s) not in the member set (ref mismatch?)", dropped)
 		}
-		out, err := assemblePlanInput(asm, snap, cur.ActiveRef, loadRotationState(cur.StatePath), now)
+		// Fold this tick's node-local L7 liveness (own-cert/cover-path) into the detector: a fresh marker
+		// naming an L7-dead member faults it blocked; absent/stale -> healthy (fail-safe).
+		l7 := loadL7Liveness(cur.L7LivenessPath, now, time.Duration(cur.L7MaxAgeMS)*time.Millisecond)
+		out, err := assemblePlanInput(asm, snap, cur.ActiveRef, loadRotationState(cur.StatePath), now, l7)
 		if err != nil {
 			log.Printf("myceliumd: measure: assemble failed (no plan input written this tick): %v", err)
 			holder.setErr(err.Error(), now)
