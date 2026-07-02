@@ -129,7 +129,7 @@ func TestAssemblePlanInputGolden(t *testing.T) {
 	}
 	// Active failing (zero successes -> impaired), candidate clean.
 	snap := []spec.TransportHealth{health("ref-a", 0, 6, t0), health("ref-b", 6, 0, t0)}
-	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0)
+	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil)
 	if err != nil {
 		t.Fatalf("assemblePlanInput: %v", err)
 	}
@@ -157,8 +157,53 @@ func TestAssemblePlanInputFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAssembler: %v", err)
 	}
-	if _, err := assemblePlanInput(asm, nil, "no-such-ref", spec.RotationState{}, t0); err == nil {
+	if _, err := assemblePlanInput(asm, nil, "no-such-ref", spec.RotationState{}, t0, nil); err == nil {
 		t.Error("assemblePlanInput accepted an unknown active ref, want error")
+	}
+}
+
+// TestLoadL7Liveness proves the fail-safe reader: only a FRESH, well-formed marker naming dead refs
+// faults them; an absent/stale/malformed/unstamped marker or an empty dead set yields nil (no L7
+// signal), so a probe outage never spuriously rotates a healthy transport.
+func TestLoadL7Liveness(t *testing.T) {
+	dir := t.TempDir()
+	now := t0
+	maxAge := 5 * time.Minute
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	fresh := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	stale := now.Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
+
+	if m := loadL7Liveness("", now, maxAge); m != nil {
+		t.Errorf("empty path: got %v, want nil", m)
+	}
+	if m := loadL7Liveness(write("absent-guard.json", "{}"), now, 0); m != nil {
+		t.Errorf("non-positive maxAge: got %v, want nil", m)
+	}
+	if m := loadL7Liveness(filepath.Join(dir, "does-not-exist.json"), now, maxAge); m != nil {
+		t.Errorf("missing file: got %v, want nil", m)
+	}
+	if m := loadL7Liveness(write("bad.json", "{not json"), now, maxAge); m != nil {
+		t.Errorf("malformed: got %v, want nil", m)
+	}
+	if m := loadL7Liveness(write("unstamped.json", `{"dead":["vless-reality-vision"]}`), now, maxAge); m != nil {
+		t.Errorf("unstamped (zero observed_at): got %v, want nil", m)
+	}
+	if m := loadL7Liveness(write("stale.json", `{"observed_at":"`+stale+`","dead":["vless-reality-vision"]}`), now, maxAge); m != nil {
+		t.Errorf("stale marker: got %v, want nil", m)
+	}
+	if m := loadL7Liveness(write("clean.json", `{"observed_at":"`+fresh+`","checked":2,"dead":[]}`), now, maxAge); m != nil {
+		t.Errorf("fresh but no dead: got %v, want nil", m)
+	}
+	// Fresh + dead: the one dead ref faults (false); extra fields (checked) are ignored.
+	m := loadL7Liveness(write("dead.json", `{"observed_at":"`+fresh+`","checked":2,"dead":["vless-reality-vision"]}`), now, maxAge)
+	if len(m) != 1 || m["vless-reality-vision"] != false {
+		t.Errorf("fresh dead marker: got %v, want {vless-reality-vision:false}", m)
 	}
 }
 
