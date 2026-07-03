@@ -19,6 +19,13 @@ truth for the version is `internal/spec.Version`.
   (RP-0013 AC-2). Family-level, not endpoint-level — REALITY Vision/gRPC/XHTTP are one family and fail
   together. Pinned by the `e2e_recovery_fallback` conformance gate + Go tests (a single-family bundle is
   proven rejected). Inert — a pure invariant on the rendered artifact; nothing actuates.
+- **Phase-3 e2e client-recovery harness (RP-0013 C2, `tests/e2e/`).** A repeatable, reversible, **surgical**
+  block of a node's active endpoint (`--source`-scoped `iptables` DROP — external clients unaffected; the
+  served config is never touched) + a headless client recovery probe that drives the node's own rendered
+  subscription (the SAME `urltest` auto-failover a stock client uses), reads the live selection via the
+  Clash API, blocks exactly the active endpoint, and times the failover to the independent sibling —
+  asserting the selection changed families. Live-validated: REALITY → GENUINE_TLS, recovered in 42s. Not a
+  CI gate (moves real packets); its serve-time precondition is the C1 gate above.
 - **L7 own-cert/cover-path liveness detection — closes the reach L4-only blind spot for the REALITY + genuine-TLS families (DoD-1 detection-fidelity).**
   A bound listener that is client-DEAD at L7 (a broken REALITY dest) previously probed healthy (TCP connect
   only), so the self-drive loop never rotated off it. Now `measure_l7_probe` (`control/lib/nb_selftest.sh`)

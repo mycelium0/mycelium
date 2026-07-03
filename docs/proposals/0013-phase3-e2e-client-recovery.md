@@ -13,7 +13,10 @@ later. See the LICENSE file in the repository root.
 - **Status:** **IN PROGRESS** (2026-07-03) — first Phase-3 workstream, opened right after the Phase-2
   GO-sign ([phase2-acceptance-ledger.md](../phase2-acceptance-ledger.md)). **C1 (contract + gates) LANDED:**
   the serve-time fallback invariant is codified (`Bundle.IndependentFallbackOK` / `DistinctClasses`) with
-  the `e2e_recovery_fallback` gate + Go tests. C2 (repeatable recovery harness) + C3 (drill) next.
+  the `e2e_recovery_fallback` gate + Go tests. **C2 (repeatable recovery harness) LANDED + validated:**
+  `tests/e2e/` (reversible scoped block + Clash-API-driven client recovery probe); a live drill on a node
+  measured a genuine cross-family failover (REALITY → GENUINE_TLS, `failover_confirmed`, recovered in ~40s
+  at a 30s urltest interval). C3 (both-direction + on-device drill → Phase-3 acceptance ledger) next.
 - **Phase:** Phase 3 (Living node — recovery, release, fungi/advisory inert seam)
 - **Type:** single-workstream RP with three chunks (contract + gates / repeatable recovery harness / drill)
 - **Related:** [RP-0012](0012-phase2-auto-rotation-actuation.md) AC-1 (this RP *is* that AC, promoted to a
@@ -77,12 +80,20 @@ enters it (AC-4 stays intact); the transport set never grows (AC-5 stays intact)
    per endpoint · the invariant is codified + requires ≥2 · a single-family bundle is proven rejected) +
    Go tests (`TestBundleIndependentFallbackOK` / `…SingleFamily` / `…DistinctClassesDeterministic`).
    Nothing actuates.
-2. **REPEATABLE RECOVERY HARNESS.** A scripted, reversible **block** of a node's active endpoint (a
-   node-local firewall rule dropping that endpoint's port/path — never a change to what the node *serves*)
-   + a **client-side recovery probe**: a headless stock-equivalent client subscribed to the node, measuring
-   the wall-clock from "active endpoint blocked" to "traffic flowing again on a sibling". Emits a
-   pass/fail + a recovery-time record. This is the "repeatable auto-test" the DoD names; the **on-device**
-   manual measurement on the operator's real client (Phase-1 method) is the authoritative companion.
+2. **REPEATABLE RECOVERY HARNESS — LANDED (`tests/e2e/`).** A scripted, reversible, **surgical** block of a
+   node's active endpoint (`block_endpoint.sh` — a `--source`-scoped `iptables` DROP, so a live population on
+   the same port is unaffected; never a change to what the node *serves*) + a **client-side recovery probe**
+   (`client_recovery_probe.sh`): a headless stock-equivalent client (a second sing-box using the node's own
+   rendered subscription — the SAME `urltest` auto-failover a stock client uses; `gen_client_config.sh`
+   wraps it + refuses a single-family sub, mirroring C1). It reads the live `urltest` selection via the
+   Clash API, blocks exactly the **active** endpoint, and times the wall-clock until traffic flows again on
+   the independent sibling — asserting the selection actually **changed families** (a real failover, not a
+   lucky already-on-the-sibling pass). Emits a JSON verdict + `recovery_seconds`. Validated by a live drill:
+   REALITY (Vision) → GENUINE_TLS (ws-tls), `failover_confirmed=true`, recovered in **42s** (30s urltest
+   interval; the served 5m interval bounds real-world recovery), node left byte-identical. This is the
+   "repeatable auto-test" the DoD names; the **on-device** manual measurement on the operator's real client
+   (Phase-1 method) is the authoritative companion (C3). Not a CI gate — it moves real packets — so it is
+   not registered in `tests/run.sh`; its serve-time precondition IS offline-gated (C1).
 3. **THE DRILL.** Run the harness on a live node (block the active → measure client recovery → restore),
    plus one on-device confirmation on the operator's real client, and record the result in a Phase-3
    acceptance ledger. Reversible; leaves the node byte-identical.
