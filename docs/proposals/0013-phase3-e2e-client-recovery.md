@@ -10,9 +10,10 @@ later. See the LICENSE file in the repository root.
 ## Metadata
 - **ID:** RP-0013
 - **Slug:** `phase3-e2e-client-recovery`
-- **Status:** **DRAFT** (2026-07-03) — first Phase-3 workstream, opened right after the Phase-2 GO-sign
-  ([phase2-acceptance-ledger.md](../phase2-acceptance-ledger.md)). Scope + acceptance below; chunking is
-  proposed, not yet started.
+- **Status:** **IN PROGRESS** (2026-07-03) — first Phase-3 workstream, opened right after the Phase-2
+  GO-sign ([phase2-acceptance-ledger.md](../phase2-acceptance-ledger.md)). **C1 (contract + gates) LANDED:**
+  the serve-time fallback invariant is codified (`Bundle.IndependentFallbackOK` / `DistinctClasses`) with
+  the `e2e_recovery_fallback` gate + Go tests. C2 (repeatable recovery harness) + C3 (drill) next.
 - **Phase:** Phase 3 (Living node — recovery, release, fungi/advisory inert seam)
 - **Type:** single-workstream RP with three chunks (contract + gates / repeatable recovery harness / drill)
 - **Related:** [RP-0012](0012-phase2-auto-rotation-actuation.md) AC-1 (this RP *is* that AC, promoted to a
@@ -66,11 +67,16 @@ enters it (AC-4 stays intact); the transport set never grows (AC-5 stays intact)
 
 ## Scope — three chunks (proposed)
 
-1. **CONTRACT + GATES (offline, inert).** Codify the contract above as verifiable invariants on the
-   **served** artifact: an e2e-shaped gate asserting a served subscription always resolves to ≥2
-   independently-reachable siblings, and that a post-rotation re-render still satisfies it (no rotation can
-   collapse the client to a single path). Reuses the existing independence gates; adds the serve-time +
-   post-rotation assertions. Nothing actuates.
+1. **CONTRACT + GATES (offline, inert) — LANDED.** The serve-time fallback invariant is codified on the
+   **rendered** artifact: `spec.Bundle.IndependentFallbackOK` / `DistinctClasses` (`internal/spec/e2e_recovery.go`)
+   assert a served bundle spans ≥2 **distinct transport families** (TransportClass), so a single-family
+   block never removes the client's last path (AC-2). Family-level, not endpoint-level — REALITY
+   Vision/gRPC/XHTTP are ONE family and fail together. Rotation-safe by construction: a RP-0012 rotation
+   stays in the closed set and has no family-disable action, so it can never reduce the served family set.
+   Pinned by the `e2e_recovery_fallback` conformance gate (registry ≥2 families · render stamps the family
+   per endpoint · the invariant is codified + requires ≥2 · a single-family bundle is proven rejected) +
+   Go tests (`TestBundleIndependentFallbackOK` / `…SingleFamily` / `…DistinctClassesDeterministic`).
+   Nothing actuates.
 2. **REPEATABLE RECOVERY HARNESS.** A scripted, reversible **block** of a node's active endpoint (a
    node-local firewall rule dropping that endpoint's port/path — never a change to what the node *serves*)
    + a **client-side recovery probe**: a headless stock-equivalent client subscribed to the node, measuring

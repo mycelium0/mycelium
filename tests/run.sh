@@ -37,6 +37,10 @@
 #                               point of block: no committed config pins a lone hardcoded sub URL, the
 #                               bundle spans >=2 independent transport families, and the served-bundle
 #                               listen binds loopback-only (RP-0007-b)
+#   * e2e_recovery_fallback.sh — the RP-0013 (Phase-3) end-to-end client-recovery contract is codified +
+#                               enforceable: a served bundle spans >=2 INDEPENDENT families (Bundle.
+#                               IndependentFallbackOK) so a single-family block never removes the client
+#                               last path (AC-2); a single-family bundle is rejected (not vacuous)
 #   * node_two_hop_failclosed.sh — node-bootstrap.sh wires the two-hop / operator-toggle / served-bundle
 #                               fail-closed behaviours (audit C17/C18/C19/C21/C25)
 #   * no_new_control_decisions_in_bash.sh — scripts/node-bootstrap.sh stays orchestration-only after the
@@ -221,6 +225,7 @@ GATES=(
 	"tests/conformance/xray_serve_gated_inert.sh"
 	"tests/conformance/active_probe_owncert.sh"
 	"tests/conformance/sub_channel_not_single_point.sh"
+	"tests/conformance/e2e_recovery_fallback.sh"
 	"tests/conformance/node_two_hop_failclosed.sh"
 	"tests/conformance/no_new_control_decisions_in_bash.sh"
 	"tests/conformance/entrypoint_executable.sh"
