@@ -129,6 +129,13 @@ while [ -h "$NB_SELF" ]; do
 	case "$NB_SELF" in /*) ;; *) NB_SELF="$d/$NB_SELF" ;; esac
 done
 NB_DIR="$(cd -P "$(dirname "$NB_SELF")" && pwd)"
+# ABSOLUTE-ise NB_SELF (the symlink loop above only absolutises a symlink target; a plain relative
+# invocation like `cd /opt/mycelium && bash scripts/node-bootstrap.sh` leaves NB_SELF relative). It is
+# written verbatim into the l7probe/rotate systemd unit ExecStart (nb_measure/nb_rotate_apply), and
+# systemd REJECTS a relative ExecStart ("Neither a valid executable name nor an absolute path") — the
+# timers then fail to enable. Anchor it to the already-absolute NB_DIR so any invocation yields an
+# absolute self-path.
+NB_SELF="$NB_DIR/$(basename "$NB_SELF")"
 REPO_ROOT="$(cd -P "$NB_DIR/.." && pwd)"
 
 log()  { printf 'node-bootstrap: %s\n' "$*"; }

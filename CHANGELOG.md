@@ -67,6 +67,13 @@ truth for the version is `internal/spec.Version`.
   realization of the Plane-2 `active-probe response failure (own-cert / cover path)` signal, under the
   hyphal-probe invariants (budgeted, jittered, bounded).
 ### Fixed
+- **Self-drive timers fail to arm on a relative invocation (systemd rejects a relative `ExecStart`).**
+  `scripts/node-bootstrap.sh` wrote its own path (`NB_SELF`) verbatim into the `mycelium-l7probe` /
+  `mycelium-rotate` unit `ExecStart`, but only *absolutised* it when it was a symlink — a plain relative
+  invocation (`cd /opt/mycelium && bash scripts/node-bootstrap.sh --measure-enable`) left it relative, so
+  systemd refused the units ("Neither a valid executable name nor an absolute path") and the timers never
+  enabled (the node silently never self-drove). `NB_SELF` is now anchored to the already-absolute `NB_DIR`,
+  so any invocation yields an absolute self-path. Found by the pre-release arm drill on a fresh node.
 - **Genuine-TLS `tls_sni` = the node's own cert-SAN domain, not the donor SNI** — the client bundles were
   emitting the donor SNI against a `*.example.com` certificate.
 - **REALITY donor validation** — donors are validated with a real ephemeral-loopback REALITY handshake
