@@ -66,12 +66,48 @@ scripts/fungi update        # fetch + re-render + validate + apply, with rollbac
 scripts/fungi apply         # apply node-descriptor changes (transports / reachability) to the node
 ```
 
-Edit what the node serves with the descriptor verbs before `apply`/`deploy`:
+Choose what the node serves with the profile verbs — a single `fungi` surface. Each edits the node-local
+descriptor / front config (write-only intent); nothing mutates a live node until `fungi apply` converges it:
 
 ```sh
-myceliumctl transport enable vless-ws-tls    # add a transport (writes node.config.json)
-myceliumctl reachable off                    # make the node a non-public participant
+fungi transport list                          # the closed registry (proto / class / port / frontable)
+fungi transport enable vless-ws-tls           # serve one more transport
+fungi transport disable hysteria2             # stop serving one
+fungi reachable off                           # make the node a non-public participant (binds loopback)
+fungi front enable --domain cdn.example.com --transport vless-ws-tls   # bring-your-own-domain CDN front
+fungi apply                                   # converge the descriptor onto the node (rollback on failure)
 ```
+
+## Profiles — common recipes
+
+A fresh node already serves a sensible **default profile**: REALITY Vision + gRPC (over TCP) plus AmneziaWG
+(over UDP) — two independent transport families, the minimum a client needs to recover from a single-family
+block (RP-0013). Toggle from there (post-deploy, once the spine is built):
+
+```sh
+# add genuine-TLS WebSocket (survives some IP/SNI blocks REALITY does not):
+fungi transport enable vless-ws-tls && fungi apply
+
+# add the Xray XHTTP transport:
+fungi transport enable vless-xhttp-tls && fungi apply
+
+# put a bring-your-own-domain CDN in front of a frontable transport (ws-tls or xhttp-tls):
+fungi transport enable vless-ws-tls
+fungi front enable --domain cdn.example.com --transport vless-ws-tls
+fungi apply
+# then deploy the compiled $STATE_DIR/front/edge.nginx.conf on YOUR edge host + point the domain's DNS at it
+
+# a non-public participant (in-region relay, not a public entry):
+fungi reachable off && fungi apply
+
+# serve without self-arming the adaptivity loop (a plain, hand-driven node):
+fungi deploy --no-arm ...
+```
+
+**Keep ≥2 independent transport families.** The node refuses to serve a subscription that spans only one
+family (a single block would strand the client — RP-0013), so if you drop AmneziaWG (`--no-amneziawg`)
+enable a second non-REALITY family (e.g. `vless-ws-tls`) too. A CDN front is **complementary** — it adds
+reachability where IP/SNI is blocked; the in-region two-hop stays primary (ADR-0033).
 
 ## Notes
 
@@ -79,7 +115,7 @@ myceliumctl reachable off                    # make the node a non-public partic
   architectures (e.g. armv7) pass `--singbox-version` / `--singbox-sha256` (and `--xray-*` if an
   Xray-engine transport is enabled) explicitly.
 - **The descriptor is optional:** a fresh node uses the default-on transport set; `node.config.json`
-  only records changes you make with `myceliumctl transport` / `reachable`.
+  only records changes you make with `fungi transport` / `reachable` / `front` (or `myceliumctl` directly).
 - **One node form:** engine, reachability, and front are capabilities of a single node, default-off
   ([ADR-0034](docs/adr/0034-unified-node-profile.md)); there is no node "type".
 
