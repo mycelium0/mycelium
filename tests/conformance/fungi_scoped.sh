@@ -8,9 +8,11 @@
 # entrypoint. It is the operator's one-command surface, but it must NOT become a second, ungoverned
 # apply path that bypasses node-bootstrap's fail-closed render -> validate -> promote -> rollback spine.
 # Two sections:
-#   (A) ACTUATION SCOPED — the actuating verbs (deploy/update/apply) actuate ONLY by exec-ing
-#       scripts/node-bootstrap.sh; fungi itself runs NO service-mutating command (systemctl
-#       start/stop/restart/reload/enable/disable/mask), NO engine run/check, and writes NO live config.
+#   (A) ACTUATION SCOPED — the actuating verbs (deploy/update/apply) actuate ONLY by invoking
+#       scripts/node-bootstrap.sh (update/apply exec it; deploy SEQUENCES it — converge, then the explicit
+#       --measure-enable/--rotate-arm/--rotate-enable-loop arm dispatches, so one command self-arms through
+#       the governed spine); fungi itself runs NO service-mutating command (systemctl start/stop/restart/
+#       reload/enable/disable/mask), NO engine run/check, and writes NO live config.
 #   (B) ORCHESTRATION ONLY — fungi defines NO control logic: no config render/validate/promote/rollback,
 #       no `sing-box check`, no jq-driven config mutation. It sequences + delegates; `status` is read-only.
 # OFFLINE + INSPECT-ONLY.
@@ -32,8 +34,8 @@ printf '== fungi is a scoped, orchestration-only entrypoint (RP-0011 C-4) ==\n'
 # ---- (A) actuation scoped ----------------------------------------------------------------------
 # the three actuating verbs delegate to node-bootstrap.sh (the fail-closed actuator)
 for v in deploy update apply; do
-	grep -qE "^[[:space:]]*$v\)" "$F" && grep -qE "exec \"\\\$NODE_BOOTSTRAP\"" "$F" \
-		&& ok "verb '$v' actuates via exec \$NODE_BOOTSTRAP" \
+	grep -qE "^[[:space:]]*$v\)" "$F" && grep -qE '"\$NODE_BOOTSTRAP"' "$F" \
+		&& ok "verb '$v' actuates via \$NODE_BOOTSTRAP" \
 		|| badln "verb '$v' does not delegate actuation to node-bootstrap"
 done
 
@@ -59,14 +61,28 @@ else
 	ok "fungi embeds no render/validate/promote/rollback logic (delegates to the spine)"
 fi
 
-# the actuators are reached ONLY by exec (a thin wrapper never inlines actuation)
-nbrefs="$(grep -cE '"\$NODE_BOOTSTRAP"' "$F" || true)"
-execrefs="$(grep -cE 'exec "\$NODE_BOOTSTRAP"' "$F" || true)"
-# every NODE_BOOTSTRAP invocation is an exec (besides the existence guard) — allow the [ -x ] check line
-nonexec="$(grep -E '"\$NODE_BOOTSTRAP"' "$F" | grep -vE 'exec "\$NODE_BOOTSTRAP"|\[ -x "\$NODE_BOOTSTRAP" \]|NODE_BOOTSTRAP=' || true)"
-[ -z "$nonexec" ] \
-	&& ok "every node-bootstrap invocation is an exec (no inlined orchestration)" \
-	|| badln "a node-bootstrap reference is not an exec/guard: $(printf '%s' "$nonexec" | tr '\n' '|')"
+# the actuators are reached ONLY by delegating to node-bootstrap. Every "$NODE_BOOTSTRAP" reference is
+# either an exec (the single-passthrough verbs update/apply) or a direct call (the deploy verb legitimately
+# SEQUENCES node-bootstrap sub-commands: converge, then the explicit --measure-enable/--rotate-arm/
+# --rotate-enable-loop arm dispatches). Inlined service/engine/config actuation — the thing that would make
+# fungi a second ungoverned apply path — is forbidden by the checks ABOVE; here we only reject a reference
+# that is NOT a node-bootstrap invocation or the existence guard.
+badref="$(grep -E '"\$NODE_BOOTSTRAP"' "$F" \
+	| grep -vE 'exec "\$NODE_BOOTSTRAP"|"\$NODE_BOOTSTRAP" \$\{deploy_args|"\$NODE_BOOTSTRAP" "\$@"|\[ -x "\$NODE_BOOTSTRAP" \]|NODE_BOOTSTRAP=' || true)"
+[ -z "$badref" ] \
+	&& ok "every node-bootstrap reference is a delegating invocation or the guard (deploy may sequence arm dispatches)" \
+	|| badln "a node-bootstrap reference is neither a delegating invocation nor the guard: $(printf '%s' "$badref" | tr '\n' '|')"
+
+# the deploy verb's self-arm goes through the EXPLICIT node-bootstrap arm dispatches (never a systemctl or
+# service mutation inside fungi) — pins that self-arming still flows through the governed spine + the
+# ships-disabled flags, so the ONE-command deploy cannot become an ungoverned arm path.
+if grep -qE '"\$NODE_BOOTSTRAP".*--measure-enable' "$F"; then
+	grep -qE '"\$NODE_BOOTSTRAP".*--rotate-enable-loop' "$F" \
+		&& ok "deploy self-arms via node-bootstrap dispatches (--measure-enable + --rotate-arm + --rotate-enable-loop)" \
+		|| badln "deploy references --measure-enable but not --rotate-enable-loop (incomplete arm chain)"
+else
+	ok "deploy does not self-arm here (serve-only wrapper) — no arm dispatch to pin"
+fi
 
 # plan delegates to the Go deploy-plan verb (pure preview), not to a live read
 grep -qE 'deploy-plan' "$F" \

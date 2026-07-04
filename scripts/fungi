@@ -13,7 +13,7 @@
 # (--singbox-*/--xray-*) are filled from control/engines.manifest.json by node-bootstrap itself
 # (RP-0011 C-2), so the operator passes none.
 #
-#   fungi deploy [opts]   stand up / converge this node            (-> node-bootstrap.sh)
+#   fungi deploy [opts]   converge + self-arm auto-rotation         (-> node-bootstrap.sh; --no-arm = serve only)
 #   fungi update [opts]   fetch + re-render + validate + rollback  (-> node-bootstrap.sh --update)
 #   fungi apply  [opts]   apply the node descriptor to the node    (-> node-bootstrap.sh --node-apply)
 #   fungi plan   [args]   preview the deploy (resolve pins, print)  (-> myceliumctl deploy-plan; read-only)
@@ -69,7 +69,27 @@ fungi_status() {
 [ -x "$NODE_BOOTSTRAP" ] || { echo "fungi: actuator not found: $NODE_BOOTSTRAP" >&2; exit 2; }
 
 case "${1:-}" in
-	deploy) shift; exec "$NODE_BOOTSTRAP" "$@" ;;
+	deploy) shift
+		# Deploy converges the node, then (unless --no-arm) SELF-ARMS the single-node adaptivity loop, so
+		# ONE command yields a serving, self-driving node: the MEASURE detection plane + L7 liveness probe,
+		# the rotate-live sentinel, and the auto-rotation loop. Each arm step is the SAME explicit
+		# node-bootstrap dispatch an operator would run by hand (--measure-enable / --rotate-arm /
+		# --rotate-enable-loop), so the ships-disabled contract still holds: only the explicit flag arms,
+		# and the timer-driven `fungi update` NEVER arms — an auto-pull still cannot self-arm a node.
+		# Idempotent (re-running converges). --no-arm (a fungi-level flag, not forwarded) converges the
+		# node serve-only; arm it later with the three flags or a re-deploy.
+		arm=1; deploy_args=()
+		for a in "$@"; do
+			if [ "$a" = "--no-arm" ]; then arm=0; else deploy_args+=("$a"); fi
+		done
+		"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"}
+		if [ "$arm" -eq 1 ]; then
+			echo "fungi deploy: self-arming single-node adaptivity (measure + L7 probe + auto-rotation; --no-arm to skip)..." >&2
+			"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --measure-enable
+			"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --rotate-arm
+			"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --rotate-enable-loop
+		fi
+		;;
 	update) shift; exec "$NODE_BOOTSTRAP" --update "$@" ;;
 	apply)  shift; exec "$NODE_BOOTSTRAP" --node-apply "$@" ;;
 	plan)   shift

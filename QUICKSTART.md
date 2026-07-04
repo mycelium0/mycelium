@@ -43,10 +43,14 @@ scripts/fungi deploy \
   --allowed-signers /path/to/allowed_signers
 ```
 
-The engine versions + checksums are pinned in `control/engines.manifest.json` and resolved
-automatically — you do **not** hand-enter `--singbox-sha256`. `fungi deploy` hardens the host,
-installs the pinned engine, generates this node's identity locally, renders + validates the config,
-and starts the service (idempotent — re-running converges).
+The engine versions + checksums — and the Go toolchain that builds the control-plane spine — are pinned in
+`control/engines.manifest.json` and fetched + checksum-verified automatically; you do **not** hand-enter
+`--singbox-sha256`, and the node needs **no distro Go**. `fungi deploy` hardens the host, installs the
+pinned engine, generates this node's identity locally, renders + validates the config, starts the service,
+and then **self-arms single-node adaptivity** (the measure + L7 liveness detection plane and the
+auto-rotation loop) so the node comes up self-driving. It is idempotent — re-running converges. Pass
+`--no-arm` to converge serve-only (arm later with `--measure-enable` + `--rotate-arm` + `--rotate-enable-loop`,
+or a re-deploy).
 
 ## 3. Check it is serving
 
