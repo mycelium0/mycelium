@@ -35,7 +35,7 @@ GO=""
 if command -v go >/dev/null 2>&1; then
 	GO="$(command -v go)"
 else
-	for cand in /usr/local/go/bin/go /usr/lib/go-1.26/bin/go /usr/lib/go/bin/go; do
+	for cand in /usr/local/lib/mycelium/go/bin/go /usr/local/go/bin/go /usr/lib/go-1.26/bin/go /usr/lib/go/bin/go; do
 		[ -x "$cand" ] && { GO="$cand"; break; }
 	done
 fi

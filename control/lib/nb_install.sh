@@ -388,6 +388,79 @@ install_tooling() {
 	return 0
 }
 
+# install_go_toolchain — ensure a PINNED, non-distro Go toolchain is present, so every spine-build path
+# (bootstrap, the timer-driven --update, --node-apply) is self-sufficient and reproducible instead of
+# depending on whatever `go` a distro ships (which varies wildly across nodes: the pre-release drill found
+# go1.26 on some, go1.18 on others). Resolves the pin from control/engines.manifest.json (toolchains.go,
+# per-arch sha256) via manifest_toolchain_pins, downloads from GO_DL_BASE, verifies FAIL-CLOSED, and
+# extracts to $TOOLING_DIR/go. On success sets MYC_GO_BIN to the go executable and returns 0; on ANY
+# failure returns non-zero WITHOUT dying (strangler-safe: install_spine degrades to the shell; the
+# AmneziaWG builder, which has no fallback, turns a non-zero return into its own die). Idempotent: skips the
+# download when $TOOLING_DIR/go already self-reports the pinned version. If the arch is uncovered (armv7) or
+# the manifest/jq is unavailable, falls back to a distro `go` on PATH if present (pre-pin behaviour).
+MYC_GO_BIN=""
+install_go_toolchain() {
+	need_root
+	MYC_GO_BIN=""
+	local pins="" gover gosha godl arch goroot goexe archive url tmp got
+	command -v manifest_toolchain_pins >/dev/null 2>&1 && pins="$(manifest_toolchain_pins go 2>/dev/null || true)"
+	if [ -z "$pins" ]; then
+		# No pin for this arch (armv7) or no manifest/jq: keep the pre-pin behaviour — use a distro go if
+		# one is on PATH, else report no toolchain (the caller decides warn-and-skip vs die).
+		if have go; then
+			MYC_GO_BIN="go"
+			warn "no pinned Go for this arch/manifest; falling back to the distro go on PATH ($(command -v go 2>/dev/null))."
+			return 0
+		fi
+		return 1
+	fi
+	gover="$(printf '%s' "$pins" | cut -f1)"   # e.g. go1.23.12
+	gosha="$(printf '%s' "$pins" | cut -f2)"
+	godl="$(printf '%s' "$pins" | cut -f3)"    # e.g. https://go.dev/dl
+	goroot="$TOOLING_DIR/go"; goexe="$goroot/bin/go"
+	# Idempotency: a present toolchain that self-reports the pinned version needs no re-download.
+	if [ -x "$goexe" ] && "$goexe" version 2>/dev/null | grep -q "$gover"; then
+		log "pinned Go $gover already installed at $goroot; skipping."
+		MYC_GO_BIN="$goexe"; return 0
+	fi
+	have curl || have wget || { warn "need curl or wget to download the pinned Go toolchain."; return 1; }
+	have tar || { warn "need tar to unpack the pinned Go toolchain."; return 1; }
+	arch="$(_myc_engine_norm_arch)"
+	archive="${gover}.linux-${arch}.tar.gz"; url="$godl/${archive}"
+	tmp="$(mktemp -d)" || { warn "mktemp failed for the Go toolchain download."; return 1; }
+	trap 'rm -rf "$tmp"' RETURN
+	log "downloading pinned Go toolchain $gover ($url)"
+	if have curl; then
+		run curl -fsSL "$url" -o "$tmp/$archive" || { warn "Go toolchain download failed: $url"; return 1; }
+	else
+		run wget -qO "$tmp/$archive" "$url" || { warn "Go toolchain download failed: $url"; return 1; }
+	fi
+	# FAIL-CLOSED checksum verification against the committed manifest pin. A mismatch NEVER installs (and
+	# never dies): the caller keeps the existing binary / degrades to the shell, and the bad download is
+	# discarded — a tampered or truncated toolchain can never build a node binary.
+	if [ "$DRY_RUN" -eq 0 ]; then
+		if have sha256sum; then got="$(sha256sum "$tmp/$archive" | awk '{print $1}')"
+		else got="$(shasum -a 256 "$tmp/$archive" | awk '{print $1}')"; fi
+		if [ "$got" != "$gosha" ]; then
+			warn "pinned Go checksum MISMATCH (got $got, expected $gosha) — refusing to install the toolchain."
+			return 1
+		fi
+		log "pinned Go checksum verified: $got"
+	fi
+	run tar -xzf "$tmp/$archive" -C "$tmp"
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "[dry-run] would install pinned Go $gover -> $goroot"
+		[ -x "$goexe" ] && MYC_GO_BIN="$goexe"
+		return 0
+	fi
+	[ -x "$tmp/go/bin/go" ] || { warn "Go release layout unexpected: $tmp/go/bin/go not found."; return 1; }
+	run rm -rf "$goroot"
+	run mv "$tmp/go" "$goroot" || { warn "failed to install the Go toolchain to $goroot."; return 1; }
+	[ -x "$goexe" ] || { warn "Go toolchain install incomplete: $goexe missing after move."; return 1; }
+	log "installed pinned Go $gover -> $goroot (non-distro; used for the spine + AmneziaWG builds)"
+	MYC_GO_BIN="$goexe"; return 0
+}
+
 # install_spine — build + install the Go control-plane binary (myceliumctl-go, from cmd/myceliumctl) out
 # of the JUST-FETCHED source into $TOOLING_DIR/bin, so the ADR-0012 Go spine is render-time-resident for
 # the RP-0008 P3 strangler. INERT in chunk 1: nothing resolves to it for rendering yet (MYCTL stays the
@@ -397,11 +470,15 @@ install_tooling() {
 # die, which has no fallback). Idempotent: skips when the installed binary already self-reports the
 # deployed source rev (stamped via -ldflags -X spec.SourceRev), so a node never serves a STALE binary
 # after an --update yet does not rebuild needlessly. Called from install_tooling -> runs on BOTH bootstrap
-# and --update. Offline: the module has ZERO external deps, so GOPROXY/GOSUMDB are pinned off as a hard
-# guard (an accidental fetch fails fast instead of hanging where outbound network is unavailable). The Go toolchain is a base dep on
-# bootstrap; the timer-driven update never runs install_base_deps, so `have go` must gate the build.
+# and --update. Offline: the module has ZERO external deps, so GOPROXY/GOSUMDB are pinned off + GOTOOLCHAIN
+# is local as a hard guard (an accidental fetch fails fast instead of hanging where outbound network is
+# unavailable). The Go toolchain itself is PINNED (install_go_toolchain, from engines.manifest.json), NOT a
+# distro package, so EVERY build path — bootstrap, the timer-driven --update, --node-apply — self-heals the
+# toolchain and builds the same reproducible binary regardless of what `go` (if any) the distro ships.
 install_spine() {
-	have go || { warn "Go toolchain absent; skipping the (inert) myceliumctl-go build — the shell control tool remains authoritative."; return 0; }
+	# Ensure a PINNED, non-distro Go toolchain (self-heals on every path incl. the timer --update). A
+	# missing/unverifiable toolchain only WARNs and skips (strangler doctrine: degrade to the shell).
+	install_go_toolchain || { warn "no usable Go toolchain (pinned download failed + no distro go); skipping the (inert) spine build — the shell control tool remains authoritative."; return 0; }
 	need_root
 	local rev cur
 	rev="$(git -C "$ARTIFACT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
@@ -439,8 +516,8 @@ install_spine() {
 		# surprises across node distros); -trimpath strips the checkout path (reproducibility + no-PII);
 		# GOCACHE is a stable node-local cache so repeated updates are fast incremental rebuilds.
 		if ( cd "$ARTIFACT_ROOT" && HOME="$TOOLING_DIR/.gohome" GOPATH="$TOOLING_DIR/.gopath" \
-				GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
-				go build -trimpath -ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$rev" \
+				GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
+				"$MYC_GO_BIN" build -trimpath -ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$rev" \
 				-o "$bin" "$pkg" ); then
 			log "built + installed $name -> $bin (rev $rev; inert until enabled, shell tool stays authoritative)"
 		else
@@ -453,19 +530,20 @@ install_spine() {
 # install_base_deps — ensure the OS packages a from-zero node needs are present so a fresh-VPS
 # bootstrap needs no manual fixups (Audit-0004 D4): git (fetch/verify), jq (identity/params/render),
 # iptables (AmneziaWG PostUp NAT), ufw (host firewall), curl/ca-certificates/tar/unzip
-# (download + unpack), and golang-go (the Go toolchain that compiles the control-plane spine binary —
-# RP-0008 P3; install_spine builds from it on bootstrap). Idempotent — apt-get install is a no-op for
-# already-present packages. flow_bootstrap-only (never the timer; that is why install_spine still
-# `have go`-gates on the update path). apt-based hosts only; elsewhere it warns and the per-step
+# (download + unpack). The Go toolchain is NO LONGER a distro dep — it is PINNED + fetched by
+# install_go_toolchain (engines.manifest.json), so it is deliberately absent here. Idempotent — apt-get install is a no-op for
+# already-present packages. flow_bootstrap-only (never the timer). install_go_toolchain — called from
+# install_spine — fetches the PINNED Go on EVERY build path (incl. the timer --update), so the update path
+# no longer depends on a distro go. apt-based hosts only; elsewhere it warns and the per-step
 # `have X || die` guards downstream still fail closed.
 install_base_deps() {
 	need_root
 	if ! have apt-get; then
-		warn "no apt-get on this host — install 'git jq iptables ufw curl ca-certificates tar unzip golang-go' by hand; the per-step guards fail closed if any are missing."
+		warn "no apt-get on this host — install 'git jq iptables ufw curl ca-certificates tar unzip' by hand (the Go toolchain is pinned + fetched separately by install_go_toolchain); the per-step guards fail closed if any are missing."
 		return 0
 	fi
-	log "ensuring base packages (git jq iptables ufw curl ca-certificates tar unzip golang-go)"
+	log "ensuring base packages (git jq iptables ufw curl ca-certificates tar unzip)"
 	run env DEBIAN_FRONTEND=noninteractive apt-get update -qq || warn "apt-get update failed; installing against cached lists."
-	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git jq iptables ufw curl ca-certificates tar unzip golang-go \
-		|| die "base package install failed — install git/jq/iptables/ufw/curl/ca-certificates/tar/unzip/golang-go and re-run."
+	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git jq iptables ufw curl ca-certificates tar unzip \
+		|| die "base package install failed — install git/jq/iptables/ufw/curl/ca-certificates/tar/unzip and re-run."
 }

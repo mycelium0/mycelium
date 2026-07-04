@@ -1,5 +1,5 @@
 {
-  "_comment": "Pinned dataplane engine versions + per-arch archive SHA256 (RP-0011 chunk C). node-bootstrap reads this as the DEFAULT --singbox-*/--xray-* pins when the operator passes no explicit flag (additive: an explicit flag still overrides; an arch not listed falls back to the required-flag behaviour). dl_base MUST equal node-bootstrap's SINGBOX_DL_BASE/XRAY_DL_BASE constants. SHA256 is over the official release archive each engine's installer downloads (sing-box: sing-box-<ver>-linux-<arch>.tar.gz; xray: Xray-linux-<token>.zip). Keys are NORMALISED arches (amd64/arm64); armv7 is intentionally uncovered (stays a required flag). Bump version + sha together; engine_manifest_shape pins the structure and the currency check ties the version to the pin CI uses.",
+  "_comment": "Pinned dataplane engine versions + per-arch archive SHA256 (RP-0011 chunk C). node-bootstrap reads this as the DEFAULT --singbox-*/--xray-* pins when the operator passes no explicit flag (additive: an explicit flag still overrides; an arch not listed falls back to the required-flag behaviour). dl_base MUST equal node-bootstrap's SINGBOX_DL_BASE/XRAY_DL_BASE constants. SHA256 is over the official release archive each engine's installer downloads (sing-box: sing-box-<ver>-linux-<arch>.tar.gz; xray: Xray-linux-<token>.zip). Keys are NORMALISED arches (amd64/arm64); armv7 is intentionally uncovered (stays a required flag). Bump version + sha together; engine_manifest_shape pins the structure and the currency check ties the version to the pin CI uses. The toolchains block pins the BUILD toolchain (go) the same way (version + per-arch sha256 + dl_base == node-bootstrap GO_DL_BASE) so the node builds the spine from a PINNED, non-distro Go; go.version tracks the go.mod floor.",
   "version": 1,
   "engines": {
     "singbox": {
@@ -16,6 +16,16 @@
       "sha256": {
         "amd64": "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae",
         "arm64": "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"
+      }
+    }
+  },
+  "toolchains": {
+    "go": {
+      "version": "go1.23.12",
+      "dl_base": "https://go.dev/dl",
+      "sha256": {
+        "amd64": "d3847fef834e9db11bf64e3fb34db9c04db14e068eeb064f49af747010454f90",
+        "arm64": "52ce172f96e21da53b1ae9079808560d49b02ac86cecfa457217597f9bc28ab3"
       }
     }
   }

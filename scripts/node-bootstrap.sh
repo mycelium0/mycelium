@@ -193,6 +193,12 @@ SINGBOX_DL_BASE="https://github.com/SagerNet/sing-box/releases/download"
 # is committed.
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_DL_BASE="https://github.com/XTLS/Xray-core/releases/download"
+
+# Canonical Go toolchain release source (go.dev/dl). The control-plane spine + AmneziaWG userspace tools
+# build from a PINNED Go (control/engines.manifest.json -> toolchains.go), never the distro package — so a
+# fresh node needs no distro Go and every build path (bootstrap / --update / --node-apply) resolves the
+# SAME toolchain. Only the public base URL is committed; the version + per-arch sha256 live in the manifest.
+GO_DL_BASE="https://go.dev/dl"
 # Xray engine service paths (ADR-0032 dual-engine; peers of SINGBOX_ETC/SINGBOX_CONFIG). The xray
 # engine serves from its OWN config, separate from sing-box's, so the two engines never collide.
 XRAY_ETC="/usr/local/etc/xray"

@@ -45,3 +45,22 @@ manifest_engine_pins() {
 		| select($x != null and $x.version != null and $x.dl_base != null and $s != null and $s != "")
 		| [$x.version, $s, $x.dl_base] | @tsv' "$mf" 2>/dev/null || return 0
 }
+
+# manifest_toolchain_pins <go|...> [arch] — print "<version>\t<sha256>\t<dl_base>" (TAB-separated) for a
+# pinned BUILD TOOLCHAIN (control/engines.manifest.json -> .toolchains) on the given (default: host)
+# normalised arch, or NOTHING if the manifest, jq, the entry, or the per-arch sha is unavailable. Same
+# read-only, never-fails contract as manifest_engine_pins — an uncovered arch (armv7) or an absent pin
+# yields nothing, and the caller keeps its fallback (distro go / skip). CLASSIFICATION: pure read.
+manifest_toolchain_pins() {
+	local tc="${1:?toolchain required}" arch mf
+	arch="$(_myc_engine_norm_arch "${2:-}")"
+	[ -n "$arch" ] || return 0
+	mf="$(_myc_engine_manifest_path)"
+	[ -f "$mf" ] || return 0
+	command -v jq >/dev/null 2>&1 || return 0
+	jq -er --arg t "$tc" --arg a "$arch" '
+		(.toolchains[$t]) as $x
+		| ($x.sha256[$a]) as $s
+		| select($x != null and $x.version != null and $x.dl_base != null and $s != null and $s != "")
+		| [$x.version, $s, $x.dl_base] | @tsv' "$mf" 2>/dev/null || return 0
+}

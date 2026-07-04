@@ -220,8 +220,8 @@ render_awg0() {
 # ---------------------------------------------------------------------------
 # install_awg_tools — build + install the AmneziaWG userspace tools from pinned source when absent, so a
 # fresh-VPS bootstrap brings up the second transport family with no manual fixups (Audit-0004 D4 / F-006).
-# No upstream prebuilt amneziawg-go release exists, so this builds from source (apt golang-go +
-# build-essential). Idempotent: a no-op when awg/awg-quick/amneziawg-go are already present. Also renders
+# No upstream prebuilt amneziawg-go release exists, so this builds from source (the PINNED Go from
+# install_go_toolchain + apt build-essential). Idempotent: a no-op when awg/awg-quick/amneziawg-go are already present. Also renders
 # the custom awg-quick@.service that forces the userspace implementation (the kernel module is not used).
 # flow_bootstrap-only (called from setup_amneziawg, which the timer never runs).
 install_awg_tools() {
@@ -231,16 +231,20 @@ install_awg_tools() {
 	fi
 	need_root
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "[dry-run] would apt-get install golang-go build-essential, build amneziawg-go $AWG_GO_TAG + amneziawg-tools $AWG_TOOLS_TAG from source, install them, and render the userspace awg-quick@ unit."
+		log "[dry-run] would apt-get install build-essential + fetch the pinned Go toolchain (install_go_toolchain), build amneziawg-go $AWG_GO_TAG + amneziawg-tools $AWG_TOOLS_TAG from source, install them, and render the userspace awg-quick@ unit."
 		return 0
 	fi
-	have apt-get || die "AmneziaWG tools absent and no apt-get to bootstrap the build toolchain — install golang-go + build-essential + the awg tools by hand, or pass --no-amneziawg."
+	have apt-get || die "AmneziaWG tools absent and no apt-get to bootstrap the build toolchain — install build-essential + the awg tools by hand (the Go toolchain is pinned + fetched by install_go_toolchain), or pass --no-amneziawg."
 	log "building AmneziaWG userspace tools from pinned source (amneziawg-go $AWG_GO_TAG, amneziawg-tools $AWG_TOOLS_TAG)"
-	env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go build-essential || die "failed to install golang-go + build-essential for the AmneziaWG build."
+	env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential || die "failed to install build-essential for the AmneziaWG build."
+	# The AmneziaWG userspace build needs Go too — use the SAME pinned, non-distro toolchain as the spine.
+	# No fallback here (unlike install_spine): AmneziaWG is a required transport family, so a missing/
+	# unverifiable toolchain is fatal (matches this builder's existing die-not-degrade contract).
+	install_go_toolchain || die "AmneziaWG build needs the pinned Go toolchain and it could not be fetched/verified — check egress + control/engines.manifest.json (toolchains.go), or pass --no-amneziawg."
 	local build; build="$(mktemp -d)" || die "mktemp failed for the AmneziaWG build."
 	if ! have amneziawg-go; then
 		git clone --depth 1 -b "$AWG_GO_TAG" "$AWG_GO_REPO" "$build/awg-go" || die "amneziawg-go clone ($AWG_GO_TAG) failed."
-		( cd "$build/awg-go" && go build -trimpath -o amneziawg-go . ) || die "amneziawg-go build failed (check the Go toolchain)."
+		( cd "$build/awg-go" && GOTOOLCHAIN=local "$MYC_GO_BIN" build -trimpath -o amneziawg-go . ) || die "amneziawg-go build failed (check the Go toolchain)."
 		install -m 0755 "$build/awg-go/amneziawg-go" "$AWG_BIN_DIR/amneziawg-go" || die "amneziawg-go install failed."
 		log "built + installed amneziawg-go -> $AWG_BIN_DIR/amneziawg-go"
 	fi
