@@ -87,6 +87,8 @@ func run(args []string) error {
 		return cmdTransport(rest)
 	case "reachable":
 		return cmdReachable(rest)
+	case "front":
+		return cmdFront(rest)
 	case "deploy-plan":
 		return cmdDeployPlan(rest)
 	case "diag":
@@ -1141,6 +1143,136 @@ func cmdTransportList(args []string) error {
 	return w.Flush()
 }
 
+// defaultFrontConfig is the node-local CDN/ingress front descriptor the front verbs edit (matches the
+// bash FRONT_CONFIG = $STATE_DIR/front.config.json that nb_front.sh front_setup consumes). It is
+// operator-supplied + node-local + never committed (ADR-0033). SEPARATE from node.config.json: the front
+// descriptor is what the deploy path reads directly; the node-profile Front field is not wired to it yet.
+const defaultFrontConfig = "/var/lib/mycelium/front.config.json"
+
+// cmdFront is the operator-facing CDN/ingress front descriptor surface (ADR-0033). enable/disable WRITE
+// the node-local front.config.json the deploy path (nb_front.sh front_setup) consumes; show prints it.
+// Like transport/reachable it is WRITE-ONLY on intent — it runs NO subprocess and never mutates a live
+// node; the operator applies with node-bootstrap.sh (deploy / --node-apply). A bring-your-own-domain,
+// opt-in, default-off front (a disabled front is byte-identical to none).
+func cmdFront(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("front: a subcommand is required (enable | disable | show)")
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "enable":
+		return cmdFrontSet(rest, true)
+	case "disable":
+		return cmdFrontSet(rest, false)
+	case "show":
+		return cmdFrontShow(rest)
+	default:
+		return fmt.Errorf("front: unknown subcommand %q (enable | disable | show)", sub)
+	}
+}
+
+// cmdFrontSet turns the CDN front on (enable) or off (disable) in the front descriptor, validated against
+// the ADR-0033 invariants (an enabled front needs the operator's OWN domain over a CDN-frontable transport;
+// terminate mode needs the explicit trade-off ack). disable keeps the domain/transport for easy re-enable
+// and only flips enabled off. Write-only (no subprocess); apply with node-bootstrap.sh.
+func cmdFrontSet(args []string, enable bool) error {
+	verb := "disable"
+	if enable {
+		verb = "enable"
+	}
+	fs := flag.NewFlagSet("front "+verb, flag.ContinueOnError)
+	cfgPath := fs.String("config", defaultFrontConfig, "front descriptor to edit")
+	domain := fs.String("domain", "", "the operator's OWN fronting domain (required to enable; core registers none)")
+	transport := fs.String("transport", "", "the frontable transport to sit in front of (vless-xhttp-tls | vless-ws-tls)")
+	mode := fs.String("mode", "", "relay (default, doctrine-clean) | terminate (metadata trade-off, needs --ack-terminate)")
+	ackTerminate := fs.Bool("ack-terminate", false, "acknowledge the terminate metadata trade-off (required for --mode terminate)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("front %s: unexpected positional argument(s): %v", verb, fs.Args())
+	}
+	// Read the existing front descriptor (fail-closed on present-but-invalid JSON); start empty if absent.
+	var c spec.FrontConfig
+	if data, rerr := os.ReadFile(*cfgPath); rerr == nil {
+		if jerr := json.Unmarshal(data, &c); jerr != nil {
+			return fmt.Errorf("front %s: existing %s is invalid JSON: %w", verb, *cfgPath, jerr)
+		}
+	} else if !os.IsNotExist(rerr) {
+		return fmt.Errorf("front %s: read %s: %w", verb, *cfgPath, rerr)
+	}
+	if enable {
+		c.Enabled = true
+		if *domain != "" {
+			c.Domain = *domain
+		}
+		if *transport != "" {
+			c.Transport = *transport
+		}
+		if *mode != "" {
+			c.Mode = spec.FrontMode(*mode)
+		}
+		if *ackTerminate {
+			c.AckTerminateTradeoff = true
+		}
+	} else {
+		c.Enabled = false // keep domain/transport/mode for easy re-enable
+	}
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("front %s: the resulting front descriptor is invalid: %w", verb, err)
+	}
+	out, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("front %s: marshal: %w", verb, err)
+	}
+	if err := os.WriteFile(*cfgPath, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("front %s: write %s: %w", verb, *cfgPath, err)
+	}
+	if enable {
+		fmt.Printf("ok\tfront enable\tdomain=%s transport=%s mode=%s\t-> %s\n", c.Domain, c.Transport, c.EffectiveMode(), *cfgPath)
+		fmt.Printf("note: the fronted transport must also be served — run: transport enable %s\n", c.Transport)
+		fmt.Println("apply on this node with: node-bootstrap.sh (deploy) or --node-apply. Then deploy the compiled")
+		fmt.Println("$STATE_DIR/front/edge.nginx.conf on YOUR OWN edge host and point the front domain's DNS at it.")
+	} else {
+		fmt.Printf("ok\tfront disable\t(no fronting; byte-identical to none)\t-> %s\n", *cfgPath)
+		fmt.Println("apply on this node with: node-bootstrap.sh --node-apply")
+	}
+	return nil
+}
+
+// cmdFrontShow prints the current front descriptor (read-only). Absent => default-off (no front).
+func cmdFrontShow(args []string) error {
+	fs := flag.NewFlagSet("front show", flag.ContinueOnError)
+	cfgPath := fs.String("config", defaultFrontConfig, "front descriptor to read")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("front show: takes no positional arguments")
+	}
+	data, rerr := os.ReadFile(*cfgPath)
+	if rerr != nil {
+		if os.IsNotExist(rerr) {
+			fmt.Printf("front: none (%s absent) — default-off, no CDN front\n", *cfgPath)
+			return nil
+		}
+		return fmt.Errorf("front show: read %s: %w", *cfgPath, rerr)
+	}
+	var c spec.FrontConfig
+	if jerr := json.Unmarshal(data, &c); jerr != nil {
+		return fmt.Errorf("front show: %s is invalid JSON: %w", *cfgPath, jerr)
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintf(w, "enabled:\t%t\n", c.Enabled)
+	fmt.Fprintf(w, "domain:\t%s\n", c.Domain)
+	fmt.Fprintf(w, "transport:\t%s\n", c.Transport)
+	fmt.Fprintf(w, "mode:\t%s\n", c.EffectiveMode())
+	if c.EffectiveMode() == spec.FrontModeTerminate {
+		fmt.Fprintf(w, "ack_terminate:\t%t\n", c.AckTerminateTradeoff)
+	}
+	return w.Flush()
+}
+
 func usage(w *os.File) {
 	fmt.Fprintf(w, `myceliumctl %s — Mycelium Phase 0 control CLI (Go spine).
 
@@ -1165,6 +1297,9 @@ Commands:
   transport enable  PROTO [--config FILE]      add a transport to the node profile descriptor (write-only; apply with --node-apply)
   transport disable PROTO [--config FILE]      remove a transport from the node profile descriptor (write-only)
   reachable on|off [--config FILE]             set the node's public-entry posture (off = bind loopback; write-only, apply with --node-apply)
+  front enable --domain D --transport P [...]  turn on a bring-your-own-domain CDN/ingress front (write-only; apply with deploy/--node-apply)
+  front disable [--config FILE]                turn the CDN front off (byte-identical to no front)
+  front show [--config FILE]                   print the current front descriptor (read-only)
   deploy-plan [FILE] [--arch A] [--manifest F] preview a node's deploy: resolve engine pins + print the command (read-only)
   diag redact                                  read stdin, write it PII-scrubbed to stdout (safe to attach to a bug report)
   diag collect                                 assemble a PII-redacted node diagnostics bundle (versions / units / recent log)

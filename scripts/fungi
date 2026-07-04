@@ -17,9 +17,12 @@
 #   fungi update [opts]   fetch + re-render + validate + rollback  (-> node-bootstrap.sh --update)
 #   fungi apply  [opts]   apply the node descriptor to the node    (-> node-bootstrap.sh --node-apply)
 #   fungi plan   [args]   preview the deploy (resolve pins, print)  (-> myceliumctl deploy-plan; read-only)
+#   fungi transport <list|enable|disable> [P]  choose which transports this node serves   (-> myceliumctl transport)
+#   fungi front <enable|disable|show> [opts]   turn a bring-your-own-domain CDN front on/off (-> myceliumctl front)
+#   fungi reachable <on|off>                   set the node's public-entry posture         (-> myceliumctl reachable)
 #   fungi status          read-only: what this node is running
 #
-# Exit: forwards the delegated command's exit; 2 = usage, 3 = the Go spine for `plan` is unavailable.
+# Exit: forwards the delegated command's exit; 2 = usage, 3 = the Go spine (plan/transport/front/reachable) is unavailable.
 
 set -euo pipefail
 
@@ -30,7 +33,7 @@ REPO_ROOT="$(cd -P "$(dirname "$FUNGI_SELF")/.." && pwd)"
 NODE_BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
 
 usage() {
-	sed -n '7,21p' "$FUNGI_SELF" | sed 's/^# \{0,1\}//; s/^#$//'
+	sed -n '7,24p' "$FUNGI_SELF" | sed 's/^# \{0,1\}//; s/^#$//'
 }
 
 # Resolve the Go spine binary that speaks `deploy-plan` (install_spine builds it at
@@ -97,8 +100,16 @@ case "${1:-}" in
 		# Run from REPO_ROOT so deploy-plan's relative default --manifest (control/engines.manifest.json)
 		# resolves regardless of the operator's cwd (the live descriptor default is an absolute path).
 		cd "$REPO_ROOT" && exec "$mc" deploy-plan "$@" ;;
+	transport|reachable|front) verb="$1"; shift
+		# The operator's single surface for choosing WHAT the node serves — which transports, the public
+		# posture, and the bring-your-own-domain CDN/ingress front. Delegated to the Go spine, which
+		# VALIDATES + writes the node-local descriptor / front config (write-only intent); nothing actuates
+		# until the next deploy/apply. Same resolve-or-explain fallback as `plan` (the spine must be built —
+		# run `fungi deploy` once first, or edit from a checkout with myceliumctl directly).
+		mc="$(resolve_myctl_go)" || { echo "fungi $verb: the Go spine (myceliumctl-go) is not built here; run 'fungi deploy' first, or use 'myceliumctl $verb' from a checkout." >&2; exit 3; }
+		exec "$mc" "$verb" "$@" ;;
 	status) shift; fungi_status ;;
 	help|-h|--help) usage; exit 0 ;;
 	"") usage >&2; exit 2 ;;
-	*) echo "fungi: unknown verb '$1' (deploy|update|apply|plan|status)" >&2; usage >&2; exit 2 ;;
+	*) echo "fungi: unknown verb '$1' (deploy|update|apply|plan|transport|front|reachable|status)" >&2; usage >&2; exit 2 ;;
 esac
