@@ -102,5 +102,7 @@ Phase-2 blocker:
   hardening (Audit-0007 S1 + all of S2) is landed and CI-green. **Phase-2 → Phase-3 transition
   AUTHORIZED.** End-to-end client recovery, the release track, and the advisory/fungi boundary are the
   Phase-3 work, per the re-phasing decision.
-- **Engineering plane:** the offline conformance suite (63 gates) is green; the Go spine builds and passes
-  `go vet` / unit tests / `-race`; every Audit-0007 S1 + S2 remediation commit is CI-green on `main`.
+- **Engineering plane:** the offline conformance suite (65 gates) is green; the Go spine builds and passes
+  `go vet` / unit tests / `-race`; every Audit-0007 S1 + S2 remediation commit is CI-green on `main`. This
+  Phase-2 close ships as **v0.2.29** — the repository's first signed release tag, cut from
+  `internal/spec.Version` = 0.2.29 (CHANGELOG `[0.2.29]`).

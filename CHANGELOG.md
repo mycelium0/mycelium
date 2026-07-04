@@ -12,6 +12,8 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
+
+## [0.2.29] — 2026-07-04
 ### Added
 - **Phase-3 inert federation seam — hypha built, Anastomosis-Bridge declared (ADR-0037).** The
   substrate-agnostic contract schema for node-to-node federation, all inert (typed data + pure `Validate()`,
