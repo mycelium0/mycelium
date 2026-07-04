@@ -37,9 +37,15 @@ MEASURE_REACH_TIMEOUT_MS="${MEASURE_REACH_TIMEOUT_MS:-3000}"
 # healthy — fail-safe); the probe itself runs OUT of the daemon on a budgeted+jittered oneshot timer
 # (INTERVAL +/- JITTER), a slower cadence than the 30s tick — the expensive, bounded hyphal probe, never
 # every tick. It closes the reach L4-only blind spot (a bound listener that is client-DEAD at L7).
-MEASURE_L7_MAX_AGE_MS="${MEASURE_L7_MAX_AGE_MS:-900000}"
-MEASURE_L7_INTERVAL_SEC="${MEASURE_L7_INTERVAL_SEC:-300}"
-MEASURE_L7_JITTER_SEC="${MEASURE_L7_JITTER_SEC:-120}"
+# Cadence tuned 2026-07-04 for single-digit-minute L7 recovery: a client-DEAD-at-L7 transport faults only
+# after MEASURE_L7_MIN_DEAD_GEN (below) DISTINCT dead generations, so L7 recovery ~= MIN_DEAD_GEN x INTERVAL
+# + the detect/rotate streak. At 120s +/- 45s (was 300 +/- 120) two generations land in ~4-5min => ~5-7min
+# recovery. The probe is node-local (loopback own-cert + own-dest REALITY steal, no third-party beacon —
+# ADR-0036), so the tighter cadence costs only local CPU, not reachability surface. MAX_AGE stays >= 2x the
+# worst-case probe gap (INTERVAL+JITTER) — the S3 cross-check below warns if that is ever violated.
+MEASURE_L7_MAX_AGE_MS="${MEASURE_L7_MAX_AGE_MS:-420000}"
+MEASURE_L7_INTERVAL_SEC="${MEASURE_L7_INTERVAL_SEC:-120}"
+MEASURE_L7_JITTER_SEC="${MEASURE_L7_JITTER_SEC:-45}"
 # Marker-replay hardening (Audit-0007 S2): the daemon faults a member only after it reads DEAD across
 # >= this many DISTINCT probe generations, so one dead run replayed across ~tick-interval reads cannot
 # satisfy the tick-based anti-flap on its own. Default 2 (operator decision 2026-07-03); set 1 to restore
@@ -89,15 +95,15 @@ generate_measure_configs() {
 	fi
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would write $reach_cfg + $measure_cfg ($n member(s), active=$active)"; return 0; fi
 	run install -d -m 0755 "$STATE_DIR"
-	# reach: own-listener TCP probe per member (window 10m, probe 30s, timeout 5s).
+	# reach: own-listener TCP probe per member (window 2m, probe 15s, timeout 3s — tuned defaults, env-overridable).
 	printf '%s' "$members" | jq \
 		--argjson win "$MEASURE_REACH_WINDOW_MS" --argjson probe "$MEASURE_REACH_PROBE_MS" --argjson tmo "$MEASURE_REACH_TIMEOUT_MS" '{
 		version: 1, window_ms: $win,
 		targets: [ .[] | { ref: .ref, method: "tcp", address: ("127.0.0.1:" + (.port|tostring)), interval_ms: $probe, timeout_ms: $tmo } ]
 	}' >"$reach_cfg.tmp" && mv -f "$reach_cfg.tmp" "$reach_cfg"
 	# measure: members + active incumbent + the rotation policy (reuse rotate_limits.json if present so
-	# the daemon's PlanInput limits match the rotate loop's; else the documented defaults). tick 60s >=
-	# the 30s probe interval (the daemon refuses to start if a tick would outpace the probes).
+	# the daemon's PlanInput limits match the rotate loop's; else the documented defaults). tick 30s >=
+	# the 15s probe interval (the daemon refuses to start if a tick would outpace the probes).
 	local limits
 	if [ -f "$STATE_DIR/rotate_limits.json" ] && jq -e . "$STATE_DIR/rotate_limits.json" >/dev/null 2>&1; then
 		limits="$(jq -c . "$STATE_DIR/rotate_limits.json")"
