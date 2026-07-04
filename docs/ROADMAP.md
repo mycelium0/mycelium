@@ -292,8 +292,9 @@ DHT, or live bridge runtime.
 
 **Risks / notes.** The temptation is to light up live federation in this phase — resist it. The live
 hypha corridor / bridge runtime, autonomous multi-hop, and any node-to-node discovery are **Phase 4+**.
-Reuse proven substrate when federation goes live (Nebula / WireGuard-Noise (Noise-IK) for
-mutual-authenticated node links; private libp2p for NAT'd peers) — do not reinvent
+Reuse proven substrate when federation goes live — **Nebula** (intra-Commune same-CA hypha) + **libp2p**
+(NAT'd cross-Commune bridge), chosen in [ADR-0037](adr/0037-federation-transport-substrate.md) (the CA
+boundary is the Commune boundary); the Phase-3 inert contract schema defers to it — do not reinvent
 ([ADR-0031](adr/0031-build-vs-reuse-compose-proven-patterns.md)).
 
 ---

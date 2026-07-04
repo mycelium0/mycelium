@@ -41,6 +41,10 @@
 #                               enforceable: a served bundle spans >=2 INDEPENDENT families (Bundle.
 #                               IndependentFallbackOK) so a single-family block never removes the client
 #                               last path (AC-2); a single-family bundle is rejected (not vacuous)
+#   * federation_inert.sh     — the Phase-3 federation contract (hypha SiblingDescriptor/HyphaInvitation +
+#                               the declared AnastomosisBridge grammar, ADR-0037/0026) is INERT: ZERO
+#                               production callers, pure (no net/exec/transport import), and no
+#                               neighbour-list/topology field (a fungi MAY introduce, MUST NOT enumerate)
 #   * node_two_hop_failclosed.sh — node-bootstrap.sh wires the two-hop / operator-toggle / served-bundle
 #                               fail-closed behaviours (audit C17/C18/C19/C21/C25)
 #   * no_new_control_decisions_in_bash.sh — scripts/node-bootstrap.sh stays orchestration-only after the
@@ -247,6 +251,7 @@ GATES=(
 	"tests/conformance/engine_manifest_additive.sh"
 	"tests/conformance/fungi_scoped.sh"
 	"tests/conformance/log_bundle_redaction.sh"
+	"tests/conformance/federation_inert.sh"
 	"tests/conformance/detector_pure_no_probe.sh"
 	"tests/conformance/tuner_pure_advisory.sh"
 	"tests/conformance/rotator_pure_planner.sh"

@@ -13,6 +13,16 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Added
+- **Phase-3 inert federation seam — hypha built, Anastomosis-Bridge declared (ADR-0037).** The
+  substrate-agnostic contract schema for node-to-node federation, all inert (typed data + pure `Validate()`,
+  **zero production callers**). Built: `IdentityHandle` (substrate-agnostic — a Nebula CA-fingerprint+cert
+  identity for a hypha, or a libp2p peer-id for a bridge), the 9-value `TrafficCapabilityClass` +
+  `CapabilityPolicy` (ADR-0026 Decision 3), `SiblingDescriptor` (the intra-Commune, same-CA hypha bond) and
+  `HyphaInvitation` (the double-opt-in, depth-1–2, degree-capped introduction — a fungi MAY introduce, MUST
+  NOT enumerate, ADR-0029). Declared (Phase-4 deferred): the full 8-term `AnastomosisBridge` contract grammar
+  (ADR-0026 Decision 2). Live transport is **reused, not reinvented** — Nebula (hypha) + libp2p (bridge),
+  chosen in ADR-0037; the CA boundary is the Commune boundary. No crypto/transport authored (ADR-0002/0031).
+  Pinned by the `federation_inert` gate (zero callers · pure · no neighbour-list/topology field) + Go tests.
 - **Phase-3 e2e client-recovery fallback contract (RP-0013 C1).** `spec.Bundle.IndependentFallbackOK` /
   `DistinctClasses` codify the serve-time invariant that a served subscription spans ≥2 **distinct
   transport families** (`TransportClass`), so a single-family block never removes the client's last path

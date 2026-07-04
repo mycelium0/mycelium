@@ -58,3 +58,5 @@ docs/runbooks/node-as-inventory.local.md
 /.scan_tmp/
 /.scan-tmp.*/
 *.out.txt
+# Local research reports (deep-research outputs; evidence backing public ADRs) — kept local, never published
+docs/research/
