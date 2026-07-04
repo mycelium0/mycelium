@@ -43,3 +43,14 @@ func (b Bundle) DistinctClasses() []TransportClass {
 func (b Bundle) IndependentFallbackOK() bool {
 	return len(b.DistinctClasses()) >= 2
 }
+
+// enabledFamiliesDistinct counts the distinct transport FAMILIES (TransportClass) across a set of enabled
+// proto descriptors — the same RP-0013 fallback contract applied on a render path that works from
+// descriptors (RenderSubscription's sing-box-dialable set) rather than a finished Bundle. Pure.
+func enabledFamiliesDistinct(ds []ProtoDescriptor) int {
+	seen := make(map[TransportClass]bool, len(ds))
+	for i := range ds {
+		seen[ds[i].Class] = true
+	}
+	return len(seen)
+}

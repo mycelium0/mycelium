@@ -43,7 +43,8 @@ func TestRenderBundleFrontAppendsFrontedEndpoint(t *testing.T) {
 
 func TestRenderBundleFrontDisabledIsIdentical(t *testing.T) {
 	p := rawParams(t, `{"node_address":"n.invalid","donor_sni":"d.invalid","reality_public_key":"PUB",
-		"short_ids":["abcd0123"],"vless_reality_vision_enabled":true,"vless_reality_vision_port":443}`)
+		"short_ids":["abcd0123"],"vless_reality_vision_enabled":true,"vless_reality_vision_port":443,
+		"vless_ws_tls_enabled":true,"vless_ws_tls_port":2089,"tls_sni":"m.example.com"}`)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	base, _ := RenderBundle(p, "id-a", "", now)
 	// disabled front + a front for a not-served transport must both be no-ops.

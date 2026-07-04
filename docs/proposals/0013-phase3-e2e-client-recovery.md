@@ -70,12 +70,16 @@ enters it (AC-4 stays intact); the transport set never grows (AC-5 stays intact)
 
 ## Scope — three chunks (proposed)
 
-1. **CONTRACT + GATES (offline, inert) — LANDED.** The serve-time fallback invariant is codified on the
+1. **CONTRACT + GATES + SERVE-TIME ENFORCEMENT — LANDED.** The fallback invariant is codified on the
    **rendered** artifact: `spec.Bundle.IndependentFallbackOK` / `DistinctClasses` (`internal/spec/e2e_recovery.go`)
    assert a served bundle spans ≥2 **distinct transport families** (TransportClass), so a single-family
    block never removes the client's last path (AC-2). Family-level, not endpoint-level — REALITY
-   Vision/gRPC/XHTTP are ONE family and fail together. Rotation-safe by construction: a RP-0012 rotation
-   stays in the closed set and has no family-disable action, so it can never reduce the served family set.
+   Vision/gRPC/XHTTP are ONE family and fail together. **Now ENFORCED fail-closed at serve time** (not just
+   offline-gated): `RenderBundle` and `RenderSubscription` refuse to emit a single-family artifact, so a
+   node — which serves via `myceliumctl bundle`/`subscription` (the Go spine) — cannot publish an
+   unrecoverable subscription. Consistent with AC-6 (≥2 independent families per node). Rotation-safe by
+   construction: a RP-0012 rotation stays in the closed set and has no family-disable action, so it can
+   never reduce the served family set.
    Pinned by the `e2e_recovery_fallback` conformance gate (registry ≥2 families · render stamps the family
    per endpoint · the invariant is codified + requires ≥2 · a single-family bundle is proven rejected) +
    Go tests (`TestBundleIndependentFallbackOK` / `…SingleFamily` / `…DistinctClassesDeterministic`).

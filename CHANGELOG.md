@@ -55,6 +55,12 @@ truth for the version is `internal/spec.Version`.
   autonomous recorded rotation, a too-soon second rotation is correctly rate-limited, and the node recovers to
   clean once the fault clears.
 ### Changed
+- **Serve-time independent-fallback enforcement (RP-0013 AC-2, fail-closed).** `RenderBundle` and
+  `RenderSubscription` now REFUSE to emit a served artifact that spans fewer than 2 independent transport
+  families — so a node (which serves via `myceliumctl bundle`/`subscription`, the Go spine) cannot publish a
+  single-family subscription a client could never recover from. Previously the ≥2-family invariant
+  (`Bundle.IndependentFallbackOK`) was offline-gated only, with zero production callers; it is now enforced
+  on the node at render time, consistent with AC-6 (≥2 independent families per node).
 - **RP-0010 AC-6 clarified** — "no new active-probing fingerprint" means no new EXTERNAL / third-party
   fingerprint. A node-local loopback own-cert/cover-path probe (genuine-TLS pure-loopback; REALITY touching
   only the node's own cover/`dest` host — the cover traffic REALITY already produces) is the sanctioned

@@ -53,6 +53,12 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 	if len(enabled) == 0 {
 		return nil, fmt.Errorf("subscription: no sing-box-dialable protocols enabled (only xray-engine protos were on)")
 	}
+	// RP-0013 AC-2 serve-time contract (fail-closed): the served subscription MUST span >= 2 INDEPENDENT
+	// transport families so a single-family block never removes the client's last path (the e2e recovery
+	// precondition; consistent with AC-6). The node refuses to emit an unrecoverable single-family sub.
+	if n := enabledFamiliesDistinct(enabled); n < 2 {
+		return nil, fmt.Errorf("subscription: the enabled sing-box transports span only %d independent family — a served subscription must span >= 2 DISTINCT families so a single-family block never removes the client's last path (RP-0013 AC-2 / AC-6); enable a second, independent transport family", n)
+	}
 
 	// Shared connection parameters. node_address is read via the shell's no-default myc_params_get, which
 	// fails closed on a missing/empty value — mirror that (a subscription with no server address is useless).

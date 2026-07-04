@@ -63,7 +63,15 @@ func RenderBundle(params map[string]json.RawMessage, firstClientID, firstClientP
 	if len(eps) == 0 {
 		return Bundle{}, fmt.Errorf("bundle: no protocols enabled in params (set at least one <proto>_enabled: true)")
 	}
-	return Bundle{Version: NetworkStateVersion, Endpoints: eps, GeneratedAt: generatedAt}, nil
+	bundle := Bundle{Version: NetworkStateVersion, Endpoints: eps, GeneratedAt: generatedAt}
+	// RP-0013 AC-2 serve-time contract (fail-closed): a served bundle MUST span >= 2 INDEPENDENT transport
+	// families so a single-family block never removes the client's last path — the precondition for e2e
+	// client recovery. Consistent with AC-6 (>= 2 independent families per node). Not just an offline gate:
+	// the node itself refuses to publish an unrecoverable single-family bundle.
+	if !bundle.IndependentFallbackOK() {
+		return Bundle{}, fmt.Errorf("bundle: the enabled transports span only %d independent family (%v) — a served bundle must span >= 2 DISTINCT families so a single-family block never removes the client's last path (RP-0013 AC-2 / AC-6); enable a second, independent transport family", len(bundle.DistinctClasses()), bundle.DistinctClasses())
+	}
+	return bundle, nil
 }
 
 // bundleBaseLinkParams resolves the per-bundle base LinkParams (everything except the per-protocol Port)

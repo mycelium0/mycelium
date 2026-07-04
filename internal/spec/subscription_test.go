@@ -132,7 +132,8 @@ func TestRenderSubscriptionShape(t *testing.T) {
 // deliberately NOT reproducing the shell's @tsv/whitespace-IFS quirks on those pathological inputs.
 func TestRenderSubscriptionNameEdges(t *testing.T) {
 	p := rawParams(t, `{"node_address":"n","donor_sni":"d","reality_public_key":"P","short_ids":["abcd0123"],
-		"vless_reality_vision_enabled":true,"vless_reality_vision_port":443}`)
+		"vless_reality_vision_enabled":true,"vless_reality_vision_port":443,
+		"vless_ws_tls_enabled":true,"vless_ws_tls_port":2089,"tls_sni":"m.example.com"}`)
 	subs, err := RenderSubscription(p, []SubClient{
 		{Name: "ok", ID: "id-ok"},
 		{Name: "", ID: "id-empty"}, // skipped

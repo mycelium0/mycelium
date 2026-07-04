@@ -58,20 +58,24 @@ func TestBundleIndependentFallbackOK(t *testing.T) {
 // — REALITY Vision + gRPC share a handshake/donor/keypair surface, so one block takes them together. The
 // invariant must reject it (it is the single-point-of-block the contract exists to forbid).
 func TestBundleIndependentFallbackSingleFamily(t *testing.T) {
-	p := baseE2EParams(t, `,
-		"vless_reality_vision_enabled":true,"vless_reality_grpc_enabled":true`)
-	b, err := RenderBundle(p, "a1b2c3d4-e5f6-7890-abcd-ef0123456789", "idpw", e2eAt)
-	if err != nil {
-		t.Fatalf("RenderBundle: %v", err)
-	}
-	if len(b.Endpoints) != 2 {
-		t.Fatalf("want 2 endpoints (vision+grpc), got %d", len(b.Endpoints))
-	}
+	// (a) The PURE invariant rejects a single-family bundle: Vision + gRPC are ONE family (RealityTCP) —
+	// shared handshake/donor/keypair — so one block takes them together, not recovery-safe.
+	b := Bundle{Version: NetworkStateVersion, Endpoints: []Endpoint{
+		{Tag: "mycelium-vless-reality-vision", TransportClass: TransportClassRealityTCP},
+		{Tag: "mycelium-vless-reality-grpc", TransportClass: TransportClassRealityTCP},
+	}}
 	if got := b.DistinctClasses(); len(got) != 1 {
 		t.Fatalf("vision+grpc must be ONE family (RealityTCP), got %v", got)
 	}
 	if b.IndependentFallbackOK() {
 		t.Fatal("a single-family bundle (REALITY-only) must FAIL the e2e fallback contract (single point of block)")
+	}
+	// (b) SERVE-TIME enforcement (RP-0013 AC-2): RenderBundle itself REFUSES to emit a single-family bundle
+	// fail-closed, so a node never publishes an unrecoverable subscription.
+	p := baseE2EParams(t, `,
+		"vless_reality_vision_enabled":true,"vless_reality_grpc_enabled":true`)
+	if _, err := RenderBundle(p, "a1b2c3d4-e5f6-7890-abcd-ef0123456789", "idpw", e2eAt); err == nil {
+		t.Fatal("RenderBundle must fail closed on a single-family (REALITY-only) params set (RP-0013 AC-2 / AC-6)")
 	}
 }
 
