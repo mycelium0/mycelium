@@ -428,7 +428,10 @@ install_go_toolchain() {
 	arch="$(_myc_engine_norm_arch)"
 	archive="${gover}.linux-${arch}.tar.gz"; url="$godl/${archive}"
 	tmp="$(mktemp -d)" || { warn "mktemp failed for the Go toolchain download."; return 1; }
-	trap 'rm -rf "$tmp"' RETURN
+	# Guard the cleanup: a RETURN trap is GLOBAL, so it fires again on the CALLER's return (install_spine,
+	# which calls this nested) where $tmp is out of scope — a bare "$tmp" then trips set -u ("unbound
+	# variable") and aborts the deploy. Skip the rm when tmp is unset/empty; it only ever removes our own.
+	trap '[ -z "${tmp:-}" ] || rm -rf "$tmp"' RETURN
 	log "downloading pinned Go toolchain $gover ($url)"
 	if have curl; then
 		run curl -fsSL "$url" -o "$tmp/$archive" || { warn "Go toolchain download failed: $url"; return 1; }
