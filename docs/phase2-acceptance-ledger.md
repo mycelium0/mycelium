@@ -67,7 +67,13 @@ apply → rollback-available → refuse-stale`, observed end to end on the node.
 These are **Phase-3 by the re-phasing decision**, not gaps in Phase-2 acceptance:
 
 - **End-to-end client recovery** — a stock client on a standard subscription recovering within minutes,
-  measured *at the client*. (Phase-3 DoD.)
+  measured *at the client*. (Phase-3 DoD.) **Harness both-direction drill DONE 2026-07-05** (RP-0013 C2,
+  `tests/e2e/`, on a live node): blocking the active REALITY endpoint → the client's `urltest` recovers on
+  the genuine-TLS sibling in **20s**; forcing the client onto the ws-tls family then blocking it → recovers
+  on REALITY in **16s**. Client-side auto-failover is symmetric and both directions land far inside the
+  single-digit-minute bound; the block is scoped + reversible and never touches the served config. The
+  **on-device** authoritative run on the operator's real restrictive link (the Phase-1 realism backstop)
+  remains the operator's part.
 - **Block-event publish path** — the first production caller of the node-status digest, i.e. publishing
   the node-local verdict as class-aggregate advisory weather. (Phase-3 advisory/fungi inert seam.)
 - **Operability & release** — `make dist` + signed release, the fungi deploy/management CLI, the unified
