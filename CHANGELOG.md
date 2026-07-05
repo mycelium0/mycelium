@@ -56,7 +56,35 @@ truth for the version is `internal/spec.Version`.
   REALITY touches only the node's own cover/`dest` host (ADR-0036). Proven on m1: an induced L7-dead active drives an
   autonomous recorded rotation, a too-soon second rotation is correctly rate-limited, and the node recovers to
   clean once the fault clears.
+- **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
+  (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
+  (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new
+  `toolchains.go` pin in `control/engines.manifest.json` (`go1.23.12` + per-arch sha256, `go.dev/dl`),
+  resolved by `manifest_toolchain_pins`, is downloaded + **checksum-verified fail-closed** + extracted by
+  `install_go_toolchain` (called from `install_spine`, so bootstrap / `--update` / `--node-apply` all
+  self-heal the toolchain and build the same reproducible binary; `GOTOOLCHAIN=local`). `golang-go` is
+  dropped from the base deps. `engine_manifest_shape` validates the pin (version, arch hex, `dl_base ==
+  GO_DL_BASE`, a go.mod currency floor). Validated on live nodes — the spine rebuilt to 0.2.29 from the
+  pinned toolchain over the real `--update` path.
+- **`fungi deploy` self-arms single-node adaptivity (`--no-arm` to opt out).** Deploy sequences the explicit
+  `--measure-enable` + `--rotate-arm` + `--rotate-enable-loop` dispatches after convergence, so one command
+  yields a serving, self-driving node. The ships-disabled contract holds — only the explicit flags arm, and
+  the timer-driven `fungi update` (`flow_update`) never arms, so an auto-pull still cannot self-arm a node
+  (`measure_daemon_ships_disabled` unchanged).
+- **Turnkey transport/CDN profile selection — `myceliumctl front` verbs + `fungi` passthroughs.**
+  `myceliumctl front enable|disable|show` creates/toggles the node-local `front.config.json` (the ADR-0033
+  bring-your-own-domain CDN/ingress front), validated (an enabled front needs the operator's own domain over
+  a frontable transport; terminate mode needs the explicit trade-off ack) — removing the last
+  hand-authored-JSON step. `fungi transport|reachable|front` thin passthroughs delegate to the Go spine so
+  the whole node lifecycle runs through one `fungi` surface. Both stay write-only intent / orchestration-only
+  (`node_cli_no_actuation` + `fungi_scoped` green).
 ### Changed
+- **Self-drive L7 liveness cadence tightened to single-digit-minute recovery.** The L7 probe now runs every
+  120s ±45s (was 300 ±120) with `MEASURE_L7_MAX_AGE_MS` 900k → 420k (still ≥2× the worst-case probe gap);
+  `MEASURE_L7_MIN_DEAD_GEN` stays 2 (the Audit-0007 S2 marker-replay hardening is preserved). A live re-drill
+  on a node — an L7-DEAD REALITY active → autonomous rotation to the genuine-TLS sibling — measured **~8 min**
+  end-to-end recovery (single-digit; the planner anti-flap `flip_confirmations` × the ~90s rotate-loop
+  cadence, not the probe interval, now bounds the tail).
 - **Serve-time independent-fallback enforcement (RP-0013 AC-2, fail-closed).** `RenderBundle` and
   `RenderSubscription` now REFUSE to emit a served artifact that spans fewer than 2 independent transport
   families — so a node (which serves via `myceliumctl bundle`/`subscription`, the Go spine) cannot publish a

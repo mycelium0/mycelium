@@ -39,8 +39,10 @@ MEASURE_REACH_TIMEOUT_MS="${MEASURE_REACH_TIMEOUT_MS:-3000}"
 # every tick. It closes the reach L4-only blind spot (a bound listener that is client-DEAD at L7).
 # Cadence tuned 2026-07-04 for single-digit-minute L7 recovery: a client-DEAD-at-L7 transport faults only
 # after MEASURE_L7_MIN_DEAD_GEN (below) DISTINCT dead generations, so L7 recovery ~= MIN_DEAD_GEN x INTERVAL
-# + the detect/rotate streak. At 120s +/- 45s (was 300 +/- 120) two generations land in ~4-5min => ~5-7min
-# recovery. The probe is node-local (loopback own-cert + own-dest REALITY steal, no third-party beacon —
+# + the detect/rotate streak. At 120s +/- 45s (was 300 +/- 120) two generations land in ~4-5min; a live
+# drill on a node measured ~8min end-to-end recovery (single-digit) — the planner anti-flap
+# (flip_confirmations x the ~90s rotate-loop cadence, NOT the probe interval) now bounds the tail.
+# The probe is node-local (loopback own-cert + own-dest REALITY steal, no third-party beacon —
 # ADR-0036), so the tighter cadence costs only local CPU, not reachability surface. MAX_AGE stays >= 2x the
 # worst-case probe gap (INTERVAL+JITTER) — the S3 cross-check below warns if that is ever violated.
 MEASURE_L7_MAX_AGE_MS="${MEASURE_L7_MAX_AGE_MS:-420000}"

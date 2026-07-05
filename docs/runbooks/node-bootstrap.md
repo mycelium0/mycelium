@@ -195,6 +195,14 @@ sudo systemctl restart sing-box
   **operator signature** verifies against an out-of-band key. An unsigned/forged push is refused
   before any of its shell (`node-bootstrap.sh`, `myceliumctl`, `render_singbox.sh`) ever runs as
   root, so a single bad push to the public repo cannot achieve network-wide code execution.
+- **Fast-forward only — a force-push is never taken silently.** `myc_fetch_artifacts` integrates the
+  verified ref with `git merge --ff-only`, so a rewritten/force-pushed history — **even a legitimate one**,
+  e.g. a credential scrub — is refused, not silently accepted. Consequence: after any deliberate history
+  rewrite, the auto-update on every already-deployed node fails fail-closed and the node stays on its
+  pre-rewrite rev (with a stale spine). Recovery is a **manual, per-node** `git reset --hard origin/main` in
+  the checkout (default `/opt/mycelium`) — an explicit operator acceptance of the rewrite — after which the
+  normal `--update` rebuilds the spine (from the pinned Go) and re-renders. Do it deliberately: the manual
+  reset **is** the human gate on a force-push, by design.
 - **The updater cannot mis-run itself.** `--update` re-execs from an immutable copy before fetching,
   so the in-place merge cannot rewrite the running script and make it skip validation/rollback.
 - The renderer only emits **valid JSON**; the updater additionally runs **`sing-box check`** and

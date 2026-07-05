@@ -78,22 +78,35 @@ These are **Phase-3 by the re-phasing decision**, not gaps in Phase-2 acceptance
 Made concrete by the drill and the Audit-0007 remediation; each is a hardening input, not a
 Phase-2 blocker:
 
-1. **Marker-replay anti-flap hardening (Audit-0007 S2-5a).** The daemon re-reads the L7 marker every
-   tick until it ages out, so one dead probe *generation* can satisfy the tick-based anti-flap on its own.
-   The fix — fault only after ≥N **distinct** dead generations — shifts the drilled detect→rotate latency
-   and so needs a **self-drive re-drill**. Documented as a known limitation in ADR-0036.
+1. **Marker-replay anti-flap hardening (Audit-0007 S2-5a) — RE-DRILL DONE 2026-07-05 (v0.2.29 milestone).**
+   The daemon re-reads the L7 marker every tick until it ages out, so one dead probe *generation* could
+   satisfy the tick-based anti-flap on its own. The fix — fault only after ≥N **distinct** dead generations
+   (`MEASURE_L7_MIN_DEAD_GEN=2`) — shifted the detect→rotate latency and needed a self-drive re-drill.
+   **Re-drilled on a live node:** an induced L7-DEAD REALITY active (blackholed `dest`, L4 listener up) drove
+   an autonomous rotation to the genuine-TLS sibling in **~8 min** end-to-end (single-digit ✓), on the
+   tightened L7 cadence (120±45s, max-age 420k, min_dead_gen=2). The planner anti-flap streak
+   (`flip_confirmations` × the ~90s rotate-loop), not the probe cadence, now bounds the tail. Restored clean
+   after the fault cleared. Documented in ADR-0036.
 2. **Remaining audit S3/NOTE.** Stale ShadowTLS fallback literal; genuine-TLS probe SAN-match
    (`-verify_hostname`); the deploy-time `donor_verify` rc=2 fail-open/-closed posture (a security-posture
    decision); `MAX_AGE` cadence cross-check; the zero-sample-window fold note.
-3. **Cadence-default tuning.** The armed drill closed the loop on *tightened* cadences; the shipped
-   defaults (reach window, rotate timer) are conservative and want tuning against a single-digit-minute
-   recovery target.
+3. **Cadence-default tuning — DONE 2026-07-05 (v0.2.29).** reach/L4 cadence tuned earlier (`21606a5`,
+   ~2–3min); the L7 cadence tightened (`4b40299`: interval 300→120s, jitter 120→45s, max-age 900k→420k,
+   `min_dead_gen` kept 2). The re-drill above measured ~8min L7 recovery (single-digit). Operator **accepted
+   ~8min** and chose NOT to tighten the anti-flap further (it would trade flap-headroom for a marginal gain).
 4. **Rotation visibility on all-transports nodes.** Where every transport is already served, a
    server-side "promote-sibling" is a no-op; recovery there is client-side failover (the Phase-3 e2e bar).
    Re-pointing the active reference / surfacing the rotation is a visibility follow-up.
 5. **On-node gold-standard donor drill.** The randomized-port + `flock` donor-verify hardening (S2-3) is
    proven by a control-flow harness; a live drill on a node (`www.samsung.com` → viable, `www.microsoft.com`
    → broken, with the real engine) is the remaining gold-standard confirmation.
+6. **Force-push / history-rewrite un-sticks nodes MANUALLY (found 2026-07-05).** The updater's
+   `git merge --ff-only` (`nb_update_apply.sh`) intentionally refuses a non-fast-forward, so a legitimate
+   history rewrite (e.g. a credential scrub) orphans a node's checkout and its auto-update then fails
+   fail-closed. One node was found stuck on a pre-rewrite rev with a stale spine; the fix is a deliberate
+   `git reset --hard origin/main` per node (an explicit acceptance of the rewrite), after which the normal
+   `--update` rebuilds the spine (now from the pinned Go). NOT a code change — the FF-only merge is the
+   anti-force-push guard. Documented in [docs/runbooks/node-bootstrap.md](runbooks/node-bootstrap.md).
 
 ## Sign-off
 
