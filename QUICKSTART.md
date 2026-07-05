@@ -19,20 +19,23 @@ networks. This guide takes a fresh Linux server to a running node in a few comma
 ## 1. Fetch and verify a release
 
 ```sh
-# download the tagged artifact + checksums + signature (or `gh release download vX.Y.Z`)
+# download the tagged artifact + checksums (or `gh release download vX.Y.Z`). The detached signature
+# SHA256SUMS.sig is signed + attached by the maintainer SEPARATELY (ADR-0015 — CI holds no signing key),
+# so it can lag the tarball by minutes; the `|| ...` below tolerates its absence.
 ver=vX.Y.Z
 base="https://github.com/mycelium0/mycelium/releases/download/$ver"
 curl -fsSLO "$base/mycelium-${ver#v}.tar.gz"
 curl -fsSLO "$base/SHA256SUMS"
-curl -fsSLO "$base/SHA256SUMS.sig"
+curl -fsSLO "$base/SHA256SUMS.sig" || echo "note: SHA256SUMS.sig not attached yet — do an integrity-only check now, or wait for the maintainer to upload it for authenticity."
 
 # verify integrity + authenticity, fail-closed (REL-3)
 tar -xzf "mycelium-${ver#v}.tar.gz" && cd "mycelium-${ver#v}"
 scripts/verify-release.sh .. --allowed-signers /path/to/allowed_signers --signer <signer-id> --tag "$ver"
 ```
 
-Without `--allowed-signers` the helper checks integrity only and warns that authenticity is
-unverified — always supply the key for a real deployment.
+Without `--allowed-signers` — or before `SHA256SUMS.sig` is attached — the helper checks **integrity only**
+and warns that authenticity is unverified. For a real deployment always supply the key AND wait for the
+signature: re-run with `--allowed-signers` once `SHA256SUMS.sig` lands.
 
 ## 2. Deploy
 
