@@ -454,6 +454,10 @@ install_go_toolchain() {
 		return 0
 	fi
 	[ -x "$tmp/go/bin/go" ] || { warn "Go release layout unexpected: $tmp/go/bin/go not found."; return 1; }
+	# Ensure the tooling dir exists before staging into it — install_go_toolchain stays self-contained (a
+	# caller that has not yet created $TOOLING_DIR, or a standalone drill, must still work; the production
+	# install_tooling creates it first, but the function must not depend on that ordering).
+	run install -d -m 0755 "$TOOLING_DIR"
 	run rm -rf "$goroot"
 	run mv "$tmp/go" "$goroot" || { warn "failed to install the Go toolchain to $goroot."; return 1; }
 	[ -x "$goexe" ] || { warn "Go toolchain install incomplete: $goexe missing after move."; return 1; }
