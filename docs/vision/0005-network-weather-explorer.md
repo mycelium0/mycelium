@@ -26,7 +26,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Horizon:** cross-cutting **Measurement** track — schemas inert in Phase 0-2; the opt-in digest path + central publisher run from **Phase 3** (the advisory-weather publish is the new Phase-3 inert-to-live seam; running emission is not Phase-0 behaviour — see [ADR-0021](../adr/0021-decentralized-observability-not-a-central-collector.md) and ROADMAP Scope-discipline), dissolving into mesh-native digest spores in Phase 4–5
+- **Horizon:** cross-cutting **Measurement** track — schemas inert in Phase 0-2; the opt-in digest path + central publisher run from **Phase 3** (the advisory-weather publish is built inert as Phase-2 groundwork and goes live in Phase 3 — intra-Commune hypha; running emission is not Phase-0 behaviour — see [ADR-0021](../adr/0021-decentralized-observability-not-a-central-collector.md) and ROADMAP Scope-discipline), dissolving into mesh-native digest spores in Phase 4
 - **Layer(s):** observability / measurement, control plane (cross-cutting)
 - **Related:** [0003-node-interaction-and-distributed-awareness.md](0003-node-interaction-and-distributed-awareness.md),
   [0004-living-network-doctrine.md](0004-living-network-doctrine.md),
@@ -120,7 +120,7 @@ aggregation centre. Each fungi sees only its own scope; fungi digests do not til
   **percentages** (not counts — counts leak network size); network sizes as order-of-magnitude buckets;
   obfuscated rotation events; and a methodology block declaring `k`, the noise, and what is withheld.
 - **The fungi opt-in publish path.** From **Phase 3** (the advisory-weather publish / fungi boundary is
-  the new Phase-3 living-node seam; the schema/envelope is inert in Phase 0-2 and nothing emits then — see
+  built inert as Phase-2 groundwork and goes live in Phase 3 — intra-Commune hypha; the schema/envelope is inert in Phase 0-2 and nothing emits then — see
   [../adr/0021-decentralized-observability-not-a-central-collector.md](../adr/0021-decentralized-observability-not-a-central-collector.md)):
   a fungi runs a small read-only aggregator over its own PII-safe signals and publishes a digest to the
   explorer's publisher. The (inert in Phase 0-2) telemetry envelope it uses is: **opt-in, PII-safe, aggregated, no correlation, no identity
@@ -143,11 +143,11 @@ aggregation centre. Each fungi sees only its own scope; fungi digests do not til
 - **Live querying of nodes from the browser.** The site reads a pre-redacted static snapshot only; an
   endpoint a visitor can query is an enumeration surface.
 - **Pulling mesh behaviour forward.** The explorer does not run a DHT, gossip, registry, or
-  announce-into-mesh (Phase 4–5); it consumes only already-redacted aggregates.
+  announce-into-mesh (Phase 4); it consumes only already-redacted aggregates.
 
 ### Deferred → future phase/Vision
 
-- **Mesh-native fungi digests.** In Phase 4–5 a fungi emits its `stress-digest` as a real spore onto
+- **Mesh-native fungi digests.** In Phase 4 a fungi emits its `stress-digest` as a real spore onto
   the awareness layer and the publisher reads spores instead of receiving direct opt-in uploads — the
   **public contract is unchanged**, only the transport beneath it. Island-scoped weather and
   carrier-bridged digest carriage follow the VIS-0002/0003 phase order (Phase 7).
@@ -192,7 +192,7 @@ runs. The explorer is a measurement surface layered on top of working access, ne
     influence (full anti-Sybil weighting is the spawned ADR's job).
   - *Central publisher (simple) ↔ mesh-native (resilient).* A single publisher now is simple and a
     value target; it holds only already-redacted aggregates and dissolves into mesh-native spore
-    ingestion in Phase 4–5. It must never accrete raw inputs or become a map.
+    ingestion in Phase 4. It must never accrete raw inputs or become a map.
 - **Technical debt accepted knowingly:** the central publisher is a deliberate temporary centre,
   accepted on the explicit plan to read mesh-native digest spores later; it must never hold raw
   per-node data or reconstruct topology in the meantime.
@@ -249,7 +249,7 @@ cannot be reversed into a map. The site adds no client-side telemetry of its own
   coarsening, and per-source caps; the load-bearing anti-Sybil weighting is the spawned ADR's job, not
   settled here.
 - **Publisher as a value target.** It is a temporary centre; it holds only already-redacted aggregates,
-  must never accrete raw inputs, and dissolves into mesh-native digest ingestion in Phase 4–5.
+  must never accrete raw inputs, and dissolves into mesh-native digest ingestion in Phase 4.
 - **Open questions → ADR/RP:** the aggregation floor `k` and region-coarsening rule (shared with
   VIS-0003); the noise mechanism and privacy budget; the `stress-digest` spore schema and the opt-in
   upload protocol now vs the mesh-native spore path later; the rotation-event obfuscation; the
@@ -260,8 +260,8 @@ cannot be reversed into a map. The site adds no client-side telemetry of its own
 With an honest, privacy-preserving weather surface, the project gains a public legibility layer it
 currently lacks — people can see the fabric is healthy, operators can decide to rotate or contribute,
 and the honesty claims become checkable — all without creating the map the architecture spends so much
-effort denying. The same digest path is the visible end of the Phase-4 block-intelligence aggregation
-and the Phase-5 mesh-native stress-digest spores; the explorer is the surface those grow into, not a
+effort denying. The same digest path is the visible end of the Phase-3 block-intelligence aggregation
+and the Phase-4 mesh-native stress-digest spores; the explorer is the surface those grow into, not a
 parallel system.
 
 ## 12. Next steps
@@ -271,7 +271,7 @@ parallel system.
   coarsening/bucketing rules, rotation-event obfuscation, and the cumulative-disclosure bound.
 - [ ] **ADR — fungi role & opt-in publish path** (`docs/adr/NNNN-...`): the `cache-custodian`-class
   fungi niche and rotation, the opt-in upload protocol (running from Phase 3; schema inert in Phase 0-2)
-  and its dissolution into mesh-native digest spores (Phase 4–5), and the anti-Sybil source weighting.
+  and its dissolution into mesh-native digest spores (Phase 4), and the anti-Sybil source weighting.
 - [ ] **RP — explorer publisher** (`docs/proposals/NNNN-...`): the off-network publisher (verify →
   coarsen → suppress-below-floor → strip → emit static snapshot), with a fail-closed conformance check
   enforcing the §7 invariants (the check is part of the conformance suite, not specified in the RP).

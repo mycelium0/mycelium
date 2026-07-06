@@ -70,9 +70,9 @@ and [research/](research/).
 - **Snowflake** — a Tor transport: broker + ephemeral WebRTC proxies contributed by volunteers;
   a reference model for distributed relay meshes.
 - **DHT** (Kademlia) — a distributed hash table for peer discovery without a central server
-  (Phase 4-5; not run in Phase 0-2).
+  (Phase 3-4; not run in Phase 0-2).
 - **Gossip / GossipSub** — epidemic propagation of messages (reachability, blocking intelligence)
-  across the mesh (Phase 4-5; not run in Phase 0-2).
+  across the mesh (Phase 3-4; not run in Phase 0-2).
 - **NAT traversal / hole-punching** — establishing a direct connection through NAT
   (ICE/STUN/TURN) so that a non-public machine can become a node.
 - **Multi-hop / onion routing** — a path ingress→intermediate→egress where no single hop knows
@@ -128,13 +128,13 @@ it defines a real contract — a schema, a state machine, a policy rule, or a me
 ## Distributed awareness
 
 - **Distributed awareness** — the local, trust-scoped, replicated neighbourhood picture; no node
-  and no coordinator ever holds the global topology (VIS-0003 §2). Phase 4-5 territory.
+  and no coordinator ever holds the global topology (VIS-0003 §2). Phase 3-4 territory.
 - **Import-inert-until-validated** — the rule that any imported artifact (spore, fragment, summary)
   has no effect on local state until it passes validation; receipt alone never mutates the fabric.
 - **Anti-entropy (repair)** — periodic reconciliation that lets a node self-heal scoped state from
   neighbour caches; the replication path, distinct from lookup, and a cumulative-enumeration
   surface that uses graduated disclosure and trust-scoped reconciliation.
-- **Coordinator** — a Phase-4 temporary, scoped centre that dissolves into the Phase-5 DHT;
+- **Coordinator** — a Phase-3 temporary, scoped centre that dissolves into the Phase-4 DHT;
   present but inert in Phase 0 (VIS-0003). Never a permanent centre.
 
 ## Network weather (public measurement surface)
@@ -317,9 +317,9 @@ already-true Phase-0 node posture.
   intra-Commune counterpart to the cross-Commune **Anastomosis Bridge** above — where a Bridge is
   **society-fusion** (a contracted link *between* two Communes), a hypha is **edge-fusion** *within* a
   single Commune under one operator's own genetics. A hypha is contract-bound and operator-provisioned,
-  never implicit, and operator-label-opaque (no per-node row, ADR-0030). Its **inert seam** lands in the
-  new **Phase 3** (living node: recovery/release, and the fungi/advisory inert seam); the **live** hypha
-  corridor / multi-hop is **Phase 4+**. Relates to the **anastomosis hop (egress)** above (the
+  never implicit, and operator-label-opaque (no per-node row, ADR-0030). Its **inert seam** is built as
+  **Phase-2** groundwork (the fungi/advisory inert seam) and **goes live in the new Phase 3** (live
+  intra-Commune hypha); the **live** hypha corridor / multi-hop is **Phase 3**. Relates to the **anastomosis hop (egress)** above (the
   deployment-level edge-fusion an operator stands up between their own nodes): the manual operator-built
   two-hop is current posture, its automated selection is Phase 4-6, and a hop that crosses **between**
   Communes is an Anastomosis Bridge, not a hypha.

@@ -32,7 +32,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
 - **Horizon:** Distribution / discovery track. Today: inert schema only (Phase 0–2). Coordinator-assisted
-  distribution is Phase 4; DHT/gossip + invite/reputation is Phase 5; trust-gradient hand-out is Phase 6.
+  distribution is Phase 3; DHT/gossip + invite/reputation is Phase 4; trust-gradient hand-out is Phase 6.
 - **Layer(s):** bootstrap / config distribution, discovery / membership, control plane (cross-cutting)
 - **Related:** [0003-node-interaction-and-distributed-awareness.md](0003-node-interaction-and-distributed-awareness.md)
   (spores, knowledge gradient, registry→DHT→gossip), [0004-living-network-doctrine.md](0004-living-network-doctrine.md)
@@ -41,7 +41,7 @@ later. See the LICENSE file in the repository root.
   [../adr/0018-fungi-role-and-opt-in-publish.md](../adr/0018-fungi-role-and-opt-in-publish.md) (the fungi role),
   [../adr/0014-per-operator-node-credentials.md](../adr/0014-per-operator-node-credentials.md),
   [../adr/0020-phase0-scope-reconciliations.md](../adr/0020-phase0-scope-reconciliations.md) (Phase-0 stays
-  out-of-band hand-off), [../ROADMAP.md](../ROADMAP.md) (Phase 1 matured endpoint; Phase 4–6 distribution).
+  out-of-band hand-off), [../ROADMAP.md](../ROADMAP.md) (Phase 1 matured endpoint; Phase 3–6 distribution).
 
 ## Context — what we are replacing, and what already works
 
@@ -138,7 +138,7 @@ planes, mapped to the canon above and to contracts the fabric already declares (
    users are re-pointed to a sibling fungus. Admission is invite-gated; re-issuance is credit-metered;
    reputation rises with unblocked uptime and falls when advertised ingress dies (Lox + rBridge).
 
-## Phase discipline (this is mostly Phase 4–6; almost nothing is built now)
+## Phase discipline (this is mostly Phase 3–6; almost nothing is built now)
 
 Per [../adr/0013-mycelial-vocabulary-and-phase-discipline.md](../adr/0013-mycelial-vocabulary-and-phase-discipline.md):
 
@@ -146,11 +146,11 @@ Per [../adr/0013-mycelial-vocabulary-and-phase-discipline.md](../adr/0013-myceli
   `TrustScope`, `EdgeReport`/`TransportClass`, `DiscoveryBackend` (declaration). The Phase-1 matured
   endpoint ([ROADMAP](../ROADMAP.md)) ships the *single-operator* self-replenishing subscription +
   client-side merge — **not** fungi distribution. Phase 0 stays out-of-band hand-off (ADR-0020 §1).
-- **Phase 4 — coordinator-assisted distribution.** A coordinator may play the rdsys-style intake role
+- **Phase 3 — coordinator-assisted distribution.** A coordinator may play the rdsys-style intake role
   (with a knowledge ceiling + TTL/decay + an emergency quarantine path, never a permanent central brain —
   `COORDINATOR_SUPERGOD_DRIFT` guard, [../refactoring.md](../refactoring.md) §7). Partition + diff-stream
   hand-out lands here.
-- **Phase 5 — DHT/gossip + invite/reputation.** Intake decentralizes onto the spore/gossip layer; invite
+- **Phase 4 — DHT/gossip + invite/reputation.** Intake decentralizes onto the spore/gossip layer; invite
   tickets + the credit economy + Lox-style blocked-ingress detection activate (sybil resistance from the
   moment membership opens, §15.7).
 - **Phase 6 — trust-gradient hand-out.** Per-user slice quality follows the trust gradient.
@@ -159,7 +159,7 @@ Per [../adr/0013-mycelial-vocabulary-and-phase-discipline.md](../adr/0013-myceli
 
 - `SINGLE_POINT_OF_BLOCK` (S0) — *the* failure this Vision exists to avoid: never one issuer, one URL, one
   map. A blocked fungus degrades to its slice; users re-point to siblings.
-- `ENUMERATION_EXPOSURE` (S1; S0 at Phase 5+) — partitioning raises cost but is not enumeration-proof
+- `ENUMERATION_EXPOSURE` (S1; S0 at Phase 4+) — partitioning raises cost but is not enumeration-proof
   (NDSS'17); invitation + credit + per-user partial views are mandatory at open membership, not optional.
 - `USER_DEANON` / `TRAFFIC_CORRELATION` (S0) — a fungus learns *which credential it served which slice to*.
   Minimize: per-user views carry no PII, the fungus is ingress-distribution only (it is **not** the user's
@@ -173,9 +173,9 @@ Per [../adr/0013-mycelial-vocabulary-and-phase-discipline.md](../adr/0013-myceli
 
 ## What this spawns
 - An ADR pinning the **partition + diff-stream** distribution contract (slice function, churn diff,
-  per-client format negotiation) for Phase 4.
+  per-client format negotiation) for Phase 3.
 - An ADR pinning **invitation + reputation/credit** (admission, credit accrual from unblocked uptime,
-  re-issuance metering, revocation) for Phase 5 — grounded in Lox/rBridge, no in-house crypto (ADR-0002).
+  re-issuance metering, revocation) for Phase 4 — grounded in Lox/rBridge, no in-house crypto (ADR-0002).
 - An RP wiring the Phase-1 single-operator self-replenishing subscription as the *seam* the fungi layer
   later sits behind (so the client loop never changes across the phase transition, §15.8).
 

@@ -187,7 +187,7 @@ Expert Lens block (§6.1–§6.2).
 - traffic indistinguishability across all active transports;
 - the anonymity model: what nodes and the control plane know about the user;
 - network persistence of the control plane itself and of bootstrap;
-- sybil resistance of discovery (for phases 5–6);
+- sybil resistance of discovery (for phases 4–6);
 - correctness of degradation, rerouting, and recovery scenarios.
 
 ### Format:
@@ -200,7 +200,7 @@ An audit triggered by an event rather than a calendar schedule.
 
 ### Triggers:
 - adding a new transport or substantially changing a transport profile;
-- roadmap phase transitions (especially 3→4 and 4→5, see §5);
+- roadmap phase transitions (especially 2→3 and 3→4, see §5);
 - changes to bootstrap, discovery, or sybil-resistance mechanisms;
 - changes to the telemetry or blockage-intelligence schema;
 - **a real blocking event**: how the system responded, what recovered and how quickly —
@@ -216,10 +216,10 @@ An audit triggered by an event rather than a calendar schedule.
 
 Cadence is tied to [ROADMAP.md](ROADMAP.md) phases — the system progresses from
 a single node to an autonomous mesh, and the cost of an error increases at each
-phase (in phases 5–6, an error in discovery or sybil resistance exposes the
+phase (in phases 4–6, an error in discovery or sybil resistance exposes the
 network map to an adversary).
 
-### Phases 0–3 (single node → multi-protocol → adaptation → living node: recovery/release)
+### Phases 0–2 (single node → multi-protocol → adaptation + the first release)
 Attack surface is limited to a single operator and their infrastructure.
 - PR audit — on every architecturally significant PR;
 - tactical audit — once per week;
@@ -227,7 +227,7 @@ Attack surface is limited to a single operator and their infrastructure.
 - event-triggered audit — on every new transport, every blocking event or interference
   incident, every change to the detector or auto-rotation.
 
-### Phase 4 (node network — per-Commune coordination)
+### Phase 3 (live intra-Commune hypha — per-Commune coordination)
 A per-Commune coordinator exists — the highest-value target within that Commune;
 compromise of that centre exposes the Commune's network map. Coordination is
 per-Commune / per-operator self-coordination, not a global central authority over
@@ -239,7 +239,7 @@ the network as a whole (ADR-0016/0021/0023/0025).
 - event-triggered audit — mandatory on any change to what the coordinator knows,
   and to its own network persistence.
 
-### Phases 5–6 (decentralization → autonomous mesh)
+### Phases 4–6 (decentralization → cross-Commune federation → autonomous mesh)
 Open membership, DHT/gossip, ephemeral ingress endpoints, home nodes behind NAT.
 Primary risks: sybil/enumeration, correlation, route poisoning.
 - PR audit — mandatory for all discovery/routing/membership changes;
@@ -574,14 +574,14 @@ Checked:
 - are "managers" and "controllers" multiplying without clear responsibility;
 - do a component's name, the mesh metaphor, and its actual role conflict;
 - are entities being added for the convenience of a single phase or PR;
-- is a temporary shape (e.g., the phase 4 coordinator) quietly becoming
+- is a temporary shape (e.g., the phase 3 coordinator) quietly becoming
   undeclared canon;
 - can the system be explained through a few stable formulas.
 
 Red flags:
 
 - "another service because it's easier";
-- the temporary phase 4 coordinator silently becomes permanently required;
+- the temporary phase 3 coordinator silently becomes permanently required;
 - a component name is decorative and does not encode the component's role or failure mode;
 - `temporary` without a trigger-to-remove;
 - two deploy-path defaults (bootstrap vs Ansible/`group_vars`) are "reconciled" in a way that widens
@@ -699,7 +699,7 @@ Checked:
 - **Persistence of control plane and bootstrap:** configs, commands,
   and first-contact endpoints do not hang on a single domain that can be cut in
   minutes;
-- **Sybil / enumeration (phases 5–6):** an adversary cannot cheaply enumerate
+- **Sybil / enumeration (phases 4–6):** an adversary cannot cheaply enumerate
   most ingress endpoints; joining the network has a cost (invites/social
   graph/PoW); a knowledge gradient limits what a new node can see;
 - **Adaptation speed:** when a transport is blocked, the system reconfigures in
@@ -710,7 +710,7 @@ Red flags:
 - a new transport with a recognizable signature (bare protocol disguised as TLS);
 - everything in one AS / on one distribution domain / on one SNI;
 - discovery that allows ingress endpoints to be enumerated by a linear DHT walk;
-- open membership without any entry cost at phase 5+;
+- open membership without any entry cost at phase 4+;
 - auto-rotation that in practice flaps and itself becomes a blocking signal.
 
 ```text
@@ -736,7 +736,7 @@ Checked:
 - **Node knowledge:** what exactly the ingress/egress node knows about the user
   and their traffic; does the ingress simultaneously know "who" and "where";
 - **Ingress/egress separation:** a single hop does not know the full path
-  (multi-hop, phase 5+);
+  (multi-hop, phase 4+);
 - **Logs:** none by default; what is logged is justified, minimal, free of PII,
   and not retained long-term;
 - **Telemetry/blockage intelligence:** aggregated, noised, not linked to identity;
@@ -780,7 +780,7 @@ Checked:
   losing fail-closed;
 - **Rerouting:** when a regional egress fails, traffic is redirected to another;
   the path is rebuilt around the failed segment;
-- **Persistence of the coordinator (phase 4):** the coordinator remains
+- **Persistence of the coordinator (phase 3):** the coordinator remains
   reachable when its primary domain is blocked (anycast/CDN-front/P2P-fallback);
   the coordinator is not a kill switch;
 - **Anti-flapping and rollback:** auto-rotation has limits, hysteresis, and
@@ -964,7 +964,7 @@ consistent naming when recurring patterns are detected:
 | `TRAFFIC_CORRELATION` | **S0** | A timing/volume/identifier channel has appeared that links a user to a destination (including through a single hop that knows the full path). |
 | `DISTINGUISHABLE_TRANSPORT` | **S0** | A transport/server is statistically distinguishable from legitimate HTTPS/QUIC, or fails active probing (recognizable fingerprint, banner, unexpected port). |
 | `SINGLE_POINT_OF_BLOCK` | **S0** | A single point of block/failure for the entire network: coordinator without fallback, single distribution domain, single AS, single SNI as the only path. |
-| `ENUMERATION_EXPOSURE` | **S1** | Discovery/DHT/registry allows an adversary to cheaply enumerate a significant fraction of ingress endpoints (sybil/enumeration). Default S1; **S0** if most ingress endpoints are enumerable at phase 5+. |
+| `ENUMERATION_EXPOSURE` | **S1** | Discovery/DHT/registry allows an adversary to cheaply enumerate a significant fraction of ingress endpoints (sybil/enumeration). Default S1; **S0** if most ingress endpoints are enumerable at phase 4+. |
 | `SILENT_DEGRADATION` | **S0** | A silent fallback/emergency path that sacrifices anonymity or indistinguishability for the sake of access, without an explicit degradation policy (violation of fail-closed). |
 | `SECRET_LEAK` | **S0** | A secret/key/identity appears in code, logs, un-noised telemetry, or an unexplained artifact. |
 | `THREAT_MODEL_DRIFT` | **S1** | A change to attack surface or assets is not reflected in THREAT-MODEL, or an "attack → response" matrix row is closed only on paper. |
@@ -1302,7 +1302,7 @@ Table columns — five:
   for the flow, but the RP does no new work in it.
 - **deferred** — the component is mentioned because a future phase will activate
   it, but it is intentionally inert in this RP. The RP body must specify the
-  future phase/RP ("multi-hop — deferred, activates in Phase 5").
+  future phase/RP ("multi-hop — deferred, activates in Phase 4").
 - **test-only** — the component participates only in conformance/smoke fixtures,
   not in the production runtime flow introduced by the RP.
 
@@ -1410,7 +1410,7 @@ The node, coordinator, and telemetry know the minimum about the user by default;
 there are no logs by default. Any change that expands a component's knowledge of
 the user or of user connections requires explicit justification and an update to
 THREAT-MODEL. An ingress endpoint must not simultaneously know "who" and "where"
-(ingress/egress separation, multi-hop at phase 5+). Violation: `USER_DEANON` /
+(ingress/egress separation, multi-hop at phase 4+). Violation: `USER_DEANON` /
 `TRAFFIC_CORRELATION` (S0).
 
 ### 15.4. Indistinguishability matters more than obfuscation
@@ -1435,11 +1435,11 @@ real path is `REDUNDANCY_COLLAPSE` (S1). A single point of failure for the entir
 network is `SINGLE_POINT_OF_BLOCK` (S0).
 
 ### 15.7. Sybil resistance from the moment of open membership
-As soon as joining the network becomes open (phases 5–6), discovery must resist
+As soon as joining the network becomes open (phases 4–6), discovery must resist
 enumeration and flooding: joining has a cost (invites/social graph/PoW), a new
 node routes little and knows little (knowledge gradient). Discovery that allows
 cheap enumeration of most ingress endpoints is `ENUMERATION_EXPOSURE` (S1; S0 at
-phase 5+).
+phase 4+).
 
 ### 15.8. Refactoring must not break phase transitions
 Layers are stable across phases — implementation changes, but contracts between
@@ -1483,7 +1483,7 @@ geo-routing). CIDR-only transports (the WireGuard-class / AmneziaWG) can only
 express the split still owes a documented region-exclude route set — never a blanket
 default route. (Manual operator-built two-hop and per-client split-tunnel routing
 are **current-posture** deployment patterns; automated cross-node route selection
-is Phase 4-6 — this rule governs the *config that is rendered now*, under that
+is Phase 3-6 — this rule governs the *config that is rendered now*, under that
 phase discipline.)
 
 ---
@@ -1516,7 +1516,7 @@ phase discipline.)
 - [ ] Ingress/egress separation maintained; a single hop does not know the full path
 - [ ] Control plane and bootstrap are at least as persistent and resilient as the data plane
 - [ ] No single point of block/failure for the entire network
-- [ ] Sybil/enumeration: joining has a cost, knowledge gradient exists (phase 5+)
+- [ ] Sybil/enumeration: joining has a cost, knowledge gradient exists (phase 4+)
 - [ ] Managed degradation exists and the recovery SLO is measurable
 - [ ] Auto-rotation has limits, hysteresis, and rollback (no flapping)
 - [ ] Rerouting works and does not leak the path

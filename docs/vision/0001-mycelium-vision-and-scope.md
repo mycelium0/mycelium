@@ -73,7 +73,7 @@ network).
 - A fully community-run, peer-to-peer connectivity layer (a distant horizon; see §2).
 
 ### Deferred
-- Decentralized discovery/mesh → Phase 5; autonomous self-healing → Phase 6.
+- Decentralized discovery/mesh → Phase 4; autonomous self-healing → Phase 6.
 
 ## 5. Target Audience and Scenarios
 
@@ -90,10 +90,10 @@ network).
   nodes · operators · network topology map.
 - **Conscious trade-offs:** the anonymity trilemma (latency ↔ capacity ↔ anonymity — choose
   2 of 3 per scenario); openness ↔ sybil-resistance; indistinguishability ↔ cost/latency;
-  speed of adaptation ↔ risk of false relocation; centralization (simplicity in Phase 4) ↔
-  decentralization (resilience in Phase 5).
-- **Accepted technical debt:** the Phase 4 coordinator as a target — plan to dissolve it in
-  Phase 5.
+  speed of adaptation ↔ risk of false relocation; centralization (simplicity in Phase 3) ↔
+  decentralization (resilience in Phase 4).
+- **Accepted technical debt:** the Phase 3 coordinator as a target — plan to dissolve it in
+  Phase 4.
 
 ## 7. Definition of Done (measurable, not a slogan)
 
@@ -141,4 +141,4 @@ working, not as a replacement.
   [../adr/0003-licensing-and-jurisdiction.md](../adr/0003-licensing-and-jurisdiction.md)).
 - [x] First RP ([../proposals/0001-bootstrap-phase-0-node.md](../proposals/0001-bootstrap-phase-0-node.md)).
 - [ ] Research note on open detector/rotation questions ([../research/](../research/)).
-- [ ] Event-driven audit when adding a new layer (Phase 4/5) — [../refactoring.md](../refactoring.md).
+- [ ] Event-driven audit when adding a new layer (Phase 3/4) — [../refactoring.md](../refactoring.md).

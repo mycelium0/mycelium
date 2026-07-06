@@ -42,9 +42,9 @@ The selection is driven by the **ADOPTed reinforce-and-evaporate scoring law** �
 
 ## Out of scope (deferred, named)
 - **New or additional transport protocols** — the set is closed (above).
-- **Fungi peering / federation / the anastomosis introduction** — Phase 4–5 ([ADR-0031](../adr/0031-build-vs-reuse-compose-proven-patterns.md) federation section / ADR-0029); the **inert** fungi/advisory seam lands in the new Phase 3 (Living node: recovery, release, and the fungi/advisory inert seam), not the narrowed single-node-adaptivity Phase 2. The **advisory class-aggregate weather publish** ([ADR-0030](../adr/0030-advisory-network-awareness.md)) is the one federation-adjacent piece that rides the Phase 3 release track, emit-only, operator-local.
+- **Fungi peering / federation / the anastomosis introduction** — Phase 3–5 ([ADR-0031](../adr/0031-build-vs-reuse-compose-proven-patterns.md) federation section / ADR-0029); the **inert** fungi/advisory seam is built as Phase-2 first-release groundwork and goes live in the new Phase 3 (intra-Commune hypha), not as running behaviour in the single-node-adaptivity core of Phase 2. The **advisory class-aggregate weather publish** ([ADR-0030](../adr/0030-advisory-network-awareness.md)) is the one federation-adjacent piece that goes live in the new Phase 3, emit-only, operator-local.
 - **Anonymity** — Mycelium does not claim or guarantee it; out of scope by design.
-- **Cross-node coordination / DHT / gossip** — Phase 4+ (ROADMAP scope discipline / MYC-F006).
+- **Cross-node coordination / DHT / gossip** — Phase 3+ (ROADMAP scope discipline / MYC-F006).
 
 ## Acceptance criteria (verifiable)
 - **AC-1 (recover-without-human):** artificially degrading the active transport on a node causes a stock client holding the bundle to recover within single-digit minutes **with no manual action**, via client-native failover + the node's rotation; the node records a class-level event.
@@ -75,4 +75,4 @@ Gates-first, inert-schema-before-behaviour (the discipline that carried Phase 1)
 - **C4 — actuation (auto-rotation) → split out to [RP-0012](0012-phase2-auto-rotation-actuation.md).** The live-mutating actuation half (the rotation planner `internal/rotate`, the dry-run executor seam, the gated live loop, and the 4-node degrade/recover test) is held to a stricter dry-run-first + go/no-go discipline, so it lives in its own RP. This doc (RP-0010) owns the **inert** detect/self-tune algorithm (C1–C3); RP-0012 **executes** this Plane-3 ADAPT decision on a live node.
 - **C5 — advisory emit (rides ADR-0030).** The emit-only class-aggregate `NodeStatusDigest` (k-floored, TTL) built from `AdvisoryHealth()` projections — never the fine state (AC-4).
 
-Continuing in parallel (per the ROADMAP): RP-0008 P3 (the bundle renderer to Go) and RP-0011 (the fungi packaging/CLI) — both release/operability-adjacent, so with the re-phasing they carry into the new Phase 3 (Living node: recovery, release, and the fungi/advisory inert seam), while this RP's pure detect→adapt→self-tune loop closes the narrowed single-node-adaptivity Phase 2.
+Continuing in parallel (per the ROADMAP): RP-0008 P3 (the bundle renderer to Go) and RP-0011 (the fungi packaging/CLI) — both release/operability-adjacent, so under Decision B they land in the closing first-release milestone of Phase 2, while this RP's pure detect→adapt→self-tune loop is the single-node-adaptivity core of Phase 2.

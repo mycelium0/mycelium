@@ -62,9 +62,9 @@ later. See the LICENSE file in the repository root.
   machinery. The **Anastomosis-Bridge contract schema** and the **`TrafficCapabilityClass` taxonomy**
   are **inert-typed now** (Phase 0-2 data + `Validate()` only, per
   [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md)); the intra-Commune F2F **hypha**
-  edge-fusion seam lands **inert** in the new Phase 3. **Live** bridge establishment /
-  revocation and cross-Commune capability-class negotiation are **Phase 4-5** (gossip/DHT/membership);
-  **trust-gradient grading of higher-risk capability classes is Phase 6.**
+  edge-fusion seam lands **inert** as Phase-2 groundwork and goes live in Phase 3. **Live**
+  cross-Commune bridge establishment / revocation and capability-class negotiation are **Phase 5**
+  (gossip/DHT/membership); **trust-gradient grading of higher-risk capability classes is Phase 6.**
 - **Related:** the companion immunity/Communes Vision
   ([VIS-0008](../vision/0008-immunity-communes-mycobiome.md) §9 Anastomosis Bridges, §12 Traffic
   Capability Classes & Safe Defaults — the doctrine this ADR binds);
@@ -292,12 +292,12 @@ active abuse. These are **policy-driven, never controlled by a global authority*
 from contracts already in canon, not from any cross-Commune machinery: per-operator credentials and a
 self-sufficient node ([ADR-0014](0014-per-operator-node-credentials.md)); no open relay / no public
 egress (Phase 0-2 ingress and egress coincide on one node — nothing is an open relay; THREAT-MODEL;
-ARCHITECTURE Layer 3); no topology sharing (no gossip runs before Phase 4-5); the host firewall opening
+ARCHITECTURE Layer 3); no topology sharing (no gossip runs before Phase 3); the host firewall opening
 no third-party transit by default. **Local** rate-limits and **local** quarantine are near-term
-node-local behaviours. The new Phase 3 lands only the **inert** intra-Commune F2F **hypha** edge-fusion
-seam. What is **Phase 4-5** is live **bridge establishment/revocation** and immune-signal
-**emission** over scoped gossip; **Phase 6** is the **trust-gradient grading** of higher-risk capability
-classes and cross-Commune trust propagation.
+node-local behaviours. Phase 2 lands only the **inert** intra-Commune F2F **hypha** edge-fusion
+seam as groundwork. What is **Phase 5** is live cross-Commune **bridge establishment/revocation** and
+immune-signal **emission** over scoped gossip; **Phase 6** is the **trust-gradient grading** of
+higher-risk capability classes and cross-Commune trust propagation.
 
 ### Decision 5 — Phase discipline & inertness
 
@@ -307,7 +307,7 @@ Per [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md): the **safe-def
 `internal/spec` — schema-versioned, JSON-tagged, pure `Validate()`, signatures via standard primitive only
 — with **no live bridge establishment, no capability negotiation, no propagation runs** before their
 phase. A bridge contract you can *construct and validate* is not a bridge anything *acts on* before
-Phase 4-5; cross-Commune capability grading does not run before Phase 6.
+Phase 5; cross-Commune capability grading does not run before Phase 6.
 
 ### Decision 6 — The hard NEVERs preserved (in one place)
 
@@ -410,7 +410,7 @@ How the decision is verified in practice:
 - **`spec_inert` / `no_premature_mesh`** ([ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md)) —
   the `AnastomosisBridge` and `TrafficCapabilityClass`/`CapabilityPolicy` types import no network, file-I/O,
   or process-execution packages and link no establishment/negotiation/propagation path; any live bridge
-  establishment wired before Phase 4-5, or capability grading before Phase 6, fails the merge gate.
+  establishment wired before Phase 5, or capability grading before Phase 6, fails the merge gate.
 - **`no_global_authority` / `no_global_abuse_oracle` review checkpoint**
   ([ADR-0023](0023-communes-mycobiome-genetics.md)/[ADR-0025](0025-no-global-abuse-oracle.md)) — code/doc
   review rejects any registry/policy/authority that establishes bridges, grades capability, or opens
@@ -443,8 +443,8 @@ the **hypha**. A **hypha** is an intra-Commune, **same-operator**, **F2F** (face
 bond — the **edge-fusion** sense of anastomosis, two of one operator's own nodes fusing a path — as
 distinct from the Anastomosis Bridge's **society-fusion** across two *different* Communes. A hypha is
 **contract-bound + operator-provisioned, never implicit**, and **operator-label-opaque** (no per-node row
-is exposed, consistent with ADR-0030). Its **inert seam** lands in the **new Phase 3** (typed + `Validate()`
-only, no live corridor); the **live** hypha corridor / multi-hop is **Phase 4+**. This amendment does not
+is exposed, consistent with ADR-0030). Its **inert seam** lands as **Phase-2 groundwork** (typed + `Validate()`
+only, no live corridor); the **live** hypha corridor / multi-hop is **Phase 3+**. This amendment does not
 soften any hard NEVER above: a hypha, like a bridge, is never implicit and carries no raw
 traffic/identity/location/full-map. See the GLOSSARY **hypha** entry (cross-referencing **Anastomosis
 Bridge** / **anastomosis hop**).

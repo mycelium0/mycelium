@@ -5,22 +5,22 @@ This file is part of Mycelium, licensed under the GNU Affero General Public Lice
 later. See the LICENSE file in the repository root.
 -->
 
-# RP-0013: Phase-3 end-to-end client recovery (measured at the client)
+# RP-0013: Phase-2 first-release milestone — end-to-end client recovery (measured at the client)
 
 ## Metadata
 - **ID:** RP-0013
 - **Slug:** `phase3-e2e-client-recovery`
-- **Status:** **IN PROGRESS** (2026-07-03) — first Phase-3 workstream, opened right after the Phase-2
-  GO-sign ([phase2-acceptance-ledger.md](../phase2-acceptance-ledger.md)). **C1 (contract + gates) LANDED:**
+- **Status:** **IN PROGRESS** (2026-07-03) — first workstream of the Phase-2 closing first-release milestone,
+  opened right after the Phase-2 single-node-adaptivity GO-sign ([phase2-acceptance-ledger.md](../phase2-acceptance-ledger.md)). **C1 (contract + gates) LANDED:**
   the serve-time fallback invariant is codified (`Bundle.IndependentFallbackOK` / `DistinctClasses`) with
   the `e2e_recovery_fallback` gate + Go tests. **C2 (repeatable recovery harness) LANDED + validated:**
   `tests/e2e/` (reversible scoped block + Clash-API-driven client recovery probe); a live drill on a node
   measured a genuine cross-family failover (REALITY → GENUINE_TLS, `failover_confirmed`, recovered in ~40s
-  at a 30s urltest interval). C3 (both-direction + on-device drill → Phase-3 acceptance ledger) next.
-- **Phase:** Phase 3 (Living node — recovery, release, fungi/advisory inert seam)
+  at a 30s urltest interval). C3 (both-direction + on-device drill → Phase-2 first-release acceptance ledger) next.
+- **Phase:** Phase 2 — closing first-release milestone (end-to-end client recovery + the reproducible signed release; the fungi/advisory boundary is built here as an inert seam that goes live in Phase 3)
 - **Type:** single-workstream RP with three chunks (contract + gates / repeatable recovery harness / drill)
 - **Related:** [RP-0012](0012-phase2-auto-rotation-actuation.md) AC-1 (this RP *is* that AC, promoted to a
-  Phase-3 DoD — Phase 2 proved the node-side self-drive; this proves the **client** recovers); [RP-0010](0010-phase2-adaptivity.md)
+  Phase-2 first-release-milestone DoD — the Phase-2 single-node self-drive proved the node-side rotation; this proves the **client** recovers); [RP-0010](0010-phase2-adaptivity.md)
   (the detector/measure plane the recovery leans on); [RP-0007](0007-phase1-distribution-health-xhttp.md)
   AC-a5/AC-b1 (the served subscription + the self-replenishing seam); [ADR-0025](../adr/0025-no-global-abuse-oracle.md)
   (advisory-never-actuates); the `sub_channel_not_single_point` + `transport_family_independence` gates
@@ -32,8 +32,8 @@ later. See the LICENSE file in the repository root.
 Phase 2 made a **node** heal itself: it detects its own channel degrading and rotates the transport it
 serves, under rate limits + rollback. But a **stock client that has already connected to a now-blocked
 endpoint does not benefit from the node rotating a *different* transport** — the client must itself notice
-the dead path and fail over to a live sibling it already holds. Phase-3 e2e recovery is therefore about
-the **client's** experience, measured **at the client**, not "node-side serving looks ok":
+the dead path and fail over to a live sibling it already holds. The Phase-2 first-release-milestone e2e
+recovery is therefore about the **client's** experience, measured **at the client**, not "node-side serving looks ok":
 
 > A stock client on a standard subscription, holding a sibling endpoint, survives a real/artificial block
 > of its active endpoint and is **carrying traffic again on a sibling within single-digit minutes, with no
@@ -99,10 +99,10 @@ enters it (AC-4 stays intact); the transport set never grows (AC-5 stays intact)
    (Phase-1 method) is the authoritative companion (C3). Not a CI gate — it moves real packets — so it is
    not registered in `tests/run.sh`; its serve-time precondition IS offline-gated (C1).
 3. **THE DRILL.** Run the harness on a live node (block the active → measure client recovery → restore),
-   plus one on-device confirmation on the operator's real client, and record the result in a Phase-3
-   acceptance ledger. Reversible; leaves the node byte-identical.
+   plus one on-device confirmation on the operator's real client, and record the result in the Phase-2
+   first-release acceptance ledger. Reversible; leaves the node byte-identical.
 
-## Acceptance criteria (verifiable — the Phase-3 e2e DoD)
+## Acceptance criteria (verifiable — the Phase-2 first-release e2e DoD)
 
 - **AC-1 (recover-at-the-client, no human):** under a real/artificial block of its active endpoint, a stock
   client holding the served subscription is carrying traffic again on a sibling within **single-digit
@@ -144,5 +144,5 @@ project OPSEC rule.
 - **No new actuation, no coordination.** Recovery is client-native failover + Phase-2 node rotation + the
   self-replenishing subscription. This RP introduces no global signal and no new mutate-a-node path.
 - **Depends on:** the Phase-2 self-drive (accepted); the self-replenishing subscription (Phase 1); the
-  ≥2-independent-siblings invariants (green). It does **not** depend on the advisory/fungi seam (a later
-  Phase-3 chunk).
+  ≥2-independent-siblings invariants (green). It does **not** depend on the advisory/fungi seam (a
+  separate piece of Phase-2 inert groundwork that goes live in Phase 3).

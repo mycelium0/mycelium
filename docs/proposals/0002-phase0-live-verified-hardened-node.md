@@ -117,7 +117,7 @@ gaps and produce the live, verified, hardened node that the DoD demands — and 
 | `observability` | Installs the node-side stats exporter + textfile gauge; PII-safe metrics, alerts, blackbox probes | active | Prometheus / Alertmanager / blackbox / node_exporter | Standard monitoring stack; no custom telemetry pipeline. |
 | `tests/conformance` | Offline 9-gate suite + post-deploy live gates (cover-site, per-protocol reachability, anti-degradation smoke, revoke/recovery) | active / test-only | system shell / openssl | Verification harness; no third-party tool fits the bespoke checks. |
 | `control-agent` skeleton (`myceliumd`/`myceliumctl` in Go) | W7: typed config model + health + thin CLI parity (the spine) | active | Go ([ADR-0012](../adr/0012-go-primary-control-plane-language.md)) | Establishes the compiled spine; the interference detector / auto-rotation logic stays deferred to Phase 2. |
-| `coordinator` (network registry / rerouting) | Not built here | deferred | none | Activates in a later RP (Phase 4); inert in Phase 0. |
+| `coordinator` (network registry / rerouting) | Not built here | deferred | none | Activates in a later RP (Phase 3); inert in Phase 0. |
 
 ### 3.2. Blast-radius cap
 > One RP = one manageable step.
@@ -703,7 +703,7 @@ transport surface; W5 re-verifies indistinguishability after the migration).
 
 ### Non-goals (deferred to later phases — not in this RP)
 - **Multi-node / network** — a second node, network registry, coordinator, cross-node config
-  distribution (Phase 4).
+  distribution (Phase 3).
 - **Interference detector & auto-rotation logic** — the detector and automated recovery on a
   blocking event; the single IP/AS remains a single point of blockage by design (Phase 2). Only
   the *manual* recovery primitives are in scope. (The Go control-agent **skeleton/spine** that

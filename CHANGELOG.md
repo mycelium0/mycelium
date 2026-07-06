@@ -15,23 +15,23 @@ truth for the version is `internal/spec.Version`.
 
 ## [0.2.29] — 2026-07-04
 ### Added
-- **Phase-3 inert federation seam — hypha built, Anastomosis-Bridge declared (ADR-0037).** The
+- **Phase-2 inert federation seam (groundwork) — hypha built, Anastomosis-Bridge declared (ADR-0037).** The
   substrate-agnostic contract schema for node-to-node federation, all inert (typed data + pure `Validate()`,
   **zero production callers**). Built: `IdentityHandle` (substrate-agnostic — a Nebula CA-fingerprint+cert
   identity for a hypha, or a libp2p peer-id for a bridge), the 9-value `TrafficCapabilityClass` +
   `CapabilityPolicy` (ADR-0026 Decision 3), `SiblingDescriptor` (the intra-Commune, same-CA hypha bond) and
   `HyphaInvitation` (the double-opt-in, depth-1–2, degree-capped introduction — a fungi MAY introduce, MUST
-  NOT enumerate, ADR-0029). Declared (Phase-4 deferred): the full 8-term `AnastomosisBridge` contract grammar
+  NOT enumerate, ADR-0029). Declared (Phase-5 deferred): the full 8-term `AnastomosisBridge` contract grammar
   (ADR-0026 Decision 2). Live transport is **reused, not reinvented** — Nebula (hypha) + libp2p (bridge),
   chosen in ADR-0037; the CA boundary is the Commune boundary. No crypto/transport authored (ADR-0002/0031).
   Pinned by the `federation_inert` gate (zero callers · pure · no neighbour-list/topology field) + Go tests.
-- **Phase-3 e2e client-recovery fallback contract (RP-0013 C1).** `spec.Bundle.IndependentFallbackOK` /
+- **Phase-2 e2e client-recovery fallback contract (RP-0013 C1).** `spec.Bundle.IndependentFallbackOK` /
   `DistinctClasses` codify the serve-time invariant that a served subscription spans ≥2 **distinct
   transport families** (`TransportClass`), so a single-family block never removes the client's last path
   (RP-0013 AC-2). Family-level, not endpoint-level — REALITY Vision/gRPC/XHTTP are one family and fail
   together. Pinned by the `e2e_recovery_fallback` conformance gate + Go tests (a single-family bundle is
   proven rejected). Inert — a pure invariant on the rendered artifact; nothing actuates.
-- **Phase-3 e2e client-recovery harness (RP-0013 C2, `tests/e2e/`).** A repeatable, reversible, **surgical**
+- **Phase-2 e2e client-recovery harness (RP-0013 C2, `tests/e2e/`).** A repeatable, reversible, **surgical**
   block of a node's active endpoint (`--source`-scoped `iptables` DROP — external clients unaffected; the
   served config is never touched) + a headless client recovery probe that drives the node's own rendered
   subscription (the SAME `urltest` auto-failover a stock client uses), reads the live selection via the

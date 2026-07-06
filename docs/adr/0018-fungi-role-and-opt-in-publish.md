@@ -33,7 +33,7 @@ later. See the LICENSE file in the repository root.
 - **Phase:** cross-cutting; the schema is inert in Phase 0-2, the opt-in telemetry publish path RUNS from
   **Phase 3** (the advisory-weather publish path — running emission is not Phase-0 behaviour; see
   [ADR-0021](0021-decentralized-observability-not-a-central-collector.md) and ROADMAP Scope-discipline),
-  dissolving into mesh-native digest spores in Phase 4-5
+  dissolving into mesh-native digest spores in Phase 4
 - **Related:** VIS-0005 (network-weather explorer — the source; §4 fungi role + §12 spawned items),
   VIS-0004 (living-network doctrine — niches not classes, concept 5), ADR-0002 (no custom crypto —
   the digest signature), ADR-0013 (vocabulary + phase discipline), ADR-0014 (per-operator
@@ -104,8 +104,8 @@ running publisher, registry, or announce path.
    aggregator over its own already-PII-safe signals and emits the `stress-digest`; it never opens a
    queryable endpoint and never accretes raw inputs.
 
-4. **Dissolution into mesh-native digest spores (Phase 4-5).** The opt-in upload path is the
-   **early transport** for an unchanged public contract. In Phase 4-5 a fungi emits the same
+4. **Dissolution into mesh-native digest spores (Phase 4).** The opt-in upload path is the
+   **early transport** for an unchanged public contract. In Phase 4 a fungi emits the same
    `stress-digest` `SporeEnvelope` as a real spore onto the awareness layer, and the publisher reads
    spores instead of receiving direct opt-in uploads. **The public contract — the digest shape, the
    floor, the forget-the-raw rule, the opt-in requirement — is unchanged; only the transport beneath
@@ -117,7 +117,7 @@ running publisher, registry, or announce path.
    already exist in the schemas and posture, each load-bearing:
    - **`import-inert-until-validated`** — every ingested digest is inert until its signature and
      structural invariants validate (the `SporeEnvelope.Validate()` posture; signature verification
-     is the verifier's Phase 4-5 job against a named standard primitive, never a new scheme);
+     is the verifier's Phase 4 job against a named standard primitive, never a new scheme);
    - **signed digests** — each digest carries a per-operator `signer_key_id` + signature (ADR-0014),
      so sources are attributable to a key and a flood from one key is detectable;
    - **the aggregation floor `k`** — a cell below the floor is **omitted, never shown as zero**, so a
@@ -137,7 +137,7 @@ running publisher, registry, or announce path.
    identity-free telemetry** (ADR-0013, AGENTS.md §2, VIS-0005 §Non-goals). **No DHT, no gossip, no
    registry, no announce-into-mesh, no global topology, no per-node disclosure** runs in Phase 0-2;
    the `DiscoveryBackend` interface stays a declared-only no-op stub. The mesh-native spore transport
-   (decision 4) is **Phase 4-5**. This ADR records the role contract and the opt-in path as a
+   (decision 4) is **Phase 4**. This ADR records the role contract and the opt-in path as a
    measurement surface layered on working access, never a discovery layer.
 
 ## Consequences
@@ -152,7 +152,7 @@ running publisher, registry, or announce path.
 - Digests are **signed `SporeEnvelope`s using standard primitives only** (`signer_key_id` +
   signature bytes, ADR-0002/ADR-0014); no new signature or aggregation cryptography is introduced.
   `import-inert-until-validated` applies to every ingested digest.
-- The **public contract is transport-agnostic**: the Phase-3 opt-in upload and the Phase-4-5
+- The **public contract is transport-agnostic**: the Phase-3 opt-in upload and the Phase-4
   mesh-native spore carry the **same** `stress-digest` shape, so the explorer and its auditors do not
   change when the transport beneath dissolves into the mesh.
 - Anti-Sybil source weighting is **bounded but not yet running**: this ADR fixes the mechanisms and
@@ -173,9 +173,9 @@ running publisher, registry, or announce path.
   never publishes weather data without its operator explicitly choosing it (VIS-0005 §7); data never
   retained or emitted cannot be seized or compelled.
 - **A running anti-Sybil reputation/weighting system now** — deferred: full source weighting is
-  load-bearing and belongs with the publisher and the floor/noise ADR (Phase 4-5). This ADR bounds a
+  load-bearing and belongs with the publisher and the floor/noise ADR (Phase 4). This ADR bounds a
   single bad source with signed digests + `import-inert-until-validated` + the floor + cross-source
   coarsening + per-source caps, and defers the running algorithm.
 - **Pulling the mesh-native spore transport into Phase 0-2** — rejected: it would run a DHT / gossip /
   announce path the phase discipline forbids (ADR-0013). The opt-in telemetry upload is the allowed
-  non-mesh transport; the spore path is Phase 4-5, with the public contract unchanged.
+  non-mesh transport; the spore path is Phase 4, with the public contract unchanged.

@@ -19,7 +19,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** accepted
 - **Layer(s):** control plane (operator tooling) / cross-cutting (logging & knowledge-minimisation)
-- **Phase:** Phase 3 — Operability & Release track (roadmap re-phasing 2026-07-02)
+- **Phase:** Phase 2 — Operability & Release track, closing first-release milestone (re-phasing Decision B, 2026-07-04)
 - **Related:** [RP-0011](../proposals/0011-phase2-fungi-packaging-and-cli.md) chunk E (the diagnostics
   bundle + AC-9); [Audit-0006](../audits/0006-diagnostics-redactor-pr-audit.md) (the PR audit that
   prompted this record); [SECURITY.md §4.2](../../SECURITY.md); [THREAT-MODEL.md](../THREAT-MODEL.md)

@@ -30,7 +30,7 @@ later. See the LICENSE file in the repository root.
 - **Author:** mindicator & silicon bags quartet
 - **Status:** accepted
 - **Layer(s):** cross-cutting track (governs data plane, control plane, routing/orchestration, discovery/membership)
-- **Phase:** cross-cutting; binds Phase 0-2 hard (plus the new Phase-3 inert seam), scopes what Phase 4-5 is allowed to wire live
+- **Phase:** cross-cutting; binds Phase 0-2 hard (plus the inert fungi/advisory seam built as Phase-2 groundwork, going live in Phase 3), scopes what Phase 3-4 is allowed to wire live
 - **Related:** VIS-0002, VIS-0003, VIS-0004 (forthcoming), ADR-0002, ADR-0011, ADR-0012,
   [../ROADMAP.md](../ROADMAP.md) (Scope discipline / finding MYC-F006; Phase-transition principle),
   `internal/spec` types
@@ -101,7 +101,7 @@ Two failure modes threaten that asset, and both must be closed before code accre
      the canon types now without shipping behavior; aligns one-to-one with development.md §1.1
      (one source of truth per name) and the ROADMAP phase fences.
    - Cons: requires reviewers and a conformance gate to police both the naming rule and the
-     inertness rule; some forward-shaped types sit unused until Phase 4-5.
+     inertness rule; some forward-shaped types sit unused until Phase 3-4.
    - Impact on indistinguishability / survivability: positive — nothing observable runs early, the
      network map is never assembled, and the canon stays trustworthy as the system grows.
 
@@ -152,8 +152,9 @@ contract and ADR-0012). Concretely, Phase 0-2 must **not** ship, run, or auto-en
 - **autonomous cord promotion** — `CordPromotion` is a typed object with no automatic promoter;
   promotion requires measurement and is wired no earlier than its ROADMAP phase.
 
-Behavior is wired live in **Phase 4-5** (the new Phase 3 lands only the INERT fungi/advisory seam, no
-live federation; and later, per VIS-0003 §4: distributed registry over DHT+gossip → Phase 5;
+Behavior is wired live in **Phase 3-4** (the INERT fungi/advisory seam is built as Phase-2 groundwork
+and goes live in the new Phase 3 as same-CA intra-Commune hypha; cross-Commune federation is later
+(Phase 5); and later still, per VIS-0003 §4: distributed registry over DHT+gossip → Phase 4;
 trust-gradient routing → Phase 6; carrier-bridged island merge → Phase 7; autonomous cord promotion →
 Phase 8), under the future Vision VIS-0004 and its follow-on ADRs, and only after the Phase-transition
 principle (ROADMAP) is met for the preceding phase in production with real users.
@@ -173,11 +174,11 @@ no announcer), so that "not yet wired" cannot silently become "accidentally live
 ## Consequences
 
 - **Positive:** the metaphor stays a falsifiable engineering vocabulary, not branding; `internal/spec`
-  can carry the full canon type set now, giving Phase 4-5 a stable contract to wire against; the
+  can carry the full canon type set now, giving Phase 3-4 a stable contract to wire against; the
   GLOSSARY can define every canon term against a concrete contract; phase order and the ROADMAP fences
   are mechanically defensible.
 - **Negative / cost:** ongoing review and a conformance gate must police both rules; some forward-shaped
-  types sit unused until Phase 4-5; contributors must learn the canon list and the inertness boundary.
+  types sit unused until Phase 3-4; contributors must learn the canon list and the inertness boundary.
 - **Impact on user security (requirement №1):** strictly protective. Nothing observable runs in Phase
   0-2: no DHT, no gossip, no announce, no global map. No node and no coordinator assembles a global
   topology, so there is no early map to enumerate or coerce, and no permanent center is crowned.

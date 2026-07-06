@@ -39,7 +39,7 @@ later. See the LICENSE file in the repository root.
   plane, control plane, routing & orchestration, discovery & membership — without modifying any of them)
 - **Phase:** cross-cutting. The **entity model** binds now and may be encoded only as **inert typed
   schema hooks** in Phase 0-2 (per [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md)); the
-  new Phase 3 introduces its **inert F2F seam** only; **live Communes, genetic exchange, cross-Commune
+  inert F2F seam is built in Phase 2 and goes live as the same-CA intra-Commune hypha in the new Phase 3; **live cross-Commune Communes, genetic exchange, cross-Commune
   trust, and the Mycobiome fabric are Phase 5-6** (gossip/DHT/membership = Phase 4-5; trust-gradient =
   Phase 6). The closed-by-default node posture
   this entity model formalises is **already true today** (per-operator credentials, no shared key

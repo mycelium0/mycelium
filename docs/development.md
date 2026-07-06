@@ -45,7 +45,7 @@ them:
 - **Layer 3 — Routing and orchestration** — path selection ingress→egress, multi-hop,
   rerouting.
 - **Layer 4 — Discovery and membership** — who is in the mesh, how to join,
-  sybil-resistance, NAT traversal (Phase 4: coordinator; Phase 5–6: libp2p DHT + gossip).
+  sybil-resistance, NAT traversal (Phase 3: coordinator; Phase 4–5: libp2p DHT + gossip).
 - **Layer 5 — Consumption interface (out of scope — standard clients connect to standard
   endpoints)** — nodes expose standard protocol endpoints; a bespoke end-user client
   application is explicitly out of scope (possible future work).
@@ -251,7 +251,7 @@ What each layer does (roles, not implementations):
 - **Layer 2 (Control)** issues identities/configs, diagnoses links, runs the auto-rotation
   loop, accumulates telemetry, and builds policy. **The brain of adaptation.**
 - **Layer 3 (Routing)** selects the ingress→egress path and reconstructs it when blocking
-  occurs (rerouting); multi-hop from Phase 5 onward.
+  occurs (rerouting); multi-hop from Phase 4 onward.
 - **Layer 4 (Discovery)** answers "who is in the mesh and who has the right to be"; it
   provides sybil-resistance and NAT traversal.
 - **Layer 5 (Consumption interface)** is out of scope: standard clients connect to standard
@@ -305,11 +305,11 @@ These are not recommendations. Violation is a development defect at severity S0/
    A silent fallback that trades anonymity/indistinguishability for reachability without an
    explicit degradation policy is `SILENT_DEGRADATION` (**S0**, §7.4).
 
-5. **Making the coordinator (Phase 4) an indispensable kill-switch.** The coordinator must
+5. **Making the coordinator (Phase 3) an indispensable kill-switch.** The coordinator must
    be persistent and resilient against network interference in its own right
    (fronting/anycast/P2P fallback) and know the minimum; its compromise must not expose the
    mesh map. The architecture must have a path
-   to operating *without* the coordinator (Phase 5). A centre with no fallback is
+   to operating *without* the coordinator (Phase 4). A centre with no fallback is
    `SINGLE_POINT_OF_BLOCK` (**S0**, §7.4).
 
 6. **Making a node "know too much."** A node/hop does not accumulate what it does not need
@@ -382,7 +382,7 @@ defect: the sources diverge and produce conflicting diagnoses/policy
 | Active transport configuration of a node | Layer 2 (config) |
 | Current link diagnosis (`clean/throttled/blocked/shutdown`) | Layer 2 (detector) |
 | Policy "which transport lives where" | Layer 2 (policy), distributed in config bundle |
-| Node registry and reachability/health | Layer 4 (Phase 4: coordinator; Phase 5+: DHT/gossip) |
+| Node registry and reachability/health | Layer 4 (Phase 3: coordinator; Phase 4+: DHT/gossip) |
 | Ingress→egress path selection | Layer 3 (routing) |
 | Raw/aggregated measurement signals | Layer 2 (telemetry store) |
 
@@ -495,7 +495,7 @@ two fresh IPs in sequence (both a resource concern and an exposure concern).
   coincide.
 - **Rerouting**: when an egress is unreachable from region R, clients in R are directed to
   an alternative egress; the path is reconstructed around the dead segment automatically.
-- **Multi-hop (Phase 5+):** onion/garlic style — no single hop knows the full path. The
+- **Multi-hop (Phase 4+):** onion/garlic style — no single hop knows the full path. The
   tradeoff latency ↔ reachability ↔ anonymity is chosen **deliberately by scenario**
   (the anonymity trilemma, THREAT-MODEL) and communicated honestly.
 - Layer 3 does **not** maintain the node registry (Layer 4) and does **not** diagnose links
@@ -517,10 +517,10 @@ two fresh IPs in sequence (both a resource concern and an exposure concern).
 
 ### 4.4. Layer 4. Discovery and membership
 
-- Evolution: Phase 0–2 — static config/config-bundle; Phase 4 — coordinator registry
-  (Headscale-style); Phase 5–6 — libp2p Kademlia DHT + GossipSub.
+- Evolution: Phase 0–2 — static config/config-bundle; Phase 3 — coordinator registry
+  (Headscale-style); Phase 4–5 — libp2p Kademlia DHT + GossipSub.
 - **Sybil-resistance** is mandatory from the moment membership becomes open (the primary
-  threat for Phases 5–6): invite tree / social-graph trust / PoW; **knowledge gradient** —
+  threat for Phases 4–5): invite tree / social-graph trust / PoW; **knowledge gradient** —
   a new node routes little and "knows little", and trust grows with verifiable history.
   Design enumeration resistance from the **first day** of the relevant phase, not after.
 - **NAT traversal**: AutoNAT determines the NAT type, hole-punching establishes a direct
@@ -568,10 +568,10 @@ mycelium/
     control-agent/          (network-state detector, auto-rotation loop, telemetry)
     cover/                  (cover-site / donor configs)
   control/
-    coordinator/            (Phase 4: registry, config distribution, blocking intelligence)
+    coordinator/            (Phase 3: registry, config distribution, blocking intelligence)
     subscription-server/    (config-bundle distribution)
     policy/                 (policy "what lives where")
-  mesh/                     (Phase 5+: libp2p DHT, gossip, NAT traversal, multi-hop)
+  mesh/                     (Phase 4+: libp2p DHT, gossip, NAT traversal, multi-hop)
   infra/
     terraform/              (VPS provisioning, fast IP/AS migration)
     ansible/                (node deployment from zero in a single command)
@@ -830,7 +830,7 @@ Distribution and operation of persistent private networking tools is subject to 
 restriction in certain jurisdictions; egress nodes bear liability for traffic that passes
 through them (THREAT-MODEL §"Legal and operational security"). Consequences for development:
 - protecting operators (deniability, clear responsibility boundaries, informed consent from
-  Phase 5–6 volunteers) is a design requirement, not a disclaimer;
+  Phase 4–5 volunteers) is a design requirement, not a disclaimer;
 - before deploying nodes in a specific jurisdiction — a separate legal assessment for that
   jurisdiction is required (outside the scope of code, but it affects defaults: what is
   collected and stored).

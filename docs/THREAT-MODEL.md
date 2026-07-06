@@ -72,7 +72,7 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 | Sybil / ingress enumeration | discovery | Invitation trees, social-graph/history trust, PoW, graduated knowledge |
 | Eclipse / route poisoning | discovery / routing | Reputation scoring, peer diversity, verifiability |
 | Traffic-timing correlation | routing | Multi-hop, padding, mixing (at latency cost) |
-| Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 4–5 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
+| Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 3–4 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
 | Operator coercion | people | Minimal logging, plausible deniability, jurisdictional distribution |
 
 ## Attack surface: TLS-in-TLS detection and the two-family mitigation
@@ -190,7 +190,7 @@ whose data direction never traverses the high-interference border filter as out-
   **node-to-node** — an in-region ingress hands the flow to an out-of-region node over a node-to-node
   hop — so the user is **never** pointed directly at an out-of-region node, and no user-direct flow
   crosses the degraded border class. This separates ingress from egress across nodes and is therefore
-  an **automated cross-node** posture (Phase 4-6, see [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md)
+  an **automated cross-node** posture (Phase 3-6, see [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md)
   and the ingress/egress-separation note in the table above). In the **current** posture it is available
   as an **operator-built two-hop**: an operator manually stands up an in-region ingress and an
   out-of-region egress under their own genetics, with the egress reached only over the node-to-node hop —

@@ -25,7 +25,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Phase:** cross-cutting **Measurement** track — a central publisher from Phase 0 onward, dissolving into mesh-native digest-spore ingestion in Phase 3–4 (see [../ROADMAP.md](../ROADMAP.md) cross-cutting tracks)
+- **Phase:** cross-cutting **Measurement** track — a central publisher from Phase 0 onward, dissolving into mesh-native digest-spore ingestion in Phase 4 (see [../ROADMAP.md](../ROADMAP.md) cross-cutting tracks)
 - **Related documents:**
   [VIS-0005](../vision/0005-network-weather-explorer.md) (the source Vision — this RP is its §12 publisher item);
   ADR-0017 (network-weather data contract & aggregation floor — the `network-weather.json`/`stress-digest` schema, the floor `k`, noise budget, coarsening/bucketing rules, rotation-event obfuscation, and the cumulative-disclosure bound this RP's pipeline enforces; authored alongside this RP per §8);
@@ -136,7 +136,7 @@ exists to deny.
 | fungi opt-in publish path | W-source: the `cache-custodian`-class fungi aggregates its own neighbourhood's redacted signals, applies the floor + noise **at the source**, forgets the raw inputs, and emits the signed `stress-digest`; the publisher's only input | deferred (its protocol + niche rotation + anti-Sybil weighting are **ADR-0018's** decision) | standard signature (key-id + bytes) / jq | Source-side aggregate-and-forget; the upload protocol + niche rotation + Sybil weighting are decided in ADR-0018, consumed (not re-decided) here. |
 | `internal/spec` (`StressSignal`, `SporeEnvelope`, `TrustScope`, `SporeTypeStressDigest`, …) | The inert, typed shapes the digest and snapshot project from; **read, not changed** — no new identity-bearing field is added | active (inert schemas) | Go | The shapes already exist and are inert (VIS-0003 §4 phase discipline); the explorer is a redacted projection of them. |
 | `network-weather.json` snapshot contract | The single static artifact the site renders; its **schema/`k`/noise/bucketing/rotation-obfuscation/cumulative bound are ADR-0017's**, consumed here | deferred (defined in ADR-0017) | JSON | One published contract, decided once in the ADR; this RP plans the pipeline that produces and proves it. |
-| DHT / gossip / registry / announce-into-mesh | **Not built here** — the publisher receives opt-in uploads now; mesh-native digest-spore ingestion is Phase 3–4 (the public contract is unchanged, only the transport beneath it) | deferred | none | Phase 3–4 ([../ROADMAP.md](../ROADMAP.md) scope discipline); inert here by design — no mesh behaviour is pulled forward. |
+| DHT / gossip / registry / announce-into-mesh | **Not built here** — the publisher receives opt-in uploads now; mesh-native digest-spore ingestion is Phase 4 (the public contract is unchanged, only the transport beneath it) | deferred | none | Phase 4 ([../ROADMAP.md](../ROADMAP.md) scope discipline); inert here by design — no mesh behaviour is pulled forward. |
 | node directory / membership list / topology / geographic map | **Not built — for any tier, not as an "advanced mode"** | excluded | none | The line the whole Vision exists to hold (VIS-0005 §4); a directory is simultaneously a routing table and a surveillance dataset. |
 
 ### 3.2. Blast-radius cap
@@ -178,7 +178,7 @@ not**. Specifically:
   `SporeEnvelope` with `SporeTypeStressDigest`, a `TrustScope`, and a standard signer key-id + signature
   bytes per [ADR-0002](../adr/0002-no-custom-cryptography.md)). Every type is **inert** (VIS-0003 §4): no
   node aggregates, emits, verifies, or germinates a digest yet, and `DiscoveryBackend.ReportStress` is a
-  declared-only stub. The fungi opt-in *protocol* (now) and its mesh-native dissolution (Phase 3–4) are
+  declared-only stub. The fungi opt-in *protocol* (now) and its mesh-native dissolution (Phase 4) are
   **ADR-0018's** to decide.
 - **Verify (W1) — no ingest.** Nothing collects opt-in digests, applies `import-inert-until-validated`,
   or verifies the `SporeEnvelope` signature against an out-of-band source key before a digest may
@@ -254,7 +254,7 @@ boundary.
 4. **Bound a single source's influence (consume ADR-0018's anti-Sybil weighting).** Apply the per-source
    cap / source weighting that ADR-0018 decides; the load-bearing Sybil resistance is the ADR's job, not
    re-decided here. The publisher receives opt-in uploads now; **mesh-native digest-spore ingestion is
-   Phase 3–4** (same public contract, different transport beneath it — VIS-0005 deferred).
+   Phase 4** (same public contract, different transport beneath it — VIS-0005 deferred).
 
 **Definition of Done.** The publisher's ingest contract is specified such that: only signed,
 in-TTL, in-scope `stress-digest` envelopes verified against an out-of-band source key influence the
@@ -434,7 +434,7 @@ adds no visitor telemetry).
   per-source caps — the load-bearing anti-Sybil weighting is **ADR-0018's** job, consumed here.
 - **Publisher as a value target.** It is a temporary centre; it holds **only already-redacted
   aggregates**, must never accrete raw inputs or reconstruct topology, and **dissolves into mesh-native
-  digest-spore ingestion in Phase 3–4** (same public contract, different transport).
+  digest-spore ingestion in Phase 4** (same public contract, different transport).
 - **Indistinguishability / probe surface.** The site exposes **no** queryable endpoint (no live node
   query), so it adds no active-probing surface; it renders a pre-redacted static artifact only.
 - **Over-specifying the gate.** Avoided by the operator rule: this RP names the **invariant** only; the
@@ -487,7 +487,7 @@ adds no visitor telemetry).
 - **The fungi opt-in upload protocol, the niche rotation, and the anti-Sybil source weighting** — decided
   in **ADR-0018**, consumed here.
 - **Mesh-native digest-spore ingestion** (a fungi emits its `stress-digest` as a real spore onto the
-  awareness layer and the publisher reads spores) — **Phase 3–4**; the public contract is unchanged, only
+  awareness layer and the publisher reads spores) — **Phase 4**; the public contract is unchanged, only
   the transport beneath it. No DHT/gossip/registry/announce runs in Phases 0–2.
 - **A project-run reference deployment or a published public endpoint** — the project runs none
   ([ADR-0016](../adr/0016-software-releases-not-an-operated-network.md)); each operator self-hosts.
@@ -500,7 +500,7 @@ adds no visitor telemetry).
   [../adr/README.md](../adr/README.md).
 - [ ] `docs/adr/0018-<slug>.md` (**new**, authored alongside this RP) — **fungi role & opt-in publish
   path**: the `cache-custodian`-class fungi niche and rotation, the opt-in upload protocol (Phase 0
-  onward) and its dissolution into mesh-native digest spores (Phase 3–4), and the anti-Sybil source
+  onward) and its dissolution into mesh-native digest spores (Phase 4), and the anti-Sybil source
   weighting W1 consumes. The human adds the row to [../adr/README.md](../adr/README.md).
 - [ ] [../development.md](../development.md) — register the **fail-closed network-weather publish
   invariant** (no IP/host/ASN/port/SNI/country/location-code/secret/per-node-id; every shown cell ≥ `k`;
@@ -516,7 +516,7 @@ adds no visitor telemetry).
   publisher holds only already-redacted aggregates, and the site exposes no queryable endpoint.
 - [ ] [../ROADMAP.md](../ROADMAP.md) Measurement track — note the explorer publisher + site as the
   public surface of the digest path, a central publisher now dissolving into mesh-native ingestion in
-  Phase 3–4.
+  Phase 4.
 - [ ] Trigger the VIS-0005 §12 **event-driven audit** when the publisher and the first live snapshot land
   (per [../refactoring.md](../refactoring.md)), focused on reversibility and cumulative disclosure.
 - [ ] [docs/proposals/README.md](README.md) — add the RP-0004 row (**the human adds the index row** to
@@ -538,7 +538,7 @@ There is nothing live to migrate: this RP is a **plan/contract** for a future, s
   operator self-hosts the site that renders it, the Measurement track gains its public surface — with the
   §12 event-driven audit run against that first live snapshot before it is relied upon.
 - **Phase order.** Phases 0–2: the opt-in PII-safe digest path only (ADR-0018); **no** DHT/gossip/
-  registry/announce/global-topology. The publisher + site are a **future build**. Phase 3–4: the publisher
+  registry/announce/global-topology. The publisher + site are a **future build**. Phase 4: the publisher
   reads mesh-native digest spores instead of direct uploads — the **public contract is unchanged**, only
   the transport beneath it.
 

@@ -19,9 +19,10 @@ later. See the LICENSE file in the repository root.
 > for the loaded word "client": Mycelium ships **no** consumer client and operates **no** public
 > network ([ADR-0016](../adr/0016-software-releases-not-an-operated-network.md)).
 >
-> **Phase.** Not before **Phase 3** (the Living-node recovery/release/advisory phase — the Inoculum
-> operator starter bundle + toolkit is release/operability-adjacent, so it moves with the release track
-> from the narrowed single-node-adaptivity Phase 2 into the new Phase 3). Phases 0–2 may only **mention**
+> **Phase.** Not before **Phase 3** (Live intra-Commune hypha — the Inoculum operator starter bundle +
+> toolkit is a **post-release** config-distribution design: the first public release cuts as Phase 2
+> closes (single-node adaptivity + its first-release milestone), and this bundle is deferred to after
+> that release, so it lands no earlier than Phase 3). Phases 0–2 may only **mention**
 > the Inoculum as future work;
 > nothing in this RP is built, wired, or auto-enabled before its phase. The schema and tooling are
 > designed now so the future does not have to break them (the same posture
@@ -34,7 +35,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-13
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Phase:** **not before Phase 3** (concept + v0 schema + toolkit + CLI; the operator starter-bundle + toolkit is release/operability-adjacent, so it rides the new Phase 3 release track, not the narrowed single-node-adaptivity Phase 2; Phases 0–2 may only mention it). See [../ROADMAP.md](../ROADMAP.md).
+- **Phase:** **not before Phase 3** (concept + v0 schema + toolkit + CLI; the operator starter-bundle + toolkit is a **post-release** config-distribution design — the first public release cuts as Phase 2 closes (single-node adaptivity + its first-release milestone), and this bundle is deferred to after that release; Phases 0–2 may only mention it). See [../ROADMAP.md](../ROADMAP.md).
 - **Related documents:**
   [ADR-0013](../adr/0013-mycelial-vocabulary-and-phase-discipline.md) (mycelial vocabulary discipline — "Inoculum"/"spore"/"fungi" name real contracts; Phase 0-2 inert schemas);
   [ADR-0016](../adr/0016-software-releases-not-an-operated-network.md) (software releases, not an operated network — the project ships no client and operates no public network);

@@ -26,7 +26,7 @@ Mycelium travels from a single VLESS+REALITY node toward a decentralized, self-h
 (see [../ROADMAP.md](../ROADMAP.md), phases 0→8). The layers are stable across phases; their
 implementations change — but that is precisely why the **reasons** behind boundary decisions
 (why the control plane rides the same covert channels as data; why ingress and egress are
-separated; why custom cryptography is forbidden; why the Phase 4 (Node network) coordinator is a consciously
+separated; why custom cryptography is forbidden; why the Phase 3 (live intra-Commune hypha) coordinator is a consciously
 accepted temporary liability) must outlast implementation churn and team turnover.
 
 Competing forces:

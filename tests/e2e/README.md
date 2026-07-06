@@ -7,7 +7,7 @@ later. See the LICENSE file in the repository root.
 
 # End-to-end client-recovery harness (RP-0013 C2)
 
-The repeatable auto-test behind the Phase-3 e2e DoD: **under a block of its active endpoint, a stock
+The repeatable auto-test behind the first-release-milestone e2e DoD (closing Phase 2): **under a block of its active endpoint, a stock
 client holding the served subscription is carrying traffic again on an independent sibling within
 single-digit minutes, with no human action — measured at the client.** This is the automated companion to
 the authoritative on-device run on the operator's real client (the Phase-1 method); see
@@ -54,7 +54,7 @@ tests/e2e/client_recovery_probe.sh --config /tmp/e2e-sub/client.runnable.json \
 ```
 
 `verdict:"pass"` with `recovery_seconds ≤ bound` ⇒ AC-1 + AC-4 met for that node. Record the result in the
-Phase-3 acceptance ledger (C3), plus one on-device confirmation on the real client.
+Phase-2 acceptance ledger (C3), plus one on-device confirmation on the real client.
 
 ## Safety / invariants
 

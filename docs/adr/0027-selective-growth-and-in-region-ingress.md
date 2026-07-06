@@ -23,7 +23,7 @@ later. See the LICENSE file in the repository root.
 > hop) as a **current-posture deployment doctrine** — the deployment shapes an operator builds **by hand
 > today**: a manually-established two-hop (in-region ingress node → out-of-region egress node) and
 > per-client split-tunnel route sets. It does **NOT** introduce automated cross-node bridging, automated
-> route selection, gossip, or dynamic path-finding — those remain Phase 4-6 per
+> route selection, gossip, or dynamic path-finding — those remain Phase 3-5 per
 > [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md). The cross-Commune **contract** that an
 > automated node-to-node hop will eventually ride is [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md);
 > this ADR records **why** the topology is shaped this way and what the **manual** form is now.
@@ -31,7 +31,7 @@ later. See the LICENSE file in the repository root.
 > **See also:** [0010-phase0-transport-set.md](0010-phase0-transport-set.md) (the engine matrix:
 > the xray-class TLS engines vs. the WireGuard-class non-TLS path — the precision of the split differs by
 > engine), [0013-mycelial-vocabulary-and-phase-discipline.md](0013-mycelial-vocabulary-and-phase-discipline.md)
-> (phase discipline: manual operator topology now, automation Phase 4-6),
+> (phase discipline: manual operator topology now, automation Phase 3-5),
 > [0014-per-operator-node-credentials.md](0014-per-operator-node-credentials.md) (the self-sufficient node;
 > the egress node a hop reaches is another operator's box, not a shared relay),
 > [0016-software-releases-not-an-operated-network.md](0016-software-releases-not-an-operated-network.md)
@@ -62,7 +62,7 @@ later. See the LICENSE file in the repository root.
   hand today, and they follow from per-operator nodes ([ADR-0014](0014-per-operator-node-credentials.md))
   and the existing engines ([ADR-0010](0010-phase0-transport-set.md)), not from any cross-node machinery.
   **Automated** cross-node bridging, automated route/path selection, and dynamic egress-hop discovery are
-  **Phase 4-6** (the gossip/DHT/bridge machinery, riding the
+  **Phase 3-5** (the gossip/DHT/bridge machinery, riding the
   [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md) contract).
 - **Related:** [ADR-0010](0010-phase0-transport-set.md) (xray-class domain-aware split vs. WireGuard-class
   CIDR-only route sets — the instrument precision this ADR depends on);
@@ -186,7 +186,7 @@ loosen ADR-0026's contract requirement for the automated form.
      operational cost and a hop of added latency; the split-tunnel boundary ("which destinations are
      impaired") must be maintained, and its **precision depends on the engine** (Decision 3); the
      **automated** form of the egress hop is an egress-capability connection that needs the
-     [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md) contract and is therefore Phase 4-6, not now.
+     [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md) contract and is therefore Phase 3-5, not now.
    - Impact on survivability: strongly positive — the primary path avoids the filter by construction, no
      third-party front sees user metadata, and the data plane carries only what it must.
 
@@ -273,7 +273,7 @@ Per [ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md):
   operator-built two-hop** (in-region ingress node → out-of-region egress node) with **per-client
   split-tunnel route sets**. These are deployment patterns an operator constructs by hand from existing
   per-operator nodes and engines — no cross-node machinery is required.
-- **Phase 4-6 (NOT now):** **automated** cross-node bridging, **automated** route/path selection, dynamic
+- **Phase 3-5 (NOT now):** **automated** cross-node bridging, **automated** route/path selection, dynamic
   egress-hop discovery, and any gossip/DHT-driven topology. When the node-to-node egress hop is **automated
   across operators**, it is an **egress-capability Anastomosis Bridge** and **MUST** ride an explicit
   contract ([ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md)): **anonymous egress is not a default
@@ -315,7 +315,7 @@ grows only where direct reach is degraded.
     the destination-AS throughput filter is invisible from the operator's clean network), so the boundary is
     maintained against a signal the operator cannot routinely see — corroborated only by an in-region
     vantage / two-vantage test.
-  - **The automated egress hop is deferred** (Phase 4-6) behind the [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md)
+  - **The automated egress hop is deferred** (Phase 3-5) behind the [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md)
     contract; today the topology is operator-manual.
 - **Impact on user security (requirement №1):** strongly positive — the user's traffic is **not** routed
   through a TLS-terminating third party, so source address + destination hostnames are not exposed; the user
@@ -335,14 +335,14 @@ grows only where direct reach is degraded.
   current-posture deployment pattern; add **Selective Growth**, **in-region ingress**, and **anastomosis hop
   (node-to-node egress)** to [../GLOSSARY.md](../GLOSSARY.md); add the **destination-AS / download-direction
   throughput filter** and the **TLS-front metadata-leak** rows to [../THREAT-MODEL.md](../THREAT-MODEL.md);
-  spawn the **Phase 4-6** automated egress-hop work **under** the
+  spawn the **Phase 3-5** automated egress-hop work **under** the
   [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md) egress-capability contract.
 - **What is now forbidden:** a **full-tunnel generated default** (carry-everything) as the shipped posture; a
   **user-direct out-of-region egress** path as the primary route; a **TLS-terminating third-party front** for
   user traffic, or treating **out-of-region CDN fronting** as a reliable primary out-of-region path; standing
   up an **automated** node-to-node egress hop **without** an explicit
   [ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md) egress-capability contract, or any **automated**
-  cross-node bridging / route selection / egress-hop discovery **before its phase** (Phase 4-6); an egress
+  cross-node bridging / route selection / egress-hop discovery **before its phase** (Phase 3-5); an egress
   hop that terminates on a **shared / open / default-on relay**
   ([ADR-0014](0014-per-operator-node-credentials.md)/[ADR-0016](0016-software-releases-not-an-operated-network.md)/[ADR-0026](0026-anastomosis-bridges-and-safe-defaults.md)).
 
@@ -369,7 +369,7 @@ How the decision is verified in practice:
   on a shared/open/default-on relay, is an **S0** and blocks merge. Anonymous egress is not a default
   primitive.
 - **`no_premature_mesh`** ([ADR-0013](0013-mycelial-vocabulary-and-phase-discipline.md)) — any **automated**
-  cross-node bridging, route/path selection, or egress-hop discovery wired before Phase 4-6 fails the merge
+  cross-node bridging, route/path selection, or egress-hop discovery wired before Phase 3-5 fails the merge
   gate; the **manual** two-hop and per-client split route sets are the only current-posture form.
 - **`check_ppn_wording`** — the reachability/topology vocabulary stays neutral PPN language: mechanism terms
   only (destination-AS / subnet throughput degradation, download-direction throttling of out-of-region egress

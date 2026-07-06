@@ -21,7 +21,7 @@ held to a stricter standard than in a typical project.
 | Xray-core | VLESS/REALITY/Vision | primary transport; track releases (network-interference waves → fast patches) |
 | sing-box | transport multiplexer | server-side; Hysteria2/TUIC |
 | AmneziaWG | obfuscated WG | non-TLS fallback |
-| libp2p | DHT/gossip/NAT (Phase 5+) | mesh |
+| libp2p | DHT/gossip/NAT (Phase 4+) | mesh |
 | Caddy / nginx | cover site | standard web server |
 | Cloudflare | CDN-front / WARP | external service; do not treat as a secrets store |
 | Terraform / Ansible | provisioning/deploy | IaC |

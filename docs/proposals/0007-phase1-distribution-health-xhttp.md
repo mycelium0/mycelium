@@ -155,7 +155,7 @@ reviewable risk surface with its own acceptance criteria and conformance evidenc
   working front is a later RP; the candidate is an RU-reachable CDN, **not Cloudflare** (ADR-0014 §6:
   blocked/throttled on target networks).
 - Any **central cross-node endpoint**, per-user HMAC slice, churn-diff stream, invite/credit/
-  reputation (Lox/rBridge), gossip/DHT/fungi distribution, coordinator intake — Phase 3-5 (VIS-0007).
+  reputation (Lox/rBridge), gossip/DHT/fungi distribution, coordinator intake — Phase 3-4 (VIS-0007).
 - The **signed / TTL-bounded / cross-node** bundle — the Inoculum (RP-0005, Phase 2).
 - **Automated/block-triggered REALITY rotation** — Phase 2 (ADR-0020 §3); Phase-1 rotation is the
   operator running the manual runbook, after which the bundle re-renders and propagates via the loop.
@@ -575,7 +575,7 @@ REALITY would collapse breadth on the local-region node — REALITY is **kept in
 7. **Across the eventual fungi transition (§15.8):** the off-the-shelf Remote-Profile /
    `profile-update-interval` client loop is **frozen now**; VIS-0007 later changes only **who answers
    the URL and what it knows**, never the client loop or the inter-layer contract — so the
-   Phase-1→Phase-3-5 transition requires **no** contract rewrite.
+   Phase-1→Phase-3-6 transition requires **no** contract rewrite.
 
 ## 13.10. Rollback / fallback
 

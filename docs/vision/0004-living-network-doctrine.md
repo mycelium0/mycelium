@@ -17,7 +17,7 @@ later. See the LICENSE file in the repository root.
 > **What this is not.** Not a permission slip to run anything new. Phases 0–2
 > contribute only *inert typed schemas and interfaces*; no DHT, no gossip, no
 > distributed registry, no announce-into-mesh, no global topology, and no
-> autonomous cord promotion run as code. Phases 4–5 wire behaviour (see VIS-0003).
+> autonomous cord promotion run as code. Phases 3–4 wire behaviour (see VIS-0003).
 > It is also not a rename pass: a mycelial term earns its place only where it
 > defines a real contract (§3, the naming discipline).
 >
@@ -36,7 +36,7 @@ later. See the LICENSE file in the repository root.
 - **Date:** 2026-06-12
 - **Author:** mindicator & silicon bags quartet
 - **Status:** draft
-- **Horizon:** cross-cutting, Phase 0–8 — inert typed schemas in Phases 0–2 (with the new Phase 3 landing the inert living-node/advisory seam); running behaviour wired in Phases 4–5 and refined in Phases 6–8 (see [../ROADMAP.md](../ROADMAP.md))
+- **Horizon:** cross-cutting, Phase 0–8 — inert typed schemas in Phases 0–2 (the inert advisory seam is Phase-2 groundwork that goes live in Phase 3); running behaviour wired in Phases 3–4 and refined in Phases 6–8 (see [../ROADMAP.md](../ROADMAP.md))
 - **Layer(s):** cross-cutting (data plane, control plane, routing, discovery)
 - **Related:** [0001-mycelium-vision-and-scope.md](0001-mycelium-vision-and-scope.md),
   [0002-carrier-agnostic-mycelial-doctrine.md](0002-carrier-agnostic-mycelial-doctrine.md),
@@ -163,7 +163,7 @@ VIS-0002/0003):
   Done item (§7).
 - **The ten living-network concepts, each mapped to a real contract** (§5): for each concept, the
   schema / state machine / policy / measurable behaviour it becomes, the `internal/spec` type(s) it
-  touches, and its Phase-0–2 (inert) vs Phase-4–5 (running) status.
+  touches, and its Phase-0–2 (inert) vs Phase-3–4 (running) status.
 - **The naming discipline** (above) as doctrine that the spec work and reviews enforce.
 - **The canonical term definitions** (above) as the single reference the GLOSSARY and the spec doc
   comments point to.
@@ -193,7 +193,7 @@ VIS-0002/0003):
 
 - **Running source/sink growth bias, pulsatile cadence control, active pruning, dormant/scarred
   re-test logic, signal-speed routing, storage-organ custody, and compartment wound response** →
-  Phases 4–5 wire these as behaviour (gradient routing refines in Phase 6; carrier-bridged island
+  Phases 3–4 wire these as behaviour (gradient routing refines in Phase 6; carrier-bridged island
   merge in Phase 7; autonomous cord promotion in Phase 8) — see [../ROADMAP.md](../ROADMAP.md) and
   VIS-0003 §4.
 - **Autonomous cord promotion from measured link weights** → Phase 8. In Phases 0–2 `CordPromotion`
@@ -236,7 +236,7 @@ this runs in Phases 0–2; the types are inert there.
    a `GradientSignal`; the spare-vs-degraded reading derives from `TransportHealth` and aggregated
    `StressSignal`; replication targets reference `TrustScope`. *Measurable behaviour:* exploration and
    replication budget measurably skews toward measured-sink scopes; never toward a static "center".
-   *Phase:* inert fields in 0–2; the bias *runs* in Phase 4–5 (refined as routing bias in Phase 6).
+   *Phase:* inert fields in 0–2; the bias *runs* in Phase 3–4 (refined as routing bias in Phase 6).
    *Invariants:* gradients are scoped and aggregated, never a global demand map.
 
 2. **Reciprocal mutualism WITHOUT economics.** *Contract:* a **policy rule** — measured local
@@ -255,7 +255,7 @@ this runs in Phases 0–2; the types are inert there.
    are `TransportHealth` (volatility/uncertainty) and `StressSignal`; each probe is a **hyphal probe**
    (bounded, cheap). *Measurable behaviour:* probe interval measurably tracks uncertainty; inter-probe
    timing is jittered (no detectable periodicity) — and this doubles as an indistinguishability
-   requirement. *Phase:* cadence/jitter fields typed-inert in 0–2; the loop *runs* in Phase 4–5.
+   requirement. *Phase:* cadence/jitter fields typed-inert in 0–2; the loop *runs* in Phase 3–4.
    *Invariants:* every probe is budgeted; no unbounded crawl; jitter is mandatory.
 
 4. **Active pruning.** *Contract:* a **policy** that does more than stale cleanup: it reduces
@@ -265,7 +265,7 @@ this runs in Phases 0–2; the types are inert there.
    machine:* the prune step of the edge lifecycle (§ canonical lifecycle). *Measurable behaviour:*
    redundant edges are pruned without dropping below a dispersion floor; enumeration surface measurably
    shrinks; honest churn is *not* pruned as hostile (hysteresis). *Phase:* `DecayPolicy` inert in 0–2;
-   pruning *runs* in Phase 4–5. *Invariants:* pruning must not concentrate the fabric or crown a
+   pruning *runs* in Phase 3–4. *Invariants:* pruning must not concentrate the fabric or crown a
    center; over-suppression caution applies.
 
 5. **Growth-front roles (niches, not classes).** *Contract:* a **state-machine attribute** — a node
@@ -275,7 +275,7 @@ this runs in Phases 0–2; the types are inert there.
    per development.md §1.1) carried on `EdgeState`/node state; cache-custodian and cord-endpoint niches
    cross-reference `CordPromotion` and the storage-organ contract (concept 8). *Measurable behaviour:*
    a node's niche changes with conditions and reverts; no niche is sticky or privileged into a class.
-   *Phase:* the enum is typed-inert in 0–2; niche assignment *runs* in Phase 4–5 (cord-endpoint niche
+   *Phase:* the enum is typed-inert in 0–2; niche assignment *runs* in Phase 3–4 (cord-endpoint niche
    gated to Phase 8). *Invariants:* niches are temporary and reversible; never a permanent center.
 
 6. **Dormant and scarred edges.** *Contract:* a **state machine** that distinguishes three failure
@@ -286,7 +286,7 @@ this runs in Phases 0–2; the types are inert there.
    corroborated `StressSignal`. *Measurable behaviour:* a scarred edge requires k-of-n /
    stronger-evidence corroboration before re-activation, while a dormant edge re-tests cheaply; the
    two are not conflated. *Phase:* the qualifier is typed-inert in 0–2; the re-test/evidence logic
-   *runs* in Phase 4–5. *Invariants:* scarred reuse needs corroborated, scoped evidence, never a single
+   *runs* in Phase 3–4. *Invariants:* scarred reuse needs corroborated, scoped evidence, never a single
    signer (ties to VIS-0003's witness floor).
 
 7. **Signal speed classes.** *Contract:* a **classification policy** routing signals by speed/
@@ -297,7 +297,7 @@ this runs in Phases 0–2; the types are inert there.
    revocation/quarantine spore types within `SporeEnvelope` (hard, threshold-signed). *Measurable
    behaviour:* a fast health blip moves routing but not trust; only a threshold-signed hard signal can
    revoke; medium signals only bias exploration. *Phase:* speed-class fields typed-inert in 0–2;
-   speed-differentiated effects *run* in Phase 4–5 (trust gradient → Phase 6; revocation → the
+   speed-differentiated effects *run* in Phase 3–4 (trust gradient → Phase 6; revocation → the
    incident/revocation ADR). *Invariants:* a fast signal can never escalate itself into a trust or
    revocation effect; only threshold-signed hard signals revoke.
 
@@ -308,7 +308,7 @@ this runs in Phases 0–2; the types are inert there.
    bootstrap-hint, stress-summary spore types) and `TrustScope`. *Measurable behaviour:* survival
    artifacts remain reconstructable from custodian caches after node loss (anti-entropy repair), while
    the most sensitive records replicate *least* (cap by sensitivity, per VIS-0003 §6). *Phase:* custody
-   fields typed-inert in 0–2; custody *runs* in Phase 4–5. *Invariants:* a custodian never holds full
+   fields typed-inert in 0–2; custody *runs* in Phase 3–4. *Invariants:* a custodian never holds full
    topology or peer lists; replication fan-out capped by record sensitivity; no PII.
 
 9. **Compartment wound response.** *Contract:* a **state machine / policy** — a stressed or suspicious
@@ -319,7 +319,7 @@ this runs in Phases 0–2; the types are inert there.
    revocation/quarantine spore in `SporeEnvelope`. *Measurable behaviour:* a suspicious region seals
    and self-heals locally; nothing about the suspicion leaves it except a redacted, aggregated,
    threshold-corroborated summary above the floor — a single observer cannot trigger global action.
-   *Phase:* compartment/quarantine fields typed-inert in 0–2; sealing *runs* in Phase 4–5
+   *Phase:* compartment/quarantine fields typed-inert in 0–2; sealing *runs* in Phase 3–4
    (threshold-signed quarantine per the revocation/incident ADR). *Invariants:* no raw suspicion
    leaves the compartment; no global action before local sealing; threshold + TTL so false seals
    self-heal.
@@ -331,13 +331,13 @@ this runs in Phases 0–2; the types are inert there.
     healthy existing carrier over standing up a parallel one. *Measurable behaviour:* the fabric adds
     redundancy on top of working carriers and degrades onto them, rather than displacing them; a burned
     transport is replaced, a healthy one is reinforced. *Phase:* carrier descriptors typed-inert in
-    0–2; symbiotic bias *runs* in Phase 4–5 (carrier-bridged island merge → Phase 7). *Invariants:*
+    0–2; symbiotic bias *runs* in Phase 3–4 (carrier-bridged island merge → Phase 7). *Invariants:*
     transports are disposable but existing carriers are reinforced, not torn out — the mesh is the
     asset.
 
 **Concept → `internal/spec` type(s) → phase mapping.**
 
-| # | Concept | Real contract | `internal/spec` type(s) touched | Phase 0–2 (inert) | Phase 4–5 (running) |
+| # | Concept | Real contract | `internal/spec` type(s) touched | Phase 0–2 (inert) | Phase 3–4 (running) |
 |---|---|---|---|---|---|
 | 1 | Source-sink flow | growth/replication/exploration bias **policy** toward sinks | `GradientSignal`, `TransportHealth`, `StressSignal`, `TrustScope` | typed fields, no bias applied | bias runs (routing bias refined Phase 6) |
 | 2 | Reciprocal mutualism, no economics | local-only scoped priority/trust **policy rule** | `TrustScope` (strictly-local, never-gossiped field) | inert field | local-only effect; never global/market |
@@ -376,8 +376,8 @@ concepts 1, 4, 8 read and write. All remain inert in Phases 0–2.
     scores-strictly-local rule.
   - *Indistinguishability ↔ adaptation cadence.* Faster probing is more adaptive but more
     fingerprintable; jitter and adaptive (not fixed) cadence are the reconciliation.
-- **Technical debt accepted knowingly:** the Phase-4 coordinator (VIS-0003) is a deliberate temporary
-  centre that some of these behaviours (custody hints, growth-front assignment) lean on before Phase 5
+- **Technical debt accepted knowingly:** the Phase-3 coordinator (VIS-0003) is a deliberate temporary
+  centre that some of these behaviours (custody hints, growth-front assignment) lean on before Phase 4
   decentralises them; accepted on the explicit plan to dissolve it, and on the rule that it must never
   become a kill-switch or a master map.
 
@@ -471,7 +471,7 @@ detector must not itself become a correlation tool.
 With the living-network doctrine fixed, the `internal/spec` schemas can be written *knowing what each
 type means and which phase may run it*, and the network-state-model ADR (ADR-0013) can formalise the
 edge lifecycle and the named types as state machines without re-litigating the metaphor. This is the
-substrate Phases 4–5 wire into behaviour, Phase 6 refines into trust-gradient routing, Phase 7 uses
+substrate Phases 3–4 wire into behaviour, Phase 6 refines into trust-gradient routing, Phase 7 uses
 for carrier-bridged island merge, and Phase 8 uses for autonomous cord promotion — each built on
 something working, not instead of it. The payoff is a mesh whose immortality-through-rotation is a
 typed, tested property rather than a slogan.
@@ -494,5 +494,5 @@ typed, tested property rather than a slogan.
   fragment) and the edge lifecycle.
 - [ ] **research-note** on decay/hysteresis, probe cadence, source-sink bias, dispersion floor,
   dormant/scarred thresholds, and replication-cap calibration (`docs/research/...`).
-- [ ] **Trigger an event-driven audit** when the living-network behaviour (Phase 4–5) is connected,
+- [ ] **Trigger an event-driven audit** when the living-network behaviour (Phase 3–4) is connected,
   per [../refactoring.md](../refactoring.md).
