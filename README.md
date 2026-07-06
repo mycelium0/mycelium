@@ -58,16 +58,18 @@ the release is signed and verifiable ([docs/RELEASING.md](docs/RELEASING.md)).
   (sing-box + AmneziaWG), control tooling, provisioning, observability, conformance tests, runbooks.
 - **Phase 1 — Distribution (closed):** genuine-TLS transports, a self-replenishing endpoint bundle,
   and a self-updating subscription — validated hands-on over real cellular and Wi-Fi links.
-- **Phase 2 — Single-node adaptivity (closed):** the node-local *measure → detect → tune → rotate →
-  roll back* loop — a network-state detector, a reinforce-and-decay self-tuner, and a gated
-  auto-rotation with anti-flapping and rollback — proven driving itself on a live node. Control logic
-  consolidated into a typed Go spine: *the shell deploys; the Go binary decides and adapts.*
-- **Phase 3 — Living node (in progress):** end-to-end client recovery under a real block, a signed
-  release + deploy CLI, and the **inert seams** for advisory network-weather and the face-to-face
-  **hypha** boundary (no live federation yet). The first public release cuts after this phase.
+- **Phase 2 — Single-node adaptivity + first release (closing):** the node-local *measure → detect →
+  tune → rotate → roll back* loop — a network-state detector, a reinforce-and-decay self-tuner, and a
+  gated auto-rotation with anti-flapping and rollback — proven driving itself on a live node, with the
+  control logic consolidated into a typed Go spine (*the shell deploys; the Go binary decides*). Its
+  closing **first-release** milestone — end-to-end client recovery under a real block + a reproducible
+  signed release — is what cuts the first public release.
+- **Phase 3 — Live federation (next, after the release):** live intra-Commune **hypha** peering over an
+  operator's own nodes. Its seams are already built but **inert** — advisory network-weather and the
+  face-to-face hypha boundary — with no live federation yet.
 
 Each phase is useful on its own and ships to production; the mesh is extended on top of something
-already working. Full roadmap (phases 0→8, scope, Definition of Done): [docs/ROADMAP.md](docs/ROADMAP.md).
+already working. Full roadmap, scope, and Definition of Done: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Principles
 
