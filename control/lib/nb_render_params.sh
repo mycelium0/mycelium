@@ -281,9 +281,15 @@ write_params() {
 	# render_singbox.sh fail-closes an ENABLED own-cert family; a REALITY-only node has no own-cert family,
 	# so an empty tls_sni is fine for it.
 	local tls_domain tls_san
-	tls_san="$(openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null)"
-	tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:\*\.[A-Za-z0-9.-]+' | head -1 | sed 's/^DNS:\*\./m./')"
-	[ -n "$tls_domain" ] || tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:[A-Za-z0-9.-]+' | grep -vE 'DNS:\*' | head -1 | sed 's/^DNS://')"
+	# These run under `set -euo pipefail`. A REALITY-only default node presents a CN=donor cover cert
+	# with NO subjectAltName, so `openssl -ext subjectAltName` yields empty and the `grep` below finds
+	# nothing → exit 1 → pipefail makes the bare assignment abort the ENTIRE deploy silently (grep
+	# prints nothing). (A multi-SAN cert would instead SIGPIPE `grep` via `head -1`.) An EMPTY tls_domain
+	# is the intended, handled result here (the C03 note above: a REALITY-only node has no own-cert SAN),
+	# so `|| true` keeps the no-match/SIGPIPE case from failing the deploy.
+	tls_san="$(openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null || true)"
+	tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:\*\.[A-Za-z0-9.-]+' | head -1 | sed 's/^DNS:\*\./m./' || true)"
+	[ -n "$tls_domain" ] || tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:[A-Za-z0-9.-]+' | grep -vE 'DNS:\*' | head -1 | sed 's/^DNS://' || true)"
 	local tmp
 	tmp="$(mktemp "${STATE_DIR}/.params.XXXXXX")"
 	jq -n \
