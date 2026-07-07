@@ -97,6 +97,19 @@ truth for the version is `internal/spec.Version`.
   realization of the Plane-2 `active-probe response failure (own-cert / cover path)` signal, under the
   hyphal-probe invariants (budgeted, jittered, bounded).
 ### Fixed
+- **Clean-machine deploy of the default REALITY-only profile aborts silently (`set -euo pipefail`).**
+  `nb_render_params.sh` derives the genuine-TLS SNI from the served cert's SAN with `grep -oE 'DNS:…'`; a
+  REALITY-only node's CN=donor cover cert has NO subjectAltName, so `grep` matches nothing and exits 1,
+  `pipefail` propagates it to the bare `tls_domain="$(…)"` assignment, and `set -e` aborts the WHOLE deploy
+  with nothing printed. An empty `tls_domain` is the intended, handled result there, so the openssl read and
+  both grep pipelines now end in `|| true` (this also fixes a latent `grep`→`head -1` SIGPIPE on a multi-SAN
+  cert). Nodes that served a genuine-TLS family (a real SAN cert) never hit it. Found by a clean-machine
+  deploy drill (a node wiped to bare OS with distro Go removed).
+- **Pinned Go toolchain too old to build the AmneziaWG engine without a distro Go.** The
+  `engines.manifest.json` build-toolchain pin `go1.23.12` satisfied the spine's `go.mod` floor (1.23) but not
+  `amneziawg-go`, whose `go.mod` requires `>= 1.24.4`; under `GOTOOLCHAIN=local` the engine build failed on a
+  machine with no newer distro Go (the existing nodes had built it with distro go1.26). Bumped the pin to
+  **go1.24.13** (new per-arch checksums; the `engine_manifest_shape` currency floor still holds). Same drill.
 - **Self-drive timers fail to arm on a relative invocation (systemd rejects a relative `ExecStart`).**
   `scripts/node-bootstrap.sh` wrote its own path (`NB_SELF`) verbatim into the `mycelium-l7probe` /
   `mycelium-rotate` unit `ExecStart`, but only *absolutised* it when it was a symlink — a plain relative
