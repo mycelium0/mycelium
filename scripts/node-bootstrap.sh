@@ -146,7 +146,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg | l7-probe-xhttp
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -269,6 +269,7 @@ while [ "$#" -gt 0 ]; do
 		--measure-configure) MODE="measure-configure"; shift ;;
 		--l7-probe)          MODE="l7-probe"; shift ;;
 		--l7-probe-awg)      MODE="l7-probe-awg"; shift ;;
+		--l7-probe-xhttp)    MODE="l7-probe-xhttp"; shift ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;
@@ -756,6 +757,10 @@ verify_post_apply() {
 	# (a TCP connect to a UDP port is meaningless), so its acceptance is L4-only without this: a real loopback
 	# WireGuard handshake against awg0 (RP-0014 chunk A). Advisory, its OWN marker, never rolls back.
 	measure_l7_probe_amneziawg "$STATE_DIR/l7_awg_postapply.json" || warn "post-apply L7 AmneziaWG liveness flagged a dead data-plane (marker: $STATE_DIR/l7_awg_postapply.json) — the UDP listener is bound but a real client could not establish the tunnel."
+	# vless-xhttp-tls rides the SEPARATE xray engine (not in $SINGBOX_CONFIG); a sing-box client cannot dial
+	# xhttp, so its acceptance is L4-only without this: an openssl own-cert loopback handshake against the
+	# xray xhttp-tls port (RP-0014 chunk A). Advisory, its OWN marker, never rolls back. No-op if xray absent.
+	measure_l7_probe_xhttp "$STATE_DIR/l7_xhttp_postapply.json" || warn "post-apply L7 xhttp-tls liveness flagged a dead outer-TLS layer (marker: $STATE_DIR/l7_xhttp_postapply.json) — the xray xhttp-tls listener is bound but a real client would fail the TLS layer."
 	return 0
 }
 
@@ -817,6 +822,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		measure-configure) generate_measure_configs ;;
 		l7-probe)          measure_l7_probe ;;
 		l7-probe-awg)      measure_l7_probe_amneziawg ;;
+		l7-probe-xhttp)    measure_l7_probe_xhttp ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
 fi

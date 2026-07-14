@@ -104,6 +104,18 @@ truth for the version is `internal/spec.Version`.
   `l7_selftest.json`. A legacy config with an empty ss/shadowtls secret reads cannot-judge, never
   spurious-dead. No schema/classifier change. Validated live: shadowtls healthy alive, wrong-port +
   black-hole dead; the full probe covers 5 families. Only the Xray-served vless-xhttp-tls remains L4-only.
+- **L7 liveness coverage for the Xray-served vless-xhttp-tls (RP-0014 chunk A) — completes chunk-A: every
+  closed transport family now has an L7 probe.** vless-xhttp-tls is in the SEPARATE xray config, a sing-box
+  client cannot dial xhttp, and it is not a sing-box measure member (nb_measure filters engine==sing-box), so
+  — like the AmneziaWG probe — `measure_l7_probe_xhttp` (`control/lib/nb_selftest.sh`) is an
+  ADVISORY/ACCEPTANCE signal on its OWN marker, NOT folded into rotation. xhttp-tls presents its own cert as
+  its outer layer, so it reuses the ws-tls genuine-TLS mechanism: an openssl loopback handshake whose leaf
+  must be non-expired AND carry tls_sni in its SAN. Honest scope (ADR-0036): catches an xray engine that is
+  down or serving a broken/expired/wrong own cert (the L4-only reach window cannot see this), but does not
+  verify the inner xhttp/VLESS layer (a bound-but-xhttp-wedged xray whose TLS still completes reads alive — a
+  documented residual). Wired into the post-apply acceptance hook + an on-demand `--l7-probe-xhttp` verb.
+  Fail-safe: absent openssl/jq, no xray config, a malformed config, or an unidentifiable inbound → skip.
+  Validated live: healthy alive, wrong-port/malformed dead/skip.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new
@@ -145,6 +157,15 @@ truth for the version is `internal/spec.Version`.
   realization of the Plane-2 `active-probe response failure (own-cert / cover path)` signal, under the
   hyphal-probe invariants (budgeted, jittered, bounded).
 ### Fixed
+- **`--node-apply` silently never served the xray engine (dual-engine gap).** `flow_node_apply` handled only
+  sing-box and early-returned when the sing-box candidate was byte-identical to the live config — so enabling
+  an xray-engine transport (vless-xhttp-tls, which leaves the sing-box config unchanged) never installed or
+  started xray. `flow_node_apply` (`control/lib/nb_render_params.sh`) now promotes/reloads sing-box ONLY when
+  its config changed (a restart drops live client connections on an always-on PPN), then ALWAYS applies the
+  optional xray engine via the new `apply_node_xray_engine` — the same fail-closed spine as bootstrap
+  (install → render → `xray run -test` → no-op-if-unchanged → promote-with-known-good-backup → unit → restart).
+  A stock node (no xray transport) is a no-op. Validated live: enabling vless-xhttp-tls served xray on its
+  port with the sing-box inbounds untouched (not restarted), rollback-safe.
 - **Legacy identities can't enable shadowsocks/shadowtls/trojan — empty per-proto secret → `sing-box check`
   "missing psk".** A node bootstrapped before ss/trojan/shadowtls were added to the identity secrets block
   carries those keys present-but-EMPTY (only `hysteria2_password` + `clash_secret` were minted), and

@@ -57,9 +57,11 @@
 # (a separate UDP engine, never in the sing-box config) is covered by the SIBLING probe
 # measure_l7_probe_amneziawg (a real loopback WG handshake) — an ADVISORY/ACCEPTANCE signal on its OWN marker,
 # NOT folded into the sing-box rotation loop (AmneziaWG is not a rotatable measure member: a standalone
-# always-on tunnel with no in-engine sibling to promote). STILL L4-only, needing a PROTOCOL-SPECIFIC probe
-# (RP-0014 chunk A follow-on): the Xray-served vless-xhttp-tls (a separate config, a distinct engine).
-# Coverage is asserted here, never a silent claim, per ADR-0036.
+# always-on tunnel with no in-engine sibling to promote). The Xray-served vless-xhttp-tls (a separate config,
+# a distinct engine, never a sing-box measure member) is covered by the SIBLING probe measure_l7_probe_xhttp
+# — an ADVISORY/ACCEPTANCE own-cert outer-TLS check (openssl loopback to the xray port; a sing-box client
+# cannot dial xhttp, so the inner xhttp/VLESS layer is a documented residual). Every closed family now has an
+# L7 probe; coverage is asserted here, never a silent claim, per ADR-0036.
 # _l7_singbox_dial OUTBOUNDS_JSON TIMEOUT — the SHARED sing-box-as-client dial + classify used by the QUIC
 # and ShadowTLS L7 probes (openssl speaks neither QUIC nor the ShadowTLS/SS layering). OUTBOUNDS_JSON is the
 # pre-built outbound ARRAY whose FIRST element is tagged "probe-out"; it is wrapped as {log, outbounds} into
@@ -410,4 +412,51 @@ measure_l7_probe_amneziawg() {
 	fi
 	[ "$verdict" = alive ] && log "L7 AmneziaWG probe: awg0 completed a loopback handshake — the obfuscated-WireGuard data-plane is live at L7."
 	return 0
+}
+
+# measure_l7_probe_xhttp — node-local L7 liveness for the Xray-served vless-xhttp-tls family, which
+# measure_l7_probe cannot cover: it is in the SEPARATE xray config (not $SINGBOX_CONFIG), a sing-box client
+# cannot dial the xhttp transport, and it is NOT a sing-box measure member (nb_measure enumerates only
+# engine==sing-box protos), so a dead ref in the rotation marker would be inert. Like measure_l7_probe_amneziawg
+# this is an ADVISORY/ACCEPTANCE signal on its OWN marker (default $STATE_DIR/l7_xhttp.json), NOT folded into
+# rotation. SCOPE (honest, ADR-0036): xhttp-tls presents its OWN cert (genuine-TLS) as its OUTER layer, so we
+# reuse the exact ws-tls mechanism — an openssl loopback handshake to 127.0.0.1:<port> whose presented leaf
+# must be non-expired AND carry the tls_sni in its SAN (pure loopback, no external contact). That catches an
+# xray engine that is DOWN or serving a broken/expired/wrong own cert — the failure modes the L4-only reach
+# window (a bare "is 2087 bound") cannot see. It does NOT verify the inner xhttp/VLESS layer (that needs an
+# Xray client; a bound-but-xhttp-wedged xray whose TLS still completes reads alive — a documented residual).
+# Best-effort: missing openssl/jq, no xray config, or an unidentifiable inbound -> no marker (fail-safe skip,
+# folds healthy). Retry-debounce so a one-off blip never writes a dead marker. Self-cleaning; loopback-only.
+measure_l7_probe_xhttp() {
+	have openssl && have jq || return 0
+	[ -n "${XRAY_CONFIG:-}" ] && [ -f "$XRAY_CONFIG" ] || return 0   # xray not serving here -> skip
+	local marker="${1:-$STATE_DIR/l7_xhttp.json}" port sni
+	# `|| port=""` / `|| sni=""`: a present-but-MALFORMED xray config makes jq exit non-zero, which under
+	# `set -euo pipefail` on the bare `--l7-probe-xhttp` verb path would abort the process at the assignment
+	# BEFORE the identify-skip guard. Neutralise it so a corrupt config folds to the documented fail-safe skip.
+	port="$(jq -r '.inbounds[]? | select(.protocol=="vless" and .streamSettings.network=="xhttp") | .port' "$XRAY_CONFIG" 2>/dev/null | head -1)" || port=""
+	sni="$(jq -r '.inbounds[]? | select(.protocol=="vless" and .streamSettings.network=="xhttp") | (.streamSettings.tlsSettings.serverName // .streamSettings.tlsSettings.certificates[0].serverName // empty)' "$XRAY_CONFIG" 2>/dev/null | head -1)" || sni=""
+	# The own-cert SNI (tls_sni) is shared with the sing-box genuine-TLS families; fall back to it if the xray
+	# tlsSettings does not restate serverName (a cert-only tlsSettings still presents the same leaf).
+	[ -n "$sni" ] || sni="$(jq -r '.inbounds[]? | select((.tls.server_name != null) and ((.tls.reality.enabled // false) == false)) | .tls.server_name' "$SINGBOX_CONFIG" 2>/dev/null | head -1)" || sni=""
+	[ -n "$port" ] && [ "$port" != "null" ] && [ -n "$sni" ] || return 0   # cannot identify the inbound -> skip
+	local parent="${sni#*.}" TO="" leaf san ok=0 attempt
+	command -v timeout >/dev/null 2>&1 && TO="timeout 8"
+	for attempt in 1 2 3; do
+		leaf="$(echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null | openssl x509 2>/dev/null)"
+		[ -n "$leaf" ] || { sleep 1; continue; }
+		printf '%s' "$leaf" | openssl x509 -noout -checkend 0 >/dev/null 2>&1 || { sleep 1; continue; }
+		san="$(printf '%s' "$leaf" | openssl x509 -noout -ext subjectAltName 2>/dev/null)"
+		if printf '%s' "$san" | grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)"; then ok=1; break; fi
+		sleep 1
+	done
+	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	if [ "$ok" -eq 1 ]; then
+		printf '{"observed_at":"%s","checked":1,"dead":[]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+		log "L7 xhttp-tls probe: the xray xhttp-tls own-cert loopback handshake completes (non-expired, SAN matches tls_sni) — the Xray outer-TLS layer is live."
+		return 0
+	fi
+	printf '{"observed_at":"%s","checked":1,"dead":["vless-xhttp-tls"]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+	warn "L7 xhttp-tls probe: the xray xhttp-tls own-cert loopback handshake FAILED (no leaf / expired / SAN mismatch) — 2087 is bound but a real client would fail the outer TLS layer."
+	return 1
 }

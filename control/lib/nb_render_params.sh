@@ -388,6 +388,43 @@ write_params() {
 # flow_update/flow_disable_two_hop, and is reachable ONLY via the explicit --node-apply mode (never an
 # auto-run from bootstrap/update). It does NOT mutate the firewall (no lockout surface); enabling a
 # transport on a new port also needs the listen port opened (harden_ufw on a full bootstrap) — tracked.
+# apply_node_xray_engine — ADR-0032 dual-engine: serve/refresh the OPTIONAL xray engine iff an xray-ENGINE
+# transport (vless-xhttp-tls) is enabled, using the SAME fail-closed spine as flow_bootstrap: ensure xray is
+# installed -> render candidate -> 'xray run -test' -> NO-OP if byte-identical to the live xray config ->
+# promote (known-good backup) -> unit -> restart. Node-local (no fetch); reached only from flow_node_apply.
+# A stock node (node_needs_xray false) is a no-op, so this can be called unconditionally. Without it,
+# enabling an xray-engine transport via --node-apply silently leaves the sing-box config byte-identical and
+# never serves xray.
+apply_node_xray_engine() {
+	node_needs_xray || return 0
+	if [ "$DRY_RUN" -eq 0 ]; then install_xray; fi
+	local xray_candidate="$STATE_DIR/xray.config.candidate.json"
+	render_xray_candidate "$xray_candidate"
+	if ! validate_xray_config "$xray_candidate"; then
+		rm -f "$xray_candidate" 2>/dev/null || true
+		die "xray candidate failed 'xray run -test' applying the node profile (fail-closed; nothing promoted)."
+	fi
+	if [ "$DRY_RUN" -eq 1 ]; then
+		rm -f "$xray_candidate" 2>/dev/null || true
+		log "[dry-run] xray-engine transport enabled; candidate validates + WOULD be served."
+		return 0
+	fi
+	if [ -f "$XRAY_CONFIG" ] && cmp -s "$xray_candidate" "$XRAY_CONFIG"; then
+		rm -f "$xray_candidate" 2>/dev/null || true
+		log "xray config byte-identical to the live one; secondary engine left untouched."
+		return 0
+	fi
+	promote_xray_config "$xray_candidate"
+	rm -f "$xray_candidate" 2>/dev/null || true
+	install_xray_unit
+	restart_xray
+	log "xray engine applied (ADR-0032 dual-engine): config promoted + xray.service restarted."
+	# Advisory L7 acceptance for the xray family: verify_post_apply is skipped on an xray-ONLY --node-apply
+	# (the sing-box config is unchanged), so run the outer-TLS own-cert probe here whenever xray is (re)served.
+	# Advisory — WARN, never rolls back (ADR-0036); a distinct marker so it never clobbers the daemon/verb one.
+	measure_l7_probe_xhttp "$STATE_DIR/l7_xhttp_postapply.json" || warn "post-apply L7 xhttp-tls liveness flagged a dead outer-TLS layer (marker: $STATE_DIR/l7_xhttp_postapply.json) — the xray xhttp-tls listener is bound but a real client would fail the outer TLS layer."
+}
+
 flow_node_apply() {
 	log "=== apply node profile (local re-render -> validate -> promote -> reload) ==="
 	need_root
@@ -399,31 +436,37 @@ flow_node_apply() {
 		rm -f "$candidate" 2>/dev/null || true
 		die "candidate failed 'sing-box check' applying the node profile (fail-closed; nothing promoted)."
 	fi
-	# NO-OP SHORT-CIRCUIT: a validated candidate byte-identical to the live config => no promote, no
-	# restart (a restart drops live client connections on an always-on PPN). A node with no descriptor /
-	# no change renders byte-identically here and does nothing.
-	if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then
-		rm -f "$candidate" 2>/dev/null || true
-		log "node profile produces a config byte-identical to the live one; no change to apply (service untouched)."
-		render_serve_bundle
-		return 0
-	fi
+	# Does the SING-BOX config change? A restart drops live client connections on an always-on PPN, so we
+	# promote/reload the primary engine ONLY when its config actually changed. This is NOT an early return:
+	# an xray-only change (e.g. enabling vless-xhttp-tls) leaves the sing-box config byte-identical, yet the
+	# xray engine below must still be served.
+	local sb_changed=1
+	if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then sb_changed=0; fi
 	if [ "$DRY_RUN" -eq 1 ]; then
 		rm -f "$candidate" 2>/dev/null || true
 		log "[dry-run] node profile validates and WOULD be applied (not promoted)."
+		apply_node_xray_engine
 		return 0
 	fi
-	promote_config "$candidate"
-	rm -f "$candidate" 2>/dev/null || true
-	install_singbox_unit
-	if apply_singbox && verify_post_apply; then
-		render_serve_bundle
-		log "node profile applied + verified; config reloaded + served bundle refreshed."
+	if [ "$sb_changed" -eq 1 ]; then
+		promote_config "$candidate"
+		install_singbox_unit
+		if apply_singbox && verify_post_apply; then
+			:
+		else
+			warn "post-apply verification failed applying the node profile; rolling back."
+			rollback_config
+			apply_singbox || true
+			verify_post_apply || warn "service still unhealthy after rollback — operator attention needed."
+			rm -f "$candidate" 2>/dev/null || true
+			die "node-apply rolled back (fail-closed) — the previous known-good config was restored."
+		fi
 	else
-		warn "post-apply verification failed applying the node profile; rolling back."
-		rollback_config
-		apply_singbox || true
-		verify_post_apply || warn "service still unhealthy after rollback — operator attention needed."
-		die "node-apply rolled back (fail-closed) — the previous known-good config was restored."
+		log "sing-box config byte-identical to the live one; primary engine left untouched."
 	fi
+	rm -f "$candidate" 2>/dev/null || true
+	# ADR-0032 dual-engine: serve/refresh xray independently of the sing-box change above (no-op on a stock node).
+	apply_node_xray_engine
+	render_serve_bundle
+	log "node profile applied + verified; config reloaded + served bundle refreshed."
 }
