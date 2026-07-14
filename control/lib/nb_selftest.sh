@@ -50,15 +50,96 @@
 # is one check per inbound; meant to run on a budgeted, jittered cadence (the hyphal-probe invariants,
 # VIS-0004), NOT every tick. Self-cleaning.
 # COVERAGE (Audit-0007 S2 + RP-0014 chunk A, honest scope): measure_l7_probe covers the sing-box REALITY
-# families (vless-reality-vision/-grpc/-xhttp — the authenticated dest steal, identical mechanism) and the
-# own-cert genuine-TLS ws-tls (loopback SAN match). AmneziaWG (a separate UDP engine, never in the sing-box
-# config) is covered by the SIBLING probe measure_l7_probe_amneziawg (a real loopback WG handshake) — an
-# ADVISORY/ACCEPTANCE signal on its OWN marker, NOT folded into the sing-box rotation loop (AmneziaWG is not
-# a rotatable measure member: a standalone always-on tunnel with no in-engine sibling to promote). STILL
-# L4-only, each needing a PROTOCOL-SPECIFIC probe (RP-0014 chunk A follow-on): the QUIC families
-# (hysteria2/tuic — a QUIC dial), shadowtls (an inner-auth probe, since the outer TLS relays a cover host),
-# and the Xray-served vless-xhttp-tls (a separate config). Coverage is asserted here, never a silent claim,
-# per ADR-0036.
+# families (vless-reality-vision/-grpc/-xhttp — the authenticated dest steal, identical mechanism), the
+# own-cert genuine-TLS ws-tls (loopback SAN match), and the QUIC families hysteria2/tuic (a real sing-box
+# client handshake + protocol auth over loopback — _l7_probe_quic_dial). AmneziaWG (a separate UDP engine,
+# never in the sing-box config) is covered by the SIBLING probe measure_l7_probe_amneziawg (a real loopback
+# WG handshake) — an ADVISORY/ACCEPTANCE signal on its OWN marker, NOT folded into the sing-box rotation loop
+# (AmneziaWG is not a rotatable measure member: a standalone always-on tunnel with no in-engine sibling to
+# promote). STILL L4-only, each needing a PROTOCOL-SPECIFIC probe (RP-0014 chunk A follow-on): shadowtls (an
+# inner-auth probe, since the outer TLS relays a cover host) and the Xray-served vless-xhttp-tls (a separate
+# config, a distinct engine). Coverage is asserted here, never a silent claim, per ADR-0036.
+# _l7_probe_quic_dial TAG TYPE PORT SNI — one QUIC (hysteria2/tuic) L7 liveness dial in two parts.
+# openssl cannot speak QUIC, so part (b) uses sing-box itself as the client. Returns: 0 alive, 1 dead,
+# 2 cannot-judge (sing-box/timeout/openssl absent, an unbuildable/malformed client config, or a fast dial
+# failure with no recognized handshake-failure signature — fail-safe, treated as NOT dead). Loopback-only.
+#
+# (a) CERT EXPIRY on the served cert FILE (the SAME shared per-node own-cert the genuine-TLS branch checks).
+#     We check EXPIRY ONLY — NOT SAN, NOT CA-chain: the own-cert is self-signed with CN=donor and NO SAN,
+#     client-PINNED by sha256 (ADR-0014), so a SAN/CA check would false-DEAD a HEALTHY node; but an EXPIRED
+#     served cert breaks every verifying/pinning client -> a definitive per-family dead. Absent/unreadable
+#     cert path -> skip (fail-safe).
+# (b) HANDSHAKE + AUTH + LIVENESS via a real QUIC dial: build an EPHEMERAL client config (a single outbound
+#     matching the inbound's first-user credentials, read from the live config into a 0600 temp file via jq)
+#     with tls.insecure=true — the cert is validated in (a), and the self-signed/pinned own-cert has no CA
+#     chain, so requiring CA/SAN trust in the dial would false-DEAD a healthy node. Then run
+#     `sing-box tools connect -o probe-out 127.0.0.1:1` (a CLOSED loopback target) under a hard timeout: a
+#     LIVE data-plane completes the handshake + protocol auth and HOLDS the connection open -> `timeout`
+#     kills it (exit 124 = ALIVE); a DEAD one (wrong/absent auth, down/wrong port) FAILS FAST. Protocol-
+#     agnostic (hysteria2 auth is in-handshake, tuic auth is post-handshake — both fail fast) and decoupled
+#     from every other transport (the target is a closed port). A fast exit is scored DEAD ONLY when its
+#     stderr carries a recognized handshake/auth/network-failure signature; a config-schema / tooling error
+#     (e.g. a sing-box version bump renaming a field) matches nothing -> cannot-judge, never a spurious dead
+#     that would rotate a healthy transport network-wide (ADR-0036 fail-safe). The creds transit the `ob`
+#     var + the 0600 temp file (removed after the dial); avoid `set -x` around this probe.
+_l7_probe_quic_dial() {
+	# to MUST exceed sing-box's QUIC handshake / "no recent network activity" timeout (~5s): a bound-but-
+	# WEDGED listener (socket held, not answering QUIC) then fails its handshake at ~5s -> a fast exit with a
+	# "connect to server:" error -> DEAD; a HEALTHY connection completes the handshake in <1s and stays active
+	# via keepalives, so it HOLDS to our timeout (exit 124 = ALIVE). A shorter timeout would kill the wedged
+	# handshake mid-retry -> 124 -> FALSE-ALIVE (the exact bound-but-dead case this probe exists to catch).
+	local tag="$1" type="$2" port="$3" sni="$4" to=7
+	[ -n "${SINGBOX_BIN:-}" ] && [ -x "$SINGBOX_BIN" ] || return 2
+	command -v timeout >/dev/null 2>&1 || return 2   # the ALIVE signal IS the timeout kill (exit 124)
+	[ -n "$sni" ] && [ -n "$port" ] || return 2
+	# (a) served-cert EXPIRY (expiry-only; SAN/CA would false-DEAD the self-signed no-SAN own-cert).
+	local cert
+	cert="$(jq -r --arg tag "$tag" '.inbounds[] | select(.tag==$tag) | .tls.certificate_path // ""' "$SINGBOX_CONFIG" 2>/dev/null)"
+	if [ -n "$cert" ] && [ -f "$cert" ] && have openssl; then
+		openssl x509 -in "$cert" -noout -checkend 0 >/dev/null 2>&1 || return 1   # EXPIRED served cert -> DEAD
+	fi
+	# (b) QUIC handshake + auth + liveness (insecure:true — cert already checked in (a); no CA/SAN trust).
+	# Single mktemp + single cleanup + single return (a RETURN trap is not function-scoped without functrace
+	# and would fire, unbound, on other returns). A SIGKILL mid-dial can orphan the 0600 temp (same creds
+	# already live in $SINGBOX_CONFIG — negligible). verdict defaults to 2 (cannot-judge) so any build/write
+	# failure is fail-safe NOT dead.
+	local tmpc ob err rc verdict=2
+	tmpc="$(mktemp 2>/dev/null)" || return 2
+	if [ "$type" = "tuic" ]; then
+		ob="$(jq -c --arg tag "$tag" --arg sni "$sni" --argjson port "$port" \
+			'.inbounds[] | select(.tag==$tag) | .users[0] as $u
+			 | {log:{level:"error"}, outbounds:[{type:"tuic",tag:"probe-out",server:"127.0.0.1",server_port:$port,uuid:$u.uuid,password:($u.password // $u.uuid),congestion_control:"bbr",tls:{enabled:true,server_name:$sni,insecure:true,alpn:["h3"]}}]}' \
+			"$SINGBOX_CONFIG" 2>/dev/null)"
+	else
+		ob="$(jq -c --arg tag "$tag" --arg sni "$sni" --argjson port "$port" \
+			'.inbounds[] | select(.tag==$tag) | .users[0].password as $pw
+			 | {log:{level:"error"}, outbounds:[{type:"hysteria2",tag:"probe-out",server:"127.0.0.1",server_port:$port,password:$pw,tls:{enabled:true,server_name:$sni,insecure:true,alpn:["h3"]}}]}' \
+			"$SINGBOX_CONFIG" 2>/dev/null)"
+	fi
+	# Only dial when the config is well-formed: non-empty AND its credential/port are non-null (a malformed /
+	# foreign inbound with missing users or listen_port builds a valid-SHAPED but unusable config -> stays
+	# cannot-judge, NOT dead; render_singbox always fills these). Then classify the fast-exit stderr.
+	if [ -n "$ob" ] \
+		&& printf '%s' "$ob" | jq -e '.outbounds[0] | (.password // .uuid) != null and .server_port != null' >/dev/null 2>&1 \
+		&& ( umask 077; printf '%s\n' "$ob" >"$tmpc" ) 2>/dev/null; then
+		rc=0
+		err="$(: | timeout "$to" "$SINGBOX_BIN" tools connect -c "$tmpc" -o probe-out 127.0.0.1:1 2>&1 >/dev/null)" || rc=$?
+		if [ "$rc" -eq 124 ]; then
+			verdict=0   # held past the handshake timeout -> handshake + auth completed + kept alive -> ALIVE
+		elif printf '%s' "$err" | grep -qiE 'connect to server|authenticat|application error|handshake|unreachable|no route'; then
+			# fast exit with an UNAMBIGUOUS server-side handshake/auth-failure signature -> DEAD. We key on
+			# the "connect to server" prefix (the OUTBOUND dial/handshake failed: wedged/down/wrong-port/HY2
+			# auth) + tuic's post-handshake "application error" + "authenticat" — NOT bare timeout/refused/
+			# reset/EOF/closed, which can also come from the intentionally-closed target on a HEALTHY dial.
+			verdict=1
+		else
+			verdict=2   # a config-schema / tooling error (no recognized signature) -> cannot-judge (fail-safe)
+		fi
+	fi
+	rm -f "$tmpc" 2>/dev/null
+	return "$verdict"
+}
+
 measure_l7_probe() {
 	have openssl && have jq || return 0
 	[ -f "$SINGBOX_CONFIG" ] || return 0
@@ -66,8 +147,9 @@ measure_l7_probe() {
 	local TO=""; command -v timeout >/dev/null 2>&1 && TO="timeout 8"
 	while IFS= read -r row; do
 		[ -n "$row" ] || continue
-		local tag ref port reality sni dest drc ok=0 attempt
+		local tag ref port reality sni dest type drc qrc ok=0 attempt
 		tag="$(printf '%s'     "$row" | jq -r '.tag')"
+		type="$(printf '%s'    "$row" | jq -r '.type // ""')"
 		port="$(printf '%s'    "$row" | jq -r '.port')"
 		reality="$(printf '%s' "$row" | jq -r '.reality')"
 		sni="$(printf '%s'     "$row" | jq -r '.sni // ""')"
@@ -79,7 +161,22 @@ measure_l7_probe() {
 		# spuriously rotate a healthy transport. A healthy member passes attempt 1 (no retry cost); only a
 		# member that fails EVERY attempt is marked dead. This probe-side debounce is the containment the
 		# tick-side cannot provide.
-		if [ "$reality" = "true" ]; then
+		if [ "$type" = "hysteria2" ] || [ "$type" = "tuic" ]; then
+			# QUIC (hysteria2/tuic): openssl cannot speak QUIC, so we complete a REAL handshake + protocol
+			# auth against the own listener with sing-box as the client, plus an expiry check on the served
+			# cert file (_l7_probe_quic_dial, loopback-only). A bound-but-client-DEAD QUIC listener (an
+			# EXPIRED served cert, wrong/rotated auth, a wedged engine) is caught here instead of passing the
+			# L4-only reach window.
+			[ -n "$sni" ] || { tested=$(( tested + 1 )); continue; }
+			for attempt in 1 2 3; do
+				# `qrc=0; ... || qrc=$?` mirrors the REALITY branch: under `set -e` a bare dead-return (rc 1)
+				# would abort before the marker is written. 0 = alive, 2 = cannot judge (sing-box/timeout
+				# absent) -> NOT dead; 1 = dead -> retry-debounce (a one-off blip never writes a dead marker).
+				qrc=0; _l7_probe_quic_dial "$tag" "$type" "$port" "$sni" || qrc=$?
+				[ "$qrc" -ne 1 ] && { ok=1; break; }
+				sleep 1
+			done
+		elif [ "$reality" = "true" ]; then
 			# REALITY: the broken-dest failure (e.g. www.microsoft.com) still completes TLS *and* the
 			# server's UNAUTHENTICATED fallback relay — only the AUTHENTICATED steal breaks. A plain openssl
 			# handshake rides that fallback and would MISS it. Use the authenticated ephemeral REALITY
@@ -121,8 +218,8 @@ measure_l7_probe() {
 		tested=$(( tested + 1 ))
 		[ "$ok" -eq 1 ] || dead="$dead $ref"
 	done <<PROBE_EOF
-$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-reality-xhttp-in" or .tag=="vless-ws-tls-in")
-	| {tag, port:.listen_port, reality:((.tls.reality.enabled)//false), sni:(.tls.server_name),
+$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-reality-xhttp-in" or .tag=="vless-ws-tls-in" or .type=="hysteria2" or .type=="tuic")
+	| {tag, type:.type, port:.listen_port, reality:((.tls.reality.enabled)//false), sni:(.tls.server_name),
 	   dest:(.tls.reality.handshake.server // .tls.server_name)}' "$SINGBOX_CONFIG" 2>/dev/null)
 PROBE_EOF
 	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -133,7 +230,7 @@ PROBE_EOF
 		warn "L7 measure-probe: client-DEAD transport(s):$dead (own-listener handshake failed)."
 		return 1
 	fi
-	log "L7 measure-probe: all $tested L7-covered transport(s) (REALITY + genuine-TLS; other families are L4-only) complete the own-listener handshake."
+	log "L7 measure-probe: all $tested L7-covered transport(s) (REALITY + genuine-TLS + QUIC; shadowtls/xhttp-tls remain L4-only) complete the own-listener handshake."
 	return 0
 }
 

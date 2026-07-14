@@ -73,6 +73,23 @@ truth for the version is `internal/spec.Version`.
   member — no in-engine sibling to promote). Wired into the post-apply acceptance hook + an on-demand
   `--l7-probe-awg` verb; not on the cadenced daemon timer. No schema/classifier change. Validated live on a
   node: alive, clean teardown, idempotent, concurrent-run skip.
+- **L7 liveness coverage for the QUIC families hysteria2/tuic (RP-0014 chunk A).** The reach probe is
+  L4-only (a TCP connect to a UDP port is meaningless) and openssl cannot speak QUIC, so a bound-but-DEAD
+  hysteria2/tuic listener (wrong/rotated auth, an expired cert, a wedged engine holding the socket)
+  previously passed. `measure_l7_probe` now covers them with a real QUIC handshake using sing-box as the
+  client (`_l7_probe_quic_dial`, `control/lib/nb_selftest.sh`): (a) an openssl EXPIRY check on the served
+  cert file (expiry-only — the own-cert is self-signed/no-SAN/sha256-pinned per ADR-0014, so a SAN/CA check
+  would false-DEAD a healthy node), then (b) an ephemeral sing-box client outbound (creds read from the live
+  config into a 0600 temp file) `tools connect` to a closed loopback target under a timeout set ABOVE
+  sing-box's ~5s QUIC handshake timeout — a healthy data-plane holds past it (exit 124 = alive) while a
+  wedged/down/mis-authed one fails fast with an unambiguous `connect to server`/`application error`/
+  `authenticat` signature (dead). Unlike AmneziaWG, hysteria2/tuic ARE rotatable measure members (class
+  quic-udp), so the dead ref folds into the rotation marker `l7_selftest.json` →
+  `DetectorSignal.ActiveProbeOK`. Fail-safe (ADR-0036): sing-box/timeout/openssl absent, an unbuildable
+  config, or an unrecognized failure → cannot-judge (never dead); a probe-side retry-debounce. No
+  schema/classifier change. Validated live (sing-box 1.13.13): healthy alive, a wedged (bound non-QUIC) port
+  dead, closed/wrong-port/wrong-auth dead, empty-sni cannot-judge; the full probe covers 4 families.
+  shadowtls + the Xray-served vless-xhttp-tls remain L4-only (the next chunk-A follow-ons).
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new
