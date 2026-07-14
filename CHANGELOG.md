@@ -56,6 +56,23 @@ truth for the version is `internal/spec.Version`.
   REALITY touches only the node's own cover/`dest` host (ADR-0036). Proven on m1: an induced L7-dead active drives an
   autonomous recorded rotation, a too-soon second rotation is correctly rate-limited, and the node recovers to
   clean once the fault clears.
+- **L7 liveness coverage for the AmneziaWG data-plane (RP-0014 chunk A).** AmneziaWG rides a separate UDP
+  engine (`amneziawg-go` on `awg0`), never appears in the sing-box config, and its UDP listener defeats the
+  L4 reach probe (a TCP connect to a UDP port is meaningless) — so its acceptance was L4-only: a bound
+  UDP/443 with a *wedged* engine (crash-looping but holding the socket, or not processing handshakes) passed
+  `verify_listen_ports`. `measure_l7_probe_amneziawg` (`control/lib/nb_selftest.sh`) now closes that with a
+  real loopback WireGuard handshake — it briefly enrols an ephemeral dead-end probe-peer on `awg0` (a `/32`
+  from a reserved `.240–.254` block `render_awg0` now fails closed before ever assigning to a client), brings
+  up a throwaway userspace interface with `awg0`'s own junk params + a `127.0.0.1` endpoint, polls
+  `latest-handshakes`, and tears everything down under an `EXIT/INT/TERM/HUP`-trap so the peer + interface are
+  always removed. Fail-safe (ADR-0036): absent tools / no `awg0` / any setup failure → healthy (never dead);
+  only a fully-set-up probe whose handshake never completes → dead. Serialized by a non-blocking `flock`
+  (a concurrent run skips), idempotent self-heal of a stray peer/iface. **Advisory/acceptance scope:** it
+  writes its OWN marker (`$STATE_DIR/l7_awg.json`; a distinct `l7_awg_postapply.json` at deploy acceptance)
+  and WARNs; it is **not** folded into the sing-box rotation loop (AmneziaWG is not a rotatable measure
+  member — no in-engine sibling to promote). Wired into the post-apply acceptance hook + an on-demand
+  `--l7-probe-awg` verb; not on the cadenced daemon timer. No schema/classifier change. Validated live on a
+  node: alive, clean teardown, idempotent, concurrent-run skip.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new

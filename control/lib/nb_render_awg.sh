@@ -171,6 +171,12 @@ render_awg0() {
 	local node_addr; node_addr="$(resolve_node_address 2>/dev/null || printf '%s' "$NODE_ADDRESS_PLACEHOLDER")"
 	local n=2 name cpub cpriv cpsk cv6 client_allowed client_dns
 	for name in $CLIENT_NAMES; do
+		# 10.13.13.240–.254 is RESERVED for the node-local L7 liveness probe (nb_selftest.sh
+		# measure_l7_probe_amneziawg enrols an ephemeral probe-peer in that block). Fail CLOSED before a
+		# client could be assigned into it, so the probe's reserved-range pre-clean can never remove a real
+		# client peer. A /24 tunnel addresses .2–.239 for clients (238); split the node or widen
+		# AWG_TUNNEL_V4 beyond /24 to serve more.
+		[ "$n" -lt 240 ] || die "AmneziaWG client count exceeds the addressable client range (.2–.239 on a /24); .240–.254 is reserved for the L7 liveness probe. Split the node or widen AWG_TUNNEL_V4 beyond a /24."
 		[ -f "$clients_dir/$name.private" ] || ( umask 077; awg genkey >"$clients_dir/$name.private" )
 		cpriv="$(cat "$clients_dir/$name.private")"
 		cpub="$(awg pubkey <"$clients_dir/$name.private")"
