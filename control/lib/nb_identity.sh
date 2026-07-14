@@ -85,7 +85,39 @@ ensure_identity() {
 
 	# 2) Node-level secrets + REALITY keypair + donor (once).
 	if [ -f "$IDENTITY_SECRETS" ]; then
-		log "node secrets already present at $IDENTITY_SECRETS; keeping them."
+		# BACKFILL any per-proto secret a LEGACY identity predates (ss/trojan/shadowtls were added to the
+		# secrets block after early nodes were bootstrapped). Existing secrets are PRESERVED byte-for-byte
+		# (stability: never rotate a live secret); only ABSENT/empty keys are minted. Without this, enabling
+		# shadowsocks/shadowtls/trojan on a legacy node renders an EMPTY password -> 'sing-box check' fails
+		# ("missing psk"), silently blocking those families. A node with all secrets present is untouched.
+		local sk missing=0 cur
+		for sk in ss_password trojan_password hysteria2_password shadowtls_password clash_secret; do
+			cur="$(jq -r --arg k "$sk" '.secrets[$k] // ""' "$IDENTITY_SECRETS" 2>/dev/null)" || cur=""
+			[ -n "$cur" ] || missing=1
+		done
+		if [ "$missing" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
+			local btmp
+			btmp="$(mktemp "${STATE_DIR}/.id.XXXXXX")"
+			# Per key: keep the EXISTING value iff it is present AND non-empty; otherwise take the fresh one.
+			# (A legacy identity may carry the key present-but-EMPTY, so a plain `{fresh}+(.secrets)` object
+			# merge — where a present "" wins — would NOT fill it; hence the explicit non-empty test.) Any
+			# other secret keys already in the block are preserved by the `$s +` base.
+			jq --arg ss "$(gen_secret_b64)" --arg tj "$(gen_secret_b64)" --arg hy "$(gen_secret_b64)" \
+				--arg st "$(gen_secret_b64)" --arg clash "$(gen_secret_b64)" \
+				'.secrets as $s | .secrets = ($s + {
+					ss_password:         (($s.ss_password // "")         | if . != "" then . else $ss end),
+					trojan_password:     (($s.trojan_password // "")     | if . != "" then . else $tj end),
+					hysteria2_password:  (($s.hysteria2_password // "")  | if . != "" then . else $hy end),
+					shadowtls_password:  (($s.shadowtls_password // "")  | if . != "" then . else $st end),
+					clash_secret:        (($s.clash_secret // "")        | if . != "" then . else $clash end)
+				})' \
+				"$IDENTITY_SECRETS" >"$btmp" \
+				&& mv -f "$btmp" "$IDENTITY_SECRETS" && chmod 0600 "$IDENTITY_SECRETS" \
+				&& log "backfilled missing per-proto secret(s) into the existing identity (legacy node; existing secrets preserved)." \
+				|| { rm -f "$btmp" 2>/dev/null; warn "identity secret backfill failed; leaving the identity untouched."; }
+		else
+			log "node secrets already present at $IDENTITY_SECRETS; keeping them."
+		fi
 		return 0
 	fi
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would generate REALITY keypair, secrets, donor, cert"; return 0; fi
