@@ -44,11 +44,13 @@
 # sustained-blocked verdict downstream). A healthy member passes on the first attempt, so the steady cost
 # is one check per inbound; meant to run on a budgeted, jittered cadence (the hyphal-probe invariants,
 # VIS-0004), NOT every tick. Self-cleaning.
-# COVERAGE (Audit-0007 S2, honest scope): this probe covers ONLY the three tags below whose L7 failure the
-# L4 reach window cannot see — the two REALITY families (vless-reality-vision/-grpc) and genuine-TLS
-# (vless-ws-tls). The other enrolled transports (hysteria2/tuic/shadowtls/trojan/xhttp) are NOT L7-probed
-# here and keep an L4-only verdict, so "the reach L4-only blind spot is closed" is scoped to these three
-# families, per ADR-0036. Extending coverage to the remaining families is future work, not a silent claim.
+# COVERAGE (Audit-0007 S2 + RP-0014 chunk A, honest scope): this probe covers the sing-box REALITY families
+# (vless-reality-vision/-grpc/-xhttp — the authenticated dest steal, identical mechanism) and the own-cert
+# genuine-TLS ws-tls (loopback SAN match) — the tags whose L7 failure the L4 reach window cannot see. STILL
+# L4-only, each needing a PROTOCOL-SPECIFIC probe (RP-0014 chunk A follow-on): the QUIC families
+# (hysteria2/tuic — a QUIC dial), shadowtls (an inner-auth probe, since the outer TLS relays a cover host),
+# the Xray-served vless-xhttp-tls (a separate config), and AmneziaWG (a WG handshake, served by a separate
+# engine — not in this sing-box config). Coverage is asserted here, never a silent claim, per ADR-0036.
 measure_l7_probe() {
 	have openssl && have jq || return 0
 	[ -f "$SINGBOX_CONFIG" ] || return 0
@@ -111,7 +113,7 @@ measure_l7_probe() {
 		tested=$(( tested + 1 ))
 		[ "$ok" -eq 1 ] || dead="$dead $ref"
 	done <<PROBE_EOF
-$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-ws-tls-in")
+$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-reality-xhttp-in" or .tag=="vless-ws-tls-in")
 	| {tag, port:.listen_port, reality:((.tls.reality.enabled)//false), sni:(.tls.server_name),
 	   dest:(.tls.reality.handshake.server // .tls.server_name)}' "$SINGBOX_CONFIG" 2>/dev/null)
 PROBE_EOF
