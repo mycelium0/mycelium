@@ -153,7 +153,12 @@ install_xray() {
 	[ -n "$XRAY_VERSION" ] || die "--xray-version is required to install xray (an xray-engine transport is enabled; fail-closed pin)."
 	[ -n "$XRAY_SHA256" ]  || die "--xray-sha256 is required to install xray (fail-closed pin)."
 	have curl || have wget || die "need curl or wget to download xray."
-	have unzip || die "need unzip to unpack the xray release (Xray ships a .zip)."
+	# Xray ships a .zip; ensure unzip (a clean machine often lacks it — install_singbox's .tar.gz never needed
+	# it, so it is not in install_base_deps). Install it like install_awg_tools bootstraps build-essential.
+	if ! have unzip; then
+		have apt-get && env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip >/dev/null 2>&1 || true
+	fi
+	have unzip || die "need unzip to unpack the xray release (Xray ships a .zip); install it by hand (e.g. apt-get install unzip)."
 
 	# Map machine arch -> the xray release archive arch token (note: distinct from sing-box's tokens).
 	local march arch
