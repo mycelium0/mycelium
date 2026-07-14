@@ -90,6 +90,20 @@ truth for the version is `internal/spec.Version`.
   schema/classifier change. Validated live (sing-box 1.13.13): healthy alive, a wedged (bound non-QUIC) port
   dead, closed/wrong-port/wrong-auth dead, empty-sni cannot-judge; the full probe covers 4 families.
   shadowtls + the Xray-served vless-xhttp-tls remain L4-only (the next chunk-A follow-ons).
+- **L7 liveness coverage for ShadowTLS v3 (RP-0014 chunk A).** The QUIC dial + classify was extracted into a
+  shared `_l7_singbox_dial` (exit 124 = held = alive; a fast exit with an unambiguous server-side
+  `connect to server`/`application error`/`authenticat` signature = dead; else cannot-judge), and
+  `_l7_probe_shadowtls_dial` (`control/lib/nb_selftest.sh`) added. ShadowTLS's client-facing inbound wraps a
+  hidden loopback shadowsocks-2022 detour and its outer TLS handshake is a genuine relay to the node's cover
+  host, so the probe reconstructs the real two-outbound client (inner SS-2022 detoured through outer
+  ShadowTLS-v3) from the live config and dials it (no node-cert-expiry check — the outer handshake presents
+  the cover's relayed cert). The dial timeout is 17s, ABOVE sing-box's ~15s TLS handshake deadline, so a
+  bound-but-black-holed listener (accepts TCP, never completes the handshake) fails → dead rather than being
+  killed mid-handshake → false-alive (validated live: a black-hole handshake times out at 15s). ShadowTLS IS
+  a rotatable measure member (class shadowtls-tcp), so the dead ref folds into the rotation marker
+  `l7_selftest.json`. A legacy config with an empty ss/shadowtls secret reads cannot-judge, never
+  spurious-dead. No schema/classifier change. Validated live: shadowtls healthy alive, wrong-port +
+  black-hole dead; the full probe covers 5 families. Only the Xray-served vless-xhttp-tls remains L4-only.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new
@@ -131,6 +145,15 @@ truth for the version is `internal/spec.Version`.
   realization of the Plane-2 `active-probe response failure (own-cert / cover path)` signal, under the
   hyphal-probe invariants (budgeted, jittered, bounded).
 ### Fixed
+- **Legacy identities can't enable shadowsocks/shadowtls/trojan — empty per-proto secret → `sing-box check`
+  "missing psk".** A node bootstrapped before ss/trojan/shadowtls were added to the identity secrets block
+  carries those keys present-but-EMPTY (only `hysteria2_password` + `clash_secret` were minted), and
+  `ensure_identity` kept the existing `identity.json` whole without backfilling — so enabling one of those
+  families rendered an empty password and the candidate failed the fail-closed `sing-box check`, silently
+  blocking the family. `ensure_identity` (`control/lib/nb_identity.sh`) now backfills: per secret, keep the
+  existing value iff present AND non-empty, else mint a fresh one; other secret keys + reality/donor/created
+  are preserved; the file is rewritten atomically (fresh temp → `mv`) so a jq/mv failure leaves the identity
+  untouched. A node with all secrets present is unchanged (no live secret is ever rotated). Dry-run safe.
 - **Clean-machine deploy of the default REALITY-only profile aborts silently (`set -euo pipefail`).**
   `nb_render_params.sh` derives the genuine-TLS SNI from the served cert's SAN with `grep -oE 'DNS:…'`; a
   REALITY-only node's CN=donor cover cert has NO subjectAltName, so `grep` matches nothing and exits 1,
