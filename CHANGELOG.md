@@ -130,8 +130,17 @@ truth for the version is `internal/spec.Version`.
   oneshot timer; `--measure-disable` removes both, idempotently). Fail-safe: absent nft/jq/table/baseline, a
   malformed config, or a counter reset → no signal (never fabricates a block); the first read only baselines.
   Validated live: a scripted RST spike on a served class flips `reset:[<class>]`, others clean;
-  adversarially reviewed (nft cannot open the firewall; set-e guard + false-positive fix applied). NOT yet
-  folded into the daemon's `DetectorSignal` (the daemon-wiring is a follow-on increment); ships disabled.
+  adversarially reviewed (nft cannot open the firewall; set-e guard + false-positive fix applied). **Folded
+  into the daemon (increment 1b).** The measure daemon reads the marker through the SAME generation gate as
+  the L7 probe — a class must read RESET across ≥ `path_min_reset_generations` DISTINCT observer generations
+  before it faults (hardening against a one-off RST spike or a replayed marker) — then overrides that
+  member's loopback `HandshakeOK` and sets `ConnectReset`, so `detect.Classify` reaches
+  blocked/connection-reset (the classifier is UNCHANGED: this is the fold, not a new branch). A co-reset
+  sibling is excluded from the rotation pool via `RotationCandidate.PathReset`, mirroring `L7Dead` — never
+  rotate ONTO a member whose own served flows are being reset. The measure.config gains
+  `path_signal_path`/`path_max_age_ms`/`path_min_reset_generations` (emitted by `nb_measure.sh`, mirroring
+  the L7 marker fields). Fail-safe throughout (an absent/stale/malformed marker → no fault → healthy). Still
+  ADVISORY-only: the daemon assembles a PlanInput; nothing actuates without the separate rotate loop.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new

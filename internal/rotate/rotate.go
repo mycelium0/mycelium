@@ -150,6 +150,12 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		if c.L7Dead {
 			continue
 		}
+		// Likewise never rotate ONTO a member whose served client flows the passive path-level observer
+		// reports meeting RSTs (RP-0014 chunk B) — a co-reset sibling (an on-path element resetting several
+		// classes at once) is no safer a target than an L7-dead one.
+		if c.PathReset {
+			continue
+		}
 		if c.Weight < in.Active.Weight+in.Limits.MinWeightMargin {
 			continue
 		}

@@ -83,14 +83,14 @@ func TestNewFailClosed(t *testing.T) {
 
 func TestTickFailClosed(t *testing.T) {
 	a := newAsm(t)
-	if _, err := a.Tick(nil, "no-such-ref", spec.RotationState{}, t0, nil); err == nil {
+	if _, err := a.Tick(nil, "no-such-ref", spec.RotationState{}, t0, nil, nil); err == nil {
 		t.Error("Tick with unknown active ref: want error")
 	}
-	if _, err := a.Tick([]spec.TransportHealth{health("ghost-ref", 5, 0, t0)}, activeRef, spec.RotationState{}, t0, nil); err == nil {
+	if _, err := a.Tick([]spec.TransportHealth{health("ghost-ref", 5, 0, t0)}, activeRef, spec.RotationState{}, t0, nil, nil); err == nil {
 		t.Error("Tick with snapshot ref not a member: want error")
 	}
 	dup := []spec.TransportHealth{health(candRef, 6, 0, t0), health(candRef, 0, 6, t0)}
-	if _, err := a.Tick(dup, activeRef, spec.RotationState{}, t0, nil); err == nil {
+	if _, err := a.Tick(dup, activeRef, spec.RotationState{}, t0, nil, nil); err == nil {
 		t.Error("Tick with a duplicate ref in one snapshot: want fail-closed error (one window double-folded otherwise)")
 	}
 }
@@ -101,7 +101,7 @@ func TestTickFailClosed(t *testing.T) {
 func TestZeroSampleWindowIsNoData(t *testing.T) {
 	a := newAsm(t)
 	// Establish a clean verdict for the active.
-	pi, err := a.Tick([]spec.TransportHealth{health(activeRef, 6, 0, t0), health(candRef, 6, 0, t0)}, activeRef, spec.RotationState{}, t0, nil)
+	pi, err := a.Tick([]spec.TransportHealth{health(activeRef, 6, 0, t0), health(candRef, 6, 0, t0)}, activeRef, spec.RotationState{}, t0, nil, nil)
 	if err != nil {
 		t.Fatalf("warm tick: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestZeroSampleWindowIsNoData(t *testing.T) {
 	}
 	// The active now reports a 0/0 window (probes lapsed). It must NOT be classified Shutdown.
 	at := t0.Add(time.Minute)
-	pi, err = a.Tick([]spec.TransportHealth{health(activeRef, 0, 0, at), health(candRef, 6, 0, at)}, activeRef, spec.RotationState{}, at, nil)
+	pi, err = a.Tick([]spec.TransportHealth{health(activeRef, 0, 0, at), health(candRef, 6, 0, at)}, activeRef, spec.RotationState{}, at, nil, nil)
 	if err != nil {
 		t.Fatalf("no-data tick: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestTickFoldGolden(t *testing.T) {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 0, 6, at), health(candRef, 6, 0, at)}
 		var err error
-		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil)
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil)
 		if err != nil {
 			t.Fatalf("Tick %d: %v", i, err)
 		}
@@ -168,7 +168,7 @@ func TestTickActiveProbeFaultsBlocked(t *testing.T) {
 		// L4 healthy for both members; only the active's node-local L7 own-cert probe is dead.
 		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
 		var err error
-		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, dead)
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, dead, nil)
 		if err != nil {
 			t.Fatalf("tick %d: %v", i, err)
 		}
@@ -188,7 +188,7 @@ func TestTickActiveProbeFaultsBlocked(t *testing.T) {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
 		var err error
-		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil)
+		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil)
 		if err != nil {
 			t.Fatalf("control tick %d: %v", i, err)
 		}
@@ -215,7 +215,7 @@ func TestTickMarksCandidateL7Dead(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		at = at.Add(time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
-		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, deadCand)
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, deadCand, nil)
 		if err != nil {
 			t.Fatalf("tick %d: %v", i, err)
 		}
@@ -238,7 +238,7 @@ func TestTickMarksCandidateL7Dead(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		at = at.Add(time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
-		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil)
+		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil)
 		if err != nil {
 			t.Fatalf("control tick %d: %v", i, err)
 		}
@@ -254,7 +254,7 @@ func TestAssembleClosesLoopActs(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 0, 6, at), health(candRef, 6, 0, at)}
-		if _, err := a.Tick(snap, activeRef, spec.RotationState{}, at, nil); err != nil {
+		if _, err := a.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil); err != nil {
 			t.Fatalf("phase-1 tick %d: %v", i, err)
 		}
 	}
@@ -267,7 +267,7 @@ func TestAssembleClosesLoopActs(t *testing.T) {
 		// Inject the impaired streak the real loop accumulates; +1 this tick reaches FlipConfirmations.
 		st := spec.RotationState{ImpairedStreak: rotate.DefaultRotationLimits().FlipConfirmations - 1}
 		var err error
-		pi, err = a.Tick(snap, activeRef, st, at, nil)
+		pi, err = a.Tick(snap, activeRef, st, at, nil, nil)
 		if err != nil {
 			t.Fatalf("phase-2 tick %d: %v", i, err)
 		}
@@ -295,8 +295,8 @@ func TestTickDeterministic(t *testing.T) {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, i%2, 6, at), health(candRef, 6, 0, at)}
 		st := spec.RotationState{ImpairedStreak: i}
-		p1, err1 := a1.Tick(snap, activeRef, st, at, nil)
-		p2, err2 := a2.Tick(snap, activeRef, st, at, nil)
+		p1, err1 := a1.Tick(snap, activeRef, st, at, nil, nil)
+		p2, err2 := a2.Tick(snap, activeRef, st, at, nil, nil)
 		if err1 != nil || err2 != nil {
 			t.Fatalf("tick %d errors: %v / %v", i, err1, err2)
 		}
@@ -315,7 +315,7 @@ func TestIdleMemberEvaporatesAndCarriesVerdict(t *testing.T) {
 		at := t0.Add(time.Duration(i) * time.Minute)
 		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
 		var err error
-		before, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil)
+		before, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil)
 		if err != nil {
 			t.Fatalf("warmup tick %d: %v", i, err)
 		}
@@ -324,7 +324,7 @@ func TestIdleMemberEvaporatesAndCarriesVerdict(t *testing.T) {
 		t.Fatalf("active verdict after clean warmup = %q, want clean", before.ActiveVerdict.State)
 	}
 	// Two hours later, only the candidate reports; the active idles.
-	after, err := a.Tick([]spec.TransportHealth{health(candRef, 6, 0, t0.Add(2*time.Hour))}, activeRef, spec.RotationState{}, t0.Add(2*time.Hour), nil)
+	after, err := a.Tick([]spec.TransportHealth{health(candRef, 6, 0, t0.Add(2*time.Hour))}, activeRef, spec.RotationState{}, t0.Add(2*time.Hour), nil, nil)
 	if err != nil {
 		t.Fatalf("idle tick: %v", err)
 	}
@@ -333,5 +333,140 @@ func TestIdleMemberEvaporatesAndCarriesVerdict(t *testing.T) {
 	}
 	if after.ActiveVerdict.State != spec.ConnStateClean {
 		t.Errorf("carried active verdict = %q, want the last clean verdict", after.ActiveVerdict.State)
+	}
+}
+
+// TestDetectorSignalConnectResetFold locks the chunk-B fold at the signal boundary, independent of the
+// detector's hysteresis: a path-level ConnectReset on a CONNECTED member overrides the loopback reach
+// HandshakeOK (faulting it) and sets ConnectReset, so Classify reaches blocked/connection-reset — the L4
+// reach window connected fine (loopback has no on-path element) but the served client handshakes are being
+// reset. The override is gated on connectedness: a not-connected member stays ConnectOK=false -> shutdown
+// (the path signal is moot there).
+func TestDetectorSignalConnectResetFold(t *testing.T) {
+	cls := spec.TransportClassRealityTCP
+	connected := health(activeRef, 6, 0, t0)
+
+	// No path signal: the connected member folds clean (HandshakeOK stays true, no reset).
+	clean := detectorSignal(cls, connected, true, false)
+	if !clean.ConnectOK || !clean.HandshakeOK || clean.ConnectReset {
+		t.Fatalf("no-signal fold: ConnectOK=%v HandshakeOK=%v ConnectReset=%v, want true,true,false",
+			clean.ConnectOK, clean.HandshakeOK, clean.ConnectReset)
+	}
+	if st, r := detect.Classify(clean); st == spec.ConnStateBlocked && r == spec.ReasonConnectionReset {
+		t.Fatal("no-signal fold: Classify unexpectedly reached blocked/connection-reset")
+	}
+
+	// Path-level ConnectReset on a connected member: HandshakeOK is overridden to false and ConnectReset is
+	// set, while the member stays ConnectOK=true (connected-but-reset). Classify -> blocked/connection-reset.
+	reset := detectorSignal(cls, connected, true, true)
+	if !reset.ConnectOK {
+		t.Error("reset fold: ConnectOK must stay true (a connected-but-reset member)")
+	}
+	if reset.HandshakeOK {
+		t.Error("reset fold: the path signal must override HandshakeOK to false")
+	}
+	if !reset.ConnectReset {
+		t.Error("reset fold: ConnectReset must be true")
+	}
+	if st, r := detect.Classify(reset); st != spec.ConnStateBlocked || r != spec.ReasonConnectionReset {
+		t.Errorf("reset fold: Classify = (%v, %v), want (blocked, connection-reset)", st, r)
+	}
+
+	// The override is moot on a not-connected member: ConnectOK=false wins -> shutdown, never blocked-reset.
+	down := detectorSignal(cls, health(activeRef, 0, 0, t0), true, true)
+	if down.ConnectOK {
+		t.Error("down fold: a member with no successes must stay ConnectOK=false")
+	}
+	if st, _ := detect.Classify(down); st != spec.ConnStateShutdown {
+		t.Errorf("down fold: Classify state = %v, want shutdown (the path signal is moot when not connected)", st)
+	}
+}
+
+// TestTickPathResetFaultsBlockedReset mirrors the L7-dead active test for chunk B: a member whose L4 reach
+// window is HEALTHY (the loopback probe connects) but whose node-local passive path observer reports its
+// served client flows meeting RSTs (connectReset[ref]==true) is classified BLOCKED/connection-reset, not
+// clean — the on-path reset the loopback reach probe cannot see. The control proves the signal is what flips
+// it: the SAME healthy window with the path map unset (nil) stays clean.
+func TestTickPathResetFaultsBlockedReset(t *testing.T) {
+	reset := map[string]bool{activeRef: true}
+	a := newAsm(t)
+	var pi rotate.PlanInput
+	for i := 0; i < 6; i++ {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		var err error
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil, reset)
+		if err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+	if pi.ActiveVerdict.State != spec.ConnStateBlocked {
+		t.Errorf("L4-healthy + path-reset active: verdict = %q, want %q (a high success ratio must not mask a boolean path-reset fault)", pi.ActiveVerdict.State, spec.ConnStateBlocked)
+	}
+	if pi.ActiveVerdict.Reason != spec.ReasonConnectionReset {
+		t.Errorf("reason = %q, want %q", pi.ActiveVerdict.Reason, spec.ReasonConnectionReset)
+	}
+
+	// Control: the identical L4-healthy window with the path map unset (nil -> no fault) stays clean, so the
+	// block above is attributable to the path signal, not the fold.
+	b := newAsm(t)
+	var pc rotate.PlanInput
+	for i := 0; i < 6; i++ {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		var err error
+		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil)
+		if err != nil {
+			t.Fatalf("control tick %d: %v", i, err)
+		}
+	}
+	if pc.ActiveVerdict.State != spec.ConnStateClean {
+		t.Errorf("L4-healthy + path unset active: verdict = %q, want clean", pc.ActiveVerdict.State)
+	}
+}
+
+// TestTickMarksCandidatePathReset: a NON-active member the node's passive path observer reports meeting RSTs
+// (connectReset[ref]==true) is surfaced on its ranked candidate as PathReset=true, so the planner can exclude
+// it from the pool (never rotate onto a co-reset sibling — RP-0014 chunk B). Only an explicit true marks a
+// member; the active (unset here) stays eligible, and a nil map leaves every candidate live (the control).
+func TestTickMarksCandidatePathReset(t *testing.T) {
+	at := t0
+	a := newAsm(t)
+	resetCand := map[string]bool{candRef: true} // the CANDIDATE is path-reset; the active is unset (healthy)
+	var pi rotate.PlanInput
+	var err error
+	for i := 0; i < 3; i++ {
+		at = at.Add(time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		pi, err = a.Tick(snap, activeRef, spec.RotationState{}, at, nil, resetCand)
+		if err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+	if len(pi.Ranked) != 1 {
+		t.Fatalf("ranked = %+v, want exactly one sibling", pi.Ranked)
+	}
+	if !pi.Ranked[0].PathReset {
+		t.Errorf("candidate %q flagged in the path map must carry PathReset=true", pi.Ranked[0].Proto)
+	}
+	if pi.Active.PathReset {
+		t.Error("active member (unset in the path map) must not be marked PathReset")
+	}
+
+	// Control: the identical fold with a nil path map leaves the candidate eligible (PathReset=false), so the
+	// flag above is attributable to the path signal, not the fold.
+	b := newAsm(t)
+	at = t0
+	var pc rotate.PlanInput
+	for i := 0; i < 3; i++ {
+		at = at.Add(time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 6, 0, at)}
+		pc, err = b.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil)
+		if err != nil {
+			t.Fatalf("control tick %d: %v", i, err)
+		}
+	}
+	if pc.Ranked[0].PathReset {
+		t.Error("a nil path map must leave the candidate eligible (PathReset=false)")
 	}
 }

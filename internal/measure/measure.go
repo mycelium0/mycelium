@@ -163,13 +163,21 @@ func New(members []Member, limits spec.RotationLimits, th detect.Thresholds, p t
 // the remaining by-products reach does not measure (reset, post-connect collapse, single-stream) stay
 // non-faulted so they never spuriously classify. A connecting-but-lossy channel with no boolean fault
 // is then graded by the success ratio inside the detector, not here.
-func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbeOK bool) spec.DetectorSignal {
+func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbeOK, connectReset bool) spec.DetectorSignal {
 	connected := h.Successes > 0
 	return spec.DetectorSignal{
-		Class:         cls,
-		Health:        h,
-		ConnectOK:     connected,
-		HandshakeOK:   connected,
+		Class:     cls,
+		Health:    h,
+		ConnectOK: connected,
+		// A path-level ConnectReset (RP-0014 chunk B: the node's OWN served client flows meeting RSTs, from
+		// the passive nft observer) OVERRIDES the loopback reach HandshakeOK. The own-listener reach probe
+		// connects fine (loopback has no on-path element), so it reports HandshakeOK=true; but the CLIENT
+		// handshakes are being reset. We therefore fault HandshakeOK when connectReset fires so Classify
+		// reaches its `!HandshakeOK && ConnectReset -> blocked/connection-reset` branch — the classifier is
+		// unchanged, this is the fold. connectReset only matters while connected: a not-connected member is
+		// already ConnectOK=false -> the classifier's shutdown branch (the path signal is moot there).
+		HandshakeOK:   connected && !connectReset,
+		ConnectReset:  connectReset,
 		ActiveProbeOK: activeProbeOK,
 		ObservedAt:    h.WindowEnd,
 	}
@@ -181,14 +189,18 @@ func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbe
 // member ref to its node-local own-cert/cover-path L7 liveness (RP-0010 AC-6 clarification): an
 // explicit false faults that ref's active-probe -> the classifier's blocked branch (catching an
 // L7-dead listener the L4 window cannot see); a ref absent from the map, or a nil map, defaults to
-// healthy (the pre-L7 behaviour, so a caller with no L7 signal folds exactly as before).
+// healthy (the pre-L7 behaviour, so a caller with no L7 signal folds exactly as before). connectReset maps
+// a member ref to its node-local passive path-level signal (RP-0014 chunk B): an explicit true faults that
+// ref's HandshakeOK + sets ConnectReset -> the classifier's blocked/connection-reset branch (catching real
+// served client flows meeting RSTs that the loopback probe cannot see), and excludes the ref from the
+// rotation pool (PathReset); a ref absent from the map, or a nil map, defaults to no path fault.
 //
 // A member present in the snapshot has its detector and tuner advanced; a member absent from the
 // snapshot (no fresh samples this tick) keeps its carried verdict and is ranked on its decayed
 // weight, read at now. A snapshot ref with no known member, or an unknown activeRef, is refused
 // (fail-closed) rather than silently dropped. Deterministic for a given snapshot stream, clock, and
 // activeProbe map.
-func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe map[string]bool) (rotate.PlanInput, error) {
+func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe, connectReset map[string]bool) (rotate.PlanInput, error) {
 	if _, ok := a.members[activeRef]; !ok {
 		return rotate.PlanInput{}, fmt.Errorf("measure: tick: active ref %q is not a known member", activeRef)
 	}
@@ -222,7 +234,15 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 				ap = live
 			}
 		}
-		v, err := a.detectors[h.TransportRef].Observe(detectorSignal(cls, h, ap))
+		// connectReset carries this ref's node-local passive path-level signal (chunk B); an unset ref (or a
+		// nil map) defaults to false (no path fault), so a caller with no path signal folds as before.
+		cr := false
+		if connectReset != nil {
+			if r, ok := connectReset[h.TransportRef]; ok {
+				cr = r
+			}
+		}
+		v, err := a.detectors[h.TransportRef].Observe(detectorSignal(cls, h, ap, cr))
 		if err != nil {
 			return rotate.PlanInput{}, fmt.Errorf("measure: tick: observe %q: %w", h.TransportRef, err)
 		}
@@ -256,6 +276,13 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 		if activeProbe != nil {
 			if live, ok := activeProbe[ref]; ok && !live {
 				c.L7Dead = true
+			}
+		}
+		// Likewise surface the path-level RST signal (chunk B) as a hard pool-exclusion: never rotate ONTO a
+		// member whose own served client flows are being reset (a co-reset sibling is no safer a target).
+		if connectReset != nil {
+			if r, ok := connectReset[ref]; ok && r {
+				c.PathReset = true
 			}
 		}
 		if ref == activeRef {

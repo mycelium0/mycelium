@@ -53,6 +53,15 @@ MEASURE_L7_JITTER_SEC="${MEASURE_L7_JITTER_SEC:-45}"
 # satisfy the tick-based anti-flap on its own. Default 2 (operator decision 2026-07-03); set 1 to restore
 # the pre-gate fault-on-first-generation behaviour.
 MEASURE_L7_MIN_DEAD_GEN="${MEASURE_L7_MIN_DEAD_GEN:-2}"
+# RP-0014 chunk B path-signal marker freshness + replay hardening. The pathsig observer runs on the SAME
+# budgeted+jittered cadence as the L7 probe (MEASURE_L7_INTERVAL_SEC +/- MEASURE_L7_JITTER_SEC), so its
+# marker ages exactly like the L7 one: MAX_AGE defaults to the L7 value (>= 2x the worst-case observer gap,
+# so a fresh reset faults but a stopped observer self-expires to healthy — fail-safe). MIN_RESET_GEN mirrors
+# MIN_DEAD_GEN: a class faults ConnectReset only after it reads RESET across this many DISTINCT observer
+# generations, so a one-off RST spike (or a replayed marker) cannot fault on its own. Set 1 to fault on the
+# first reset generation.
+MEASURE_PATH_MAX_AGE_MS="${MEASURE_PATH_MAX_AGE_MS:-$MEASURE_L7_MAX_AGE_MS}"
+MEASURE_PATH_MIN_RESET_GEN="${MEASURE_PATH_MIN_RESET_GEN:-2}"
 
 _measure_unit() { printf '%s' "/etc/systemd/system/mycelium-measure.service"; }
 _l7probe_service_unit() { printf '%s' "/etc/systemd/system/mycelium-l7probe.service"; }
@@ -61,6 +70,7 @@ _pathsig_service_unit() { printf '%s' "/etc/systemd/system/mycelium-pathsig.serv
 _pathsig_timer_unit()   { printf '%s' "/etc/systemd/system/mycelium-pathsig.timer"; }
 _measure_reach_cfg()   { printf '%s' "$STATE_DIR/reach.config.json"; }
 _measure_cfg()         { printf '%s' "$STATE_DIR/measure.config.json"; }
+_measure_pathsig_marker() { printf '%s' "$STATE_DIR/path_signal.json"; }
 _measure_l7_marker()   { printf '%s' "$STATE_DIR/l7_selftest.json"; }
 _measure_vocab()       { printf '%s' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"; }
 
@@ -121,11 +131,15 @@ generate_measure_configs() {
 		--arg l7path "$(_measure_l7_marker)" \
 		--argjson l7age "$MEASURE_L7_MAX_AGE_MS" \
 		--argjson l7gen "$MEASURE_L7_MIN_DEAD_GEN" \
+		--arg pathpath "$(_measure_pathsig_marker)" \
+		--argjson pathage "$MEASURE_PATH_MAX_AGE_MS" \
+		--argjson pathgen "$MEASURE_PATH_MIN_RESET_GEN" \
 		--argjson limits "$limits" \
 		--argjson tick "$MEASURE_TICK_MS" '{
 		version: 1, tick_ms: $tick, active_ref: $active,
 		output_path: $out, state_path: $state, limits: $limits,
 		l7_liveness_path: $l7path, l7_max_age_ms: $l7age, l7_min_dead_generations: $l7gen,
+		path_signal_path: $pathpath, path_max_age_ms: $pathage, path_min_reset_generations: $pathgen,
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."

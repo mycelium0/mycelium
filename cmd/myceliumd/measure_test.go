@@ -99,6 +99,8 @@ func TestMeasureConfigValidate(t *testing.T) {
 		{"zero tick", func(c *measureConfig) { c.TickMS = 0 }},
 		{"empty output", func(c *measureConfig) { c.OutputPath = "" }},
 		{"empty active", func(c *measureConfig) { c.ActiveRef = "" }},
+		{"l7 path without age", func(c *measureConfig) { c.L7LivenessPath = "/x"; c.L7MaxAgeMS = 0 }},
+		{"path signal without age", func(c *measureConfig) { c.PathSignalPath = "/x"; c.PathMaxAgeMS = 0 }},
 	}
 	for _, b := range bad {
 		c := goodMeasureConfig()
@@ -129,7 +131,7 @@ func TestAssemblePlanInputGolden(t *testing.T) {
 	}
 	// Active failing (zero successes -> impaired), candidate clean.
 	snap := []spec.TransportHealth{health("ref-a", 0, 6, t0), health("ref-b", 6, 0, t0)}
-	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil)
+	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil, nil)
 	if err != nil {
 		t.Fatalf("assemblePlanInput: %v", err)
 	}
@@ -157,7 +159,7 @@ func TestAssemblePlanInputFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAssembler: %v", err)
 	}
-	if _, err := assemblePlanInput(asm, nil, "no-such-ref", spec.RotationState{}, t0, nil); err == nil {
+	if _, err := assemblePlanInput(asm, nil, "no-such-ref", spec.RotationState{}, t0, nil, nil); err == nil {
 		t.Error("assemblePlanInput accepted an unknown active ref, want error")
 	}
 }
@@ -348,6 +350,107 @@ func TestFilterToMembers(t *testing.T) {
 	// The input slice must not be mutated (kept must not alias snap's backing array).
 	if snap[1].TransportRef != "x" {
 		t.Error("filterToMembers mutated the input snapshot")
+	}
+}
+
+// TestGateToResetMap locks the value-convention flip between the shared generation gate (which emits
+// ref->FALSE, the L7 "dead" convention the activeProbe map reads) and measure.Tick's connectReset map
+// (which reads ref->TRUE as "reset"). Without this flip the whole chunk-B path fold is a silent no-op, so
+// this test is the guard against that regression.
+func TestGateToResetMap(t *testing.T) {
+	if m := gateToResetMap(nil); m != nil {
+		t.Errorf("nil faulted set: got %v, want nil (folds as no path signal)", m)
+	}
+	if m := gateToResetMap(map[string]bool{}); m != nil {
+		t.Errorf("empty faulted set: got %v, want nil", m)
+	}
+	// The gate hands us ref->false (its L7 convention); the remap must emit ref->TRUE for connectReset.
+	in := map[string]bool{"ref-a": false, "ref-b": false}
+	out := gateToResetMap(in)
+	if len(out) != 2 {
+		t.Fatalf("remap size = %d, want 2", len(out))
+	}
+	for _, ref := range []string{"ref-a", "ref-b"} {
+		if v, ok := out[ref]; !ok || v != true {
+			t.Errorf("remap[%q] = (%v, present=%v), want (true, true)", ref, v, ok)
+		}
+	}
+}
+
+// TestReadPathMarker mirrors the L7 fail-safe reader for the chunk-B path-signal marker: only a FRESH,
+// well-formed marker naming reset refs yields present=true; an absent/stale/malformed/unstamped marker or
+// an empty reset set yields (nil, zero, false) — a passive-observer outage never spuriously faults a
+// healthy transport.
+func TestReadPathMarker(t *testing.T) {
+	dir := t.TempDir()
+	now := t0
+	maxAge := 5 * time.Minute
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	fresh := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	stale := now.Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
+
+	none := func(name string, reset []string, present bool) {
+		if present || reset != nil {
+			t.Errorf("%s: got reset=%v present=%v, want nil/false", name, reset, present)
+		}
+	}
+	r, _, p := readPathMarker("", now, maxAge)
+	none("empty path", r, p)
+	r, _, p = readPathMarker(write("age0.json", "{}"), now, 0)
+	none("non-positive maxAge", r, p)
+	r, _, p = readPathMarker(filepath.Join(dir, "missing.json"), now, maxAge)
+	none("missing file", r, p)
+	r, _, p = readPathMarker(write("bad.json", "{not json"), now, maxAge)
+	none("malformed", r, p)
+	r, _, p = readPathMarker(write("unstamped.json", `{"reset":["ref-a"]}`), now, maxAge)
+	none("unstamped", r, p)
+	r, _, p = readPathMarker(write("stale.json", `{"observed_at":"`+stale+`","reset":["ref-a"]}`), now, maxAge)
+	none("stale", r, p)
+	r, _, p = readPathMarker(write("empty.json", `{"observed_at":"`+fresh+`","reset":[]}`), now, maxAge)
+	none("fresh but empty reset", r, p)
+
+	// Fresh + non-empty reset: present, and blank refs are filtered out.
+	r, at, p := readPathMarker(write("reset.json", `{"observed_at":"`+fresh+`","reset":["ref-a","","ref-b"]}`), now, maxAge)
+	if !p || len(r) != 2 || r[0] != "ref-a" || r[1] != "ref-b" {
+		t.Errorf("fresh reset marker: reset=%v present=%v, want [ref-a ref-b]/true", r, p)
+	}
+	if at.IsZero() {
+		t.Error("fresh reset marker: observedAt must be stamped")
+	}
+}
+
+// TestAssemblePlanInputPathReset proves the chunk-B connectReset map reaches the assembled PlanInput: a
+// candidate flagged reset is surfaced as PathReset=true (so the planner excludes it from the pool), while
+// the unset active stays eligible. Deterministic in one tick (the flag is not gated by detector hysteresis).
+func TestAssemblePlanInputPathReset(t *testing.T) {
+	asm, err := goodMeasureConfig().buildAssembler(t0)
+	if err != nil {
+		t.Fatalf("buildAssembler: %v", err)
+	}
+	snap := []spec.TransportHealth{health("ref-a", 6, 0, t0), health("ref-b", 6, 0, t0)}
+	// ref-b (the candidate sibling) is flagged reset by the path observer.
+	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil, map[string]bool{"ref-b": true})
+	if err != nil {
+		t.Fatalf("assemblePlanInput: %v", err)
+	}
+	var pi rotate.PlanInput
+	if err := json.Unmarshal(out, &pi); err != nil {
+		t.Fatalf("output is not PlanInput JSON: %v\n%s", err, out)
+	}
+	if len(pi.Ranked) != 1 || pi.Ranked[0].Proto != "vless-reality-grpc" {
+		t.Fatalf("ranked = %+v, want the grpc sibling", pi.Ranked)
+	}
+	if !pi.Ranked[0].PathReset {
+		t.Error("candidate flagged in the connectReset map must carry PathReset=true in the assembled input")
+	}
+	if pi.Active.PathReset {
+		t.Error("the unset active must not carry PathReset")
 	}
 }
 

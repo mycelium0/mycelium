@@ -66,6 +66,21 @@ type measureConfig struct {
 	// own. Unset (<= 0) defaults to defaultL7MinDeadGenerations (2); an explicit 1 restores the pre-gate
 	// fault-on-first-generation behaviour.
 	L7MinDeadGenerations int `json:"l7_min_dead_generations,omitempty"`
+
+	// PathSignalPath (optional) points at the node-local PASSIVE path-level served-flow marker the nft
+	// RST-rate observer writes ($STATE_DIR/path_signal.json = {reset:[refs]}, RP-0014 chunk B). When set, the
+	// daemon folds it into each tick's DetectorSignal: a flagged member has ConnectReset set AND HandshakeOK
+	// faulted (the loopback reach probe cannot see real client flows being reset), so detect.Classify reaches
+	// its blocked/connection-reset branch and the member is pool-excluded (PathReset). Fail-safe: an
+	// absent/stale/malformed marker yields no path signal (healthy), so an observer outage never faults a member.
+	PathSignalPath string `json:"path_signal_path,omitempty"`
+	// PathMaxAgeMS is the freshness window for that marker (fail-safe healthy past it). Required (> 0) when
+	// PathSignalPath is set.
+	PathMaxAgeMS int `json:"path_max_age_ms,omitempty"`
+	// PathMinResetGenerations is the marker-replay + anti-flap hardening (mirrors L7MinDeadGenerations): a
+	// member must be named RESET across at least this many DISTINCT marker generations before the daemon
+	// faults it. Unset (<= 0) defaults to defaultL7MinDeadGenerations (2); an explicit 1 faults on the first.
+	PathMinResetGenerations int `json:"path_min_reset_generations,omitempty"`
 }
 
 // members converts the config rows to internal/measure.Member descriptors.
@@ -153,6 +168,9 @@ func (c *measureConfig) Validate() error {
 	if c.L7LivenessPath != "" && c.L7MaxAgeMS <= 0 {
 		return fmt.Errorf("measure config: l7_max_age_ms must be > 0 when l7_liveness_path is set")
 	}
+	if c.PathSignalPath != "" && c.PathMaxAgeMS <= 0 {
+		return fmt.Errorf("measure config: path_max_age_ms must be > 0 when path_signal_path is set")
+	}
 	return nil
 }
 
@@ -230,6 +248,60 @@ func readL7Marker(path string, now time.Time, maxAge time.Duration) (dead []stri
 		return nil, time.Time{}, false
 	}
 	return dead, m.ObservedAt, true
+}
+
+// pathSignalMarker is the node-local PASSIVE path-level served-flow marker (RP-0014 chunk B) the nft
+// RST-rate observer writes. Reset lists the member refs whose served client flows are meeting RSTs above
+// threshold this window; ObservedAt stamps it for freshness. Absent/stale/malformed -> no path signal.
+type pathSignalMarker struct {
+	ObservedAt time.Time `json:"observed_at"`
+	Reset      []string  `json:"reset"`
+}
+
+// readPathMarker mirrors readL7Marker for the path-signal marker: it returns the FRESH reset-ref list, the
+// generation stamp, and present. Fail-safe: empty path / non-positive maxAge / missing / unreadable /
+// malformed / unstamped / stale / empty-reset all yield (nil, zero, false) — no path signal.
+func readPathMarker(path string, now time.Time, maxAge time.Duration) (reset []string, observedAt time.Time, present bool) {
+	if path == "" || maxAge <= 0 {
+		return nil, time.Time{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, time.Time{}, false
+	}
+	var m pathSignalMarker
+	if json.Unmarshal(data, &m) != nil {
+		return nil, time.Time{}, false
+	}
+	if m.ObservedAt.IsZero() || now.Sub(m.ObservedAt) > maxAge {
+		return nil, time.Time{}, false
+	}
+	for _, ref := range m.Reset {
+		if ref != "" {
+			reset = append(reset, ref)
+		}
+	}
+	if len(reset) == 0 {
+		return nil, time.Time{}, false
+	}
+	return reset, m.ObservedAt, true
+}
+
+// gateToResetMap remaps the generation gate's faulted SET into the convention measure.Tick's connectReset
+// parameter expects. The gate (shared with the L7 liveness path) emits ref->FALSE — the "this member is
+// dead" convention the activeProbe map reads — but connectReset reads ref->TRUE as "this member's served
+// client flows are meeting RSTs". Without this flip the path fold is a silent no-op (Tick would read the
+// faulted ref's value as false and fold no signal). Returns nil when nothing is faulted, which Tick folds
+// as no path signal (identical to an unset map).
+func gateToResetMap(faulted map[string]bool) map[string]bool {
+	if len(faulted) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(faulted))
+	for ref := range faulted {
+		out[ref] = true
+	}
+	return out
 }
 
 // loadL7Liveness returns the SPARSE map of member ref -> false for every FRESH dead ref (an unset ref
@@ -327,8 +399,8 @@ func (g *l7GenerationGate) fold(dead []string, observedAt time.Time, present boo
 // core of the daemon's measure tick — no I/O of its own; the caller supplies the snapshot, active ref,
 // state, clock, and the node-local L7-liveness map (a member ref -> false for a fresh L7-dead member;
 // a nil/unset map folds as healthy, the pre-L7 behaviour).
-func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe map[string]bool) ([]byte, error) {
-	pi, err := asm.Tick(snap, activeRef, state, now, activeProbe)
+func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe, connectReset map[string]bool) ([]byte, error) {
+	pi, err := asm.Tick(snap, activeRef, state, now, activeProbe, connectReset)
 	if err != nil {
 		return nil, err
 	}
@@ -412,6 +484,9 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 	// generation streaks are what make marker replay harmless. Its policy (MinGenerations) is fixed at
 	// startup from initial, alongside the members/limits.
 	l7gate := newL7GenerationGate(effectiveL7MinGenerations(initial.L7MinDeadGenerations))
+	// The path-signal marker rides the SAME generation-gate logic (a member must read RESET across >= N
+	// distinct marker generations before it faults, hardening against replay + a one-off RST spike).
+	pathgate := newL7GenerationGate(effectiveL7MinGenerations(initial.PathMinResetGenerations))
 
 	tick := func() {
 		// Re-read the config for the current active ref / paths; the assembler's members and limits are
@@ -435,7 +510,11 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 		// from one probe run. An absent/stale marker resets the gate and yields no fault (fail-safe).
 		dead, observedAt, present := readL7Marker(cur.L7LivenessPath, now, time.Duration(cur.L7MaxAgeMS)*time.Millisecond)
 		l7 := l7gate.fold(dead, observedAt, present)
-		out, err := assemblePlanInput(asm, snap, cur.ActiveRef, loadRotationState(cur.StatePath), now, l7)
+		// Fold this tick's passive path-level RST signal (chunk B) THROUGH its own generation gate, exactly
+		// like the L7 marker. An absent/stale marker resets the gate and yields no fault (fail-safe).
+		rReset, rObserved, rPresent := readPathMarker(cur.PathSignalPath, now, time.Duration(cur.PathMaxAgeMS)*time.Millisecond)
+		pathReset := gateToResetMap(pathgate.fold(rReset, rObserved, rPresent))
+		out, err := assemblePlanInput(asm, snap, cur.ActiveRef, loadRotationState(cur.StatePath), now, l7, pathReset)
 		if err != nil {
 			log.Printf("myceliumd: measure: assemble failed (no plan input written this tick): %v", err)
 			holder.setErr(err.Error(), now)
