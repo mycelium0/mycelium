@@ -57,6 +57,8 @@ MEASURE_L7_MIN_DEAD_GEN="${MEASURE_L7_MIN_DEAD_GEN:-2}"
 _measure_unit() { printf '%s' "/etc/systemd/system/mycelium-measure.service"; }
 _l7probe_service_unit() { printf '%s' "/etc/systemd/system/mycelium-l7probe.service"; }
 _l7probe_timer_unit()   { printf '%s' "/etc/systemd/system/mycelium-l7probe.timer"; }
+_pathsig_service_unit() { printf '%s' "/etc/systemd/system/mycelium-pathsig.service"; }
+_pathsig_timer_unit()   { printf '%s' "/etc/systemd/system/mycelium-pathsig.timer"; }
 _measure_reach_cfg()   { printf '%s' "$STATE_DIR/reach.config.json"; }
 _measure_cfg()         { printf '%s' "$STATE_DIR/measure.config.json"; }
 _measure_l7_marker()   { printf '%s' "$STATE_DIR/l7_selftest.json"; }
@@ -127,6 +129,103 @@ generate_measure_configs() {
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."
+}
+
+# ---------------------------------------------------------------------------
+# RP-0014 chunk B (increment 1) — passive path-level served-flow interference observer (ConnectReset).
+# A dedicated ADDITIVE nft table (input hook, priority BELOW ufw, `policy accept` -> it NEVER drops, only
+# falls through to the real firewall) carries a per-served-TCP-port RST + SYN *counter*. measure_pathsig_probe
+# reads the counter deltas over a budgeted+jittered window and sets ConnectReset (in a node-local marker the
+# measure daemon folds into DetectorSignal, mirroring the L7 marker) for a served class whose inbound-RST
+# rate is a high fraction of its new-connection rate. Pure by-product (AC-6): no drop, no payload, no per-peer
+# identity retained — only per-class RST/SYN counts. UDP families (QUIC/AmneziaWG) have no TCP RST and are not
+# observed. Fail-safe: absent nft/jq/table/baseline -> no signal (never fabricates a block). ADR-0036 boundary:
+# watching the node's OWN served traffic passively is a by-product, not a new client-vantage probe.
+# ---------------------------------------------------------------------------
+PATHSIG_NFT_TABLE="inet mycelium_measure"
+
+# _pathsig_tcp_ports — the served client-facing TCP listener ports from the live sing-box config (reality
+# vless / ws-tls vless / shadowtls / trojan). Excludes the UDP families (hy2/tuic) and the internal loopback
+# shadowsocks detour (which listens on 127.0.0.1, not `::`/0.0.0.0).
+_pathsig_tcp_ports() {
+	[ -f "$SINGBOX_CONFIG" ] || return 0
+	jq -r '.inbounds[]? | select((.type=="vless" or .type=="shadowtls" or .type=="trojan") and (.listen_port!=null) and ((.listen // "::")|test("^(::|0\\.0\\.0\\.0)$"))) | .listen_port' \
+		"$SINGBOX_CONFIG" 2>/dev/null | sort -un
+}
+
+# pathsig_nft_apply — install the passive per-port RST/SYN counters (idempotent: delete + recreate). No-op
+# (fail-safe) if nft/jq/config absent or there are no served TCP ports.
+pathsig_nft_apply() {
+	have nft && have jq || return 0
+	need_root
+	local ports p; ports="$(_pathsig_tcp_ports)" || ports=""   # a malformed config must fold to skip, not abort measure-enable
+	[ -n "$ports" ] || { log "path-signal: no served TCP ports to observe; skipping nft counters."; return 0; }
+	nft delete table $PATHSIG_NFT_TABLE 2>/dev/null || true
+	{
+		echo "table $PATHSIG_NFT_TABLE {"
+		for p in $ports; do printf '  counter rst_%s {}\n  counter syn_%s {}\n' "$p" "$p"; done
+		echo "  chain input {"
+		echo "    type filter hook input priority filter - 10; policy accept;"
+		for p in $ports; do
+			printf '    tcp dport %s tcp flags & (rst) == rst counter name "rst_%s"\n' "$p" "$p"
+			printf '    tcp dport %s tcp flags & (fin|syn|rst|ack) == syn counter name "syn_%s"\n' "$p" "$p"
+		done
+		echo "  }"
+		echo "}"
+	} | nft -f - 2>/dev/null \
+		|| { warn "path-signal: could not install the nft observer counters (fail-safe: no path signal)."; return 0; }
+	rm -f "$STATE_DIR/pathsig_counters.json" 2>/dev/null || true   # reset the baseline so the first read does not delta a stale snapshot
+	log "path-signal: installed passive nft RST/SYN counters for served TCP port(s): $(printf '%s ' $ports)."
+}
+
+# pathsig_nft_remove — delete the observer table + baseline (idempotent).
+pathsig_nft_remove() {
+	have nft || return 0
+	nft delete table $PATHSIG_NFT_TABLE 2>/dev/null || true
+	rm -f "$STATE_DIR/pathsig_counters.json" 2>/dev/null || true
+}
+
+# measure_pathsig_probe [MARKER] — read the RST/SYN counter deltas since the last window, threshold, and write
+# the ConnectReset marker (default $STATE_DIR/path_signal.json = {observed_at, checked, reset:[REFS]}). A ref
+# in `reset` names a served class whose inbound-RST rate this window was >= PATHSIG_RST_FLOOR (absolute, to
+# ignore low-traffic noise) AND >= PATHSIG_RST_RATIO_NUM/DEN of its new-connection rate. The first read after
+# (re)arm only baselines (no delta yet). Counter reset (a table reload) clamps the delta to 0 -> no false
+# signal. Fail-safe: absent table/jq -> no marker.
+measure_pathsig_probe() {
+	have nft && have jq || return 0
+	nft list table $PATHSIG_NFT_TABLE >/dev/null 2>&1 || return 0   # observer not armed -> skip
+	local marker="${1:-$STATE_DIR/path_signal.json}" statef="$STATE_DIR/pathsig_counters.json"
+	local cur; cur="$(nft -j list counters table $PATHSIG_NFT_TABLE 2>/dev/null \
+		| jq -c '[.nftables[].counter? | select(.name != null) | {(.name): .packets}] | add // {}')" || return 0
+	[ -n "$cur" ] && [ "$cur" != "null" ] && [ "$cur" != "{}" ] || return 0
+	local portmap; portmap="$(jq -c '[.inbounds[]? | select((.type=="vless" or .type=="shadowtls" or .type=="trojan") and (.listen_port!=null)) | {(.listen_port|tostring): (.tag|sub("-in$";""))}] | add // {}' "$SINGBOX_CONFIG" 2>/dev/null)" || portmap="{}"
+	local last="{}"; [ -f "$statef" ] && last="$(cat "$statef" 2>/dev/null || echo '{}')"
+	( umask 077; printf '%s\n' "$cur" >"$statef.tmp" ) 2>/dev/null && mv -f "$statef.tmp" "$statef" 2>/dev/null || true
+	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	if [ "$last" = "{}" ]; then
+		printf '{"observed_at":"%s","checked":0,"reset":[]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+		return 0   # first read after (re)arm: baseline only
+	fi
+	local reset; reset="$(jq -nc \
+		--argjson cur "$cur" --argjson last "$last" --argjson pm "$portmap" \
+		--argjson floor "${PATHSIG_RST_FLOOR:-5}" --argjson rnum "${PATHSIG_RST_RATIO_NUM:-1}" --argjson rden "${PATHSIG_RST_RATIO_DEN:-2}" '
+		[ $cur | keys[] | select(startswith("rst_")) | ltrimstr("rst_") ]
+		| map(. as $port
+			| (($cur["rst_"+$port] // 0) - ($last["rst_"+$port] // 0) | if . < 0 then 0 else . end) as $rd
+			| (($cur["syn_"+$port] // 0) - ($last["syn_"+$port] // 0) | if . < 0 then 0 else . end) as $sd
+			| select($sd > 0 and $rd >= $floor and ($rd * $rden) >= ($rnum * $sd))
+			| ($pm[$port] // empty))
+		| unique')" || reset=""
+	[ -n "$reset" ] || reset="[]"
+	local n; n="$(printf '%s' "$cur" | jq '[keys[]|select(startswith("rst_"))]|length' 2>/dev/null || echo 0)"
+	printf '{"observed_at":"%s","checked":%s,"reset":%s}\n' "$ts" "${n:-0}" "$reset" >"$marker.tmp" 2>/dev/null \
+		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+	if [ "$reset" != "[]" ]; then
+		warn "path-signal: inbound-RST rate on served class(es) $(printf '%s' "$reset" | jq -r 'join(",")' 2>/dev/null || printf '%s' "$reset") exceeds the threshold — possible on-path connection-reset interference on real client flows."
+		return 1
+	fi
+	log "path-signal: inbound-RST rates within threshold across all $n observed served TCP class(es)."
+	return 0
 }
 
 # measure_enable (--measure-enable) — write + enable mycelium-measure.service. Fail-closed: requires the
@@ -209,6 +308,40 @@ UNIT
 	run systemctl enable --now mycelium-l7probe.timer || die "measure: could not enable mycelium-l7probe.timer (fail-closed)."
 	run systemctl start mycelium-l7probe.service 2>/dev/null || true  # seed the marker now so the daemon has an L7 signal before the first timer fire
 	log "measure: mycelium-l7probe.timer ENABLED (~every ${MEASURE_L7_INTERVAL_SEC}s +/-${MEASURE_L7_JITTER_SEC}s jitter) — folds L7 own-cert/cover-path liveness into detection."
+
+	# RP-0014 chunk B: passive path-level served-flow observer — install the nft RST/SYN counters + a
+	# budgeted+jittered ONESHOT timer running '--pathsig-probe', writing the ConnectReset marker the measure
+	# loop folds into DetectorSignal (mirrors the L7 probe). Armed alongside the measure plane; the nft table
+	# is additive (policy accept -> never drops), removed by --measure-disable.
+	pathsig_nft_apply
+	cat >"$(_pathsig_service_unit)" <<UNIT
+[Unit]
+Description=Mycelium MEASURE path-level served-flow observer (RP-0014 chunk B) — passive nft RST-rate signal
+After=network-online.target sing-box.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$NB_SELF --pathsig-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
+Nice=10
+IOSchedulingClass=idle
+UNIT
+	cat >"$(_pathsig_timer_unit)" <<UNIT
+[Unit]
+Description=Mycelium MEASURE path-signal observer cadence (budgeted + jittered)
+
+[Timer]
+OnBootSec=${MEASURE_L7_INTERVAL_SEC}
+OnUnitActiveSec=${MEASURE_L7_INTERVAL_SEC}
+RandomizedDelaySec=${MEASURE_L7_JITTER_SEC}
+
+[Install]
+WantedBy=timers.target
+UNIT
+	run systemctl daemon-reload
+	run systemctl enable --now mycelium-pathsig.timer || die "measure: could not enable mycelium-pathsig.timer (fail-closed)."
+	run systemctl start mycelium-pathsig.service 2>/dev/null || true  # seed the observer baseline now
+	log "measure: mycelium-pathsig.timer ENABLED (~every ${MEASURE_L7_INTERVAL_SEC}s +/-${MEASURE_L7_JITTER_SEC}s jitter) — folds the passive served-flow RST-rate signal (ConnectReset) into detection."
 }
 
 MEASURE_PLAN_MAX_STALE_SEC="${MEASURE_PLAN_MAX_STALE_SEC:-180}"
@@ -250,8 +383,10 @@ measure_disable() {
 	need_root
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would disable + remove mycelium-measure.service + mycelium-l7probe.timer"; return 0; fi
 	run systemctl disable --now mycelium-l7probe.timer 2>/dev/null || true
+	run systemctl disable --now mycelium-pathsig.timer 2>/dev/null || true
 	run systemctl disable --now mycelium-measure.service 2>/dev/null || true
-	rm -f "$(_l7probe_timer_unit)" "$(_l7probe_service_unit)" "$(_measure_unit)"
+	rm -f "$(_l7probe_timer_unit)" "$(_l7probe_service_unit)" "$(_pathsig_timer_unit)" "$(_pathsig_service_unit)" "$(_measure_unit)"
+	pathsig_nft_remove   # remove the passive observer nft table + baseline (RP-0014 chunk B)
 	run systemctl daemon-reload
-	log "measure: mycelium-measure.service + mycelium-l7probe.timer DISABLED + removed; the node no longer assembles a PlanInput or probes L7 liveness."
+	log "measure: mycelium-measure.service + mycelium-l7probe.timer + mycelium-pathsig.timer DISABLED + removed; the node no longer assembles a PlanInput or observes L7/path-level signals."
 }

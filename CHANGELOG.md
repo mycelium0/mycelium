@@ -116,6 +116,22 @@ truth for the version is `internal/spec.Version`.
   documented residual). Wired into the post-apply acceptance hook + an on-demand `--l7-probe-xhttp` verb.
   Fail-safe: absent openssl/jq, no xray config, a malformed config, or an unidentifiable inbound → skip.
   Validated live: healthy alive, wrong-port/malformed dead/skip.
+- **RP-0014 chunk B (increment 1) — passive path-level served-flow interference observer (ConnectReset).**
+  The detector's first PATH-LEVEL input, closing the residual gap a loopback self-probe cannot see: real
+  client flows being reset by an on-path element while the own-listener handshake stays healthy. A dedicated
+  ADDITIVE nft table (`inet mycelium_measure`, input hook, `policy accept` — it NEVER drops, only counts +
+  falls through to ufw, so it cannot alter the firewall) carries a per-served-TCP-port inbound-RST + SYN
+  counter; `measure_pathsig_probe` (`control/lib/nb_measure.sh`) reads the deltas over a budgeted+jittered
+  window and writes a node-local marker (`$STATE_DIR/path_signal.json` = {reset:[class refs]}), flagging a
+  class whose inbound-RST rate is a high fraction (≥ ½) of its new-connection rate AND above an absolute
+  floor (≥ 5) with a non-zero connection rate. Pure by-product (AC-6, ADR-0036): no drop, no payload, no
+  per-peer identity — only per-class RST/SYN counts; UDP families (QUIC/AmneziaWG) have no TCP RST and are
+  not observed. Armed with the measure plane (`--measure-enable` installs the counters + a `--pathsig-probe`
+  oneshot timer; `--measure-disable` removes both, idempotently). Fail-safe: absent nft/jq/table/baseline, a
+  malformed config, or a counter reset → no signal (never fabricates a block); the first read only baselines.
+  Validated live: a scripted RST spike on a served class flips `reset:[<class>]`, others clean;
+  adversarially reviewed (nft cannot open the firewall; set-e guard + false-positive fix applied). NOT yet
+  folded into the daemon's `DetectorSignal` (the daemon-wiring is a follow-on increment); ships disabled.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new
