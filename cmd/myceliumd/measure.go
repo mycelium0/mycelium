@@ -411,6 +411,21 @@ func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, acti
 	return out, nil
 }
 
+// assembleTick is the daemon's per-tick fold composition, extracted so a test can drive the EXACT wiring
+// the daemon runs (marker reads -> the two generation gates -> assemblePlanInput), not a re-implementation.
+// It reads this tick's node-local L7 liveness marker and the passive path-level RST marker, folds each
+// THROUGH its own generation gate (a member must read DEAD/RESET across >= MinGenerations DISTINCT marker
+// generations before it faults, so marker replay across ticks cannot satisfy the anti-flap from one probe
+// run; an absent/stale marker resets that gate -> no fault, fail-safe), and assembles the PlanInput. The
+// gates are the caller's (persisted across ticks); cfg supplies the marker paths + freshness windows.
+func assembleTick(asm *measure.Assembler, snap []spec.TransportHealth, cfg *measureConfig, now time.Time, state spec.RotationState, l7gate, pathgate *l7GenerationGate) ([]byte, error) {
+	dead, observedAt, present := readL7Marker(cfg.L7LivenessPath, now, time.Duration(cfg.L7MaxAgeMS)*time.Millisecond)
+	l7 := l7gate.fold(dead, observedAt, present)
+	rReset, rObserved, rPresent := readPathMarker(cfg.PathSignalPath, now, time.Duration(cfg.PathMaxAgeMS)*time.Millisecond)
+	pathReset := gateToResetMap(pathgate.fold(rReset, rObserved, rPresent))
+	return assemblePlanInput(asm, snap, cfg.ActiveRef, state, now, l7, pathReset)
+}
+
 // filterToMembers keeps only the snapshot entries whose ref is a configured member, returning the
 // kept slice and the count dropped. reach may probe context anchors the node does not rotate among;
 // those are not folded (and measure.Tick would otherwise fail-close on them).
@@ -504,17 +519,7 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 			// reach/measure ref mismatch the operator should reconcile.
 			log.Printf("myceliumd: measure: dropped %d reach anchor(s) not in the member set (ref mismatch?)", dropped)
 		}
-		// Fold this tick's node-local L7 liveness (own-cert/cover-path) into the detector, THROUGH the
-		// generation gate (Audit-0007 S2): a member must read DEAD across >= MinGenerations DISTINCT marker
-		// generations before it faults blocked, so marker replay across ticks cannot satisfy the anti-flap
-		// from one probe run. An absent/stale marker resets the gate and yields no fault (fail-safe).
-		dead, observedAt, present := readL7Marker(cur.L7LivenessPath, now, time.Duration(cur.L7MaxAgeMS)*time.Millisecond)
-		l7 := l7gate.fold(dead, observedAt, present)
-		// Fold this tick's passive path-level RST signal (chunk B) THROUGH its own generation gate, exactly
-		// like the L7 marker. An absent/stale marker resets the gate and yields no fault (fail-safe).
-		rReset, rObserved, rPresent := readPathMarker(cur.PathSignalPath, now, time.Duration(cur.PathMaxAgeMS)*time.Millisecond)
-		pathReset := gateToResetMap(pathgate.fold(rReset, rObserved, rPresent))
-		out, err := assemblePlanInput(asm, snap, cur.ActiveRef, loadRotationState(cur.StatePath), now, l7, pathReset)
+		out, err := assembleTick(asm, snap, cur, now, loadRotationState(cur.StatePath), l7gate, pathgate)
 		if err != nil {
 			log.Printf("myceliumd: measure: assemble failed (no plan input written this tick): %v", err)
 			holder.setErr(err.Error(), now)

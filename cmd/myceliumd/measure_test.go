@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -451,6 +452,96 @@ func TestAssemblePlanInputPathReset(t *testing.T) {
 	}
 	if pi.Active.PathReset {
 		t.Error("the unset active must not carry PathReset")
+	}
+}
+
+// TestPathSignalMarkerDrivesBlockedReset is the daemon-level integration proof for RP-0014 chunk B 1c:
+// a path_signal.json marker in the OBSERVER's exact on-disk format ({observed_at, checked, reset:[refs]}),
+// whose reset ref is a production proto id, drives the full daemon composition — readPathMarker -> the
+// generation gate -> gateToResetMap -> assemblePlanInput — to a blocked/connection-reset verdict on the
+// active member once the class is flagged across >= path_min_reset_generations DISTINCT generations. It
+// pins the REF SEAM the fold depends on: nb_measure sets the member ref to the proto, and the observer
+// writes reset refs as the sing-box tag minus "-in" (== the proto), so a live marker actually matches the
+// member the daemon folds (an off-by-one in either naming would make the fold a silent live no-op). This
+// is the node-free half of the 1c e2e; the observer -> marker half was validated live in increment 1a.
+func TestPathSignalMarkerDrivesBlockedReset(t *testing.T) {
+	dir := t.TempDir()
+	// Production-faithful config: the member ref IS the proto id (nb_measure emits `ref: .proto`), so the
+	// marker's reset ref (the observer's tag-minus-"-in" == proto) keys the exact member the daemon folds.
+	cfg := goodMeasureConfig()
+	cfg.Members = []measureMember{
+		{Ref: "vless-reality-vision", Proto: "vless-reality-vision", Action: "promote-sibling"},
+		{Ref: "vless-reality-grpc", Proto: "vless-reality-grpc", Action: "promote-sibling"},
+	}
+	cfg.ActiveRef = "vless-reality-vision"
+	cfg.PathMinResetGenerations = 2
+	// Point the daemon composition at a real marker file with the daemon's own freshness window.
+	marker := filepath.Join(dir, "path_signal.json")
+	cfg.PathSignalPath = marker
+	cfg.PathMaxAgeMS = 5 * 60 * 1000 // 5 min
+	asm, err := cfg.buildAssembler(t0)
+	if err != nil {
+		t.Fatalf("buildAssembler: %v", err)
+	}
+
+	// The daemon holds ONE path gate (and one L7 gate) across ticks (like runMeasure); the per-ref
+	// distinct-generation streak is what makes a single RST spike (one generation) harmless.
+	l7gate := newL7GenerationGate(effectiveL7MinGenerations(cfg.L7MinDeadGenerations))
+	pathgate := newL7GenerationGate(effectiveL7MinGenerations(cfg.PathMinResetGenerations))
+
+	// writeMarker emits the OBSERVER's exact format. resetBody is the raw JSON array body (e.g.
+	// `"vless-reality-vision"`), empty for a clean generation.
+	writeMarker := func(observedAt time.Time, resetBody string) {
+		body := fmt.Sprintf(`{"observed_at":"%s","checked":2,"reset":[%s]}`, observedAt.UTC().Format(time.RFC3339Nano), resetBody)
+		if err := os.WriteFile(marker, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// tick drives the daemon's REAL per-tick composition (assembleTick — the same function runMeasure calls),
+	// so this test exercises the actual marker-read -> gate -> gateToResetMap -> assemble wiring, not a copy.
+	tick := func(now time.Time) (spec.ConnState, spec.DetectReason) {
+		snap := []spec.TransportHealth{
+			health("vless-reality-vision", 6, 0, now), // L4 reach HEALTHY for both — only the path signal faults
+			health("vless-reality-grpc", 6, 0, now),
+		}
+		out, err := assembleTick(asm, snap, cfg, now, spec.RotationState{}, l7gate, pathgate)
+		if err != nil {
+			t.Fatalf("assembleTick: %v", err)
+		}
+		var pi rotate.PlanInput
+		if err := json.Unmarshal(out, &pi); err != nil {
+			t.Fatalf("unmarshal PlanInput: %v", err)
+		}
+		return pi.ActiveVerdict.State, pi.ActiveVerdict.Reason
+	}
+
+	// Each generation the observer flags the ACTIVE class reset, with a fresh observed_at. The fault must NOT
+	// appear before generation 2: generation 0 leaves the gate at streak 1 (below path_min_reset_generations
+	// 2), and generation 1 is the first generation the gate faults — but that is only the FIRST blocked
+	// observation, which the detector's FlipConfirmations (2) has not yet confirmed. Only from generation 2
+	// on (gate satisfied AND the flip confirmed) is the active verdict blocked/connection-reset.
+	var state spec.ConnState
+	var reason spec.DetectReason
+	for i := 0; i < 6; i++ {
+		now := t0.Add(time.Duration(i) * time.Minute)
+		writeMarker(now, `"vless-reality-vision"`)
+		state, reason = tick(now)
+		if i <= 1 && state == spec.ConnStateBlocked {
+			t.Fatalf("generation %d must not yet fault (>= 2 distinct reset generations AND >= 2 flip confirmations are required): got %v", i, state)
+		}
+	}
+	if state != spec.ConnStateBlocked || reason != spec.ReasonConnectionReset {
+		t.Fatalf("after sustained path-reset generations, active verdict = (%v, %v), want (blocked, connection-reset) — the observer->marker->daemon fold is not reaching the classifier", state, reason)
+	}
+
+	// Once the observer stops flagging the class (a fresh clean marker with reset:[]), readPathMarker
+	// returns not-present and the gate resets — the daemon fold no longer asserts ConnectReset (the fault is
+	// not latched at the fold; the detector's own hysteresis governs the verdict's return to clean).
+	clean := t0.Add(10 * time.Minute)
+	writeMarker(clean, ``)
+	rReset, rObserved, rPresent := readPathMarker(marker, clean, 5*time.Minute)
+	if pr := gateToResetMap(pathgate.fold(rReset, rObserved, rPresent)); len(pr) != 0 {
+		t.Fatalf("a clean marker (reset:[]) must clear the path signal at the fold, got %v", pr)
 	}
 }
 

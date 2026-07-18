@@ -66,3 +66,39 @@ Phase-2 acceptance ledger (C3), plus one on-device confirmation on the real clie
   stay green; the harness introduces no global signal and no mutate-a-node path).
 - **Realism caveat** — a node-local firewall DROP approximates a path block; the on-device run on the real
   restrictive link is the realism backstop (as in Phase 1).
+
+---
+
+# Path-signal reset drill (RP-0014 chunk B 1c)
+
+`pathsig_reset_drill.sh` closes the **path-level** detector loop live: a served-side inbound-RST spike →
+the passive nft observer counts it → the marker flips `reset:[<class>]` → the measure daemon folds it → the
+served `rotate.PlanInput`'s **active verdict becomes blocked/connection-reset**. It is the live half of 1c;
+the node-free halves are `tests/conformance/pathsig_passive_observer.sh` (the observer is provably passive /
+node-local / payload-free) and `TestPathSignalMarkerDrivesBlockedReset` in `cmd/myceliumd` (the marker
+format → daemon fold, over the generation gate). Like the recovery harness above it is a **live-node** drill,
+not a `tests/run.sh` gate.
+
+| Script | Runs as | Does |
+|---|---|---|
+| `pathsig_reset_drill.sh` | armed node, root | Bursts `--count` abortive (`SO_LINGER=0`) TCP closes at the active member's served port each generation — one inbound RST per close — runs the observer probe to publish a fresh marker generation, and polls the PlanInput until the active verdict is `blocked/connection-reset`. Emits a JSON verdict. |
+
+```sh
+# on an armed node (node-bootstrap.sh --measure-enable), as root; PORT = the active member's served TCP port
+tests/e2e/pathsig_reset_drill.sh --port <active-port>
+```
+
+**Generation spacing.** The daemon faults a class only after it reads `reset:[<class>]` across
+`≥ path_min_reset_generations` (default 2) DISTINCT marker generations, on its own `tick_ms` (~30s) cadence.
+`--gen-gap` (default 35s) keeps each generation wider than one daemon tick so the daemon reads each one;
+total wall clock ≈ `generations × gen-gap` + the detector flip-confirmation streak — single-digit minutes.
+
+**Safety / invariants.** Never touches the served config, params, engine, or firewall — the only durable
+effect is transient counter increments + a self-expiring marker; when the RST burst stops, the detector's
+own hysteresis returns the verdict to clean (no cleanup step). It quiesces the production
+`mycelium-pathsig.timer` for its duration (so a scheduled probe cannot reset the daemon's generation streak
+mid-drill) and restores it on exit. Because a blocked/connection-reset verdict is what a live rotate loop
+consumes, the drill **refuses to run on a node whose rotate apply loop is armed** (`rotate-live.enabled`)
+unless `PATHSIG_DRILL_ALLOW_ARMED=1` — on the default un-armed node it is a pure diagnostic. UDP families
+(hy2/tuic/awg) have no TCP RST and cannot be drilled. The `--target 127.0.0.1` default is self-contained;
+pass the node's public IP to mirror a real off-node client if loopback RSTs are filtered on the host.

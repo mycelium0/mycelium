@@ -243,6 +243,40 @@ func TestPlanRotatesPastL7DeadToLiveSibling(t *testing.T) {
 	}
 }
 
+// TestPlanExcludesPathResetCandidate: a candidate whose served client flows the node's passive path-level
+// observer reports meeting RSTs (PathReset=true, RP-0014 chunk B) is excluded from the pool exactly like an
+// L7-dead sibling — the planner never rotates ONTO a co-reset target, even one that beats the margin.
+func TestPlanExcludesPathResetCandidate(t *testing.T) {
+	in := base()
+	reset := cand("vless-reality-grpc", 0.9, true) // beats the 0.2 incumbent by the 0.1 margin AND is promoted
+	reset.PathReset = true
+	in.Ranked = []spec.RotationCandidate{reset}
+	p, err := Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Act {
+		t.Fatalf("must not rotate onto a path-reset sibling, rotated to %q", p.To.Proto)
+	}
+	if p.Reason != spec.RotationReasonNoBetterCandidate {
+		t.Fatalf("an excluded path-reset candidate must hold no-better-candidate, got %q", p.Reason)
+	}
+}
+
+// TestPlanRotatesPastPathResetToLiveSibling: when the highest-weight candidate is path-reset, the planner
+// skips it and rotates to the next candidate whose flows are clean and still beats the margin.
+func TestPlanRotatesPastPathResetToLiveSibling(t *testing.T) {
+	in := base()
+	resetTop := cand("vless-ws-tls", 0.95, true)
+	resetTop.PathReset = true
+	live := cand("vless-reality-grpc", 0.7, true) // still > 0.2 + 0.1 margin
+	in.Ranked = []spec.RotationCandidate{resetTop, live}
+	p := mustPlan(t, in)
+	if !p.Act || p.To.Proto != "vless-reality-grpc" {
+		t.Fatalf("must skip the path-reset top candidate and rotate to the live sibling, got act=%v to=%q", p.Act, p.To.Proto)
+	}
+}
+
 func TestPlanPicksHighestWeightDeterministically(t *testing.T) {
 	in := base()
 	in.Ranked = []spec.RotationCandidate{

@@ -141,6 +141,29 @@ truth for the version is `internal/spec.Version`.
   `path_signal_path`/`path_max_age_ms`/`path_min_reset_generations` (emitted by `nb_measure.sh`, mirroring
   the L7 marker fields). Fail-safe throughout (an absent/stale/malformed marker → no fault → healthy). Still
   ADVISORY-only: the daemon assembles a PlanInput; nothing actuates without the separate rotate loop.
+  **Increment 1c — the observer's safety pinned + the fold proven end to end.** A new offline conformance gate
+  (`tests/conformance/pathsig_passive_observer.sh`) mechanically pins that the observer is a PASSIVE,
+  NODE-LOCAL, PAYLOAD-FREE by-product: a dedicated additive nft table with `policy accept` whose rules ONLY
+  count (no drop/reject/nat/redirect/tproxy/queue/log/ct-set — it cannot alter the live firewall) and match
+  ONLY `tcp dport` + `tcp flags` (never a source address, meta selector, payload, interface, or per-connection
+  ct state — no per-peer identity), never open an off-node transmit, write an aggregate-only marker
+  ({observed_at, checked, reset}), fail safe on a missing nft/jq, and actuate nothing. The nft-semantic checks
+  run over the FULL emitted ruleset and rest on a structural precondition — the `{...} | nft -f -` block must
+  be built ONLY from literal echo/printf (no helper call or bare-variable payload may smuggle in rule text the
+  gate cannot read) — with every nft invocation vetted PER INVOCATION (a compound `nft list … && nft add rule
+  … drop` cannot launder past a line-based filter) and no nft emission permitted outside the observer region.
+  Negative-tested against 13 unsafe mutations — a drop verdict, a source-IP match, a shared table, a
+  policy flip, an extra marker key, a removed fail-safe guard, a ct-state/meta match, an out-of-region rule
+  add, a helper-emitted rule, a laundered compound line, a bare-variable payload, and an indirect transmit —
+  each makes it FAIL, while the real observer passes. A new
+  daemon-integration test (`TestPathSignalMarkerDrivesBlockedReset`) feeds a marker in the observer's EXACT
+  on-disk format through `readPathMarker` → the generation gate → `gateToResetMap` → `assemblePlanInput` and
+  asserts the active verdict reaches blocked/connection-reset once the class is flagged across ≥
+  `path_min_reset_generations` distinct generations — pinning the ref seam (member ref == proto == the
+  sing-box inbound tag minus `-in`) the live fold depends on, so a naming drift cannot silently make it a
+  no-op. A committed on-node drill (`tests/e2e/pathsig_reset_drill.sh`, run-by-hand, not a CI gate) closes the
+  full live loop: a served-side `SO_LINGER=0` RST burst → observer marker → daemon PlanInput verdict
+  blocked/connection-reset, with generations spaced wider than a daemon tick.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new
