@@ -277,6 +277,40 @@ func TestPlanRotatesPastPathResetToLiveSibling(t *testing.T) {
 	}
 }
 
+// TestPlanExcludesPathCollapseCandidate: a candidate whose established served flows the observer reports in a
+// downstream throughput collapse (PathCollapse=true, RP-0014 chunk B increment 2) is excluded from the pool
+// like a path-reset sibling — never rotate ONTO a co-collapsing target, even one that beats the margin.
+func TestPlanExcludesPathCollapseCandidate(t *testing.T) {
+	in := base()
+	collapse := cand("vless-reality-grpc", 0.9, true)
+	collapse.PathCollapse = true
+	in.Ranked = []spec.RotationCandidate{collapse}
+	p, err := Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Act {
+		t.Fatalf("must not rotate onto a path-collapse sibling, rotated to %q", p.To.Proto)
+	}
+	if p.Reason != spec.RotationReasonNoBetterCandidate {
+		t.Fatalf("an excluded path-collapse candidate must hold no-better-candidate, got %q", p.Reason)
+	}
+}
+
+// TestPlanRotatesPastPathCollapseToLiveSibling: when the highest-weight candidate is path-collapse, the
+// planner skips it and rotates to the next candidate whose flows are healthy and still beats the margin.
+func TestPlanRotatesPastPathCollapseToLiveSibling(t *testing.T) {
+	in := base()
+	collapseTop := cand("vless-ws-tls", 0.95, true)
+	collapseTop.PathCollapse = true
+	live := cand("vless-reality-grpc", 0.7, true)
+	in.Ranked = []spec.RotationCandidate{collapseTop, live}
+	p := mustPlan(t, in)
+	if !p.Act || p.To.Proto != "vless-reality-grpc" {
+		t.Fatalf("must skip the path-collapse top candidate and rotate to the live sibling, got act=%v to=%q", p.Act, p.To.Proto)
+	}
+}
+
 func TestPlanPicksHighestWeightDeterministically(t *testing.T) {
 	in := base()
 	in.Ranked = []spec.RotationCandidate{

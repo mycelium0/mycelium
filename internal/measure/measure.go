@@ -163,7 +163,7 @@ func New(members []Member, limits spec.RotationLimits, th detect.Thresholds, p t
 // the remaining by-products reach does not measure (reset, post-connect collapse, single-stream) stay
 // non-faulted so they never spuriously classify. A connecting-but-lossy channel with no boolean fault
 // is then graded by the success ratio inside the detector, not here.
-func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbeOK, connectReset bool) spec.DetectorSignal {
+func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbeOK, connectReset, postConnectCollapse bool) spec.DetectorSignal {
 	connected := h.Successes > 0
 	return spec.DetectorSignal{
 		Class:     cls,
@@ -176,10 +176,18 @@ func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbe
 		// reaches its `!HandshakeOK && ConnectReset -> blocked/connection-reset` branch — the classifier is
 		// unchanged, this is the fold. connectReset only matters while connected: a not-connected member is
 		// already ConnectOK=false -> the classifier's shutdown branch (the path signal is moot there).
-		HandshakeOK:   connected && !connectReset,
-		ConnectReset:  connectReset,
-		ActiveProbeOK: activeProbeOK,
-		ObservedAt:    h.WindowEnd,
+		HandshakeOK:  connected && !connectReset,
+		ConnectReset: connectReset,
+		// A path-level PostConnectCollapse (RP-0014 chunk B increment 2: established served flows in a
+		// downstream throughput collapse — the send queue stalls because the client stops ACKing) leaves
+		// HandshakeOK and ActiveProbeOK UNTOUCHED (the connection DID establish and the loopback L7 passes;
+		// the collapse is post-connect). Classify reaches its PostConnectCollapse->throttled branch only when
+		// ConnectOK && HandshakeOK && ActiveProbeOK all hold, which they do for a collapsing member — so a
+		// member tripping BOTH reset and collapse hits the more-severe reset/blocked branch first (correct).
+		// Only meaningful while connected.
+		PostConnectCollapse: connected && postConnectCollapse,
+		ActiveProbeOK:       activeProbeOK,
+		ObservedAt:          h.WindowEnd,
 	}
 }
 
@@ -194,13 +202,17 @@ func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbe
 // ref's HandshakeOK + sets ConnectReset -> the classifier's blocked/connection-reset branch (catching real
 // served client flows meeting RSTs that the loopback probe cannot see), and excludes the ref from the
 // rotation pool (PathReset); a ref absent from the map, or a nil map, defaults to no path fault.
+// postConnectCollapse maps a member ref to its node-local passive send-queue-stall signal (RP-0014 chunk B
+// increment 2): an explicit true sets PostConnectCollapse -> the classifier's throttled/throughput-collapse
+// branch (catching a downstream post-connect collapse the loopback probe cannot see) and excludes the ref
+// from the pool (PathCollapse); a ref absent, or a nil map, defaults to no collapse fault.
 //
 // A member present in the snapshot has its detector and tuner advanced; a member absent from the
 // snapshot (no fresh samples this tick) keeps its carried verdict and is ranked on its decayed
 // weight, read at now. A snapshot ref with no known member, or an unknown activeRef, is refused
 // (fail-closed) rather than silently dropped. Deterministic for a given snapshot stream, clock, and
 // activeProbe map.
-func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe, connectReset map[string]bool) (rotate.PlanInput, error) {
+func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe, connectReset, postConnectCollapse map[string]bool) (rotate.PlanInput, error) {
 	if _, ok := a.members[activeRef]; !ok {
 		return rotate.PlanInput{}, fmt.Errorf("measure: tick: active ref %q is not a known member", activeRef)
 	}
@@ -242,7 +254,15 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 				cr = r
 			}
 		}
-		v, err := a.detectors[h.TransportRef].Observe(detectorSignal(cls, h, ap, cr))
+		// postConnectCollapse carries this ref's node-local send-queue-stall signal (chunk B increment 2);
+		// an unset ref (or a nil map) defaults to false, so a caller with no collapse signal folds as before.
+		pcc := false
+		if postConnectCollapse != nil {
+			if c, ok := postConnectCollapse[h.TransportRef]; ok {
+				pcc = c
+			}
+		}
+		v, err := a.detectors[h.TransportRef].Observe(detectorSignal(cls, h, ap, cr, pcc))
 		if err != nil {
 			return rotate.PlanInput{}, fmt.Errorf("measure: tick: observe %q: %w", h.TransportRef, err)
 		}
@@ -283,6 +303,13 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 		if connectReset != nil {
 			if r, ok := connectReset[ref]; ok && r {
 				c.PathReset = true
+			}
+		}
+		// And the send-queue-stall signal (chunk B increment 2) as a pool-exclusion: never rotate ONTO a
+		// member whose established served flows are collapsing downstream (a co-collapsing sibling is no safer).
+		if postConnectCollapse != nil {
+			if c2, ok := postConnectCollapse[ref]; ok && c2 {
+				c.PathCollapse = true
 			}
 		}
 		if ref == activeRef {

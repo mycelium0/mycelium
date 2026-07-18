@@ -132,7 +132,7 @@ func TestAssemblePlanInputGolden(t *testing.T) {
 	}
 	// Active failing (zero successes -> impaired), candidate clean.
 	snap := []spec.TransportHealth{health("ref-a", 0, 6, t0), health("ref-b", 6, 0, t0)}
-	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil, nil)
+	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("assemblePlanInput: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestAssemblePlanInputFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAssembler: %v", err)
 	}
-	if _, err := assemblePlanInput(asm, nil, "no-such-ref", spec.RotationState{}, t0, nil, nil); err == nil {
+	if _, err := assemblePlanInput(asm, nil, "no-such-ref", spec.RotationState{}, t0, nil, nil, nil); err == nil {
 		t.Error("assemblePlanInput accepted an unknown active ref, want error")
 	}
 }
@@ -396,33 +396,46 @@ func TestReadPathMarker(t *testing.T) {
 	fresh := now.Add(-time.Minute).UTC().Format(time.RFC3339Nano)
 	stale := now.Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
 
-	none := func(name string, reset []string, present bool) {
-		if present || reset != nil {
-			t.Errorf("%s: got reset=%v present=%v, want nil/false", name, reset, present)
+	// No fresh/well-formed marker at all -> not present, both lists nil (the gates then reset, never fault).
+	none := func(name string, reset, collapse []string, present bool) {
+		if present || reset != nil || collapse != nil {
+			t.Errorf("%s: got reset=%v collapse=%v present=%v, want nil/nil/false", name, reset, collapse, present)
 		}
 	}
-	r, _, p := readPathMarker("", now, maxAge)
-	none("empty path", r, p)
-	r, _, p = readPathMarker(write("age0.json", "{}"), now, 0)
-	none("non-positive maxAge", r, p)
-	r, _, p = readPathMarker(filepath.Join(dir, "missing.json"), now, maxAge)
-	none("missing file", r, p)
-	r, _, p = readPathMarker(write("bad.json", "{not json"), now, maxAge)
-	none("malformed", r, p)
-	r, _, p = readPathMarker(write("unstamped.json", `{"reset":["ref-a"]}`), now, maxAge)
-	none("unstamped", r, p)
-	r, _, p = readPathMarker(write("stale.json", `{"observed_at":"`+stale+`","reset":["ref-a"]}`), now, maxAge)
-	none("stale", r, p)
-	r, _, p = readPathMarker(write("empty.json", `{"observed_at":"`+fresh+`","reset":[]}`), now, maxAge)
-	none("fresh but empty reset", r, p)
+	r, c, _, p := readPathMarker("", now, maxAge)
+	none("empty path", r, c, p)
+	r, c, _, p = readPathMarker(write("age0.json", "{}"), now, 0)
+	none("non-positive maxAge", r, c, p)
+	r, c, _, p = readPathMarker(filepath.Join(dir, "missing.json"), now, maxAge)
+	none("missing file", r, c, p)
+	r, c, _, p = readPathMarker(write("bad.json", "{not json"), now, maxAge)
+	none("malformed", r, c, p)
+	r, c, _, p = readPathMarker(write("unstamped.json", `{"reset":["ref-a"]}`), now, maxAge)
+	none("unstamped", r, c, p)
+	r, c, _, p = readPathMarker(write("stale.json", `{"observed_at":"`+stale+`","reset":["ref-a"]}`), now, maxAge)
+	none("stale", r, c, p)
 
-	// Fresh + non-empty reset: present, and blank refs are filtered out.
-	r, at, p := readPathMarker(write("reset.json", `{"observed_at":"`+fresh+`","reset":["ref-a","","ref-b"]}`), now, maxAge)
-	if !p || len(r) != 2 || r[0] != "ref-a" || r[1] != "ref-b" {
-		t.Errorf("fresh reset marker: reset=%v present=%v, want [ref-a ref-b]/true", r, p)
+	// Fresh but naming NOTHING: present=true with both lists empty (the gates fold this as "recovered" and
+	// reset their streaks) — NOT dropped as absent, so a collapse-only marker below is never lost.
+	r, c, _, p = readPathMarker(write("empty.json", `{"observed_at":"`+fresh+`","reset":[],"collapse":[]}`), now, maxAge)
+	if !p || len(r) != 0 || len(c) != 0 {
+		t.Errorf("fresh empty marker: reset=%v collapse=%v present=%v, want []/[]/true", r, c, p)
+	}
+
+	// Fresh + non-empty reset: present, blank refs filtered.
+	r, c, at, p := readPathMarker(write("reset.json", `{"observed_at":"`+fresh+`","reset":["ref-a","","ref-b"],"collapse":[]}`), now, maxAge)
+	if !p || len(r) != 2 || r[0] != "ref-a" || r[1] != "ref-b" || len(c) != 0 {
+		t.Errorf("fresh reset marker: reset=%v collapse=%v present=%v, want [ref-a ref-b]/[]/true", r, c, p)
 	}
 	if at.IsZero() {
 		t.Error("fresh reset marker: observedAt must be stamped")
+	}
+
+	// Fresh + collapse only (reset empty): present, collapse delivered — the increment-2 case that the old
+	// empty-reset-drops-the-marker semantics would have swallowed.
+	r, c, _, p = readPathMarker(write("collapse.json", `{"observed_at":"`+fresh+`","reset":[],"collapse":["ref-a","","ref-b"]}`), now, maxAge)
+	if !p || len(r) != 0 || len(c) != 2 || c[0] != "ref-a" || c[1] != "ref-b" {
+		t.Errorf("fresh collapse-only marker: reset=%v collapse=%v present=%v, want []/[ref-a ref-b]/true", r, c, p)
 	}
 }
 
@@ -436,7 +449,7 @@ func TestAssemblePlanInputPathReset(t *testing.T) {
 	}
 	snap := []spec.TransportHealth{health("ref-a", 6, 0, t0), health("ref-b", 6, 0, t0)}
 	// ref-b (the candidate sibling) is flagged reset by the path observer.
-	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil, map[string]bool{"ref-b": true})
+	out, err := assemblePlanInput(asm, snap, "ref-a", spec.RotationState{}, t0, nil, map[string]bool{"ref-b": true}, nil)
 	if err != nil {
 		t.Fatalf("assemblePlanInput: %v", err)
 	}
@@ -484,15 +497,16 @@ func TestPathSignalMarkerDrivesBlockedReset(t *testing.T) {
 		t.Fatalf("buildAssembler: %v", err)
 	}
 
-	// The daemon holds ONE path gate (and one L7 gate) across ticks (like runMeasure); the per-ref
-	// distinct-generation streak is what makes a single RST spike (one generation) harmless.
+	// The daemon holds ONE gate per signal across ticks (like runMeasure); the per-ref distinct-generation
+	// streak is what makes a single RST spike (one generation) harmless.
 	l7gate := newL7GenerationGate(effectiveL7MinGenerations(cfg.L7MinDeadGenerations))
 	pathgate := newL7GenerationGate(effectiveL7MinGenerations(cfg.PathMinResetGenerations))
+	collapsegate := newL7GenerationGate(effectiveL7MinGenerations(cfg.PathCollapseMinGenerations))
 
 	// writeMarker emits the OBSERVER's exact format. resetBody is the raw JSON array body (e.g.
-	// `"vless-reality-vision"`), empty for a clean generation.
+	// `"vless-reality-vision"`), empty for a clean generation. collapse stays [] (increment-1 path).
 	writeMarker := func(observedAt time.Time, resetBody string) {
-		body := fmt.Sprintf(`{"observed_at":"%s","checked":2,"reset":[%s]}`, observedAt.UTC().Format(time.RFC3339Nano), resetBody)
+		body := fmt.Sprintf(`{"observed_at":"%s","checked":2,"reset":[%s],"collapse":[]}`, observedAt.UTC().Format(time.RFC3339Nano), resetBody)
 		if err := os.WriteFile(marker, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -504,7 +518,7 @@ func TestPathSignalMarkerDrivesBlockedReset(t *testing.T) {
 			health("vless-reality-vision", 6, 0, now), // L4 reach HEALTHY for both — only the path signal faults
 			health("vless-reality-grpc", 6, 0, now),
 		}
-		out, err := assembleTick(asm, snap, cfg, now, spec.RotationState{}, l7gate, pathgate)
+		out, err := assembleTick(asm, snap, cfg, now, spec.RotationState{}, l7gate, pathgate, collapsegate)
 		if err != nil {
 			t.Fatalf("assembleTick: %v", err)
 		}
@@ -534,14 +548,76 @@ func TestPathSignalMarkerDrivesBlockedReset(t *testing.T) {
 		t.Fatalf("after sustained path-reset generations, active verdict = (%v, %v), want (blocked, connection-reset) — the observer->marker->daemon fold is not reaching the classifier", state, reason)
 	}
 
-	// Once the observer stops flagging the class (a fresh clean marker with reset:[]), readPathMarker
-	// returns not-present and the gate resets — the daemon fold no longer asserts ConnectReset (the fault is
-	// not latched at the fold; the detector's own hysteresis governs the verdict's return to clean).
+	// Once the observer stops flagging the class (a fresh marker with reset:[]), the marker is still present
+	// (fresh) but names nothing, so the gate folds it as "recovered" and clears the streak — the daemon fold
+	// no longer asserts ConnectReset (the fault is not latched at the fold; the detector's own hysteresis
+	// governs the verdict's return to clean).
 	clean := t0.Add(10 * time.Minute)
 	writeMarker(clean, ``)
-	rReset, rObserved, rPresent := readPathMarker(marker, clean, 5*time.Minute)
+	rReset, _, rObserved, rPresent := readPathMarker(marker, clean, 5*time.Minute)
+	if !rPresent {
+		t.Fatal("a fresh clean marker must still be present (empty lists), not dropped")
+	}
 	if pr := gateToResetMap(pathgate.fold(rReset, rObserved, rPresent)); len(pr) != 0 {
 		t.Fatalf("a clean marker (reset:[]) must clear the path signal at the fold, got %v", pr)
+	}
+}
+
+// TestPathSignalMarkerDrivesThrottledCollapse is the daemon-level integration proof for increment 2: a
+// marker in the observer's exact format naming a class in `collapse` drives the active verdict to
+// throttled/throughput-collapse once armed (path_collapse_enabled) — through the SAME assembleTick
+// composition runMeasure runs — and, crucially, stays CLEAN when DISARMED (the default), proving the fold is
+// inert until an on-node drill signs off. Reset stays [] so this isolates the collapse path.
+func TestPathSignalMarkerDrivesThrottledCollapse(t *testing.T) {
+	run := func(armed bool) (spec.ConnState, spec.DetectReason) {
+		dir := t.TempDir()
+		cfg := goodMeasureConfig()
+		cfg.Members = []measureMember{
+			{Ref: "vless-reality-vision", Proto: "vless-reality-vision", Action: "promote-sibling"},
+			{Ref: "vless-reality-grpc", Proto: "vless-reality-grpc", Action: "promote-sibling"},
+		}
+		cfg.ActiveRef = "vless-reality-vision"
+		cfg.PathCollapseMinGenerations = 2
+		cfg.PathCollapseEnabled = armed
+		marker := filepath.Join(dir, "path_signal.json")
+		cfg.PathSignalPath = marker
+		cfg.PathMaxAgeMS = 5 * 60 * 1000
+		asm, err := cfg.buildAssembler(t0)
+		if err != nil {
+			t.Fatalf("buildAssembler: %v", err)
+		}
+		l7gate := newL7GenerationGate(effectiveL7MinGenerations(cfg.L7MinDeadGenerations))
+		pathgate := newL7GenerationGate(effectiveL7MinGenerations(cfg.PathMinResetGenerations))
+		collapsegate := newL7GenerationGate(effectiveL7MinGenerations(cfg.PathCollapseMinGenerations))
+		var state spec.ConnState
+		var reason spec.DetectReason
+		for i := 0; i < 6; i++ {
+			now := t0.Add(time.Duration(i) * time.Minute)
+			body := fmt.Sprintf(`{"observed_at":"%s","checked":2,"reset":[],"collapse":["vless-reality-vision"]}`, now.UTC().Format(time.RFC3339Nano))
+			if err := os.WriteFile(marker, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			snap := []spec.TransportHealth{health("vless-reality-vision", 6, 0, now), health("vless-reality-grpc", 6, 0, now)}
+			out, err := assembleTick(asm, snap, cfg, now, spec.RotationState{}, l7gate, pathgate, collapsegate)
+			if err != nil {
+				t.Fatalf("assembleTick: %v", err)
+			}
+			var pi rotate.PlanInput
+			if err := json.Unmarshal(out, &pi); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			state, reason = pi.ActiveVerdict.State, pi.ActiveVerdict.Reason
+		}
+		return state, reason
+	}
+
+	// ARMED: the collapse marker drives the verdict to throttled/throughput-collapse.
+	if st, r := run(true); st != spec.ConnStateThrottled || r != spec.ReasonThroughputCollapse {
+		t.Errorf("armed: active verdict = (%v, %v), want (throttled, throughput-collapse) — the collapse fold is not reaching the classifier", st, r)
+	}
+	// DISARMED (default): the SAME marker never faults — the fold is inert until an on-node drill arms it.
+	if st, r := run(false); st != spec.ConnStateClean {
+		t.Errorf("disarmed: active verdict = (%v, %v), want clean — the collapse fold must stay inert while disarmed", st, r)
 	}
 }
 

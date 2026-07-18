@@ -220,11 +220,39 @@ marker_lines="$(printf '%s\n' "$region_nc" | grep -E "printf '\\{")"
 if [ -z "$marker_lines" ]; then
 	badln "no marker-writer of the known 'printf \"{...}\"' shape in the observer region — the marker's keys cannot be read, so the aggregate-only invariant is UNVERIFIED; re-confirm this gate against the new writer shape"
 else
-	badkeys="$(printf '%s\n' "$marker_lines" | grep -oE '"[a-z_]+":' | tr -d '":' | sort -u | grep -vxE 'observed_at|checked|reset' || true)"
+	# Allowlist: {observed_at, checked, reset, collapse}. `collapse` (increment 2) is a closed-vocab class-ref
+	# list, identical in shape to `reset`, never an IP/peer/host — the check still fails closed on any other key.
+	badkeys="$(printf '%s\n' "$marker_lines" | grep -oE '"[a-z_]+":' | tr -d '":' | sort -u | grep -vxE 'observed_at|checked|reset|collapse' || true)"
 	if [ -n "$badkeys" ]; then
-		badln "the observer marker carries a key outside the aggregate allowlist {observed_at,checked,reset}: $(printf '%s' "$badkeys" | tr '\n' ' ')"
+		badln "the observer marker carries a key outside the aggregate allowlist {observed_at,checked,reset,collapse}: $(printf '%s' "$badkeys" | tr '\n' ' ')"
 	else
-		ok "the observer marker carries only the aggregate keys {observed_at, checked, reset} (no IP/peer/host field)"
+		ok "the observer marker carries only the aggregate keys {observed_at, checked, reset, collapse} (no IP/peer/host field)"
+	fi
+fi
+
+# --- 5b. /proc-SOURCE PASSIVITY (increment 2 collapse reader) ----------------------------------------
+# The nft-ruleset checks (1-3) structurally do not cover a NON-nft source. The PostConnectCollapse signal is
+# read from /proc/net/tcp{,6}; pin that reader as fail-safe and address-free (it reads the remote address
+# ONLY to exclude loopback, then discards it — the /proc analogue of the nft no-saddr invariant). The
+# transmit (4) + actuation (6) denylists already cover the whole region, so they cover this reader too.
+if printf '%s\n' "$region_nc" | grep -q '_collapse_classes()'; then
+	proc_reader="$(printf '%s\n' "$region_nc" | awk 'index($0,"_collapse_classes()"){f=1} f{print} f&&/^\}/{f=0}')"
+	if printf '%s\n' "$proc_reader" | grep -q '/proc/net/tcp'; then
+		if printf '%s\n' "$proc_reader" | grep -qE '\[ -r /proc/net/tcp \]'; then
+			ok "the collapse /proc reader fails safe on an unreadable /proc (guard '[ -r /proc/net/tcp ]' -> no signal)"
+		else
+			badln "the collapse /proc reader does not guard on '[ -r /proc/net/tcp ]' — it must fail safe (no signal) when /proc is unreadable"
+		fi
+		# The reader must EMIT only the served port/class (its awk key), never the remote address it reads to
+		# exclude loopback. Scan every awk `print` for a rem-address token.
+		if printf '%s\n' "$proc_reader" | grep -oE 'print[^"]*' | grep -qE '\$3\b|\bra\[|\brip\b|rem_address|saddr|daddr'; then
+			badln "the collapse /proc reader appears to EMIT a remote address (it must read rem_address only to exclude loopback, then discard):"
+			printf '%s\n' "$proc_reader" | grep -nE 'print[^"]*(\$3\b|ra\[|rip)' | sed 's/^/        /'
+		else
+			ok "the collapse /proc reader emits only the served port/class, never a remote address (read-to-skip-then-discard)"
+		fi
+	else
+		badln "_collapse_classes is present but does not read /proc/net/tcp — the collapse source moved; re-confirm this /proc-passivity sub-block"
 	fi
 fi
 
@@ -252,19 +280,19 @@ fi
 # detector to blocked/connection-reset (the fold) lives in Go tests; require the COMPONENT readers/flags
 # AND the two composition proofs (the Tick active-member fold + the daemon marker->PlanInput e2e), so the
 # runtime proof of the fold cannot be silently deleted while this gate still passes.
-need_meas="TestDetectorSignalConnectResetFold TestTickMarksCandidatePathReset TestTickPathResetFaultsBlockedReset"
+need_meas="TestDetectorSignalConnectResetFold TestTickMarksCandidatePathReset TestTickPathResetFaultsBlockedReset TestDetectorSignalPostConnectCollapseFold TestTickPathCollapseFaultsThrottled TestTickMarksCandidatePathCollapse"
 missing_meas=""
 for tn in $need_meas; do [ -f "$MEAS_TEST" ] && grep -q "$tn" "$MEAS_TEST" || missing_meas="$missing_meas $tn"; done
 if [ -z "$missing_meas" ]; then
-	ok "internal/measure fold tests present (ConnectReset fold + candidate exclusion + active-member blocked/reset)"
+	ok "internal/measure fold tests present (ConnectReset + PostConnectCollapse folds + candidate exclusions + active-member blocked/throttled)"
 else
 	badln "internal/measure/measure_test.go is missing chunk-B fold test(s):$missing_meas"
 fi
-need_daemon="TestReadPathMarker TestGateToResetMap TestPathSignalMarkerDrivesBlockedReset"
+need_daemon="TestReadPathMarker TestGateToResetMap TestPathSignalMarkerDrivesBlockedReset TestPathSignalMarkerDrivesThrottledCollapse"
 missing_daemon=""
 for tn in $need_daemon; do [ -f "$DAEMON_TEST" ] && grep -q "$tn" "$DAEMON_TEST" || missing_daemon="$missing_daemon $tn"; done
 if [ -z "$missing_daemon" ]; then
-	ok "cmd/myceliumd marker tests present (readPathMarker + gateToResetMap + marker->PlanInput e2e fold)"
+	ok "cmd/myceliumd marker tests present (readPathMarker + gateToResetMap + marker->PlanInput reset + collapse e2e folds)"
 else
 	badln "cmd/myceliumd/measure_test.go is missing chunk-B marker/e2e test(s):$missing_daemon"
 fi

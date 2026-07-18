@@ -117,15 +117,16 @@ func (r RotationReason) IsValid() bool {
 // class-level only (the RotationPlan's own RotationReason explains the decision), so the fine
 // detector-cause vocabulary never enters the rotation schema.
 type RotationCandidate struct {
-	Proto     string         `json:"proto"`                // closed-registry proto id (TransportRegistry)
-	Class     TransportClass `json:"class"`                // its coarse family (closed vocab)
-	Action    RotationAction `json:"action"`               // the move to reach/apply it
-	FromPort  int            `json:"from_port"`            // current canonical port (0 if not port-toggled)
-	ToPort    int            `json:"to_port"`              // target canonical port (0 if unchanged / not toggled)
-	Promoted  bool           `json:"promoted"`             // tuner promote flag for this member
-	Weight    float64        `json:"weight"`               // node-local tuner weight in [0,1]
-	L7Dead    bool           `json:"l7_dead,omitempty"`    // this node's own L7 probe reports the member client-DEAD; the planner excludes it (Audit-0007 S2). Zero value = eligible.
-	PathReset bool           `json:"path_reset,omitempty"` // this node's passive path-level observer reports the member's served client flows meeting RSTs (RP-0014 chunk B); the planner excludes it like L7Dead — never rotate ONTO a co-reset sibling. Zero value = eligible.
+	Proto        string         `json:"proto"`                   // closed-registry proto id (TransportRegistry)
+	Class        TransportClass `json:"class"`                   // its coarse family (closed vocab)
+	Action       RotationAction `json:"action"`                  // the move to reach/apply it
+	FromPort     int            `json:"from_port"`               // current canonical port (0 if not port-toggled)
+	ToPort       int            `json:"to_port"`                 // target canonical port (0 if unchanged / not toggled)
+	Promoted     bool           `json:"promoted"`                // tuner promote flag for this member
+	Weight       float64        `json:"weight"`                  // node-local tuner weight in [0,1]
+	L7Dead       bool           `json:"l7_dead,omitempty"`       // this node's own L7 probe reports the member client-DEAD; the planner excludes it (Audit-0007 S2). Zero value = eligible.
+	PathReset    bool           `json:"path_reset,omitempty"`    // this node's passive path-level observer reports the member's served client flows meeting RSTs (RP-0014 chunk B); the planner excludes it like L7Dead — never rotate ONTO a co-reset sibling. Zero value = eligible.
+	PathCollapse bool           `json:"path_collapse,omitempty"` // this node's passive path-level observer reports the member's established served flows in a downstream post-connect throughput collapse (RP-0014 chunk B increment 2); excluded like PathReset — never rotate ONTO a co-collapsing sibling. Zero value = eligible.
 }
 
 // Validate checks the candidate is within the closed transport set (the AC-5 anchor): a non-empty

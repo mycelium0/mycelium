@@ -62,6 +62,15 @@ MEASURE_L7_MIN_DEAD_GEN="${MEASURE_L7_MIN_DEAD_GEN:-2}"
 # first reset generation.
 MEASURE_PATH_MAX_AGE_MS="${MEASURE_PATH_MAX_AGE_MS:-$MEASURE_L7_MAX_AGE_MS}"
 MEASURE_PATH_MIN_RESET_GEN="${MEASURE_PATH_MIN_RESET_GEN:-2}"
+# RP-0014 chunk B increment 2 — PostConnectCollapse (send-queue-stall) fold. It ships DISARMED: the observer
+# writes the marker's `collapse` list in SHADOW every window (for observation), but the daemon does NOT fold
+# it into a rotation-driving verdict until an on-node drill validates the /proc parse + the fire/silence
+# behaviour. Arm by deploying with MEASURE_PATH_COLLAPSE_ENABLED=true (then node-apply). MIN_GEN mirrors the
+# reset gate (a class must read COLLAPSE across this many DISTINCT observer generations before it faults).
+MEASURE_PATH_COLLAPSE_ENABLED="${MEASURE_PATH_COLLAPSE_ENABLED:-false}"
+# Normalise to a strict JSON boolean so --argjson never chokes (and an unrecognised value fails SAFE = false).
+case "$MEASURE_PATH_COLLAPSE_ENABLED" in true|True|TRUE|1|yes|on) MEASURE_PATH_COLLAPSE_ENABLED=true ;; *) MEASURE_PATH_COLLAPSE_ENABLED=false ;; esac
+MEASURE_PATH_COLLAPSE_MIN_GEN="${MEASURE_PATH_COLLAPSE_MIN_GEN:-2}"
 
 _measure_unit() { printf '%s' "/etc/systemd/system/mycelium-measure.service"; }
 _l7probe_service_unit() { printf '%s' "/etc/systemd/system/mycelium-l7probe.service"; }
@@ -134,12 +143,15 @@ generate_measure_configs() {
 		--arg pathpath "$(_measure_pathsig_marker)" \
 		--argjson pathage "$MEASURE_PATH_MAX_AGE_MS" \
 		--argjson pathgen "$MEASURE_PATH_MIN_RESET_GEN" \
+		--argjson collapsegen "$MEASURE_PATH_COLLAPSE_MIN_GEN" \
+		--argjson collapseon "$MEASURE_PATH_COLLAPSE_ENABLED" \
 		--argjson limits "$limits" \
 		--argjson tick "$MEASURE_TICK_MS" '{
 		version: 1, tick_ms: $tick, active_ref: $active,
 		output_path: $out, state_path: $state, limits: $limits,
 		l7_liveness_path: $l7path, l7_max_age_ms: $l7age, l7_min_dead_generations: $l7gen,
 		path_signal_path: $pathpath, path_max_age_ms: $pathage, path_min_reset_generations: $pathgen,
+		path_collapse_enabled: $collapseon, path_collapse_min_generations: $collapsegen,
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."
@@ -199,12 +211,78 @@ pathsig_nft_remove() {
 	rm -f "$STATE_DIR/pathsig_counters.json" 2>/dev/null || true
 }
 
+# _collapse_classes CUR LAST PORTMAP — the served classes showing a DOWNSTREAM PostConnectCollapse (RP-0014
+# chunk B increment 2). A collapse is invisible to a byte counter (the node's egress succeeds; the drop is
+# on-path), but it leaves a node-LOCAL kernel signature: an ESTABLISHED served socket whose SEND BACKLOG
+# (tx_queue = write_seq - snd_una) stays non-empty AND whose unrecovered-retransmit count climbs — because
+# snd_una advances ONLY on a real inbound client ACK, so retransmits alone never clear it. Per served port we
+# count established non-loopback sockets E and "stuck" ones (retrnsmt >= FLOOR && non-empty tx_queue), and
+# flag the class iff there is fresh new-connection churn (syn delta > SYN_FLOOR) AND E >= EST_FLOOR (enough
+# concurrent flows to be a class signal, not one dying download) AND stuck >= STUCK_FLOOR AND stuck is >= half
+# of E. Node-local /proc read; the remote address is read ONLY to exclude loopback, then DISCARDED (never
+# stored). Fail-safe: unreadable /proc -> [] (no signal). mawk-safe: /proc hex fields are fixed-width
+# zero-padded UPPERCASE, so a lexical compare equals a numeric one — no strtonum (gawk-only) needed.
+# retrnsmt is field 7 (hex); field 8 is the decimal service uid — reading it as retrnsmt would false-fire on
+# every socket owned by the non-root engine uid, so the index is load-bearing.
+_collapse_classes() {
+	local cur="$1" last="$2" pm="$3"
+	[ -r /proc/net/tcp ] || { printf '[]'; return 0; }
+	local ports; ports="$(printf '%s' "$pm" | jq -r 'keys[]?' 2>/dev/null)" || ports=""
+	[ -n "$ports" ] || { printf '[]'; return 0; }
+	# hex(local_address port form, %04X UPPER) : decimal served port — awk keys by decimal via this map.
+	local p hexmap=""
+	for p in $ports; do hexmap="$hexmap$(printf '%04X' "$p" 2>/dev/null):$p "; done
+	# syn deltas per decimal served port as SPACE-joined "PORT:DELTA" tokens (a single line — an embedded
+	# newline in an awk -v value is not portable), the new-connection churn gate (reuses the increment-1 nft
+	# syn_<port> counter delta — no new nft rule).
+	local syndeltas; syndeltas="$(jq -nr --argjson cur "$cur" --argjson last "$last" '
+		[ $cur | keys[] | select(startswith("syn_")) | ltrimstr("syn_") as $p
+		  | (($cur["syn_"+$p]//0) - ($last["syn_"+$p]//0) | if . < 0 then 0 else . end) as $d
+		  | "\($p):\($d)" ] | join(" ")' 2>/dev/null)" || syndeltas=""
+	local retxhex; retxhex="$(printf '%08X' "${COLLAPSE_RETX_FLOOR:-2}")"
+	local files="/proc/net/tcp"; [ -r /proc/net/tcp6 ] && files="$files /proc/net/tcp6"
+	local decports; decports="$(awk \
+		-v hexmap="$hexmap" -v retx="$retxhex" \
+		-v estfloor="${COLLAPSE_EST_FLOOR:-8}" -v stuckfloor="${COLLAPSE_STUCK_FLOOR:-4}" \
+		-v rnum="${COLLAPSE_RATIO_NUM:-1}" -v rden="${COLLAPSE_RATIO_DEN:-2}" -v syn="$syndeltas" '
+		BEGIN {
+			n = split(hexmap, H, " "); for (i=1;i<=n;i++) { if (H[i]!="") { split(H[i], hp, ":"); dec[toupper(hp[1])] = hp[2] } }
+			m = split(syn, S, " "); for (i=1;i<=m;i++) { if (S[i]!="") { split(S[i], kv, ":"); synd[kv[1]] = kv[2] + 0 } }
+		}
+		FNR == 1 { next }                              # per-file header
+		{
+			split($2, la, ":"); lp = toupper(la[2])    # local port, UPPER hex
+			if (!(lp in dec)) next                       # not a served port
+			if ($4 != "01") next                         # ESTABLISHED only (hex 01)
+			split($3, ra, ":"); rip = ra[1]
+			if (rip == "0100007F" || rip == "00000000000000000000000001000000") next  # v4/v6 loopback -> skip + DISCARD
+			d = dec[lp]; E[d]++
+			split($5, tq, ":")                           # tx_queue:rx_queue
+			if (toupper($7) >= retx && tq[1] != "00000000") Stuck[d]++
+		}
+		END {
+			for (d in E) {
+				if ((synd[d] + 0) <= 0) continue                     # fresh new-connection churn this window
+				if (E[d] < estfloor) continue                        # enough concurrent flows to be a class signal
+				if ((Stuck[d] + 0) < stuckfloor) continue            # enough stuck absolutely
+				if ((Stuck[d] + 0) * rden < rnum * E[d]) continue    # stuck >= (num/den) of E (>= half)
+				print d
+			}
+		}' $files 2>/dev/null)" || decports=""
+	[ -n "$decports" ] || { printf '[]'; return 0; }
+	printf '%s\n' "$decports" | jq -R . | jq -s -c --argjson pm "$pm" '[ .[] | $pm[.] // empty ] | unique' 2>/dev/null || printf '[]'
+}
+
 # measure_pathsig_probe [MARKER] — read the RST/SYN counter deltas since the last window, threshold, and write
-# the ConnectReset marker (default $STATE_DIR/path_signal.json = {observed_at, checked, reset:[REFS]}). A ref
-# in `reset` names a served class whose inbound-RST rate this window was >= PATHSIG_RST_FLOOR (absolute, to
-# ignore low-traffic noise) AND >= PATHSIG_RST_RATIO_NUM/DEN of its new-connection rate. The first read after
-# (re)arm only baselines (no delta yet). Counter reset (a table reload) clamps the delta to 0 -> no false
-# signal. Fail-safe: absent table/jq -> no marker.
+# the path-signal marker (default $STATE_DIR/path_signal.json = {observed_at, checked, reset:[REFS], collapse:
+# [REFS]}). A ref in `reset` (ConnectReset, increment 1) names a served class whose inbound-RST rate this
+# window was >= PATHSIG_RST_FLOOR AND >= PATHSIG_RST_RATIO_NUM/DEN of its new-connection rate. A ref in
+# `collapse` (PostConnectCollapse, increment 2) names a class whose ESTABLISHED served sockets show the
+# send-queue-stall signature (see _collapse_classes). The first read after (re)arm only baselines (no delta
+# yet). Counter reset (a table reload) clamps the delta to 0 -> no false signal. Fail-safe: absent table/jq ->
+# no marker; unreadable /proc -> collapse stays []. The daemon folds `reset` unconditionally but `collapse`
+# only when armed (measure.config path_collapse_enabled) — it ships in SHADOW (observed, never rotates) until
+# an on-node drill validates the parse + fire/silence.
 measure_pathsig_probe() {
 	have nft && have jq || return 0
 	nft list table $PATHSIG_NFT_TABLE >/dev/null 2>&1 || return 0   # observer not armed -> skip
@@ -217,9 +295,13 @@ measure_pathsig_probe() {
 	( umask 077; printf '%s\n' "$cur" >"$statef.tmp" ) 2>/dev/null && mv -f "$statef.tmp" "$statef" 2>/dev/null || true
 	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	if [ "$last" = "{}" ]; then
-		printf '{"observed_at":"%s","checked":0,"reset":[]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
-		return 0   # first read after (re)arm: baseline only
+		printf '{"observed_at":"%s","checked":0,"reset":[],"collapse":[]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+		return 0   # first read after (re)arm: baseline only (no delta, no /proc window yet)
 	fi
+	# PostConnectCollapse (increment 2) — computed alongside the RST signal, written to the same marker. It is
+	# fail-safe ([]) on any error, so it never perturbs the ConnectReset path.
+	local collapse; collapse="$(_collapse_classes "$cur" "$last" "$portmap" 2>/dev/null)" || collapse="[]"
+	[ -n "$collapse" ] || collapse="[]"
 	local reset; reset="$(jq -nc \
 		--argjson cur "$cur" --argjson last "$last" --argjson pm "$portmap" \
 		--argjson floor "${PATHSIG_RST_FLOOR:-5}" --argjson rnum "${PATHSIG_RST_RATIO_NUM:-1}" --argjson rden "${PATHSIG_RST_RATIO_DEN:-2}" '
@@ -232,13 +314,19 @@ measure_pathsig_probe() {
 		| unique')" || reset=""
 	[ -n "$reset" ] || reset="[]"
 	local n; n="$(printf '%s' "$cur" | jq '[keys[]|select(startswith("rst_"))]|length' 2>/dev/null || echo 0)"
-	printf '{"observed_at":"%s","checked":%s,"reset":%s}\n' "$ts" "${n:-0}" "$reset" >"$marker.tmp" 2>/dev/null \
+	printf '{"observed_at":"%s","checked":%s,"reset":%s,"collapse":%s}\n' "$ts" "${n:-0}" "$reset" "$collapse" >"$marker.tmp" 2>/dev/null \
 		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+	local hit=0
 	if [ "$reset" != "[]" ]; then
 		warn "path-signal: inbound-RST rate on served class(es) $(printf '%s' "$reset" | jq -r 'join(",")' 2>/dev/null || printf '%s' "$reset") exceeds the threshold — possible on-path connection-reset interference on real client flows."
-		return 1
+		hit=1
 	fi
-	log "path-signal: inbound-RST rates within threshold across all $n observed served TCP class(es)."
+	if [ "$collapse" != "[]" ]; then
+		warn "path-signal: send-queue stall on served class(es) $(printf '%s' "$collapse" | jq -r 'join(",")' 2>/dev/null || printf '%s' "$collapse") — established flows are not being ACKed (possible downstream post-connect throughput collapse). SHADOW: advisory only until armed."
+		hit=1
+	fi
+	[ "$hit" -eq 1 ] && return 1
+	log "path-signal: inbound-RST + send-queue-stall rates within threshold across all $n observed served TCP class(es)."
 	return 0
 }
 

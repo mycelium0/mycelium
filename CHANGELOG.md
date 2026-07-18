@@ -164,6 +164,25 @@ truth for the version is `internal/spec.Version`.
   no-op. A committed on-node drill (`tests/e2e/pathsig_reset_drill.sh`, run-by-hand, not a CI gate) closes the
   full live loop: a served-side `SO_LINGER=0` RST burst → observer marker → daemon PlanInput verdict
   blocked/connection-reset, with generations spaced wider than a daemon tick.
+  **Increment 2 — PostConnectCollapse (the throughput-collapse signal), producer shipped DISARMED.** The
+  detector's second path-level input, resolved by an adversarial design panel (4 mechanisms → 3 judges →
+  synthesis). A post-connect "data dies" collapse happens DOWNSTREAM of the node, so a local egress byte
+  counter cannot see it — but it leaves a node-LOCAL kernel signature: an ESTABLISHED served socket whose
+  send backlog (`tx_queue`) stays non-empty AND whose unrecovered-retransmit count climbs, because `snd_una`
+  advances only on a real inbound client ACK (retransmits alone never clear it). `_collapse_classes`
+  (`control/lib/nb_measure.sh`) reads `/proc/net/tcp{,6}` (no new nft rule, no conntrack, no sysctl) and,
+  gated by the existing increment-1 `syn_<port>` churn counter, flags a class when a majority of ≥8 concurrent
+  established flows are stuck — writing a `collapse` list into the same marker. It is mawk-safe (fixed-width
+  hex compared lexically, not `strtonum`) and reads the remote address ONLY to exclude loopback, then
+  discards it (never stored). The daemon folds `collapse` through its own generation gate into
+  `PostConnectCollapse` (leaving HandshakeOK/ActiveProbeOK untouched, unlike ConnectReset), so
+  `detect.Classify` reaches throttled/throughput-collapse; a co-collapsing sibling is pool-excluded
+  (`RotationCandidate.PathCollapse`, mirroring PathReset). **It ships DISARMED** (`path_collapse_enabled`
+  false by default): the marker's collapse list is written in SHADOW for observation, but the fold is inert
+  until an on-node drill validates the `/proc` field parse (`retrnsmt` is field 7, NOT the field-8 uid — the
+  false-fire landmine the panel caught) and the fire/silence behaviour. The gate is extended to pin the new
+  `/proc` reader as fail-safe + address-free and to allow the `collapse` marker key; new Go tests cover the
+  fold, the pool exclusion, and the armed→throttled / disarmed→clean control.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new

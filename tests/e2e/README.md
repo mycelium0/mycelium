@@ -102,3 +102,27 @@ consumes, the drill **refuses to run on a node whose rotate apply loop is armed*
 unless `PATHSIG_DRILL_ALLOW_ARMED=1` — on the default un-armed node it is a pure diagnostic. UDP families
 (hy2/tuic/awg) have no TCP RST and cannot be drilled. The `--target 127.0.0.1` default is self-contained;
 pass the node's public IP to mirror a real off-node client if loopback RSTs are filtered on the host.
+
+## Arming PostConnectCollapse (RP-0014 chunk B increment 2 — runbook, no script yet)
+
+The collapse signal (`_collapse_classes` in `nb_measure.sh`) ships **disarmed** (`path_collapse_enabled`
+false): the observer writes the marker's `collapse` list in **shadow** every window, but the daemon does not
+fold it into a rotation until an on-node drill signs off. There is deliberately **no committed drill script**
+— inducing a *post-handshake* node→client egress black-hole (without also blocking the handshake) is
+kernel/link-specific and must be iterated live, so shipping an unvalidated script would be worse than none.
+The arming procedure (do all three on a node with real served traffic, `path_collapse_enabled` still false):
+
+1. **Parse proof.** Dump a few established served sockets and confirm the field layout on *this* kernel +
+   engine uid: `awk 'NR>1 && $4=="01"{print $2, $7, $8}' /proc/net/tcp | head`. Confirm `$7` is the 8-hex
+   `retrnsmt` and `$8` is the decimal service uid (the sing-box/xray uid). This pins the field-7 index — the
+   field-8-uid confusion is the one false-fire landmine (`retrnsmt`-vs-`uid`).
+2. **Fire proof.** Toward a *test* client, black-hole the node→client Application-Data after the handshake
+   (e.g. a scoped `tc`/`netem` drop on a scratch path). Confirm the shadow marker's `collapse` names the
+   class across ≥2 generations, then set `MEASURE_PATH_COLLAPSE_ENABLED=true` + node-apply and confirm the
+   verdict flips to `throttled/throughput-collapse`.
+3. **Silence proof.** Under healthy heavy-download traffic (incl. a GRO client) and lossy-but-alive mobile
+   traffic (`netem loss`, not black-hole), confirm `collapse` stays **empty** — the shadow phase's
+   zero-false-emission record is the silence evidence.
+
+Only after 1–3 pass, leave `path_collapse_enabled=true`. If step 3 shows noise, the design panel's fallback
+is an independent nft byte-rate corroborator (require both signals before faulting) — see the RP.

@@ -81,6 +81,14 @@ type measureConfig struct {
 	// member must be named RESET across at least this many DISTINCT marker generations before the daemon
 	// faults it. Unset (<= 0) defaults to defaultL7MinDeadGenerations (2); an explicit 1 faults on the first.
 	PathMinResetGenerations int `json:"path_min_reset_generations,omitempty"`
+	// PathCollapseEnabled ARMS the PostConnectCollapse fold (RP-0014 chunk B increment 2). It ships DISARMED
+	// (false): the observer writes the marker's `collapse` list in SHADOW (for observation), but the daemon
+	// does NOT fold it into a rotation-driving verdict until an on-node drill validates the /proc parse and
+	// the fire/silence behaviour. When false the daemon still READS collapse but treats it as always-empty.
+	PathCollapseEnabled bool `json:"path_collapse_enabled,omitempty"`
+	// PathCollapseMinGenerations mirrors PathMinResetGenerations for the collapse signal. Unset (<= 0)
+	// defaults to defaultL7MinDeadGenerations (2). Only consulted when PathCollapseEnabled.
+	PathCollapseMinGenerations int `json:"path_collapse_min_generations,omitempty"`
 }
 
 // members converts the config rows to internal/measure.Member descriptors.
@@ -251,40 +259,48 @@ func readL7Marker(path string, now time.Time, maxAge time.Duration) (dead []stri
 }
 
 // pathSignalMarker is the node-local PASSIVE path-level served-flow marker (RP-0014 chunk B) the nft
-// RST-rate observer writes. Reset lists the member refs whose served client flows are meeting RSTs above
-// threshold this window; ObservedAt stamps it for freshness. Absent/stale/malformed -> no path signal.
+// observer writes. Reset lists the member refs whose served client flows are meeting RSTs above threshold
+// this window (ConnectReset, increment 1); Collapse lists refs whose established served flows show the
+// downstream send-queue-stall signature (PostConnectCollapse, increment 2); ObservedAt stamps it for
+// freshness. Absent/stale/malformed -> no path signal.
 type pathSignalMarker struct {
 	ObservedAt time.Time `json:"observed_at"`
 	Reset      []string  `json:"reset"`
+	Collapse   []string  `json:"collapse"`
 }
 
-// readPathMarker mirrors readL7Marker for the path-signal marker: it returns the FRESH reset-ref list, the
-// generation stamp, and present. Fail-safe: empty path / non-positive maxAge / missing / unreadable /
-// malformed / unstamped / stale / empty-reset all yield (nil, zero, false) — no path signal.
-func readPathMarker(path string, now time.Time, maxAge time.Duration) (reset []string, observedAt time.Time, present bool) {
+// readPathMarker returns the FRESH reset + collapse ref lists, the generation stamp, and present. present
+// means a fresh, well-formed marker EXISTS — it is NOT gated on either list being non-empty, so a marker
+// naming only a collapse (reset empty) is still delivered, and a fresh marker naming NOTHING is delivered
+// with both lists empty (which the generation gates fold as "recovered", resetting their streaks). Fail-safe:
+// empty path / non-positive maxAge / missing / unreadable / malformed / unstamped / stale all yield
+// (nil, nil, zero, false) — no path signal (the gates then reset, never fabricating a fault).
+func readPathMarker(path string, now time.Time, maxAge time.Duration) (reset, collapse []string, observedAt time.Time, present bool) {
 	if path == "" || maxAge <= 0 {
-		return nil, time.Time{}, false
+		return nil, nil, time.Time{}, false
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, time.Time{}, false
+		return nil, nil, time.Time{}, false
 	}
 	var m pathSignalMarker
 	if json.Unmarshal(data, &m) != nil {
-		return nil, time.Time{}, false
+		return nil, nil, time.Time{}, false
 	}
 	if m.ObservedAt.IsZero() || now.Sub(m.ObservedAt) > maxAge {
-		return nil, time.Time{}, false
+		return nil, nil, time.Time{}, false
 	}
 	for _, ref := range m.Reset {
 		if ref != "" {
 			reset = append(reset, ref)
 		}
 	}
-	if len(reset) == 0 {
-		return nil, time.Time{}, false
+	for _, ref := range m.Collapse {
+		if ref != "" {
+			collapse = append(collapse, ref)
+		}
 	}
-	return reset, m.ObservedAt, true
+	return reset, collapse, m.ObservedAt, true
 }
 
 // gateToResetMap remaps the generation gate's faulted SET into the convention measure.Tick's connectReset
@@ -399,8 +415,8 @@ func (g *l7GenerationGate) fold(dead []string, observedAt time.Time, present boo
 // core of the daemon's measure tick — no I/O of its own; the caller supplies the snapshot, active ref,
 // state, clock, and the node-local L7-liveness map (a member ref -> false for a fresh L7-dead member;
 // a nil/unset map folds as healthy, the pre-L7 behaviour).
-func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe, connectReset map[string]bool) ([]byte, error) {
-	pi, err := asm.Tick(snap, activeRef, state, now, activeProbe, connectReset)
+func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, activeRef string, state spec.RotationState, now time.Time, activeProbe, connectReset, postConnectCollapse map[string]bool) ([]byte, error) {
+	pi, err := asm.Tick(snap, activeRef, state, now, activeProbe, connectReset, postConnectCollapse)
 	if err != nil {
 		return nil, err
 	}
@@ -412,18 +428,28 @@ func assemblePlanInput(asm *measure.Assembler, snap []spec.TransportHealth, acti
 }
 
 // assembleTick is the daemon's per-tick fold composition, extracted so a test can drive the EXACT wiring
-// the daemon runs (marker reads -> the two generation gates -> assemblePlanInput), not a re-implementation.
-// It reads this tick's node-local L7 liveness marker and the passive path-level RST marker, folds each
-// THROUGH its own generation gate (a member must read DEAD/RESET across >= MinGenerations DISTINCT marker
-// generations before it faults, so marker replay across ticks cannot satisfy the anti-flap from one probe
-// run; an absent/stale marker resets that gate -> no fault, fail-safe), and assembles the PlanInput. The
-// gates are the caller's (persisted across ticks); cfg supplies the marker paths + freshness windows.
-func assembleTick(asm *measure.Assembler, snap []spec.TransportHealth, cfg *measureConfig, now time.Time, state spec.RotationState, l7gate, pathgate *l7GenerationGate) ([]byte, error) {
+// the daemon runs (marker reads -> the generation gates -> assemblePlanInput), not a re-implementation.
+// It reads this tick's node-local L7 liveness marker and the passive path-level marker (both RST and
+// send-queue-stall lists), folds each THROUGH its own generation gate (a member must read DEAD/RESET/COLLAPSE
+// across >= MinGenerations DISTINCT marker generations before it faults, so marker replay across ticks cannot
+// satisfy the anti-flap from one probe run; an absent/stale marker resets that gate -> no fault, fail-safe),
+// and assembles the PlanInput. The gates are the caller's (persisted across ticks); cfg supplies the marker
+// paths + freshness windows. The collapse signal is DISARMED unless cfg.PathCollapseEnabled — the marker's
+// collapse list is read (shadow) but not folded into a rotation-driving verdict until arming (increment 2).
+func assembleTick(asm *measure.Assembler, snap []spec.TransportHealth, cfg *measureConfig, now time.Time, state spec.RotationState, l7gate, pathgate, collapsegate *l7GenerationGate) ([]byte, error) {
 	dead, observedAt, present := readL7Marker(cfg.L7LivenessPath, now, time.Duration(cfg.L7MaxAgeMS)*time.Millisecond)
 	l7 := l7gate.fold(dead, observedAt, present)
-	rReset, rObserved, rPresent := readPathMarker(cfg.PathSignalPath, now, time.Duration(cfg.PathMaxAgeMS)*time.Millisecond)
+	rReset, rCollapse, rObserved, rPresent := readPathMarker(cfg.PathSignalPath, now, time.Duration(cfg.PathMaxAgeMS)*time.Millisecond)
 	pathReset := gateToResetMap(pathgate.fold(rReset, rObserved, rPresent))
-	return assemblePlanInput(asm, snap, cfg.ActiveRef, state, now, l7, pathReset)
+	// Collapse rides its own gate but only actuates when armed. When disarmed we STILL fold it through the
+	// gate (so its streak state advances and shadow behaviour matches armed behaviour) but discard the result,
+	// so arming later has no cold-start surprise; the map passed to Tick is nil -> no verdict/pool effect.
+	collapseFaulted := collapsegate.fold(rCollapse, rObserved, rPresent)
+	var pathCollapse map[string]bool
+	if cfg.PathCollapseEnabled {
+		pathCollapse = gateToResetMap(collapseFaulted) // ref->true convention, same as reset
+	}
+	return assemblePlanInput(asm, snap, cfg.ActiveRef, state, now, l7, pathReset, pathCollapse)
 }
 
 // filterToMembers keeps only the snapshot entries whose ref is a configured member, returning the
@@ -502,6 +528,9 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 	// The path-signal marker rides the SAME generation-gate logic (a member must read RESET across >= N
 	// distinct marker generations before it faults, hardening against replay + a one-off RST spike).
 	pathgate := newL7GenerationGate(effectiveL7MinGenerations(initial.PathMinResetGenerations))
+	// The collapse signal (increment 2) rides its own generation gate. Its streak advances every tick (shadow)
+	// so arming has no cold start, but assembleTick only folds its result into a verdict when armed.
+	collapsegate := newL7GenerationGate(effectiveL7MinGenerations(initial.PathCollapseMinGenerations))
 
 	tick := func() {
 		// Re-read the config for the current active ref / paths; the assembler's members and limits are
@@ -519,7 +548,7 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 			// reach/measure ref mismatch the operator should reconcile.
 			log.Printf("myceliumd: measure: dropped %d reach anchor(s) not in the member set (ref mismatch?)", dropped)
 		}
-		out, err := assembleTick(asm, snap, cur, now, loadRotationState(cur.StatePath), l7gate, pathgate)
+		out, err := assembleTick(asm, snap, cur, now, loadRotationState(cur.StatePath), l7gate, pathgate, collapsegate)
 		if err != nil {
 			log.Printf("myceliumd: measure: assemble failed (no plan input written this tick): %v", err)
 			holder.setErr(err.Error(), now)

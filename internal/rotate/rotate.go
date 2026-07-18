@@ -156,6 +156,11 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		if c.PathReset {
 			continue
 		}
+		// And never rotate ONTO a member whose established served flows the observer reports in a downstream
+		// post-connect throughput collapse (RP-0014 chunk B increment 2) — a co-collapsing sibling is no safer.
+		if c.PathCollapse {
+			continue
+		}
 		if c.Weight < in.Active.Weight+in.Limits.MinWeightMargin {
 			continue
 		}
