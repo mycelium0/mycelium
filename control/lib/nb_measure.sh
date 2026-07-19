@@ -375,8 +375,14 @@ UNIT
 		run systemctl disable --now myceliumd.service 2>/dev/null || true
 	fi
 	run systemctl daemon-reload
-	run systemctl enable --now mycelium-measure.service || die "measure: could not enable mycelium-measure.service (fail-closed)."
-	log "measure: mycelium-measure.service ENABLED — this node now assembles a node-local rotate.PlanInput (ADVISORY; it does NOT rotate). Disable with '$0 --measure-disable'."
+	run systemctl enable mycelium-measure.service || die "measure: could not enable mycelium-measure.service (fail-closed)."
+	# restart (not `enable --now`): the daemon is long-lived, so on a RE-enable after a spine rebuild
+	# `enable --now` would leave the OLD binary running (enable --now never restarts an already-active
+	# service) — the code update would silently not take effect. `restart` starts it if inactive AND reloads
+	# the current binary if active, fail-closed if the current binary is broken. (The l7probe/pathsig units
+	# are oneshot: they re-exec node-bootstrap fresh on every timer fire, so they never go stale this way.)
+	run systemctl restart mycelium-measure.service || die "measure: could not (re)start mycelium-measure.service on the current binary (fail-closed)."
+	log "measure: mycelium-measure.service ENABLED + restarted onto the current binary — this node now assembles a node-local rotate.PlanInput (ADVISORY; it does NOT rotate). Disable with '$0 --measure-disable'."
 
 	# L7 liveness probe (RP-0010 AC-6): a budgeted + jittered ONESHOT timer runs '--l7-probe' OUT of the
 	# daemon, writing the marker the measure loop folds into DetectorSignal.ActiveProbeOK — closing the

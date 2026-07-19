@@ -197,6 +197,14 @@ truth for the version is `internal/spec.Version`.
   cross-node aggregation + region-keyed weather stay on the inert Phase-5 federation seam (the
   `federation_inert` + `node_status_digest_emit_safe` gates stay green). This connects the two existing pure
   halves so that future emitter has a node-local input.
+### Fixed
+- **`--measure-enable` now restarts the long-lived measure daemon onto the current binary.** It used
+  `systemctl enable --now mycelium-measure.service`, which never restarts an already-active service — so a
+  spine rebuild followed by a re-`--measure-enable` silently left the OLD `myceliumd` running and the code
+  update never took effect (found live: an m1 reset drill saw the observer marker flip but the daemon fold
+  never fired, because the daemon was an 11-day-old binary with no `readPathMarker`). Now `enable` +
+  `restart` (fail-closed), so the current binary always loads. The l7probe/pathsig units are oneshot
+  (re-exec node-bootstrap fresh each timer fire) and were never affected.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new
