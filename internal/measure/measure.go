@@ -332,3 +332,30 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 		Now:           now,
 	}, nil
 }
+
+// StatusObservations projects the plane's held per-member verdicts into the per-CLASS advisory-health
+// observations spec.BuildNodeStatusDigest consumes (RP-0014 chunk C — the node-local half of a fungi's
+// per-family "weather"). Each member's fine ConnState is projected DOWN to its lossy AdvisoryHealth — the
+// ONLY externalisable view, in which throttled/blocked/shutdown all collapse to `degraded` so the advisory
+// can never reveal which interference class succeeded (ADR-0030) — grouped by the member's transport class.
+// A member not yet observed contributes HealthUnknown.
+//
+// It is PURE (reads held state; no I/O, no clock, no emission) — the projection SEAM the digest builder's
+// k-floor sits on top of (the floor makes a single member's state indistinguishable within its class:
+// reality-tcp has 3 members, quic-udp 2, so a single node's own multi-member classes already clear a k>=2
+// floor). It deliberately does NOT build, serve, sign, or transmit a digest: the live advisory
+// emitter/cache/publisher is a future cross-cutting RP, and cross-node aggregation + region-keyed weather
+// stay on the inert Phase-5 federation seam. This function only connects the two existing pure halves (the
+// measure plane's verdicts and spec.BuildNodeStatusDigest) so that future emitter has a node-local input.
+func (a *Assembler) StatusObservations() map[spec.TransportClass][]spec.HealthValue {
+	obs := make(map[spec.TransportClass][]spec.HealthValue, len(a.order))
+	for _, ref := range a.order {
+		cls := a.class[ref]
+		h := spec.HealthUnknown
+		if v, ok := a.verdicts[ref]; ok {
+			h = v.State.AdvisoryHealth()
+		}
+		obs[cls] = append(obs[cls], h)
+	}
+	return obs
+}

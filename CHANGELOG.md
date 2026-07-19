@@ -183,6 +183,20 @@ truth for the version is `internal/spec.Version`.
   false-fire landmine the panel caught) and the fire/silence behaviour. The gate is extended to pin the new
   `/proc` reader as fail-safe + address-free and to allow the `collapse` marker key; new Go tests cover the
   fold, the pool exclusion, and the armed→throttled / disarmed→clean control.
+  **Chunk C — proactive full-set selection: the node-local digest projection seam.** Chunk C's node-local
+  DoD was already met by chunks A/B — the L7 probe assesses the WHOLE served set every run (not just the
+  active), and the planner ranks candidates by tuner weight while hard-excluding the L7-dead / path-reset /
+  path-collapse ones across the pool. The one genuinely-missing node-local piece was the glue between the
+  measure plane's held per-member verdicts and the (already-present, inert) `spec.BuildNodeStatusDigest`:
+  `measure.Assembler.StatusObservations()` projects each member's fine ConnState DOWN to its lossy
+  `AdvisoryHealth` (throttled/blocked/shutdown all collapse to `degraded`, ADR-0030), grouped by transport
+  class — the per-CLASS observation map the digest builder's k-floor consumes. It is PURE (no I/O, no
+  emission): a single node's own multi-member classes (reality-tcp = 3 members, quic-udp = 2) already clear a
+  k≥2 floor, so it feeds a valid class-aggregate digest with no second node. Deliberately does NOT build,
+  serve, sign, or transmit — the live advisory emitter/cache/publisher is a future cross-cutting RP, and
+  cross-node aggregation + region-keyed weather stay on the inert Phase-5 federation seam (the
+  `federation_inert` + `node_status_digest_emit_safe` gates stay green). This connects the two existing pure
+  halves so that future emitter has a node-local input.
 - **Pinned, non-distro Go toolchain for the node spine build.** A node built its Go control-plane spine
   (`myceliumctl-go` + `myceliumd`) and the AmneziaWG userspace tools from whatever `go` the distro shipped
   (varying wildly node-to-node), and the timer-driven `--update` could not build the spine at all. A new

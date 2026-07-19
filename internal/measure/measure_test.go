@@ -587,3 +587,55 @@ func TestTickMarksCandidatePathCollapse(t *testing.T) {
 		t.Error("a nil collapse map must leave the candidate eligible (PathCollapse=false)")
 	}
 }
+
+// TestStatusObservations proves the chunk-C projection seam: the plane's held per-member verdicts project to
+// per-CLASS advisory-health observations (the lossy alive/degraded/unknown view, ADR-0030), grouped by class,
+// and that projection feeds spec.BuildNodeStatusDigest to a valid k-floored digest from ONE node's own
+// multi-member class (reality-tcp has 2 members here, clearing a k=2 floor) — no second node, no transport.
+func TestStatusObservations(t *testing.T) {
+	a := newAsm(t)
+	// Warm both members: active clean (-> alive), candidate all-failure (-> impaired -> degraded, lossy).
+	for i := 0; i < 4; i++ {
+		at := t0.Add(time.Duration(i) * time.Minute)
+		snap := []spec.TransportHealth{health(activeRef, 6, 0, at), health(candRef, 0, 6, at)}
+		if _, err := a.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil, nil); err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+	obs := a.StatusObservations()
+	// Both default members are reality-tcp -> one class with two observations.
+	hs, ok := obs[spec.TransportClassRealityTCP]
+	if !ok || len(hs) != 2 {
+		t.Fatalf("StatusObservations = %+v, want reality-tcp with 2 observations", obs)
+	}
+	// Lossy projection: exactly one alive (the clean active) + one degraded (the impaired candidate); the
+	// fine state (throttled/blocked/shutdown) is not distinguishable in the advisory view.
+	var alive, degraded int
+	for _, h := range hs {
+		switch h {
+		case spec.HealthAlive:
+			alive++
+		case spec.HealthDegraded:
+			degraded++
+		}
+	}
+	if alive != 1 || degraded != 1 {
+		t.Errorf("projection = %v (alive=%d degraded=%d), want 1 alive + 1 degraded", hs, alive, degraded)
+	}
+	// The seam connects: the projection feeds BuildNodeStatusDigest to a valid k=2 digest from this one node.
+	d, err := spec.BuildNodeStatusDigest(spec.TrustScope{ID: "local", MaxHops: 0}, obs, 2, time.Hour, t0)
+	if err != nil {
+		t.Fatalf("BuildNodeStatusDigest from the projection: %v", err)
+	}
+	if len(d.Classes) != 1 || d.Classes[0].Class != spec.TransportClassRealityTCP {
+		t.Fatalf("digest classes = %+v, want exactly reality-tcp", d.Classes)
+	}
+	// reality-tcp aggregates alive-dominant (any member alive -> class alive).
+	if d.Classes[0].Health != spec.HealthAlive {
+		t.Errorf("reality-tcp class health = %q, want alive (alive-dominant aggregate)", d.Classes[0].Health)
+	}
+	// A k=3 floor omits reality-tcp (only 2 members) -> nothing clears the floor -> emit-nothing (fail-closed).
+	if _, err := spec.BuildNodeStatusDigest(spec.TrustScope{ID: "local"}, obs, 3, time.Hour, t0); err == nil {
+		t.Error("k=3 floor on a 2-member class must fail-closed (ErrAggregationFloor), got a digest")
+	}
+}
