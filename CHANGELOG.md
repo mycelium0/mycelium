@@ -182,7 +182,15 @@ truth for the version is `internal/spec.Version`.
   until an on-node drill validates the `/proc` field parse (`retrnsmt` is field 7, NOT the field-8 uid — the
   false-fire landmine the panel caught) and the fire/silence behaviour. The gate is extended to pin the new
   `/proc` reader as fail-safe + address-free and to allow the `collapse` marker key; new Go tests cover the
-  fold, the pool exclusion, and the armed→throttled / disarmed→clean control.
+  fold, the pool exclusion, and the armed→throttled / disarmed→clean control. **Validated live (2026-07-19,
+  m1):** the parse-proof confirmed the field layout (sing-box uid in `/proc` field 8, retrnsmt in field 7) on
+  the real kernel; a synthetic ≥8-flow fire-proof (client ACKs dropped so the node's sent data goes
+  unacknowledged) drove all flows to retransmit and the observer fired; and the full arming drill on the REAL
+  reality-vision class (8+ live reality sessions downloading, then their ACKs dropped) produced
+  `marker.collapse=["vless-reality-vision"]` and, with the fold armed, the daemon verdict
+  **throttled/throughput-collapse** — recovering to clean once the loss stopped. A DURABLE arm sentinel
+  (`$STATE_DIR/collapse-armed.enabled`, mirroring `rotate-live.enabled`) keeps an operator-armed node armed
+  across a config regen / auto-update; absent, the `false` default holds.
   **Chunk C — proactive full-set selection: the node-local digest projection seam.** Chunk C's node-local
   DoD was already met by chunks A/B — the L7 probe assesses the WHOLE served set every run (not just the
   active), and the planner ranks candidates by tuner weight while hard-excluding the L7-dead / path-reset /

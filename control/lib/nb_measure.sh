@@ -65,7 +65,8 @@ MEASURE_PATH_MIN_RESET_GEN="${MEASURE_PATH_MIN_RESET_GEN:-2}"
 # RP-0014 chunk B increment 2 — PostConnectCollapse (send-queue-stall) fold. It ships DISARMED: the observer
 # writes the marker's `collapse` list in SHADOW every window (for observation), but the daemon does NOT fold
 # it into a rotation-driving verdict until an on-node drill validates the /proc parse + the fire/silence
-# behaviour. Arm by deploying with MEASURE_PATH_COLLAPSE_ENABLED=true (then node-apply). MIN_GEN mirrors the
+# behaviour. Arm PERSISTENTLY (survives config regen / auto-update) with `touch $STATE_DIR/collapse-armed.enabled`
+# after an on-node fire/silence drill; or per-invocation with MEASURE_PATH_COLLAPSE_ENABLED=true. MIN_GEN mirrors the
 # reset gate (a class must read COLLAPSE across this many DISTINCT observer generations before it faults).
 MEASURE_PATH_COLLAPSE_ENABLED="${MEASURE_PATH_COLLAPSE_ENABLED:-false}"
 # Normalise to a strict JSON boolean so --argjson never chokes (and an unrecognised value fails SAFE = false).
@@ -80,6 +81,9 @@ _pathsig_timer_unit()   { printf '%s' "/etc/systemd/system/mycelium-pathsig.time
 _measure_reach_cfg()   { printf '%s' "$STATE_DIR/reach.config.json"; }
 _measure_cfg()         { printf '%s' "$STATE_DIR/measure.config.json"; }
 _measure_pathsig_marker() { printf '%s' "$STATE_DIR/path_signal.json"; }
+# The DURABLE PostConnectCollapse arm sentinel (mirrors rotate-live.enabled): present => collapse armed even
+# across a config regen, absent => the env/default governs. NEVER shipped in git (node-local operator state).
+_collapse_sentinel() { printf '%s' "$STATE_DIR/collapse-armed.enabled"; }
 _measure_l7_marker()   { printf '%s' "$STATE_DIR/l7_selftest.json"; }
 _measure_vocab()       { printf '%s' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"; }
 
@@ -133,6 +137,13 @@ generate_measure_configs() {
 	else
 		limits='{"flip_confirmations":3,"min_weight_margin":0.1,"min_interval_ns":1800000000000,"window_ns":3600000000000,"max_per_window":2,"max_rollbacks_per_window":1,"cooldown_after_rollback_ns":3600000000000}'
 	fi
+	# PostConnectCollapse arm state, DURABLE across config regen / auto-update: enabled iff the env says so OR
+	# a node-local arm SENTINEL is present (mirrors the rotate-live.enabled sentinel). So an operator who armed
+	# collapse after their on-node fire/silence drill (via `touch $STATE_DIR/collapse-armed.enabled`) stays
+	# armed even when --update / --node-apply regenerates this config without the env. Removing the sentinel
+	# (and re-generating) disarms.
+	local collapse_on="$MEASURE_PATH_COLLAPSE_ENABLED"
+	[ -f "$(_collapse_sentinel)" ] && collapse_on=true
 	printf '%s' "$members" | jq \
 		--arg active "$active" \
 		--arg out "$STATE_DIR/rotate_plan_input.json" \
@@ -144,7 +155,7 @@ generate_measure_configs() {
 		--argjson pathage "$MEASURE_PATH_MAX_AGE_MS" \
 		--argjson pathgen "$MEASURE_PATH_MIN_RESET_GEN" \
 		--argjson collapsegen "$MEASURE_PATH_COLLAPSE_MIN_GEN" \
-		--argjson collapseon "$MEASURE_PATH_COLLAPSE_ENABLED" \
+		--argjson collapseon "$collapse_on" \
 		--argjson limits "$limits" \
 		--argjson tick "$MEASURE_TICK_MS" '{
 		version: 1, tick_ms: $tick, active_ref: $active,
