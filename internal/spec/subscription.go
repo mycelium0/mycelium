@@ -92,6 +92,11 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 	trojanPassword := paramStr(params, "trojan_password", "")
 	hysteria2Password := paramStr(params, "hysteria2_password", "")
 	shadowtlsPassword := paramStr(params, "shadowtls_password", "")
+	// The client uTLS ClientHello preset (RP-0015). One value, threaded through every TLS-carrying client
+	// outbound here (and mirrored by the shell render + the node-local donor-verify / L7 probe), so a
+	// fingerprint switch is consistent everywhere clients + the node's own liveness handshake use it.
+	// Normalised to the closed vocab: an unknown/empty value renders as the default, never an invalid token.
+	fp := NormalizeClientFingerprint(paramStr(params, "client_fingerprint", DefaultClientFingerprint))
 
 	// Resolved ports, keyed by proto (registry default when the param is absent).
 	portOf := func(proto string) (int, error) {
@@ -110,10 +115,10 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 	}
 
 	realityTLS := func() subTLS {
-		return subTLS{Enabled: true, ServerName: donorSNI, UTLS: subUTLS{Enabled: true, Fingerprint: "chrome"}, Reality: &subReality{Enabled: true, PublicKey: pub, ShortID: shortFirst}}
+		return subTLS{Enabled: true, ServerName: donorSNI, UTLS: subUTLS{Enabled: true, Fingerprint: fp}, Reality: &subReality{Enabled: true, PublicKey: pub, ShortID: shortFirst}}
 	}
 	plainTLS := func(alpn []string) subTLS {
-		return subTLS{Enabled: true, ServerName: tlsSNI, UTLS: subUTLS{Enabled: true, Fingerprint: "chrome"}, ALPN: alpn}
+		return subTLS{Enabled: true, ServerName: tlsSNI, UTLS: subUTLS{Enabled: true, Fingerprint: fp}, ALPN: alpn}
 	}
 	or := func(a, b string) string {
 		if a != "" {
@@ -167,7 +172,7 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 			case "shadowtls":
 				// Routable outbound: Shadowsocks detoured through the hidden ShadowTLS-handshake outbound.
 				proxies = append(proxies, subShadowTLSRoute{Type: "shadowsocks", Tag: d.Proto, Method: "2022-blake3-aes-256-gcm", Password: sspw, Detour: "shadowtls-handshake"})
-				detours = append(detours, subShadowTLSHandshake{Type: "shadowtls", Tag: "shadowtls-handshake", Server: nodeAddr, ServerPort: port, Version: 3, Password: stlspw, TLS: subTLS{Enabled: true, ServerName: tlsSNI, UTLS: subUTLS{Enabled: true, Fingerprint: "chrome"}}})
+				detours = append(detours, subShadowTLSHandshake{Type: "shadowtls", Tag: "shadowtls-handshake", Server: nodeAddr, ServerPort: port, Version: 3, Password: stlspw, TLS: subTLS{Enabled: true, ServerName: tlsSNI, UTLS: subUTLS{Enabled: true, Fingerprint: fp}}})
 			case "trojan":
 				proxies = append(proxies, subTrojan{Type: "trojan", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Password: trpw, TLS: plainTLS([]string{"h2", "http/1.1"})})
 			default:
@@ -186,7 +191,7 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 			subSimple{Type: "block", Tag: "block"},
 		)
 
-		clash := renderClash(c.Name, nodeAddr, c.ID, donorSNI, pub, shortFirst, tlsSNI, sspw, hy2pw, trpw, grpcService, enabled, portOf)
+		clash := renderClash(c.Name, nodeAddr, c.ID, donorSNI, pub, shortFirst, tlsSNI, sspw, hy2pw, trpw, grpcService, fp, enabled, portOf)
 
 		out = append(out, ClientSubscription{
 			Name:    c.Name,
@@ -201,7 +206,7 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 // renderClash hand-emits the Clash-Meta YAML byte-identically to the shell `myc_sb_emit_clash`.
 // jq has no YAML output, so the shell emits by printf; every value is quoted so special characters are
 // inert. Clash-Meta supports neither ShadowTLS nor the XHTTP/WS transports, so those are skipped.
-func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, grpc string, enabled []ProtoDescriptor, portOf func(string) (int, error)) string {
+func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, grpc, fp string, enabled []ProtoDescriptor, portOf func(string) (int, error)) string {
 	var b strings.Builder
 	b.WriteString("# Copyright © 2026 mindicator & silicon bags quartet.\n")
 	b.WriteString("# SPDX-License-Identifier: AGPL-3.0-or-later\n")
@@ -228,7 +233,7 @@ func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, gr
 			b.WriteString("    flow: xtls-rprx-vision\n")
 			b.WriteString("    tls: true\n")
 			fmt.Fprintf(&b, "    servername: \"%s\"\n", dsni)
-			b.WriteString("    client-fingerprint: chrome\n")
+			b.WriteString("    client-fingerprint: " + fp + "\n")
 			b.WriteString("    reality-opts:\n")
 			fmt.Fprintf(&b, "      public-key: \"%s\"\n", pub)
 			fmt.Fprintf(&b, "      short-id: \"%s\"\n", sid)
@@ -243,7 +248,7 @@ func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, gr
 			b.WriteString("    udp: true\n")
 			b.WriteString("    tls: true\n")
 			fmt.Fprintf(&b, "    servername: \"%s\"\n", dsni)
-			b.WriteString("    client-fingerprint: chrome\n")
+			b.WriteString("    client-fingerprint: " + fp + "\n")
 			b.WriteString("    grpc-opts:\n")
 			fmt.Fprintf(&b, "      grpc-service-name: \"%s\"\n", grpc)
 			b.WriteString("    reality-opts:\n")
@@ -288,7 +293,7 @@ func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, gr
 			fmt.Fprintf(&b, "    port: %s\n", port("trojan"))
 			fmt.Fprintf(&b, "    password: \"%s\"\n", trpw)
 			fmt.Fprintf(&b, "    sni: \"%s\"\n", tsni)
-			b.WriteString("    client-fingerprint: chrome\n")
+			b.WriteString("    client-fingerprint: " + fp + "\n")
 			b.WriteString("    alpn:\n")
 			b.WriteString("      - h2\n")
 			b.WriteString("      - http/1.1\n")

@@ -12,6 +12,22 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
+### Added
+- **Fingerprint-adaptivity — the operator knob (RP-0015 increment A).** The client uTLS ClientHello preset
+  ("fingerprint"), previously the literal `chrome` hardcoded in a dozen render/verify/probe sites with no
+  single source, is now a single-sourced, closed-vocabulary, operator-settable parameter (`client_fingerprint`,
+  default `chrome`). The closed vocab lives once in Go (`internal/spec`: `ClientFingerprints` /
+  `ValidClientFingerprint` / `NormalizeClientFingerprint` — real current presets only: chrome/firefox/edge/
+  safari/ios/android; a per-connection randomiser is deliberately excluded, a unique JA4 being itself a tell)
+  and is mirrored into `control/vocab.json`; `client_fingerprint` joined the `operator_toggle_keys` allowlist.
+  Threaded consistently through every client-facing site — the sing-box subscription + Clash render
+  (`subscription.go` / `render_singbox.sh`), the legacy vision render (`render.sh`), the share-link
+  (`link.go` / `render_bundle.sh`), the aggregate fold, the donor-verify client (`nb_donor.sh`), and the
+  ShadowTLS L7 probe (`nb_selftest.sh`) — so the value clients dial, the value the on-node handshake mimics,
+  and the value the liveness probe uses can never drift. Additive: with no override every rendered artifact
+  and probe is byte-identical to before (default `chrome`). Pinned by the new `fingerprint_single_source`
+  conformance gate + Go tests; the `share_link_go_equiv` / `subscription_go_equiv` byte-equivalence gates now
+  exercise a non-default preset. The rotation (drive it from the measure→detect loop) is increment B, later.
 
 ## [0.2.29] — 2026-07-04
 ### Added

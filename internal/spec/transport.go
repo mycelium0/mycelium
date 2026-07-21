@@ -152,7 +152,45 @@ func HealthValues() []HealthValue {
 // operatorTunableKnobs are the operator-settable params that are NOT a per-proto enable/port toggle:
 // the transport-shape knobs (paths / gRPC service name) and the coarse region bucket. They are
 // deliberately NOT identity-derived, so an override may set them without pinning a secret/key stale.
-var operatorTunableKnobs = []string{"xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket"}
+var operatorTunableKnobs = []string{"xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket", "client_fingerprint"}
+
+// DefaultClientFingerprint is the uTLS ClientHello preset the client render + the node-local verify/probe
+// use unless an operator sets client_fingerprint. It is a REAL, current browser preset.
+const DefaultClientFingerprint = "chrome"
+
+// clientFingerprints is the CLOSED vocabulary of client uTLS presets an operator may set (RP-0015 —
+// fingerprint-adaptivity): real, current browser fingerprints only, DefaultClientFingerprint first.
+// `random`/`randomized` are DELIBERATELY excluded — a unique per-connection ClientHello is itself an
+// entropy tell, the opposite of blending in — so a rotation (RP-0015 increment B) only ever moves WITHIN
+// this set, never to a randomiser.
+var clientFingerprints = []string{"chrome", "firefox", "edge", "safari", "ios", "android"}
+
+// ClientFingerprints returns a copy of the closed client-fingerprint vocabulary (deterministic order).
+func ClientFingerprints() []string {
+	out := make([]string, len(clientFingerprints))
+	copy(out, clientFingerprints)
+	return out
+}
+
+// ValidClientFingerprint reports whether s is a member of the closed client-fingerprint vocabulary. It is
+// the single validator the render + the operator-override merge use; an unknown value fails closed.
+func ValidClientFingerprint(s string) bool {
+	for _, f := range clientFingerprints {
+		if f == s {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeClientFingerprint returns s if it is a valid closed-vocab preset, else DefaultClientFingerprint
+// (fail-safe: an empty or unknown value renders as the default, never as an invalid uTLS token).
+func NormalizeClientFingerprint(s string) string {
+	if ValidClientFingerprint(s) {
+		return s
+	}
+	return DefaultClientFingerprint
+}
 
 // OperatorToggleKeys returns the CLOSED allowlist of params keys an operator may override: every
 // params-toggled proto's *_enabled flag, then every *_port key (registry order), then the tunable
@@ -188,6 +226,7 @@ type Vocab struct {
 	RegionBuckets      []RegionBucket    `json:"region_buckets"`       // closed region vocabulary (Phase 1: only "unspecified")
 	HealthValues       []HealthValue     `json:"health_values"`        // closed advisory-health vocabulary
 	OperatorToggleKeys []string          `json:"operator_toggle_keys"` // closed allowlist of operator-settable params keys
+	ClientFingerprints []string          `json:"client_fingerprints"`  // closed client uTLS-preset vocabulary (RP-0015); [0] is the default
 	Protos             []ProtoDescriptor `json:"protos"`               // canonical proto registry, priority order
 }
 
@@ -201,6 +240,7 @@ func NewVocab() Vocab {
 		RegionBuckets:      RegionBuckets(),
 		HealthValues:       HealthValues(),
 		OperatorToggleKeys: OperatorToggleKeys(),
+		ClientFingerprints: ClientFingerprints(),
 		Protos:             TransportRegistry(),
 	}
 }

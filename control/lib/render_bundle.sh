@@ -64,7 +64,7 @@ myc_bundle_priority_of() {
 # Bundle's opaque Link: the same connection coordinates the sing-box/Clash subscription dials,
 # rendered as the standard scheme:// URI a client imports. Never empty for a known protocol.
 #
-# ARG ORDER (15 positional, all already-resolved by the caller; C34 arity-guarded below):
+# ARG ORDER (17 positional, all already-resolved by the caller; C34 arity-guarded below):
 #   $1  PROTO       protocol token (e.g. vless-reality-vision)
 #   $2  SERVER      node address
 #   $3  PORT        per-protocol port
@@ -83,6 +83,8 @@ myc_bundle_priority_of() {
 #                   on-path observer cannot correlate the two "independent" XHTTP families by an
 #                   identical path)
 #   $16 WS_PATH     ws path for the genuine-TLS ws-tls family (its own per-family path; default "/ws")
+#   $17 FP          client uTLS ClientHello preset (RP-0015; closed-vocab, default "chrome") — the fp=
+#                   query value on the vless/trojan links (QUIC hy2/tuic carry no fp)
 #
 # The node/port/SNI live ONLY inside this opaque string (per bundle.go: the coarse class/region at
 # the typed level, the dialable detail opaquely in Link). All values are passed in already-resolved
@@ -100,10 +102,10 @@ myc_uri_encode() {
 myc_bundle_link() {
 	# C34: arity guard — a positional-count mismatch must fail loud, not silently fall through to the
 	# empty-default link (which would surface only as a downstream empty-Link die with no cause).
-	[ "$#" -eq 16 ] || myc_die "myc_bundle_link: expected 16 args, got $# (see ARG ORDER above)."
-	local proto server port uuid dsni pub sid tsni sspw hy2pw trpw tuicpw grpc xpath xpath_tls ws_path frag
+	[ "$#" -eq 17 ] || myc_die "myc_bundle_link: expected 17 args, got $# (see ARG ORDER above)."
+	local proto server port uuid dsni pub sid tsni sspw hy2pw trpw tuicpw grpc xpath xpath_tls ws_path fp frag
 	proto="$1"; server="$2"; port="$3"; uuid="$4"; dsni="$5"; pub="$6"; sid="$7"; tsni="$8"
-	sspw="$9"; hy2pw="${10}"; trpw="${11}"; tuicpw="${12}"; grpc="${13}"; xpath="${14}"; xpath_tls="${15}"; ws_path="${16}"
+	sspw="$9"; hy2pw="${10}"; trpw="${11}"; tuicpw="${12}"; grpc="${13}"; xpath="${14}"; xpath_tls="${15}"; ws_path="${16}"; fp="${17}"
 	frag="mycelium-${proto}"
 	# C07: percent-encode every dynamic value before it is interpolated into the URI. server/port are
 	# structural authority components (a hostname/integer port carry no reserved chars), so they are left
@@ -123,30 +125,31 @@ myc_bundle_link() {
 	xpath="$(myc_uri_encode "$xpath")"
 	xpath_tls="$(myc_uri_encode "$xpath_tls")"
 	ws_path="$(myc_uri_encode "$ws_path")"
+	fp="$(myc_uri_encode "$fp")"
 	frag="$(myc_uri_encode "$frag")"
 	case "$proto" in
 		vless-reality-vision)
-			printf 'vless://%s@%s:%s?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp#%s' \
-				"$uuid" "$server" "$port" "$dsni" "$pub" "$sid" "$frag" ;;
+			printf 'vless://%s@%s:%s?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=tcp#%s' \
+				"$uuid" "$server" "$port" "$dsni" "$fp" "$pub" "$sid" "$frag" ;;
 		vless-reality-grpc)
-			printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=grpc&serviceName=%s#%s' \
-				"$uuid" "$server" "$port" "$dsni" "$pub" "$sid" "$grpc" "$frag" ;;
+			printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=grpc&serviceName=%s#%s' \
+				"$uuid" "$server" "$port" "$dsni" "$fp" "$pub" "$sid" "$grpc" "$frag" ;;
 		vless-reality-xhttp)
-			printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=xhttp&path=%s#%s' \
-				"$uuid" "$server" "$port" "$dsni" "$pub" "$sid" "$xpath" "$frag" ;;
+			printf 'vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s#%s' \
+				"$uuid" "$server" "$port" "$dsni" "$fp" "$pub" "$sid" "$xpath" "$frag" ;;
 		vless-xhttp-tls)
 			# genuine single-layer TLS (own cert, verified — NO reality donor): security=tls, no pbk/sid.
 			# C06: use the per-family path ($xpath_tls), NOT the REALITY-XHTTP path ($xpath), so the two
 			# XHTTP families can carry distinct paths and are not path-correlatable by an on-path observer.
-			printf 'vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=chrome&alpn=h2,http/1.1&type=xhttp&path=%s#%s' \
-				"$uuid" "$server" "$port" "$tsni" "$xpath_tls" "$frag" ;;
+			printf 'vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=%s&alpn=h2,http/1.1&type=xhttp&path=%s#%s' \
+				"$uuid" "$server" "$port" "$tsni" "$fp" "$xpath_tls" "$frag" ;;
 		vless-ws-tls)
 			# genuine single-layer TLS over native WebSocket (own cert, verified — NO reality donor):
 			# security=tls, type=ws, no pbk/sid. alpn=http%2F1.1 (single ALPN, percent-encoded literal so
 			# the '/' cannot shift the query boundaries). host carries the own-cert SNI ($tsni). path is the
 			# per-family ws path ($ws_path), already percent-encoded above.
-			printf 'vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=chrome&alpn=http%%2F1.1&type=ws&host=%s&path=%s#%s' \
-				"$uuid" "$server" "$port" "$tsni" "$tsni" "$ws_path" "$frag" ;;
+			printf 'vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=%s&alpn=http%%2F1.1&type=ws&host=%s&path=%s#%s' \
+				"$uuid" "$server" "$port" "$tsni" "$fp" "$tsni" "$ws_path" "$frag" ;;
 		hysteria2)
 			printf 'hysteria2://%s@%s:%s?sni=%s&alpn=h3#%s' \
 				"$hy2pw" "$server" "$port" "$tsni" "$frag" ;;
@@ -164,8 +167,8 @@ myc_bundle_link() {
 			printf 'ss://2022-blake3-aes-256-gcm:%s@%s:%s?plugin=shadow-tls&sni=%s#%s' \
 				"$sspw" "$server" "$port" "$tsni" "$frag" ;;
 		trojan)
-			printf 'trojan://%s@%s:%s?sni=%s&fp=chrome&alpn=h2,http/1.1&type=tcp#%s' \
-				"$trpw" "$server" "$port" "$tsni" "$frag" ;;
+			printf 'trojan://%s@%s:%s?sni=%s&fp=%s&alpn=h2,http/1.1&type=tcp#%s' \
+				"$trpw" "$server" "$port" "$tsni" "$fp" "$frag" ;;
 		*)
 			printf '' ;;
 	esac
@@ -274,7 +277,7 @@ myc_render_bundle() {
 			[ -n "$_tls_sni_explicit" ] || myc_die "bundle: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — the own-cert family must carry its OWN SNI (never fall back to donor_sni; that is a cert/SNI mismatch tell). Set params.tls_sni." ;;
 	esac
 
-	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls ws_path
+	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls ws_path client_fingerprint
 	ss_password="$(myc_params_get "$params" '.ss_password' '')"
 	trojan_password="$(myc_params_get "$params" '.trojan_password' '')"
 	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
@@ -290,6 +293,9 @@ myc_render_bundle() {
 	# endpoint is not path-correlatable with the XHTTP families. MUST match render_singbox.sh's resolution
 	# so the served inbound and the bundle Link agree.
 	ws_path="$(myc_params_get "$params" '.ws_path' '/ws')"
+	# RP-0015: the client uTLS ClientHello preset, normalised against the closed vocab (default "chrome").
+	# MUST match render_singbox.sh's resolution so the served inbound's client and the bundle Link agree.
+	client_fingerprint="$(myc_client_fingerprint "$params")"
 
 	# The node identity used as the endpoint credential (first client).
 	local id ipw
@@ -360,7 +366,7 @@ myc_render_bundle() {
 			myc_die "bundle: port for protocol '$proto' is out of range ('$port'); a server_port must be in 1..65535."
 		fi
 		link="$(myc_bundle_link "$proto" "$node_addr" "$port" "$id" "$donor_sni" "$pub" "$short_first" \
-			"$tls_sni" "$ss_pw" "$hy2_pw" "$trojan_pw" "$tuic_pw" "$grpc_service" "$xhttp_path" "$xhttp_path_tls" "$ws_path")"
+			"$tls_sni" "$ss_pw" "$hy2_pw" "$trojan_pw" "$tuic_pw" "$grpc_service" "$xhttp_path" "$xhttp_path_tls" "$ws_path" "$client_fingerprint")"
 		[ -n "$link" ] || myc_die "bundle: produced an empty Link for protocol '$proto' (bundle.go rejects empty links)."
 
 		# Endpoint fields EXACTLY per bundle.go: tag, transport_class, region, priority, health, link.

@@ -159,6 +159,8 @@ myc_agg_link_outbound() {
 				{ type: "hysteria2", tag: $tag, server: $host, server_port: $port,
 				  password: $userinfo,
 				  tls: { enabled: true, server_name: ($q.sni // ""),
+				         # fp-static: QUIC uTLS is a separate handshake axis from the REALITY/TLS client
+				         # fingerprint; hy2/tuic links carry no fp, so RP-0015 client_fingerprint skips it.
 				         utls: { enabled: true, fingerprint: "chrome" },
 				         alpn: (($q.alpn // "h3") | split(",")) } }
 			elif $scheme == "tuic" then
@@ -170,6 +172,7 @@ myc_agg_link_outbound() {
 				| { type: "tuic", tag: $tag, server: $host, server_port: $port,
 				    uuid: $uuid, password: $pw, congestion_control: ($q.congestion_control // "bbr"),
 				    tls: { enabled: true, server_name: ($q.sni // ""),
+				           # fp-static: QUIC uTLS — separate handshake axis (see hysteria2 above).
 				           utls: { enabled: true, fingerprint: "chrome" },
 				           alpn: (($q.alpn // "h3") | split(",")) } }
 			elif $scheme == "ss" then

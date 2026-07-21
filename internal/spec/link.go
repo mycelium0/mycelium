@@ -30,25 +30,29 @@ import (
 func ShareLink(proto string, p LinkParams) (string, error) {
 	frag := uriEncode("mycelium-" + proto)
 	e := uriEncode
+	// RP-0015 client uTLS preset: normalise to the closed vocab (empty/unknown -> chrome, so a direct-JSON
+	// caller that omits the field stays byte-identical to the shell's chrome default), then percent-encode
+	// (closed-vocab tokens are all-unreserved, so this is a pass-through).
+	fp := e(NormalizeClientFingerprint(p.Fingerprint))
 	switch proto {
 	case "vless-reality-vision":
-		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=tcp#%s",
-			e(p.UUID), p.Server, p.Port, e(p.DonorSNI), e(p.Pub), e(p.ShortID), frag), nil
+		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=tcp#%s",
+			e(p.UUID), p.Server, p.Port, e(p.DonorSNI), fp, e(p.Pub), e(p.ShortID), frag), nil
 	case "vless-reality-grpc":
-		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=grpc&serviceName=%s#%s",
-			e(p.UUID), p.Server, p.Port, e(p.DonorSNI), e(p.Pub), e(p.ShortID), e(p.GRPCServiceName), frag), nil
+		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=grpc&serviceName=%s#%s",
+			e(p.UUID), p.Server, p.Port, e(p.DonorSNI), fp, e(p.Pub), e(p.ShortID), e(p.GRPCServiceName), frag), nil
 	case "vless-reality-xhttp":
-		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=chrome&pbk=%s&sid=%s&type=xhttp&path=%s#%s",
-			e(p.UUID), p.Server, p.Port, e(p.DonorSNI), e(p.Pub), e(p.ShortID), e(p.XHTTPPath), frag), nil
+		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=xhttp&path=%s#%s",
+			e(p.UUID), p.Server, p.Port, e(p.DonorSNI), fp, e(p.Pub), e(p.ShortID), e(p.XHTTPPath), frag), nil
 	case "vless-xhttp-tls":
 		// genuine single-layer TLS (own cert; NO reality): security=tls, no pbk/sid; per-family path.
-		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=chrome&alpn=h2,http/1.1&type=xhttp&path=%s#%s",
-			e(p.UUID), p.Server, p.Port, e(p.TLSSNI), e(p.XHTTPPathTLS), frag), nil
+		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=%s&alpn=h2,http/1.1&type=xhttp&path=%s#%s",
+			e(p.UUID), p.Server, p.Port, e(p.TLSSNI), fp, e(p.XHTTPPathTLS), frag), nil
 	case "vless-ws-tls":
 		// genuine single-layer TLS over native WebSocket; alpn=http%2F1.1 (literal %2F so the '/' cannot
 		// shift the query boundaries); host carries the own-cert SNI; per-family ws path.
-		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=chrome&alpn=http%%2F1.1&type=ws&host=%s&path=%s#%s",
-			e(p.UUID), p.Server, p.Port, e(p.TLSSNI), e(p.TLSSNI), e(p.WSPath), frag), nil
+		return fmt.Sprintf("vless://%s@%s:%s?encryption=none&security=tls&sni=%s&fp=%s&alpn=http%%2F1.1&type=ws&host=%s&path=%s#%s",
+			e(p.UUID), p.Server, p.Port, e(p.TLSSNI), fp, e(p.TLSSNI), e(p.WSPath), frag), nil
 	case "hysteria2":
 		return fmt.Sprintf("hysteria2://%s@%s:%s?sni=%s&alpn=h3#%s",
 			e(p.Hy2Password), p.Server, p.Port, e(p.TLSSNI), frag), nil
@@ -62,8 +66,8 @@ func ShareLink(proto string, p LinkParams) (string, error) {
 		return fmt.Sprintf("ss://2022-blake3-aes-256-gcm:%s@%s:%s?plugin=shadow-tls&sni=%s#%s",
 			e(p.SSPassword), p.Server, p.Port, e(p.TLSSNI), frag), nil
 	case "trojan":
-		return fmt.Sprintf("trojan://%s@%s:%s?sni=%s&fp=chrome&alpn=h2,http/1.1&type=tcp#%s",
-			e(p.TrojanPassword), p.Server, p.Port, e(p.TLSSNI), frag), nil
+		return fmt.Sprintf("trojan://%s@%s:%s?sni=%s&fp=%s&alpn=h2,http/1.1&type=tcp#%s",
+			e(p.TrojanPassword), p.Server, p.Port, e(p.TLSSNI), fp, frag), nil
 	default:
 		return "", fmt.Errorf("%w: proto %q has no share-link (not a link-bearing transport)", ErrUnknownEnum, proto)
 	}
@@ -89,6 +93,7 @@ type LinkParams struct {
 	XHTTPPath       string `json:"xhttp_path"`        // REALITY-xhttp path
 	XHTTPPathTLS    string `json:"xhttp_path_tls"`    // genuine-TLS-xhttp path
 	WSPath          string `json:"ws_path"`           // ws path
+	Fingerprint     string `json:"fingerprint"`       // RP-0015 client uTLS preset (closed vocab, default chrome)
 }
 
 // uriEncode percent-encodes VALUE exactly as the shell `myc_uri_encode` (jq @uri): every BYTE outside the

@@ -550,7 +550,7 @@ myc_sb_render_subscription() {
 			[ -n "$_tls_sni_explicit" ] || myc_die "subscription: an own-cert genuine-TLS family (vless-xhttp-tls/vless-ws-tls) is enabled but params.tls_sni is empty — the own-cert family must carry its OWN SNI (never the donor_sni/localhost fallback). Set params.tls_sni." ;;
 	esac
 
-	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls ws_path
+	local ss_password trojan_password hysteria2_password shadowtls_password grpc_service xhttp_path xhttp_path_tls ws_path client_fingerprint
 	ss_password="$(myc_params_get "$params" '.ss_password' '')"
 	trojan_password="$(myc_params_get "$params" '.trojan_password' '')"
 	hysteria2_password="$(myc_params_get "$params" '.hysteria2_password' '')"
@@ -563,6 +563,9 @@ myc_sb_render_subscription() {
 	# vless-ws-tls dials $ws_path (native WebSocket; default "/ws"). Its own per-family path so the ws-tls
 	# endpoint is not path-correlatable with the XHTTP families.
 	ws_path="$(myc_params_get "$params" '.ws_path' '/ws')"
+	# RP-0015: the client uTLS ClientHello preset, threaded into every TLS-carrying outbound below (and
+	# mirrored by the donor-verify / L7 probe), normalised against the closed vocab (default "chrome").
+	client_fingerprint="$(myc_client_fingerprint "$params")"
 
 	# Per-protocol ports (must match the server render defaults).
 	local ports_json
@@ -625,14 +628,15 @@ myc_sb_render_subscription() {
 				--arg xpath "$xhttp_path" \
 				--arg xpathtls "$xhttp_path_tls" \
 				--arg wspath "$ws_path" \
+				--arg fp "$client_fingerprint" \
 				--arg utinterval "$MYC_URLTEST_INTERVAL" \
 				--argjson uttolerance "$MYC_URLTEST_TOLERANCE" \
 				--arg utidle "$MYC_URLTEST_IDLE_TIMEOUT" \
 				--argjson ports "$ports_json" \
 				--argjson enabled "$enabled_json" \
 				'
-				def reality_tls: { enabled: true, server_name: $dsni, utls: { enabled: true, fingerprint: "chrome" }, reality: { enabled: true, public_key: $pub, short_id: $sid } };
-				def plain_tls($alpn): { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: "chrome" }, alpn: $alpn };
+				def reality_tls: { enabled: true, server_name: $dsni, utls: { enabled: true, fingerprint: $fp }, reality: { enabled: true, public_key: $pub, short_id: $sid } };
+				def plain_tls($alpn): { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: $fp }, alpn: $alpn };
 				# tag -> candidate outbound
 				{
 					"vless-reality-vision": { type: "vless", tag: "vless-reality-vision", server: $server, server_port: $ports["vless-reality-vision"], uuid: $uuid, flow: "xtls-rprx-vision", packet_encoding: "xudp", tls: reality_tls },
@@ -656,7 +660,7 @@ myc_sb_render_subscription() {
 				# outbound (tag "shadowtls") is Shadowsocks with a detour to the
 				# hidden "shadowtls-handshake" outbound that performs the v3 handshake.
 				| (if ($enabled | index("shadowtls")) then
-						[ { type: "shadowtls", tag: "shadowtls-handshake", server: $server, server_port: $ports["shadowtls"], version: 3, password: $stlspw, tls: { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: "chrome" } } } ]
+						[ { type: "shadowtls", tag: "shadowtls-handshake", server: $server, server_port: $ports["shadowtls"], version: 3, password: $stlspw, tls: { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: $fp } } } ]
 					else [] end) as $detours
 				| ($enabled | map($cand[.].tag)) as $tags
 				| {
@@ -724,7 +728,7 @@ myc_sb_emit_clash() {
 					printf '    flow: xtls-rprx-vision\n'
 					printf '    tls: true\n'
 					printf '    servername: "%s"\n' "$dsni"
-					printf '    client-fingerprint: chrome\n'
+					printf '    client-fingerprint: %s\n' "$client_fingerprint"
 					printf '    reality-opts:\n'
 					printf '      public-key: "%s"\n' "$pub"
 					printf '      short-id: "%s"\n' "$sid"
@@ -740,7 +744,7 @@ myc_sb_emit_clash() {
 					printf '    udp: true\n'
 					printf '    tls: true\n'
 					printf '    servername: "%s"\n' "$dsni"
-					printf '    client-fingerprint: chrome\n'
+					printf '    client-fingerprint: %s\n' "$client_fingerprint"
 					printf '    grpc-opts:\n'
 					printf '      grpc-service-name: "%s"\n' "$grpc"
 					printf '    reality-opts:\n'
@@ -789,7 +793,7 @@ myc_sb_emit_clash() {
 					printf '    port: %s\n' "$(port_of trojan)"
 					printf '    password: "%s"\n' "$trpw"
 					printf '    sni: "%s"\n' "$tsni"
-					printf '    client-fingerprint: chrome\n'
+					printf '    client-fingerprint: %s\n' "$client_fingerprint"
 					printf '    alpn:\n'
 					printf '      - h2\n'
 					printf '      - http/1.1\n'

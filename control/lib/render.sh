@@ -245,7 +245,7 @@ myc_render_subscription() {
 	fi
 
 	# Connection parameters shared by every client config.
-	local node_addr listen_port donor_sni pub short_first
+	local node_addr listen_port donor_sni pub short_first client_fingerprint
 	node_addr="$(myc_params_get "$params" '.node_address')"
 	listen_port="$(myc_params_get "$params" '.listen_port' '443')"
 	donor_sni="$(myc_params_get "$params" '.donor_sni')"
@@ -253,6 +253,8 @@ myc_render_subscription() {
 	# Clients present a single shortId; use the first from the pool.
 	short_first="$(printf '%s' "$params" | jq -r '.short_ids[0] // empty')"
 	[ -n "$short_first" ] || myc_die "subscription: params.short_ids must contain at least one shortId"
+	# RP-0015: client uTLS ClientHello preset, normalised against the closed vocab (default "chrome").
+	client_fingerprint="$(myc_client_fingerprint "$params")"
 
 	myc_mkdir_p "$out_dir"
 
@@ -275,6 +277,7 @@ myc_render_subscription() {
 				--arg sni "$donor_sni" \
 				--arg pub "$pub" \
 				--arg sid "$short_first" \
+				--arg fp "$client_fingerprint" \
 				'{
 					outbounds: [
 						{
@@ -288,7 +291,7 @@ myc_render_subscription() {
 							tls: {
 								enabled: true,
 								server_name: $sni,
-								utls: { enabled: true, fingerprint: "chrome" },
+								utls: { enabled: true, fingerprint: $fp },
 								reality: {
 									enabled: true,
 									public_key: $pub,
@@ -322,7 +325,7 @@ myc_render_subscription() {
 				printf '    flow: xtls-rprx-vision\n'
 				printf '    tls: true\n'
 				printf '    servername: "%s"\n' "$donor_sni"
-				printf '    client-fingerprint: chrome\n'
+				printf '    client-fingerprint: %s\n' "$client_fingerprint"
 				printf '    reality-opts:\n'
 				printf '      public-key: "%s"\n' "$pub"
 				printf '      short-id: "%s"\n' "$short_first"

@@ -235,6 +235,7 @@ GATES=(
 	"tests/conformance/entrypoint_executable.sh"
 	"tests/conformance/no_reserved_jq_vars.sh"
 	"tests/conformance/vocab_single_source.sh"
+	"tests/conformance/fingerprint_single_source.sh"
 	"tests/conformance/detector_state_closed_vocab.sh"
 	"tests/conformance/node_status_digest_emit_safe.sh"
 	"tests/conformance/front_relay_preferred.sh"

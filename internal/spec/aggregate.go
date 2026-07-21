@@ -64,7 +64,9 @@ func outboundValue(tag, link string) (any, error) {
 	var v any
 	switch scheme {
 	case "vless":
-		tls := aggTLS{Enabled: true, ServerName: q["sni"], UTLS: aggUTLS{Enabled: true, Fingerprint: qd(q, "fp", "chrome")}}
+		// RP-0015: the fp is carried by the parsed share-link query (which the render splices from the
+		// operator's client_fingerprint); the default only applies to a link that omits fp.
+		tls := aggTLS{Enabled: true, ServerName: q["sni"], UTLS: aggUTLS{Enabled: true, Fingerprint: qd(q, "fp", DefaultClientFingerprint)}}
 		if q["security"] == "reality" {
 			tls.Reality = &aggReality{Enabled: true, PublicKey: q["pbk"], ShortID: q["sid"]}
 		} else {
@@ -83,10 +85,13 @@ func outboundValue(tag, link string) (any, error) {
 		}
 		v = ob
 	case "hysteria2":
+		// QUIC uTLS: a separate handshake axis from the REALITY/TLS client fingerprint; hy2/tuic share-links
+		// carry no fp, so the RP-0015 client_fingerprint knob deliberately does not reach here (fp-static).
 		v = aggHy2{Type: "hysteria2", Tag: tag, Server: host, ServerPort: port, Password: ui,
 			TLS: aggTLS{Enabled: true, ServerName: q["sni"], UTLS: aggUTLS{Enabled: true, Fingerprint: "chrome"},
 				ALPN: strings.Split(qd(q, "alpn", "h3"), ",")}}
 	case "tuic":
+		// QUIC uTLS: separate handshake axis (fp-static; see hysteria2).
 		v = aggTuic{Type: "tuic", Tag: tag, Server: host, ServerPort: port,
 			UUID: uriDecode(uriBefore(userinfoRaw, ":")), Password: uriDecode(uriAfter(userinfoRaw, ":")),
 			CongestionControl: qd(q, "congestion_control", "bbr"),
@@ -100,7 +105,7 @@ func outboundValue(tag, link string) (any, error) {
 			Method: uriDecode(uriBefore(userinfoRaw, ":")), Password: uriDecode(uriAfter(userinfoRaw, ":"))}
 	case "trojan":
 		v = aggTrojan{Type: "trojan", Tag: tag, Server: host, ServerPort: port, Password: ui,
-			TLS: aggTLS{Enabled: true, ServerName: q["sni"], UTLS: aggUTLS{Enabled: true, Fingerprint: qd(q, "fp", "chrome")},
+			TLS: aggTLS{Enabled: true, ServerName: q["sni"], UTLS: aggUTLS{Enabled: true, Fingerprint: qd(q, "fp", DefaultClientFingerprint)},
 				ALPN: strings.Split(qd(q, "alpn", "h2,http/1.1"), ",")}}
 	default:
 		return nil, nil

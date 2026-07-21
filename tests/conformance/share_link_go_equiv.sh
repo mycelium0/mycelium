@@ -58,15 +58,20 @@ uuid="11111111-2222-3333-4444-555555555555"
 dsni="www.microsoft.com"; pub="aB-cd_EF12"; sid="0e6e7757f3382b14"; tsni="edge.example.invalid"
 sspw="ss/pw+1=x"; hy2pw="hy2:pw@2"; trpw="tr&pw#3"; tuicpw="tuic pw?4"
 grpc="grpc.health.v1.Health"; xpath="/x?a=1"; xpath_tls="/xt#y"; ws_path="/ws&z"
+# RP-0015: a NON-default closed-vocab fingerprint, so the equivalence proves both renderers thread the
+# operator's client_fingerprint identically (not just the shared chrome default).
+fp="firefox"
 
 json="$(jq -n \
 	--arg server "$server" --arg port "$port" --arg uuid "$uuid" --arg donor_sni "$dsni" \
 	--arg pub "$pub" --arg short_id "$sid" --arg tls_sni "$tsni" --arg ss_password "$sspw" \
 	--arg hy2_password "$hy2pw" --arg trojan_password "$trpw" --arg tuic_password "$tuicpw" \
 	--arg grpc_service_name "$grpc" --arg xhttp_path "$xpath" --arg xhttp_path_tls "$xpath_tls" --arg ws_path "$ws_path" \
+	--arg fingerprint "$fp" \
 	'{server:$server,port:$port,uuid:$uuid,donor_sni:$donor_sni,pub:$pub,short_id:$short_id,tls_sni:$tls_sni,
 	  ss_password:$ss_password,hy2_password:$hy2_password,trojan_password:$trojan_password,tuic_password:$tuic_password,
-	  grpc_service_name:$grpc_service_name,xhttp_path:$xhttp_path,xhttp_path_tls:$xhttp_path_tls,ws_path:$ws_path}')"
+	  grpc_service_name:$grpc_service_name,xhttp_path:$xhttp_path,xhttp_path_tls:$xhttp_path_tls,ws_path:$ws_path,
+	  fingerprint:$fingerprint}')"
 
 # The link-bearing protos = registry protos with a non-empty scheme (from the committed vocab).
 PROTOS="$(jq -r '[.protos[] | select(.scheme != "") | .proto] | join(" ")' "$REPO_ROOT/control/vocab.json")"
@@ -74,7 +79,7 @@ PROTOS="$(jq -r '[.protos[] | select(.scheme != "") | .proto] | join(" ")' "$REP
 
 fail=0
 for proto in $PROTOS; do
-	b="$(myc_bundle_link "$proto" "$server" "$port" "$uuid" "$dsni" "$pub" "$sid" "$tsni" "$sspw" "$hy2pw" "$trpw" "$tuicpw" "$grpc" "$xpath" "$xpath_tls" "$ws_path")"
+	b="$(myc_bundle_link "$proto" "$server" "$port" "$uuid" "$dsni" "$pub" "$sid" "$tsni" "$sspw" "$hy2pw" "$trpw" "$tuicpw" "$grpc" "$xpath" "$xpath_tls" "$ws_path" "$fp")"
 	g="$(printf '%s' "$json" | "$GO" share-link --proto "$proto" - 2>/dev/null)"
 	if [ -n "$b" ] && [ "$b" = "$g" ]; then
 		printf '  ok    %s\n' "$proto"

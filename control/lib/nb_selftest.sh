@@ -142,15 +142,17 @@ _l7_probe_quic_dial() {
 # sing-box's ~15s TLS handshake deadline so a bound-but-black-holed listener (accepts TCP, never completes
 # the handshake) fails -> DEAD, not held -> false-ALIVE. Returns 0 alive / 1 dead / 2 cannot-judge.
 _l7_probe_shadowtls_dial() {
-	local tag="$1" port="$2"
+	# fp (RP-0015): the client uTLS ClientHello preset the reconstructed probe-client mimics, so the L7
+	# handshake reflects what real clients send (a filtered fingerprint reads DEAD here). Default "chrome".
+	local tag="$1" port="$2" fp="${3:-chrome}"
 	[ -n "$port" ] || return 2
 	local ob
-	ob="$(jq -c --arg tag "$tag" --argjson port "$port" \
+	ob="$(jq -c --arg tag "$tag" --argjson port "$port" --arg fp "$fp" \
 		'.inbounds as $in
 		 | ($in[] | select(.tag==$tag)) as $stls
 		 | ($in[] | select(.tag==($stls.detour))) as $ss
 		 | [ {type:"shadowsocks",tag:"probe-out",method:$ss.method,password:$ss.password,detour:"probe-stls"},
-		     {type:"shadowtls",tag:"probe-stls",server:"127.0.0.1",server_port:$port,version:3,password:$stls.users[0].password,tls:{enabled:true,server_name:$stls.handshake.server,utls:{enabled:true,fingerprint:"chrome"}}} ]' \
+		     {type:"shadowtls",tag:"probe-stls",server:"127.0.0.1",server_port:$port,version:3,password:$stls.users[0].password,tls:{enabled:true,server_name:$stls.handshake.server,utls:{enabled:true,fingerprint:$fp}}} ]' \
 		"$SINGBOX_CONFIG" 2>/dev/null)"
 	# well-formed iff both secrets + the port + the cover SNI are present (a legacy/foreign config with an
 	# EMPTY ss/shadowtls secret, or a missing detour, -> cannot-judge, NOT dead).
@@ -163,6 +165,11 @@ measure_l7_probe() {
 	[ -f "$SINGBOX_CONFIG" ] || return 0
 	local marker="${1:-$STATE_DIR/l7_selftest.json}" dead="" tested=0 row
 	local TO=""; command -v timeout >/dev/null 2>&1 && TO="timeout 8"
+	# RP-0015: resolve the client uTLS preset ONCE (single source: params.client_fingerprint, normalised
+	# against the closed vocab) so every mimicking probe below (the ShadowTLS reconstruction, the ephemeral
+	# REALITY verify-client) dials with the SAME fingerprint real clients send — a filtered fingerprint then
+	# reads client-DEAD here. Best-effort: an unreadable/absent params resolves to the "chrome" default.
+	local fp; fp="$(myc_client_fingerprint "$(jq -c . "${PARAMS_JSON:-}" 2>/dev/null || printf '{}')")"
 	while IFS= read -r row; do
 		[ -n "$row" ] || continue
 		local tag ref port reality sni dest type drc qrc ok=0 attempt
@@ -185,7 +192,7 @@ measure_l7_probe() {
 			# client-DEAD listener (a wedged/black-holed engine, a broken cover relay, a rotated inner/outer
 			# secret) is caught here instead of passing the L4-only reach window.
 			for attempt in 1 2 3; do
-				qrc=0; _l7_probe_shadowtls_dial "$tag" "$port" || qrc=$?
+				qrc=0; _l7_probe_shadowtls_dial "$tag" "$port" "$fp" || qrc=$?
 				# 0 = alive, 2 = cannot judge (sing-box/timeout absent) -> NOT dead; 1 = dead -> retry-debounce.
 				[ "$qrc" -ne 1 ] && { ok=1; break; }
 				sleep 1
@@ -217,7 +224,7 @@ measure_l7_probe() {
 				# runs under `set -e` in a NON-exempt context, so a bare `donor_verify_reality; drc=$?`
 				# would trip errexit on a broken-dest return (rc 1) and abort BEFORE the marker is written
 				# — silently defeating the very broken-REALITY detection this probe exists for.
-				drc=0; donor_verify_reality "$dest" || drc=$?
+				drc=0; donor_verify_reality "$dest" "$fp" || drc=$?
 				# 0 = steal-viable, 2 = cannot judge (engine/curl/port) -> NOT dead; 1 = broken -> retry.
 				[ "$drc" -ne 1 ] && { ok=1; break; }
 				sleep 1

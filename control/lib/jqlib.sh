@@ -155,3 +155,29 @@ myc_params_get() {
 	fi
 	myc_die "required params field missing or empty: $path"
 }
+
+# myc_client_fingerprint PARAMS_JSON — resolve the client uTLS ClientHello preset (RP-0015). Reads
+# .client_fingerprint from PARAMS_JSON and NORMALISES it against the Go-owned closed vocabulary
+# (control/vocab.json .client_fingerprints): a member passes through; an absent/empty/unknown value
+# resolves to the default (the vocab's first entry, "chrome"). It is the shell twin of Go
+# spec.NormalizeClientFingerprint, so the client render + the donor-verify / L7 probe never splice an
+# invalid uTLS token (which would fail-serve) — even when an operator override carries a typo. The
+# renderer already validates the KEY against operator_toggle_keys; this validates the VALUE.
+myc_client_fingerprint() {
+	myc_require_jq
+	local params fp vocab list def
+	params="$1"
+	vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	fp="$(printf '%s' "$params" | jq -r '.client_fingerprint // empty' 2>/dev/null)"
+	# The closed vocabulary + its default (first entry) from the single source; fall back to the
+	# documented default if the vocab is unreadable so a render never hard-fails on a missing file.
+	list="$(jq -c '.client_fingerprints // empty' "$vocab" 2>/dev/null || true)"
+	def="$(jq -r '.client_fingerprints[0] // "chrome"' "$vocab" 2>/dev/null || true)"
+	[ -n "$def" ] || def="chrome"
+	if [ -n "$fp" ] && [ -n "$list" ] \
+		&& printf '%s' "$list" | jq -e --arg f "$fp" 'index($f) != null' >/dev/null 2>&1; then
+		printf '%s\n' "$fp"
+	else
+		printf '%s\n' "$def"
+	fi
+}

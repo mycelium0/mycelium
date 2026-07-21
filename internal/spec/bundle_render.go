@@ -119,6 +119,7 @@ func bundleBaseLinkParams(params map[string]json.RawMessage, firstClientID, firs
 		GRPCServiceName: paramStr(params, "grpc_service_name", "grpc"),
 		XHTTPPath:       paramStr(params, "xhttp_path", "/"),
 		WSPath:          paramStr(params, "ws_path", "/ws"),
+		Fingerprint:     NormalizeClientFingerprint(paramStr(params, "client_fingerprint", DefaultClientFingerprint)),
 	}
 	// xhttp_path_tls defaults to xhttp_path when unset (back-compat; C06 lets an operator set them apart).
 	base.XHTTPPathTLS = paramStr(params, "xhttp_path_tls", base.XHTTPPath)

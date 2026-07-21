@@ -68,7 +68,10 @@ donor_verify_reality() {
 	# overlapping runs would collide on) and the whole handshake runs under an flock, so a deploy-time
 	# donor pick and a timer-fired L7 probe cannot race for ports — a race would false-DEAD a healthy donor
 	# and trigger a spurious rotation. A bind failure returns 2 (cannot judge), never 1 (dead). Self-cleaning.
-	local host="$1"
+	# fp (RP-0015): the client uTLS ClientHello preset the ephemeral verify-client mimics, so the on-node
+	# handshake stays representative of what real clients send. Defaults to "chrome" (the vocab default) when
+	# the caller omits it; the orchestration callers resolve it from params via myc_client_fingerprint.
+	local host="$1" fp="${2:-chrome}"
 	have "$SINGBOX_BIN" || return 2
 	# The lock lives under STATE_DIR (node-shared) so a deploy-time donor pick and a timer-fired L7 probe
 	# actually serialize — a systemd unit with PrivateTmp= would NOT share a /tmp lock. Falls back to /tmp
@@ -104,7 +107,7 @@ donor_verify_reality() {
 			sport=$(( 10000 + RANDOM % 20000 ))
 			cport=$(( sport + 1 ))
 			printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"vless\",\"listen\":\"127.0.0.1\",\"listen_port\":$sport,\"users\":[{\"uuid\":\"$uuid\"}],\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"reality\":{\"enabled\":true,\"handshake\":{\"server\":\"$host\",\"server_port\":443},\"private_key\":\"$priv\",\"short_id\":[\"$sid\"]}}}],\"outbounds\":[{\"type\":\"direct\"}]}" >"$dir/s.json"
-			printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"socks\",\"listen\":\"127.0.0.1\",\"listen_port\":$cport}],\"outbounds\":[{\"type\":\"vless\",\"tag\":\"v\",\"server\":\"127.0.0.1\",\"server_port\":$sport,\"uuid\":\"$uuid\",\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"$pub\",\"short_id\":\"$sid\"}}},{\"type\":\"direct\"}],\"route\":{\"final\":\"v\"}}" >"$dir/c.json"
+			printf '%s' "{\"log\":{\"level\":\"error\"},\"inbounds\":[{\"type\":\"socks\",\"listen\":\"127.0.0.1\",\"listen_port\":$cport}],\"outbounds\":[{\"type\":\"vless\",\"tag\":\"v\",\"server\":\"127.0.0.1\",\"server_port\":$sport,\"uuid\":\"$uuid\",\"tls\":{\"enabled\":true,\"server_name\":\"$host\",\"utls\":{\"enabled\":true,\"fingerprint\":\"$fp\"},\"reality\":{\"enabled\":true,\"public_key\":\"$pub\",\"short_id\":\"$sid\"}}},{\"type\":\"direct\"}],\"route\":{\"final\":\"v\"}}" >"$dir/c.json"
 			"$SINGBOX_BIN" run -c "$dir/s.json" >/dev/null 2>&1 & sp=$!
 			"$SINGBOX_BIN" run -c "$dir/c.json" >/dev/null 2>&1 & cp=$!
 			# Only read a probe failure as DEAD once BOTH ephemeral engines have actually bound; a bind
@@ -131,8 +134,11 @@ donor_verify() {
 	# signals a genuinely broken node, not a normal pre-engine condition — refusing to bootstrap beats
 	# bringing up a node whose REALITY-donor viability could not be authoritatively validated.
 	local host="$1"
+	# RP-0015: mimic the operator-set client uTLS preset (single source: params.client_fingerprint,
+	# normalised against the closed vocab). Best-effort — an unreadable/absent params resolves to "chrome".
+	local fp; fp="$(myc_client_fingerprint "$(jq -c . "${PARAMS_JSON:-}" 2>/dev/null || printf '{}')")"
 	donor_verify_tls "$host" || return 1
-	donor_verify_reality "$host"
+	donor_verify_reality "$host" "$fp"
 	case "$?" in
 		0) return 0 ;;
 		2) warn "donor '$host': the REALITY-layer check could not run (engine/curl absent, or no ephemeral port would bind) — REJECTING (fail-closed): a donor whose REALITY viability cannot be authoritatively validated must not be accepted. The engine is installed before donor selection, so this signals a broken node; fix the install/curl and re-run."; return 1 ;;

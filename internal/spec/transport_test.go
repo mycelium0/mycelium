@@ -170,6 +170,7 @@ func TestOperatorToggleKeysMatchesLegacy(t *testing.T) {
 		"vless_reality_vision_port", "vless_reality_grpc_port", "vless_reality_xhttp_port",
 		"vless_xhttp_tls_port", "vless_ws_tls_port", "hysteria2_port", "tuic_port", "shadowsocks_port", "shadowtls_port",
 		"trojan_port", "xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket",
+		"client_fingerprint", // RP-0015: the client uTLS-preset knob joined the tunable allowlist.
 	}
 	got := OperatorToggleKeys()
 	asSet := func(s []string) map[string]int {

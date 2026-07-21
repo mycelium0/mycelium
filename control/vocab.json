@@ -43,7 +43,16 @@
     "xhttp_path_tls",
     "ws_path",
     "grpc_service_name",
-    "region_bucket"
+    "region_bucket",
+    "client_fingerprint"
+  ],
+  "client_fingerprints": [
+    "chrome",
+    "firefox",
+    "edge",
+    "safari",
+    "ios",
+    "android"
   ],
   "protos": [
     {
