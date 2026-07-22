@@ -18,6 +18,13 @@
 #       (network degradation), never the filtering box (whole word, any case)
 #     * a country name from the small denylist below (whole word, any case)
 #
+#   The SAME patterns are also checked against COMMIT MESSAGES (not just files): a forbidden
+#   term in a message is just as public, and one slipped past this gate once (a 'circumvent'
+#   substring rode a commit message while the doc it described was already neutral — the file
+#   walk cannot see messages). By default only HEAD's message is scanned (so frozen pre-policy
+#   history never trips it); set MYC_PPN_MSG_RANGE=<rev-range> (e.g. origin/main..HEAD) to scan
+#   every new message in a range before landing them.
+#
 #   Approved neutral vocabulary (NOT flagged): persistent private network, network
 #   adversary, network interference, network degradation, forced degradation, network
 #   stability attacks, behavioral-layer detection, blocking, AS-level blocking, active
@@ -123,6 +130,42 @@ while IFS= read -r -d '' f; do
 	done < <(grep -InE "$LOCATION_CODES" "$f" 2>/dev/null || true)
 
 done < <(find "$REPO_ROOT" -type f -print0)
+
+# --- Commit MESSAGE scan --------------------------------------------------------------------
+# The file walk cannot see commit messages, yet a forbidden term in a message is just as public
+# (it slipped through once). Scan HEAD's message by default; MYC_PPN_MSG_RANGE scans a range of
+# new messages. Skips cleanly with no git work-tree (a source tarball has no messages). Only the
+# selected commits are scanned — frozen pre-policy history is never re-litigated.
+if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+	if [ -n "${MYC_PPN_MSG_RANGE:-}" ]; then
+		msg_commits="$(git -C "$REPO_ROOT" rev-list "$MYC_PPN_MSG_RANGE" 2>/dev/null || true)"
+	else
+		msg_commits="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+	fi
+	for c in $msg_commits; do
+		short="$(git -C "$REPO_ROOT" rev-parse --short "$c" 2>/dev/null || printf '%s' "$c")"
+		body="$(git -C "$REPO_ROOT" log -1 "$c" --format='%B' 2>/dev/null || true)"
+		[ -n "$body" ] || continue
+		loc="commit ${short} (message)"
+		# Same four pattern groups as the file scan, with the same grep flags.
+		while IFS=: read -r lineno text; do
+			[ -n "${lineno:-}" ] || continue
+			report "$loc" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
+		done < <(printf '%s\n' "$body" | grep -inE "$FORBIDDEN_SUBSTR" || true)
+		while IFS=: read -r lineno text; do
+			[ -n "${lineno:-}" ] || continue
+			report "$loc" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
+		done < <(printf '%s\n' "$body" | grep -inwE "$FORBIDDEN_WORDS" || true)
+		while IFS=: read -r lineno text; do
+			[ -n "${lineno:-}" ] || continue
+			report "$loc" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
+		done < <(printf '%s\n' "$body" | grep -inwE "$COUNTRY_WORDS" || true)
+		while IFS=: read -r lineno text; do
+			[ -n "${lineno:-}" ] || continue
+			report "$loc" "$lineno" "$(printf '%s' "$text" | sed 's/^[[:space:]]*//')"
+		done < <(printf '%s\n' "$body" | grep -nE "$LOCATION_CODES" || true)
+	done
+fi
 
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: forbidden framing found. Use neutral PPN vocabulary (see header).\n' >&2
