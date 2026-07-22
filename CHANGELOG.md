@@ -13,6 +13,23 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Added
+- **Fingerprint-adaptivity — the gated actuator (RP-0015 increment B, B3; ships disarmed).** `flow_rotate_fingerprint`
+  (`control/lib/nb_rotate_apply.sh`) is the scalar twin of the transport `flow_rotate`: it drives the SAME
+  proven render→validate→promote→apply→verify_post_apply→rollback primitives behind its OWN triple gate
+  (dry-run default + `--apply-rotation` + a SEPARATE node sentinel `fp-rotate-live.enabled`), persisting the
+  one delta `.client_fingerprint=<target>` through the operator-overrides overlay — a closed-vocab toggle key,
+  so the rotation survives `--update` and re-resolves through `myc_client_fingerprint` at every render/verify/
+  probe site (increment A's consistency invariant closes the loop). It never grows the protocol set; it only
+  moves the client uTLS preset WITHIN the closed vocabulary. `refresh_rotate_fp_plan_from_daemon` folds the B2
+  daemon's `FingerprintPlanInput` into the plan via `myceliumctl fingerprint-plan` (self-drive; stale-refuse);
+  the measure config gained fp fields + a durable `fp-rotate-live.enabled`→`fp_rotate_enabled` arm fold (like
+  the collapse sentinel); the fp A/B probe now runs on the existing L7-probe timer (a second `ExecStart`, no
+  new timer). New verbs `--fp-rotate` / `--fp-rotate-arm` / `--fp-rotate-disarm`. SHIPS DISARMED: reached only
+  by the explicit `--fp-rotate` dispatch (never bootstrap/update), dry-run unless armed, sentinel never in git.
+  Pinned by `fp_rotate_gated` (triple gate + dispatch-only + ships-disarmed + scalar-delta-only) +
+  `fp_closed_set_only` (no randomiser, no off-vocab target, at planner + Validate + actuator + vocab) + a
+  `fingerprint_single_source` post-rotation-consistency extension (the delta key IS the key the renders read).
+  The transport rotation path is untouched (its gates stay green). The live arming drill is B4.
 - **Fingerprint-adaptivity — the Go fold + planner (RP-0015 increment B, B2; disarmed).** The daemon now folds
   the B1 `fp_probe.json` marker through a PARALLEL scalar plane (the transport member planner is untouched):
   `readFpMarker` (fail-safe like `readL7Marker`) → `foldFpGate`, which REUSES the RP-0014 `l7GenerationGate`

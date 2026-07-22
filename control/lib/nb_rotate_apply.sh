@@ -417,3 +417,253 @@ flow_rotate() {
 		rotate_apply_dryrun "$plan"
 	fi
 }
+
+# =====================================================================================================
+# RP-0015 increment B (B3): the client-fingerprint gated actuator — a SCALAR twin of the transport
+# rotation above. It drives the SAME render -> validate -> promote -> apply -> verify_post_apply ->
+# rollback primitives, behind its OWN triple gate (dry-run default + --apply-rotation + a SEPARATE node
+# sentinel $STATE_DIR/fp-rotate-live.enabled), persisting the ONE delta `.client_fingerprint=<target>`
+# through the operator-overrides overlay (a closed-vocab toggle key, so it survives --update and re-resolves
+# through myc_client_fingerprint at every render/verify/probe site — increment A's consistency invariant).
+# It NEVER grows the protocol set; it only ever moves the client uTLS preset WITHIN the closed vocabulary.
+# SHIPS DISARMED. The transport rotation path above is untouched.
+# =====================================================================================================
+
+_fp_rotate_sentinel() { printf '%s' "$STATE_DIR/fp-rotate-live.enabled"; }
+fp_rotate_live_armed() { [ -f "$(_fp_rotate_sentinel)" ]; }
+
+fp_rotate_arm() {
+	need_root
+	( umask 077; : >"$(_fp_rotate_sentinel)" ) || die "fp-rotation: could not arm (write $(_fp_rotate_sentinel))."
+	log "fp-rotation: node ARMED for LIVE client-fingerprint apply ($(_fp_rotate_sentinel) present). Disarm with '$0 --fp-rotate-disarm'."
+}
+
+fp_rotate_disarm() {
+	need_root
+	rm -f "$(_fp_rotate_sentinel)" || die "fp-rotation: could not disarm (remove $(_fp_rotate_sentinel))."
+	log "fp-rotation: node DISARMED ($(_fp_rotate_sentinel) removed); --fp-rotate --apply-rotation now falls back to dry-run."
+}
+
+_fp_rotate_state_file()   { printf '%s' "$STATE_DIR/rotate_fp_state.json"; }
+_fp_rotate_overlay_bak()  { printf '%s' "$STATE_DIR/operator-overrides.fp-rotate-bak.json"; }
+
+# _fp_plan_target PLAN — the closed-vocab preset the plan rotates TO (its .to). Fail-closed on empty.
+_fp_plan_target() {
+	local plan="$1" t; t="$(jq -r '.to // empty' "$plan")"
+	[ -n "$t" ] || die "fp-rotation: plan has no .to preset (cannot apply)."
+	printf '%s' "$t"
+}
+
+# _fp_rotation_set_delta FILE TARGET — set .client_fingerprint=TARGET in FILE, ATOMICALLY (single jq -> tmp
+# -> mv); a failure leaves FILE byte-unchanged. The ONE scalar move (no enable-key, no port).
+_fp_rotation_set_delta() {
+	local file="$1" target="$2" tmp
+	tmp="$(mktemp)" || die "fp-rotation: mktemp failed."
+	jq --arg t "$target" '.client_fingerprint = $t' "$file" > "$tmp" && mv -f "$tmp" "$file" \
+		|| { rm -f "$tmp"; die "fp-rotation: could not write the delta to $file (fail-closed)."; }
+}
+
+apply_fp_rotation_to_params() {
+	local plan="$1" params="$2" target
+	target="$(_fp_plan_target "$plan")"
+	_fp_rotation_set_delta "$params" "$target"
+	log "fp-rotation: params delta applied to the dry-run copy — client_fingerprint -> $target."
+}
+
+# persist_fp_to_overlay PLAN — write .client_fingerprint into the PERSISTED operator-overrides overlay so the
+# rotation SURVIVES write_params/--update (client_fingerprint is an operator_toggle_key). Honors DRY_RUN.
+# SNAPSHOTS the pre-rotation overlay to its OWN backup FIRST (distinct from the transport rotation's). Atomic.
+persist_fp_to_overlay() {
+	local plan="$1"
+	[ "$DRY_RUN" -eq 0 ] || { log "[dry-run] would persist client_fingerprint into $OPERATOR_OVERRIDES (no mutation)."; return 0; }
+	local target bak
+	target="$(_fp_plan_target "$plan")"
+	[ -f "$OPERATOR_OVERRIDES" ] || ( umask 077; printf '{}\n' >"$OPERATOR_OVERRIDES" ) \
+		|| die "fp-rotation: could not initialise the overlay $OPERATOR_OVERRIDES (fail-closed)."
+	jq -e 'type == "object"' "$OPERATOR_OVERRIDES" >/dev/null 2>&1 \
+		|| die "fp-rotation: overlay $OPERATOR_OVERRIDES is not a JSON object (fail-closed; fix or remove it)."
+	bak="$(_fp_rotate_overlay_bak)"
+	cp -f "$OPERATOR_OVERRIDES" "$bak" || die "fp-rotation: could not snapshot the overlay (fail-closed; refusing to mutate without a revert path)."
+	_fp_rotation_set_delta "$OPERATOR_OVERRIDES" "$target"
+	chmod 0600 "$OPERATOR_OVERRIDES" 2>/dev/null || true
+	log "fp-rotation: persisted client_fingerprint=$target into the operator-overrides overlay (survives --update; snapshot at $bak)."
+}
+
+revert_fp_overlay() {
+	local bak; bak="$(_fp_rotate_overlay_bak)"
+	[ -f "$bak" ] || { warn "fp-rotation: no overlay snapshot to revert ($bak absent)."; return 0; }
+	if install -m 0600 "$bak" "$OPERATOR_OVERRIDES" 2>/dev/null; then
+		log "fp-rotation: reverted the operator-overrides overlay to its pre-rotation snapshot."
+		return 0
+	fi
+	warn "fp-rotation: CRITICAL — could NOT revert the overlay ($OPERATOR_OVERRIDES); the rotated client_fingerprint may persist and re-apply on the next --update. Restore by hand from the snapshot $bak. OPERATOR ATTENTION REQUIRED."
+	return 1
+}
+
+fp_rotate_abort_revert() {
+	local candidate="$1" msg="$2"
+	revert_fp_overlay
+	( write_params ) || warn "fp-rotation: write_params failed while reverting; params.json may still hold the rotated preset — operator attention needed (overlay snapshot: $(_fp_rotate_overlay_bak))."
+	rm -f "$candidate" 2>/dev/null || true
+	die "fp-rotation: $msg; reverted overlay (fail-closed; nothing promoted)."
+}
+
+persist_fp_rotation_state() {
+	local plan="$1" tmp
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	jq -e '.next_state' "$plan" >/dev/null 2>&1 \
+		|| { warn "fp-rotation: plan has no .next_state; between-tick state not updated."; return 0; }
+	tmp="$(mktemp)" || return 0
+	jq '.next_state' "$plan" > "$tmp" && ( umask 077; mv -f "$tmp" "$(_fp_rotate_state_file)" ) \
+		|| { rm -f "$tmp"; warn "fp-rotation: could not persist between-tick state."; return 0; }
+	chmod 0600 "$(_fp_rotate_state_file)" 2>/dev/null || true
+	log "fp-rotation: persisted next_state -> $(_fp_rotate_state_file)."
+}
+
+# record_fp_rotation_rollback PLAN — fold a rollback into the fp between-tick state via the SAME pure Go
+# rotate.RecordOutcome (myceliumctl rotate-record; generic over state+limits) that transport rollback uses,
+# on the SEPARATE fp state file. Degrades to a warning if the spine/limits are absent (the rollback itself
+# already happened); for the drill rollback-latch step both MUST be present.
+record_fp_rotation_rollback() {
+	local plan="$1"
+	local spine="${SPINE_BIN:-$TOOLING_DIR/bin/myceliumctl-go}"
+	local limits="${ROTATE_LIMITS:-$STATE_DIR/rotate_limits.json}"
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	[ -x "$spine" ] || { warn "fp-rotation: spine binary absent ($spine); rollback NOT recorded (budget/latch unchanged)."; return 0; }
+	[ -f "$limits" ] || { warn "fp-rotation: no $limits; rollback NOT recorded (budget/latch unchanged)."; return 0; }
+	local input next tmp
+	input="$(jq -n --slurpfile p "$plan" --slurpfile l "$limits" \
+		'{state: ($p[0].next_state // {}), limits: $l[0], rolled_back: true}')" \
+		|| { warn "fp-rotation: could not assemble rollback-record input."; return 0; }
+	next="$(printf '%s' "$input" | "$spine" rotate-record - 2>/dev/null)" \
+		|| { warn "fp-rotation: rotate-record failed; budget/latch unchanged."; return 0; }
+	tmp="$(mktemp)" || return 0
+	printf '%s\n' "$next" > "$tmp" && ( umask 077; mv -f "$tmp" "$(_fp_rotate_state_file)" ) \
+		|| { rm -f "$tmp"; warn "fp-rotation: could not persist post-rollback state."; return 0; }
+	chmod 0600 "$(_fp_rotate_state_file)" 2>/dev/null || true
+	log "fp-rotation: recorded rollback (budget spent; hold latch updated) -> $(_fp_rotate_state_file)."
+}
+
+# --- DRY-RUN executor (default; promotes nothing, mutates no persisted state) -------------------------
+rotate_apply_fp_dryrun() {
+	local plan="$1" from to
+	from="$(jq -r '.from // "?"' "$plan")"
+	to="$(jq -r '.to // "?"' "$plan")"
+	log "fp-rotation (DRY-RUN): client_fingerprint $from -> $to (reason=$(jq -r '.reason' "$plan")) — render + 'sing-box check'; promotes nothing."
+	local tmp_params="$STATE_DIR/params.fp-rotate-dryrun.json"
+	local candidate="$STATE_DIR/config.fp-rotate-candidate.json"
+	cp -f "$PARAMS_JSON" "$tmp_params" || die "fp-rotation: could not stage a temp params copy."
+	apply_fp_rotation_to_params "$plan" "$tmp_params"
+	if ! ( PARAMS_JSON="$tmp_params"; render_candidate "$candidate" ); then
+		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
+		die "fp-rotation: candidate render failed (fail-closed; nothing changed)."
+	fi
+	if validate_config "$candidate"; then
+		log "[dry-run] OK: fp-rotation candidate ($from -> $to) rendered + passed 'sing-box check'. WOULD promote; NOT promoting (dry-run). Live config + persisted params unchanged."
+		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
+		return 0
+	fi
+	rm -f "$tmp_params" "$candidate" 2>/dev/null || true
+	die "fp-rotation: candidate failed 'sing-box check' (fail-closed; nothing changed)."
+}
+
+# --- LIVE executor (fp-armed + --apply-rotation + DRY_RUN=0 only) -------------------------------------
+rotate_apply_fp_live() {
+	local plan="$1" from to
+	from="$(jq -r '.from // "?"' "$plan")"
+	to="$(jq -r '.to // "?"' "$plan")"
+	log "fp-rotation (LIVE, armed): client_fingerprint $from -> $to (reason=$(jq -r '.reason' "$plan"))."
+	local tmp_params="$STATE_DIR/params.fp-rotate-pre.json"
+	local candidate="$STATE_DIR/config.fp-rotate-candidate.json"
+	# Phase A — VALIDATE FIRST against a temp params copy; touch NO persisted state if the rotation is bad.
+	cp -f "$PARAMS_JSON" "$tmp_params" || die "fp-rotation: could not stage temp params (fail-closed)."
+	apply_fp_rotation_to_params "$plan" "$tmp_params"
+	if ! ( PARAMS_JSON="$tmp_params"; render_candidate "$candidate" ); then
+		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
+		die "fp-rotation: pre-validate render failed (fail-closed; nothing changed)."
+	fi
+	if ! validate_config "$candidate"; then
+		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
+		die "fp-rotation: candidate failed 'sing-box check' (fail-closed; nothing changed)."
+	fi
+	rm -f "$tmp_params" 2>/dev/null || true
+	# Phase B — PERSIST via the overlay (snapshot taken), regenerate params, re-render + re-validate. Every
+	# die-capable step is SUBSHELL-wrapped so a failure is catchable and the overlay is reverted.
+	persist_fp_to_overlay "$plan"
+	if ! ( write_params ); then
+		fp_rotate_abort_revert "$candidate" "write_params failed after the overlay update"
+	fi
+	if ! ( render_candidate "$candidate" ); then
+		fp_rotate_abort_revert "$candidate" "post-persist render failed"
+	fi
+	if ! validate_config "$candidate"; then
+		fp_rotate_abort_revert "$candidate" "post-persist candidate failed 'sing-box check'"
+	fi
+	# No-op short-circuit: the new preset already renders the live config -> keep overlay + state, no restart
+	# (an always-on PPN must not drop client connections for a no-op).
+	if [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then
+		rm -f "$candidate" 2>/dev/null || true
+		persist_fp_rotation_state "$plan"
+		log "fp-rotation: candidate identical to the live config (preset already effective); no restart. Overlay kept."
+		return 0
+	fi
+	# Phase C — PROMOTE with rollback. On verify failure: restore last-known-good config AND revert the
+	# overlay AND regenerate params AND restart onto last-good AND record the rollback, then fail closed.
+	promote_config "$candidate"
+	rm -f "$candidate" 2>/dev/null || true
+	install_singbox_unit
+	if apply_singbox && verify_post_apply; then
+		persist_fp_rotation_state "$plan"
+		render_serve_bundle
+		log "fp-rotation: LIVE apply verified (client_fingerprint $from -> $to). Between-tick state persisted."
+		return 0
+	fi
+	warn "fp-rotation: post-apply verification FAILED; rolling back config + overlay (fail-closed)."
+	rollback_config
+	revert_fp_overlay
+	( write_params ) || warn "fp-rotation: write_params failed during rollback; params.json may still hold the rotated preset — operator attention needed."
+	apply_singbox || warn "fp-rotation: could not restart sing-box onto the restored config — operator attention needed."
+	verify_post_apply || warn "fp-rotation: service still unhealthy after rollback — operator attention needed."
+	record_fp_rotation_rollback "$plan"
+	die "fp-rotation: rolled back (fail-closed). Last-known-good config restored; overlay reverted; rollback recorded."
+}
+
+# flow_rotate_fingerprint — the --fp-rotate dispatch target. Reads a FingerprintPlan (default
+# $STATE_DIR/rotate_fp_plan.json, override FP_ROTATE_PLAN; produced by `myceliumctl fingerprint-plan`),
+# refreshing it from the MEASURE daemon's FingerprintPlanInput. HOLD -> persist next_state, no-op. ACT ->
+# DRY-RUN by default; LIVE only when --apply-rotation AND DRY_RUN=0 AND the fp sentinel is present. Any other
+# combination is a DRY-RUN preview. Fail-closed throughout. Reached ONLY by the explicit --fp-rotate dispatch.
+flow_rotate_fingerprint() {
+	log "=== fp-rotate: plan -> dry-run preview | gated live apply (RP-0015 B) ==="
+	need_root
+	local plan="${FP_ROTATE_PLAN:-$STATE_DIR/rotate_fp_plan.json}"
+	refresh_rotate_fp_plan_from_daemon
+	[ -f "$plan" ] || die "fp-rotation: no plan at $plan (produce one, or enable the MEASURE daemon with --measure-enable, or 'myceliumctl fingerprint-plan PLANINPUT.json > $plan')."
+	jq -e . "$plan" >/dev/null 2>&1 || die "fp-rotation: plan $plan is not valid JSON (fail-closed)."
+	[ -f "$PARAMS_JSON" ] || die "fp-rotation: params.json missing ($PARAMS_JSON); bootstrap first."
+	if [ "$(jq -r '.act // false' "$plan")" != "true" ]; then
+		# Persist next_state on HOLD too (the accumulating impaired-streak + rate window) — the same fix the
+		# transport HOLD path carries, so an unattended fp loop can actually reach FlipConfirmations.
+		if jq -e '.next_state' "$plan" >/dev/null 2>&1; then
+			jq -c '.next_state' "$plan" >"$(_fp_rotate_state_file).tmp" 2>/dev/null \
+				&& mv -f "$(_fp_rotate_state_file).tmp" "$(_fp_rotate_state_file)" \
+				|| rm -f "$(_fp_rotate_state_file).tmp"
+		fi
+		log "fp-rotation plan is a HOLD (reason=$(jq -r '.reason // "?"' "$plan"); $(jq -r '.held_because // ""' "$plan")) — nothing to apply (next_state persisted: streak=$(jq -r '.next_state.impaired_streak // 0' "$plan"))."
+		return 0
+	fi
+	if [ "${ROTATE_APPLY:-0}" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
+		if fp_rotate_live_armed; then
+			rotate_apply_fp_live "$plan"
+		else
+			warn "fp-rotation: --apply-rotation given but this node is NOT fp-armed (sentinel $(_fp_rotate_sentinel) absent)."
+			warn "fp-rotation: refusing to actuate; running a DRY-RUN preview instead. Arm THIS node with '$0 --fp-rotate-arm' to allow live apply."
+			rotate_apply_fp_dryrun "$plan"
+		fi
+	else
+		if [ "${ROTATE_APPLY:-0}" -eq 1 ]; then
+			warn "fp-rotation: --apply-rotation given with --dry-run; running a DRY-RUN preview only (no persisted mutation)."
+		fi
+		rotate_apply_fp_dryrun "$plan"
+	fi
+}

@@ -72,6 +72,11 @@ MEASURE_PATH_COLLAPSE_ENABLED="${MEASURE_PATH_COLLAPSE_ENABLED:-false}"
 # Normalise to a strict JSON boolean so --argjson never chokes (and an unrecognised value fails SAFE = false).
 case "$MEASURE_PATH_COLLAPSE_ENABLED" in true|True|TRUE|1|yes|on) MEASURE_PATH_COLLAPSE_ENABLED=true ;; *) MEASURE_PATH_COLLAPSE_ENABLED=false ;; esac
 MEASURE_PATH_COLLAPSE_MIN_GEN="${MEASURE_PATH_COLLAPSE_MIN_GEN:-2}"
+# RP-0015 B: the client-fingerprint A/B plane freshness + gate + arm knobs (mirror the collapse ones).
+MEASURE_FP_MAX_AGE_MS="${MEASURE_FP_MAX_AGE_MS:-$MEASURE_L7_MAX_AGE_MS}"
+MEASURE_FP_MIN_GEN="${MEASURE_FP_MIN_GEN:-2}"
+MEASURE_FP_ROTATE_ENABLED="${MEASURE_FP_ROTATE_ENABLED:-false}"
+case "$MEASURE_FP_ROTATE_ENABLED" in true|True|TRUE|1|yes|on) MEASURE_FP_ROTATE_ENABLED=true ;; *) MEASURE_FP_ROTATE_ENABLED=false ;; esac
 
 _measure_unit() { printf '%s' "/etc/systemd/system/mycelium-measure.service"; }
 _l7probe_service_unit() { printf '%s' "/etc/systemd/system/mycelium-l7probe.service"; }
@@ -85,6 +90,10 @@ _measure_pathsig_marker() { printf '%s' "$STATE_DIR/path_signal.json"; }
 # across a config regen, absent => the env/default governs. NEVER shipped in git (node-local operator state).
 _collapse_sentinel() { printf '%s' "$STATE_DIR/collapse-armed.enabled"; }
 _measure_l7_marker()   { printf '%s' "$STATE_DIR/l7_selftest.json"; }
+_measure_fp_marker()   { printf '%s' "$STATE_DIR/fp_probe.json"; }
+# The DURABLE fingerprint-rotation arm sentinel (mirrors rotate-live.enabled / collapse-armed.enabled):
+# present => fp_rotate_enabled even across a config regen, absent => the env/default governs. NEVER in git.
+_fp_rotate_arm_sentinel() { printf '%s' "$STATE_DIR/fp-rotate-live.enabled"; }
 _measure_vocab()       { printf '%s' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"; }
 
 # generate_measure_configs (--measure-configure) — write the node-local reach + measure configs from
@@ -144,6 +153,11 @@ generate_measure_configs() {
 	# (and re-generating) disarms.
 	local collapse_on="$MEASURE_PATH_COLLAPSE_ENABLED"
 	[ -f "$(_collapse_sentinel)" ] && collapse_on=true
+	# RP-0015 B: the fingerprint-rotation plane is DISARMED unless the env says so OR the arm sentinel is
+	# present (DURABLE across --update/--node-apply, exactly like the collapse arm). Disarmed => the daemon
+	# shadow-folds the fp marker but writes NO FingerprintPlanInput, so nothing downstream can rotate a preset.
+	local fp_rotate_on="$MEASURE_FP_ROTATE_ENABLED"
+	[ -f "$(_fp_rotate_arm_sentinel)" ] && fp_rotate_on=true
 	printf '%s' "$members" | jq \
 		--arg active "$active" \
 		--arg out "$STATE_DIR/rotate_plan_input.json" \
@@ -156,6 +170,12 @@ generate_measure_configs() {
 		--argjson pathgen "$MEASURE_PATH_MIN_RESET_GEN" \
 		--argjson collapsegen "$MEASURE_PATH_COLLAPSE_MIN_GEN" \
 		--argjson collapseon "$collapse_on" \
+		--arg fppath "$(_measure_fp_marker)" \
+		--argjson fpage "$MEASURE_FP_MAX_AGE_MS" \
+		--argjson fpgen "$MEASURE_FP_MIN_GEN" \
+		--argjson fprotateon "$fp_rotate_on" \
+		--arg fpplaninput "$STATE_DIR/rotate_fp_plan_input.json" \
+		--arg fpstate "$STATE_DIR/rotate_fp_state.json" \
 		--argjson limits "$limits" \
 		--argjson tick "$MEASURE_TICK_MS" '{
 		version: 1, tick_ms: $tick, active_ref: $active,
@@ -163,6 +183,8 @@ generate_measure_configs() {
 		l7_liveness_path: $l7path, l7_max_age_ms: $l7age, l7_min_dead_generations: $l7gen,
 		path_signal_path: $pathpath, path_max_age_ms: $pathage, path_min_reset_generations: $pathgen,
 		path_collapse_enabled: $collapseon, path_collapse_min_generations: $collapsegen,
+		fp_probe_path: $fppath, fp_max_age_ms: $fpage, fp_min_generations: $fpgen,
+		fp_rotate_enabled: $fprotateon, fp_plan_input_path: $fpplaninput, fp_state_path: $fpstate,
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."
@@ -408,6 +430,10 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=$NB_SELF --l7-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
+# RP-0015 B: the fingerprint A/B post-pass runs on the SAME cadence (no new timer/host). Type=oneshot runs
+# these sequentially, so it consumes the l7_selftest.json the probe above just wrote. It only re-dials (with
+# alternate presets) when a fingerprint-carrying member already read DEAD, so it is cheap on a healthy node.
+ExecStart=$NB_SELF --fp-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
 Nice=10
 IOSchedulingClass=idle
 UNIT
@@ -494,6 +520,35 @@ refresh_rotate_plan_from_daemon() {
 	else
 		rm -f "$plan.tmp"
 		warn "rotation: rotate-plan on the MEASURE PlanInput failed — keeping the existing $plan (if any)."
+	fi
+}
+
+# refresh_rotate_fp_plan_from_daemon — the SCALAR twin of refresh_rotate_plan_from_daemon (RP-0015 B). If the
+# MEASURE daemon has written a FRESH FingerprintPlanInput ($STATE_DIR/rotate_fp_plan_input.json, only when
+# fp_rotate_enabled), fold it into the FingerprintPlan the fp loop consumes via `myceliumctl fingerprint-plan`.
+# A stale/absent/unparseable input leaves the plan untouched (REFUSE to self-drive). The fp apply path stays
+# triple-gated regardless, so self-driving never lowers the actuation bar — it only supplies the plan.
+refresh_rotate_fp_plan_from_daemon() {
+	local pi spine plan pi_now pi_epoch now_epoch age
+	pi="$STATE_DIR/rotate_fp_plan_input.json"
+	plan="${FP_ROTATE_PLAN:-$STATE_DIR/rotate_fp_plan.json}"
+	spine="${SPINE_BIN:-$TOOLING_DIR/bin/myceliumctl-go}"
+	[ -f "$pi" ] || return 0
+	[ -x "$spine" ] || { warn "fp-rotation: $spine absent — cannot consume the MEASURE FingerprintPlanInput (no self-drive this tick)."; return 0; }
+	pi_now="$(jq -r '.now // empty' "$pi" 2>/dev/null)"
+	pi_epoch="$(date -u -d "$pi_now" +%s 2>/dev/null || echo 0)"
+	now_epoch="$(date -u +%s)"
+	age=$(( now_epoch - pi_epoch ))
+	if [ -z "$pi_now" ] || [ "$pi_epoch" -eq 0 ] || [ "$age" -lt 0 ] || [ "$age" -gt "$MEASURE_PLAN_MAX_STALE_SEC" ]; then
+		warn "fp-rotation: the MEASURE FingerprintPlanInput at $pi is STALE or unparseable (now='$pi_now', age=${age}s > ${MEASURE_PLAN_MAX_STALE_SEC}s) — REFUSING to self-drive off it (is mycelium-measure.service healthy?)."
+		return 0
+	fi
+	if ( "$spine" fingerprint-plan "$pi" >"$plan.tmp" 2>/dev/null ) && jq -e . "$plan.tmp" >/dev/null 2>&1; then
+		mv -f "$plan.tmp" "$plan"
+		log "fp-rotation: refreshed $plan from the MEASURE FingerprintPlanInput (self-driven; age ${age}s, act=$(jq -r '.act // false' "$plan"))."
+	else
+		rm -f "$plan.tmp"
+		warn "fp-rotation: fingerprint-plan on the MEASURE FingerprintPlanInput failed — keeping the existing $plan (if any)."
 	fi
 }
 

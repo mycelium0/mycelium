@@ -183,6 +183,30 @@ else
 	badln "nb_selftest.sh not found: $NS"
 fi
 
+# --- 4: post-rotation consistency (RP-0015 B) — the actuator's delta key IS the render/verify/probe key ----
+# A fingerprint rotation (B3) persists its move as `.client_fingerprint` into the operator-overrides overlay,
+# which write_params merges into params.json. Every render/verify/probe site resolves the value from
+# params.client_fingerprint via myc_client_fingerprint (section 3), so as long as the actuator writes the SAME
+# key the renders read, a rotated NON-default preset flows to every site — render == donor-verify == probe on
+# the rotated value, with no per-site re-plumbing. This closes the loop between increments A and B.
+RA="$LIB/nb_rotate_apply.sh"
+if [ -f "$RA" ]; then
+	if has "$RA" '.client_fingerprint = $t' && has "$JQLIB" '.client_fingerprint // empty'; then
+		okln "the fp rotation delta writes .client_fingerprint — the SAME key myc_client_fingerprint reads (post-rotation consistency)"
+	else
+		badln "the fp rotation delta key does not match the key the renders resolve (post-rotation drift risk)"
+	fi
+	# The rotation move must ride the operator-overrides overlay (so it survives --update); client_fingerprint
+	# is an operator_toggle_key (asserted in section 1), so the merge keeps it.
+	if has "$RA" 'persist_fp_to_overlay' && has "$RA" 'OPERATOR_OVERRIDES'; then
+		okln "the fp rotation persists through the operator-overrides overlay (survives --update)"
+	else
+		badln "the fp rotation does not persist through the operator-overrides overlay"
+	fi
+else
+	badln "nb_rotate_apply.sh not found: $RA"
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the client fingerprint is not single-sourced / consistently threaded (RP-0015 A).\n' >&2

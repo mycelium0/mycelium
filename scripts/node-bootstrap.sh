@@ -264,6 +264,9 @@ while [ "$#" -gt 0 ]; do
 		--rotate-disarm)   MODE="rotate-disarm"; shift ;;
 		--rotate-enable-loop)  MODE="rotate-enable-loop"; shift ;;
 		--rotate-disable-loop) MODE="rotate-disable-loop"; shift ;;
+		--fp-rotate)         MODE="fp-rotate"; shift ;;
+		--fp-rotate-arm)     MODE="fp-rotate-arm"; shift ;;
+		--fp-rotate-disarm)  MODE="fp-rotate-disarm"; shift ;;
 		--measure-enable)    MODE="measure-enable"; shift ;;
 		--measure-disable)   MODE="measure-disable"; shift ;;
 		--measure-configure) MODE="measure-configure"; shift ;;
@@ -826,6 +829,9 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		l7-probe-xhttp)    measure_l7_probe_xhttp ;;
 		pathsig-probe)     measure_pathsig_probe ;;
 		fp-probe)          measure_fp_ab_probe ;;
+		fp-rotate)         flow_rotate_fingerprint ;;
+		fp-rotate-arm)     fp_rotate_arm ;;
+		fp-rotate-disarm)  fp_rotate_disarm ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
 fi
