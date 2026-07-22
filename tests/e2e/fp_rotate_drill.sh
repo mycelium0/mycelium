@@ -61,6 +61,8 @@ command -v jq >/dev/null 2>&1 || die "jq required."
 [ -x "$SPINE" ] || die "spine binary absent ($SPINE) — the drill needs myceliumctl-go."
 [ -f "$PARAMS_JSON" ] || die "params.json absent ($PARAMS_JSON) — bootstrap first."
 [ -f "$SINGBOX_CONFIG" ] || die "served config absent ($SINGBOX_CONFIG)."
+systemctl is-active --quiet mycelium-measure.service \
+	|| die "the MEASURE daemon is not active — run '$NB --measure-enable' first (the drill self-drives off its FingerprintPlanInput)."
 
 # The preset the node currently serves, and a distinct closed-vocab target to rotate to.
 ORIG_FP="$(jq -r '.client_fingerprint // "chrome"' "$PARAMS_JSON")"
@@ -89,6 +91,10 @@ restore() {
 	rm -f "$FP_MARKER" "$FP_PLAN_INPUT" "$FP_STATE" 2>/dev/null || true
 	"$NB" --fp-rotate-disarm --checkout "$CHECKOUT_DIR" --state-dir "$STATE_DIR" --tooling-dir "$TOOLING_DIR" >/dev/null 2>&1 || true
 	rm -f "$FP_SENTINEL" 2>/dev/null || true
+	# Regenerate the measure config so fp_rotate_enabled returns to false (the sentinel is gone) and restart
+	# the daemon back to the disarmed posture.
+	"$NB" --measure-configure --checkout "$CHECKOUT_DIR" --state-dir "$STATE_DIR" --tooling-dir "$TOOLING_DIR" >/dev/null 2>&1 || true
+	systemctl restart mycelium-measure.service >/dev/null 2>&1 || true
 	# Restore the original preset through the overlay (survives --update), then re-apply the node.
 	if [ "$(jq -r '.client_fingerprint // ""' "$OVERRIDES" 2>/dev/null)" = "$TARGET_FP" ]; then
 		local tmp; tmp="$(mktemp)"
@@ -125,7 +131,12 @@ inject_marker "clean" "$ORIG_FP" ""
 say "STEP 2 — NEGATIVE (transport-wide must NOT rotate)"
 "$NB" --fp-rotate-arm --checkout "$CHECKOUT_DIR" --state-dir "$STATE_DIR" --tooling-dir "$TOOLING_DIR" >/dev/null 2>&1 \
 	|| die "could not fp-arm the node."
-info "fp-armed ($FP_SENTINEL present)."
+# Arming writes the sentinel; regenerate the measure config so the daemon folds fp_rotate_enabled=true and
+# begins WRITING the FingerprintPlanInput the fp loop self-drives off (the daemon re-reads its config each tick).
+"$NB" --measure-configure --checkout "$CHECKOUT_DIR" --state-dir "$STATE_DIR" --tooling-dir "$TOOLING_DIR" >/dev/null 2>&1 \
+	|| die "could not regenerate the measure config after arming."
+systemctl restart mycelium-measure.service >/dev/null 2>&1 || true   # pick up fp_rotate_enabled immediately
+info "fp-armed ($FP_SENTINEL present) + measure config regenerated (fp_rotate_enabled=true)."
 local_i=0
 while [ "$local_i" -lt "$GENERATIONS" ]; do inject_marker "transport-wide" "$ORIG_FP" ""; local_i=$((local_i+1)); sleep "$GEN_GAP"; done
 "$NB" --fp-rotate --apply-rotation --checkout "$CHECKOUT_DIR" --state-dir "$STATE_DIR" --tooling-dir "$TOOLING_DIR" >/dev/null 2>&1 || true
