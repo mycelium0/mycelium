@@ -65,6 +65,8 @@ func run(args []string) error {
 		return cmdVocab(rest)
 	case "rotate-plan":
 		return cmdRotatePlan(rest)
+	case "fingerprint-plan":
+		return cmdFingerprintPlan(rest)
 	case "rotate-record":
 		return cmdRotateRecord(rest)
 	case "share-link":
@@ -261,6 +263,52 @@ func cmdRotatePlan(args []string) error {
 	out, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
 		return fmt.Errorf("rotate-plan: marshal plan: %w", err)
+	}
+	fmt.Println(string(out))
+	return nil
+}
+
+// cmdFingerprintPlan reads a node-local FingerprintPlanInput as JSON (a FILE argument or - for stdin), runs
+// the pure client-fingerprint planner (internal/rotate.PlanFingerprint, RP-0015 increment B), and writes the
+// resulting FingerprintPlan as indented JSON on stdout. It is the scalar twin of rotate-plan: the daemon's
+// fingerprint fold writes the input (current preset + the A/B verdict + limits + the fp state) and this
+// returns the hold/rotate decision. Pure, clock-injected (Now filled from the system clock when zero), no
+// network, no mutation. (Applying a plan is the shell flow_rotate_fingerprint, dry-run by default — B3.)
+func cmdFingerprintPlan(args []string) error {
+	fs := flag.NewFlagSet("fingerprint-plan", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("fingerprint-plan: exactly one FingerprintPlanInput FILE (or - for stdin) is required")
+	}
+	src := fs.Arg(0)
+	var (
+		data []byte
+		err  error
+	)
+	if src == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(src)
+	}
+	if err != nil {
+		return fmt.Errorf("fingerprint-plan: read %s: %w", src, err)
+	}
+	var in spec.FingerprintPlanInput
+	if err := json.Unmarshal(data, &in); err != nil {
+		return fmt.Errorf("fingerprint-plan: %s is not valid FingerprintPlanInput JSON: %w", src, err)
+	}
+	if in.Now.IsZero() {
+		in.Now = time.Now().UTC()
+	}
+	plan, err := rotate.PlanFingerprint(in)
+	if err != nil {
+		return fmt.Errorf("fingerprint-plan: %w", err)
+	}
+	out, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return fmt.Errorf("fingerprint-plan: marshal plan: %w", err)
 	}
 	fmt.Println(string(out))
 	return nil
@@ -1286,6 +1334,7 @@ Commands:
   validate-bundle FILE|-                       validate a rendered distribution bundle (RP-0008 P1)
   vocab                                        emit the canonical transport/region/health vocabulary as JSON (RP-0008 P2)
   rotate-plan FILE|-                           plan a node-local transport rotation: PlanInput JSON -> RotationPlan JSON (RP-0012)
+  fingerprint-plan FILE|-                      plan a node-local client-fingerprint rotation: FingerprintPlanInput JSON -> FingerprintPlan JSON (RP-0015 B)
   rotate-record FILE|-                         fold an apply outcome into the rotation state: {state,limits,rolled_back,now} -> RotationState JSON (RP-0012)
   share-link --proto P FILE|-                  render the dialable client share-link for a transport from LinkParams JSON (RP-0008 P3)
   bundle --params F --state F [--out F|-]       render a node's distribution Bundle JSON from params + identities (RP-0008 P3)

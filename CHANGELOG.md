@@ -13,6 +13,23 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Added
+- **Fingerprint-adaptivity — the Go fold + planner (RP-0015 increment B, B2; disarmed).** The daemon now folds
+  the B1 `fp_probe.json` marker through a PARALLEL scalar plane (the transport member planner is untouched):
+  `readFpMarker` (fail-safe like `readL7Marker`) → `foldFpGate`, which REUSES the RP-0014 `l7GenerationGate`
+  keyed on the synthetic ref `client-fingerprint` and faults only when a `fingerprint-specific` verdict with a
+  STABLE `(current,target)` pair recurs across ≥ `fp_min_generations` DISTINCT marker generations (a target/
+  current change — an unstable pick or a completed rotation — or a `transport-wide`/`clean`/stale marker resets
+  the streak). The gate shadow-advances every tick so arming has no cold start; the assembled
+  `spec.FingerprintPlanInput` is written to `fp_plan_input_path` only when `fp_rotate_enabled` (default false).
+  `internal/rotate.PlanFingerprint` is the pure decision — the scalar twin of `rotate.Plan`, mirroring its guard
+  order (clean → rollback-latch → hysteresis → cooldown → per-window budget → a valid closed-vocab target) and
+  REUSING `spec.RotationLimits`/`RotationState` verbatim on a SEPARATE fp state so the two budgets never
+  contend; `spec.FingerprintPlan.Validate` requires the target be a closed-vocab preset distinct from the
+  current (a randomiser can never validate). A `myceliumctl fingerprint-plan` verb (twin of `rotate-plan`)
+  exposes it. DISARMED + advisory: the daemon only PRODUCES a plan input, never actuates (the gated actuator is
+  B3). Pinned by Go tests: the `PlanFingerprint` guard order + the `FingerprintPlan.Validate` closed-set rules +
+  a `measure_test.go` real-fold wiring test (fp_probe.json → the reused generation gate → FingerprintPlanInput,
+  driving the actual daemon fold, not a re-implementation). Advisory/pure/ships-disabled discipline gates green.
 - **Fingerprint-adaptivity — the A/B discriminator producer (RP-0015 increment B, B1; inert).** `measure_fp_ab_probe`
   (`control/lib/nb_selftest.sh`) resolves whether a client-DEAD verdict on a fingerprint-carrying member
   (a REALITY family, or ShadowTLS) is caused by the CURRENT uTLS preset or by the transport underneath it,

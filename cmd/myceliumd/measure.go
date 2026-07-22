@@ -89,6 +89,31 @@ type measureConfig struct {
 	// PathCollapseMinGenerations mirrors PathMinResetGenerations for the collapse signal. Unset (<= 0)
 	// defaults to defaultL7MinDeadGenerations (2). Only consulted when PathCollapseEnabled.
 	PathCollapseMinGenerations int `json:"path_collapse_min_generations,omitempty"`
+
+	// --- RP-0015 increment B: the client-fingerprint A/B plane (a PARALLEL scalar plane; the transport
+	// member fields above are untouched). All fail-safe: absent/stale/malformed markers yield no fp signal.
+	// FpProbePath (optional) points at the fp A/B marker measure_fp_ab_probe writes ($STATE_DIR/fp_probe.json
+	// = {verdict, current_fingerprint, target_fingerprint, ...}). When set, the daemon folds it through a
+	// generation gate keyed on the synthetic ref "client-fingerprint" (a fingerprint-specific verdict with a
+	// STABLE (current,target) pair across >= FpMinGenerations distinct generations before it faults).
+	FpProbePath string `json:"fp_probe_path,omitempty"`
+	// FpMaxAgeMS is the freshness window for the fp marker (fail-safe: past it, no fp signal). Required (> 0)
+	// when FpProbePath is set.
+	FpMaxAgeMS int `json:"fp_max_age_ms,omitempty"`
+	// FpMinGenerations is the marker-replay + anti-flap hardening for the fp signal (mirrors
+	// L7MinDeadGenerations). Unset (<= 0) defaults to defaultL7MinDeadGenerations (2).
+	FpMinGenerations int `json:"fp_min_generations,omitempty"`
+	// FpRotateEnabled ARMS the fingerprint plane's PLAN-INPUT emission. It ships DISARMED (false): the daemon
+	// STILL folds the fp marker through its generation gate every tick (shadow, so arming has no cold start),
+	// but writes NO FingerprintPlanInput until an on-node drill validates the A/B + the gated actuation. When
+	// false the fingerprint plane is observe-only — nothing downstream can rotate a preset.
+	FpRotateEnabled bool `json:"fp_rotate_enabled,omitempty"`
+	// FpPlanInputPath is where the assembled FingerprintPlanInput JSON is written (atomically) each tick when
+	// FpRotateEnabled — the file `myceliumctl fingerprint-plan` reads. Unwritten while disarmed.
+	FpPlanInputPath string `json:"fp_plan_input_path,omitempty"`
+	// FpStatePath (optional) is the fingerprint plane's OWN rotate_fp_state.json (its RotationState between
+	// ticks) — SEPARATE from StatePath so the fp rotation budget never contends with the transport budget.
+	FpStatePath string `json:"fp_state_path,omitempty"`
 }
 
 // members converts the config rows to internal/measure.Member descriptors.
@@ -452,6 +477,102 @@ func assembleTick(asm *measure.Assembler, snap []spec.TransportHealth, cfg *meas
 	return assemblePlanInput(asm, snap, cfg.ActiveRef, state, now, l7, pathReset, pathCollapse)
 }
 
+// fpProbeMarker is the node-local fingerprint A/B marker measure_fp_ab_probe writes (RP-0015 increment B).
+// Verdict is one of the closed neutral tokens (fingerprint-specific / transport-wide / clean / cannot-judge);
+// CurrentFingerprint is the preset the probe used; TargetFingerprint is the closed-vocab preset the A/B found
+// ALIVE while the current read DEAD (set only for fingerprint-specific). Absent/stale/malformed -> no fp signal.
+type fpProbeMarker struct {
+	ObservedAt         time.Time `json:"observed_at"`
+	CurrentFingerprint string    `json:"current_fingerprint"`
+	Verdict            string    `json:"verdict"`
+	TargetFingerprint  string    `json:"target_fingerprint"`
+	SuspectRefs        []string  `json:"suspect_refs"`
+}
+
+// readFpMarker reads the fingerprint A/B marker and returns its verdict, current + target presets, the
+// generation stamp, and present. Fail-safe exactly like readL7Marker/readPathMarker: empty path /
+// non-positive maxAge / missing / unreadable / malformed / unstamped / stale all yield ("", "", "", zero,
+// false) — no fp signal (the fp gate then resets, never fabricating a fault).
+func readFpMarker(path string, now time.Time, maxAge time.Duration) (verdict, current, target string, observedAt time.Time, present bool) {
+	if path == "" || maxAge <= 0 {
+		return "", "", "", time.Time{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", "", time.Time{}, false
+	}
+	var m fpProbeMarker
+	if json.Unmarshal(data, &m) != nil {
+		return "", "", "", time.Time{}, false
+	}
+	if m.ObservedAt.IsZero() || now.Sub(m.ObservedAt) > maxAge {
+		return "", "", "", time.Time{}, false
+	}
+	return m.Verdict, m.CurrentFingerprint, m.TargetFingerprint, m.ObservedAt, true
+}
+
+// fpGateRef is the synthetic ref the fingerprint plane folds through the (reused) l7GenerationGate — the
+// client fingerprint is one node-wide scalar, so it is represented as a single ref rather than a member.
+const fpGateRef = "client-fingerprint"
+
+// foldFpGate advances the fingerprint generation gate with one fp-marker read and returns (target, faulted):
+// it faults (names client-fingerprint dead) ONLY when the marker is fresh, the verdict is
+// fingerprint-specific, and the SAME (current, target) pair recurs across >= MinGenerations DISTINCT marker
+// generations. It REUSES l7GenerationGate for the distinct-observed_at replay hardening; the pair-stability
+// is tracked in *lastPair here: a verdict change, a (current,target) change (a rotation happened, or an
+// unstable target pick), or an absent/stale marker all reset the streak (fail-safe). transport-wide / clean /
+// cannot-judge never fault, so the useless "rotate-the-preset-when-the-transport-is-blocked" case cannot
+// reach the planner.
+func foldFpGate(g *l7GenerationGate, lastPair *string, verdict, current, target string, observedAt time.Time, present bool) (string, bool) {
+	faultInput := present && verdict == "fingerprint-specific" && target != "" && current != ""
+	pairKey := ""
+	if faultInput {
+		pairKey = current + "\x00" + target
+	}
+	if pairKey != *lastPair {
+		// The (current,target) pair changed or dropped — the accumulated streak is meaningless; hard-reset
+		// the gate (present=false clears every streak; only fpGateRef is ever tracked here).
+		g.fold(nil, time.Time{}, false)
+	}
+	*lastPair = pairKey
+	var dead []string
+	if faultInput {
+		dead = []string{fpGateRef}
+	}
+	// present drives the gate's own reset: a fresh-but-non-faulting marker (dead empty) resets fpGateRef; an
+	// absent/stale marker (present=false) resets everything. Only a fresh fault with a NEW distinct
+	// observed_at advances the streak. The gate's ref->false convention means MEMBERSHIP (not the value,
+	// which is always false) signals a fault, so test key presence.
+	faulted := g.fold(dead, observedAt, present)
+	if _, ok := faulted[fpGateRef]; faultInput && ok {
+		return target, true
+	}
+	return "", false
+}
+
+// assembleFpTick is the fingerprint plane's per-tick fold, extracted (like assembleTick) so a test can drive
+// the EXACT wiring the daemon runs (readFpMarker -> foldFpGate -> the FingerprintPlanInput) rather than a
+// re-implementation. It ALWAYS folds the gate (shadow-advancing across ticks so arming has no cold start) and
+// marshals the FingerprintPlanInput; the caller (runMeasure) writes it only when armed. The gate + lastPair
+// are the caller's (persisted across ticks). state is the fingerprint plane's OWN RotationState.
+func assembleFpTick(cfg *measureConfig, now time.Time, state spec.RotationState, fpgate *l7GenerationGate, lastPair *string) ([]byte, error) {
+	verdict, current, target, observedAt, present := readFpMarker(cfg.FpProbePath, now, time.Duration(cfg.FpMaxAgeMS)*time.Millisecond)
+	gatedTarget, faulted := foldFpGate(fpgate, lastPair, verdict, current, target, observedAt, present)
+	in := spec.FingerprintPlanInput{
+		Current: current,
+		Target:  gatedTarget,
+		Faulted: faulted,
+		Limits:  cfg.Limits,
+		State:   state,
+		Now:     now,
+	}
+	out, err := json.MarshalIndent(in, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("measure: marshal fingerprint plan input: %w", err)
+	}
+	return out, nil
+}
+
 // filterToMembers keeps only the snapshot entries whose ref is a configured member, returning the
 // kept slice and the count dropped. reach may probe context anchors the node does not rotate among;
 // those are not folded (and measure.Tick would otherwise fail-close on them).
@@ -531,6 +652,11 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 	// The collapse signal (increment 2) rides its own generation gate. Its streak advances every tick (shadow)
 	// so arming has no cold start, but assembleTick only folds its result into a verdict when armed.
 	collapsegate := newL7GenerationGate(effectiveL7MinGenerations(initial.PathCollapseMinGenerations))
+	// RP-0015 increment B: the fingerprint A/B plane's OWN generation gate + the (current,target) pair it
+	// tracks for pair-stability, both persisted across ticks. Like the collapse gate it shadow-advances every
+	// tick so arming has no cold start; the FingerprintPlanInput is WRITTEN only when FpRotateEnabled.
+	fpgate := newL7GenerationGate(effectiveL7MinGenerations(initial.FpMinGenerations))
+	var lastFpPair string
 
 	tick := func() {
 		// Re-read the config for the current active ref / paths; the assembler's members and limits are
@@ -560,6 +686,18 @@ func runMeasure(ctx context.Context, mon *reach.Monitor, cfgPath string, asm *me
 			return
 		}
 		holder.set(out, now)
+
+		// RP-0015 increment B: the fingerprint A/B plane rides in parallel. The gate ALWAYS folds (shadow-
+		// advances) so arming has no cold start; the FingerprintPlanInput is WRITTEN only when armed. A fold
+		// or write failure is logged and never disturbs the transport plane already written above.
+		fpOut, ferr := assembleFpTick(cur, now, loadRotationState(cur.FpStatePath), fpgate, &lastFpPair)
+		if ferr != nil {
+			log.Printf("myceliumd: measure: fingerprint fold failed (no plan input written this tick): %v", ferr)
+		} else if cur.FpRotateEnabled && cur.FpPlanInputPath != "" {
+			if err := atomicWriteFile(cur.FpPlanInputPath, fpOut); err != nil {
+				log.Printf("myceliumd: measure: writing %s failed: %v", cur.FpPlanInputPath, err)
+			}
+		}
 	}
 
 	tick() // assemble once immediately so a PlanInput exists before the first interval elapses

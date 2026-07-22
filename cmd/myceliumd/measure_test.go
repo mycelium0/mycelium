@@ -636,3 +636,150 @@ func TestLoadRotationState(t *testing.T) {
 		t.Errorf("loaded state ImpairedStreak = %d, want 2", st.ImpairedStreak)
 	}
 }
+
+// --- RP-0015 increment B: the fingerprint A/B plane -------------------------------------------------
+
+// TestReadFpMarker: fail-safe on every degenerate marker; a fresh well-formed marker is delivered.
+func TestReadFpMarker(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	maxAge := time.Minute
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	fresh := now.Add(-time.Second).Format(time.RFC3339Nano)
+	stale := now.Add(-2 * time.Minute).Format(time.RFC3339Nano)
+
+	if _, _, _, _, present := readFpMarker("", now, maxAge); present {
+		t.Error("empty path must not be present")
+	}
+	if _, _, _, _, present := readFpMarker(write("missing.json", ``), now, 0); present {
+		t.Error("non-positive maxAge must not be present")
+	}
+	if _, _, _, _, present := readFpMarker(write("bad.json", `{not json`), now, maxAge); present {
+		t.Error("malformed must not be present")
+	}
+	if _, _, _, _, present := readFpMarker(write("unstamped.json", `{"verdict":"fingerprint-specific"}`), now, maxAge); present {
+		t.Error("unstamped must not be present")
+	}
+	if _, _, _, _, present := readFpMarker(write("stale.json", `{"observed_at":"`+stale+`","verdict":"fingerprint-specific","current_fingerprint":"chrome","target_fingerprint":"firefox"}`), now, maxAge); present {
+		t.Error("stale must not be present")
+	}
+	v, c, tg, _, present := readFpMarker(write("fresh.json", `{"observed_at":"`+fresh+`","verdict":"fingerprint-specific","current_fingerprint":"chrome","target_fingerprint":"firefox"}`), now, maxAge)
+	if !present || v != "fingerprint-specific" || c != "chrome" || tg != "firefox" {
+		t.Errorf("fresh marker: present=%v verdict=%q current=%q target=%q", present, v, c, tg)
+	}
+}
+
+// TestFoldFpGate: the pair-stable generation gate faults only on a fingerprint-specific verdict whose
+// (current,target) pair recurs across >= MinGenerations DISTINCT generations; a target/current change, a
+// non-fingerprint-specific verdict, an absent marker, or a same-generation replay all reset the streak.
+func TestFoldFpGate(t *testing.T) {
+	base := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	g1, g2, g3 := base.Add(-3*time.Second), base.Add(-2*time.Second), base.Add(-time.Second)
+
+	// stable pair over 2 distinct generations -> faults on gen 2.
+	g := newL7GenerationGate(2)
+	var pair string
+	if _, f := foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g1, true); f {
+		t.Error("gen1 must not fault (needs 2 generations)")
+	}
+	if tgt, f := foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g2, true); !f || tgt != "firefox" {
+		t.Errorf("gen2 must fault to firefox, got faulted=%v target=%q", f, tgt)
+	}
+
+	// a TARGET change resets the streak.
+	g, pair = newL7GenerationGate(2), ""
+	foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g1, true)
+	if _, f := foldFpGate(g, &pair, "fingerprint-specific", "chrome", "edge", g2, true); f {
+		t.Error("a target change must reset the streak")
+	}
+
+	// a CURRENT change (a rotation happened) resets the streak.
+	g, pair = newL7GenerationGate(2), ""
+	foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g1, true)
+	if _, f := foldFpGate(g, &pair, "fingerprint-specific", "firefox", "edge", g2, true); f {
+		t.Error("a current-preset change must reset the streak")
+	}
+
+	// transport-wide never faults AND resets, so a later stable fault re-accumulates from scratch.
+	g, pair = newL7GenerationGate(2), ""
+	foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g1, true)
+	if _, f := foldFpGate(g, &pair, "transport-wide", "chrome", "", g2, true); f {
+		t.Error("transport-wide must not fault")
+	}
+	if _, f := foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g3, true); f {
+		t.Error("after a reset, the first post-reset generation must not fault")
+	}
+
+	// an absent/stale marker (present=false) resets.
+	g, pair = newL7GenerationGate(2), ""
+	foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g1, true)
+	if _, f := foldFpGate(g, &pair, "", "", "", time.Time{}, false); f {
+		t.Error("an absent marker must not fault")
+	}
+
+	// a same-generation REPLAY does not advance the streak.
+	g, pair = newL7GenerationGate(2), ""
+	foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g1, true)
+	if _, f := foldFpGate(g, &pair, "fingerprint-specific", "chrome", "firefox", g1, true); f {
+		t.Error("replaying the same observed_at must not fault")
+	}
+}
+
+// TestAssembleFpTickRealFold drives fp_probe.json through the REAL daemon fold (readFpMarker -> foldFpGate ->
+// FingerprintPlanInput), not a re-implementation, pinning that a fingerprint-specific verdict faults after
+// >= FpMinGenerations and that a transport-wide verdict resets it.
+func TestAssembleFpTickRealFold(t *testing.T) {
+	dir := t.TempDir()
+	fpPath := filepath.Join(dir, "fp_probe.json")
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	cfg := &measureConfig{FpProbePath: fpPath, FpMaxAgeMS: 60000, FpMinGenerations: 2, Limits: rotate.DefaultRotationLimits()}
+	gate := newL7GenerationGate(2)
+	var pair string
+	writeFp := func(observed time.Time, verdict, cur, tgt string) {
+		body := fmt.Sprintf(`{"observed_at":%q,"current_fingerprint":%q,"verdict":%q,"target_fingerprint":%q,"suspect_refs":["vless-reality-vision"]}`,
+			observed.UTC().Format(time.RFC3339Nano), cur, verdict, tgt)
+		if err := os.WriteFile(fpPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	decode := func(b []byte) spec.FingerprintPlanInput {
+		var in spec.FingerprintPlanInput
+		if err := json.Unmarshal(b, &in); err != nil {
+			t.Fatalf("unmarshal FingerprintPlanInput: %v", err)
+		}
+		return in
+	}
+
+	writeFp(now.Add(-3*time.Second), "fingerprint-specific", "chrome", "firefox")
+	b, err := assembleFpTick(cfg, now, spec.RotationState{}, gate, &pair)
+	if err != nil {
+		t.Fatalf("assembleFpTick gen1: %v", err)
+	}
+	if decode(b).Faulted {
+		t.Error("gen1: must not fault yet")
+	}
+
+	writeFp(now.Add(-2*time.Second), "fingerprint-specific", "chrome", "firefox")
+	b, err = assembleFpTick(cfg, now, spec.RotationState{}, gate, &pair)
+	if err != nil {
+		t.Fatalf("assembleFpTick gen2: %v", err)
+	}
+	if in := decode(b); !in.Faulted || in.Target != "firefox" || in.Current != "chrome" {
+		t.Errorf("gen2: want faulted target=firefox current=chrome, got %+v", in)
+	}
+
+	writeFp(now.Add(-1*time.Second), "transport-wide", "chrome", "")
+	b, err = assembleFpTick(cfg, now, spec.RotationState{}, gate, &pair)
+	if err != nil {
+		t.Fatalf("assembleFpTick gen3: %v", err)
+	}
+	if decode(b).Faulted {
+		t.Error("transport-wide: must reset, not fault")
+	}
+}
