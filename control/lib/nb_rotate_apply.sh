@@ -599,33 +599,45 @@ rotate_apply_fp_live() {
 	if ! validate_config "$candidate"; then
 		fp_rotate_abort_revert "$candidate" "post-persist candidate failed 'sing-box check'"
 	fi
-	# No-op short-circuit: the new preset already renders the live config -> keep overlay + state, no restart
-	# (an always-on PPN must not drop client connections for a no-op).
-	if [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then
-		rm -f "$candidate" 2>/dev/null || true
-		persist_fp_rotation_state "$plan"
-		log "fp-rotation: candidate identical to the live config (preset already effective); no restart. Overlay kept."
-		return 0
+	# Phase C — the client-fingerprint change is CLIENT-FACING: it re-renders the subscription + share-links
+	# (which carry the uTLS preset), NOT the SERVER config (the server inbounds carry no client fingerprint,
+	# so the candidate above is normally byte-identical to the live SINGBOX_CONFIG). So the effect is pushed
+	# by RE-RENDERING THE CLIENT BUNDLE, and the engine is restarted ONLY in the (unexpected) case the server
+	# config actually differs. Then verify: the node's OWN donor-verify + L7 probe now resolve the NEW preset
+	# (via myc_client_fingerprint), so verify_post_apply confirms the node still handshakes on it. Rollback on
+	# failure restores the preset (overlay + params + bundle) and, if we restarted, the last-good config.
+	local restarted=0
+	render_serve_bundle
+	if [ -f "$SINGBOX_CONFIG" ] && ! cmp -s "$candidate" "$SINGBOX_CONFIG"; then
+		promote_config "$candidate"
+		install_singbox_unit
+		restarted=1
+		apply_singbox || {
+			warn "fp-rotation: engine restart failed after a server-config change; rolling back (fail-closed)."
+			rollback_config; revert_fp_overlay
+			( write_params ) || warn "fp-rotation: write_params failed during rollback — operator attention needed."
+			render_serve_bundle; apply_singbox || warn "fp-rotation: could not restart onto the restored config — operator attention needed."
+			record_fp_rotation_rollback "$plan"
+			die "fp-rotation: rolled back (engine restart failed after a server-config change)."
+		}
 	fi
-	# Phase C — PROMOTE with rollback. On verify failure: restore last-known-good config AND revert the
-	# overlay AND regenerate params AND restart onto last-good AND record the rollback, then fail closed.
-	promote_config "$candidate"
 	rm -f "$candidate" 2>/dev/null || true
-	install_singbox_unit
-	if apply_singbox && verify_post_apply; then
+	if verify_post_apply; then
 		persist_fp_rotation_state "$plan"
-		render_serve_bundle
-		log "fp-rotation: LIVE apply verified (client_fingerprint $from -> $to). Between-tick state persisted."
+		log "fp-rotation: LIVE apply verified (client_fingerprint $from -> $to; server restart=$restarted). Client bundle re-rendered; between-tick state persisted."
 		return 0
 	fi
-	warn "fp-rotation: post-apply verification FAILED; rolling back config + overlay (fail-closed)."
-	rollback_config
+	warn "fp-rotation: post-apply verification FAILED (the node does not handshake on the new preset); rolling back preset + overlay (fail-closed)."
 	revert_fp_overlay
 	( write_params ) || warn "fp-rotation: write_params failed during rollback; params.json may still hold the rotated preset — operator attention needed."
-	apply_singbox || warn "fp-rotation: could not restart sing-box onto the restored config — operator attention needed."
+	render_serve_bundle
+	if [ "$restarted" = "1" ]; then
+		rollback_config
+		apply_singbox || warn "fp-rotation: could not restart sing-box onto the restored config — operator attention needed."
+	fi
 	verify_post_apply || warn "fp-rotation: service still unhealthy after rollback — operator attention needed."
 	record_fp_rotation_rollback "$plan"
-	die "fp-rotation: rolled back (fail-closed). Last-known-good config restored; overlay reverted; rollback recorded."
+	die "fp-rotation: rolled back (fail-closed). Original preset restored; client bundle re-rendered; rollback recorded."
 }
 
 # flow_rotate_fingerprint — the --fp-rotate dispatch target. Reads a FingerprintPlan (default
