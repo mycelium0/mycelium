@@ -39,6 +39,26 @@ autonomous self-healing, carrier-agnostic bridging, and biological-flow optimiza
 > nodes) and grows outward through the mesh (4) and cross-Commune federation (5). Old Phases 4–5 shifted
 > down to 3–4; a cross-Commune phase was split out as 5; Phases 6–8 keep their numbers.
 
+> **Re-phasing note (Decision C, 2026-07-22).** Single-node adaptivity is open-ended — each hardening axis
+> (detector fidelity, client fingerprint, handshake delivery, …) invites the next — so pinning the first
+> release to "adaptivity complete" would defer it indefinitely. Decision C therefore **fixes the release
+> bar** and **separates the ongoing hardening from it** (phase numbers are unchanged — this re-homes work
+> into a track, it does not renumber):
+> - **The release bar — fixed, and reached.** The first signed release cuts at Phase 2's adaptivity CORE:
+>   measure→detect→tune→rotate→rollback, end-to-end client recovery
+>   ([RP-0013](proposals/0013-phase3-e2e-client-recovery.md)), detector hardening
+>   ([RP-0014](proposals/0014-phase2-detector-hardening.md)), the client-fingerprint knob + gated rotation
+>   ([RP-0015](proposals/0015-fingerprint-adaptivity.md), live-validated on a node), and the proven
+>   from-zero deploy path — **plus the release MECHANISM** (reproducible signed artifacts + verify, a
+>   QUICKSTART). This is the closing milestone of Phase 2 (Decision B, unchanged); Decision C only declares
+>   the bar reached, so cutting the release is now a mechanism step, not a "one more RP" wait.
+> - **Client-side hardening — a named POST-RELEASE track.** Further single-node deepening of the
+>   client→node handshake — transport-delivery fragmentation
+>   ([RP-0016](proposals/0016-transport-delivery-hardening.md)), fragmentation-adaptivity, and future
+>   ClientHello axes — is an explicit ONGOING track that runs AFTER the release, in parallel with the
+>   federation phases (3+). It does **not** gate the first release and does **not** gate Phase 3. It is a
+>   cross-cutting track (below), not a numbered phase.
+
 Timelines are relative (team of 1–3). These are directions, not deadlines.
 
 ---
@@ -560,6 +580,7 @@ real, self-healing access; Phase 8 makes it more efficient, it is not a precondi
 | **Security and anonymity** | De-anonymisation threats, traffic-correlation attacks, node compromise; what a node knows about users | Baked into the protocol from the start — cannot be bolted on later |
 | **Measurement** | OONI-style measurements of "what is blocked where and how", replacing guesswork with ground truth. Its public, privacy-preserving surface is the **network-weather explorer** ([vision/0005](vision/0005-network-weather-explorer.md)): opt-in `fungi` nodes emit redacted aggregated digests; the explorer shows fabric health, never a map | Feeds the adaptation layer; without data, adaptation is blind |
 | **Advisory network awareness** (operator-local) | The bridge between Phase-2 self-healing and Phase-3 coordination: several self-healing nodes share **signed, class-aggregate, TTL-bound** advisory weather (per-**class** transport health, bundle freshness, degraded coarse buckets) through an operator-local fungi-lite publisher + `cell-pack` (`aggregate --sign --ttl`). **Federation, not coordination** — no map, no coordinator, no per-node row, no transmitted node id, advisory-never-actuates. Decision + the 10 proof gates in [ADR-0030](adr/0030-advisory-network-awareness.md) | Without it the Phase-2 → Phase-3 jump is a cliff (each node heals itself → a per-Commune coordinator, with no rung between). This rides Phase-2 self-healing, gives the inert weather/immunity `internal/spec` schemas their first caller behind proof gates, and tests the future fungi/explorer model **before any mesh exists**. The advisory shape must be class-aggregate by construction — the per-node-digest design reconstructs the network map (rejected, ADR-0030) |
+| **Client-side hardening** (post-release, single-node) | Ongoing deepening of the client→node handshake's resilience to on-path network interference: the client uTLS fingerprint (its *content*) + gated rotation ([RP-0015](proposals/0015-fingerprint-adaptivity.md)), transport-delivery fragmentation (its *delivery*, [RP-0016](proposals/0016-transport-delivery-hardening.md)), and future ClientHello axes — all engine-native, closed-vocabulary, additive, off by default. Never a bespoke desync tool (ADR-0002/0031): flip an engine flag, be a real client rather than craft a fake handshake | Adaptivity is open-ended — each axis invites the next — so this track lets the first release cut at a **fixed** bar (Decision C) while the hardening continues *afterward*, in parallel with the federation phases, gating neither the release nor Phase 3 |
 | **Legal and operational security** | Distribution/operation of persistent private network tools is subject to legal pressure in some jurisdictions; exit-node liability; operator and user protection | A legal error is irreversible; detailed legal and compliance analysis is maintained in the maintainers' internal knowledge base |
 | **Governance and funding** | Who pays for nodes, how decisions are made, how mesh segments federate | Determines whether the project reaches phases 5–6 |
 

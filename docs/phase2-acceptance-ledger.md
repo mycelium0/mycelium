@@ -20,6 +20,16 @@ the **closing first-release milestone of Phase 2** (single-node concerns; see RO
 the advisory/fungi boundary is built here as an **inert seam** that **goes live in Phase 3 (live
 intra-Commune hypha)** — none of these are adaptivity-core acceptance criteria.
 
+> **Decision C (2026-07-22) — the first-release bar is reached.** The adaptivity CORE (this ledger, GO'd
+> 2026-07-03) + end-to-end client recovery ([RP-0013](proposals/0013-phase3-e2e-client-recovery.md)) +
+> detector hardening ([RP-0014](proposals/0014-phase2-detector-hardening.md)) + the client-fingerprint knob
+> and gated rotation ([RP-0015](proposals/0015-fingerprint-adaptivity.md), live-drill-validated on a node)
+> together constitute the **fixed first-release bar**. What remains to cut the release is the release
+> MECHANISM (reproducible signed artifacts + verify, a QUICKSTART) — an operator decision, not another
+> adaptivity RP. Further single-node client→node hardening (transport-delivery fragmentation
+> [RP-0016](proposals/0016-transport-delivery-hardening.md) + future axes) is the **post-release
+> client-side-hardening track** (ROADMAP Decision C); it gates neither the release nor Phase 3.
+
 > **Current verdict: GO — Phase-2 single-node-adaptivity core ACCEPTED 2026-07-03** (operator sign-off
 > recorded below). On a live node the node-local self-drive loop closed autonomously: an induced
 > degradation was detected, the impaired-verdict streak persisted to the flip threshold under the

@@ -30,6 +30,7 @@ Crucially, this is **already a first-class, client-side, engine-native option** 
 3. **Switch CONSISTENTLY.** The value the served subscription renders and the value a share-link/aggregate carries (where the engine reads it) MUST agree — the same single-source discipline RP-0015 enforces for the fingerprint (gate-pinned).
 4. **Necessary, not sufficient.** Fragmentation sharpens ONE axis of ONE path (the client→node TLS delivery). The ≥2-independent-transport-families invariant (RP-0013) and the framed/genuine-TLS families remain the real backstop; this does not replace them.
 5. **Client→node only.** This is the CLIENT's outbound TLS handshake to the node. The node's own REALITY steal / donor handshake (the borrowed cover SNI/cert) is unchanged — server-side shaping is out of scope.
+6. **Fragment a GENUINE handshake — never craft a fake one.** We split the *real* client ClientHello across records/segments so a naive on-path SNI/pattern match no longer lines up. We do **not** inject decoy packets, overlap the stream with a captured foreign ClientHello, or otherwise make a *fake* handshake "look genuine" — those techniques (a) require raw, privileged egress interception (kernel NFQUEUE / WinDivert) that a routed client→node tunnel does not have, and (b) target a *direct* connection to a blocked host, which is not our shape. The "make the reassembled bytes look like a real client" goal is met on our side the honest way: genuine-TLS families ([RP-0014](0014-phase2-detector-hardening.md)) + real, current uTLS fingerprints ([RP-0015](0015-fingerprint-adaptivity.md)). Be a real client; do not desync a fake one.
 
 ## Increment A — the knob (engine-native, closed-vocab, operator-settable, consistent)
 
@@ -52,10 +53,13 @@ Crucially, this is **already a first-class, client-side, engine-native option** 
 
 ## Increment B — adaptivity (deferred, design-panel-worthy)
 
+**Why rotation, not a fixed setting.** A *fixed* fragmentation shape is itself fingerprintable — the same lesson RP-0015 learned for the ClientHello (an on-path element can learn "the traffic that always splits at position N is the tool"). The prior art ships dozens of retuned split variants precisely because any single one eventually gets matched. So the mode set is a closed vocabulary meant to be *rotated* through the measure→detect→rotate loop, exactly like the fingerprint — never one hard-coded value.
+
 **What (sketch).** Enable (or step through) fragmentation when a **delivery-layer** client→node filter is indicated. The hard part is the SIGNAL: a client-access-vantage filter is, by construction, the residual the RP-0015 node-vantage A/B cannot positively observe — so increment B likely needs either an operator trigger, a client-reported signal, or a distinct node-side heuristic, resolved in a follow-on design pass (like RP-0014 chunk B and RP-0015 increment B). It reuses the RP-0012 gated render→validate→promote→verify→rollback path and the RP-0015 render-threading; it is node-local, closed-set, advisory-then-gated, and ships disarmed. **Explicitly deferred** — increment A (the knob) stands alone and is useful as an operator toggle from day one.
 
 ## Out of scope (named)
 - **Bespoke packet manipulation / raw-socket desync / kernel interception** — excluded by design (principle 1), not deferred. Mycelium flips an engine flag; it does not become a packet-manipulation tool.
+- **Stream-overlap desync + fake/decoy injection** (the "overlap the handshake with a captured foreign ClientHello, inject a fake decoy" family) — the deliberate capability boundary (principle 6). It needs privileged raw egress a routed tunnel does not have and targets a *direct* connection to a blocked host; its intent (reassembled bytes that look genuine) is served on our side by genuine-TLS + real uTLS fingerprints, honestly.
 - **A `random`/`custom` fragmentation value** — not a vocabulary member (principle 1).
 - **Server-side / inbound shaping** — this RP is the CLIENT's outbound TLS to the node; the node's REALITY steal / donor handshake is unchanged.
 - **The fingerprint axis** — RP-0015 owns the *content* of the ClientHello; this owns its *delivery*.
