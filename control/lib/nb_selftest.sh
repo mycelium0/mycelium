@@ -270,6 +270,93 @@ PROBE_EOF
 	return 0
 }
 
+# measure_fp_ab_probe [MARKER] [L7_MARKER] — RP-0015 increment B (producer, ADVISORY, INERT). Decides
+# whether a client-DEAD verdict on a fingerprint-CARRYING member is caused by the CURRENT uTLS preset or by
+# the transport underneath it, via a SAME-LISTENER A/B. It consumes the L7 marker's dead[] list (the
+# current-preset verdict, already retry-debounced) and, for the FIRST dead fingerprint-carrying member (a
+# REALITY family via donor_verify_reality, or ShadowTLS via _l7_probe_shadowtls_dial — genuine-TLS is
+# openssl/no-uTLS and QUIC is insecure, so both are fingerprint-BLIND and excluded), re-dials the IDENTICAL
+# dest/cover/port/engine/auth, changing ONLY the uTLS preset, walking the closed vocabulary
+# (control/vocab.json .client_fingerprints, current excluded, canonical order), 3-attempt retry-debounce per
+# arm, STOPPING at the first preset that reads ALIVE. Because everything but the ClientHello preset is held
+# constant, any transport-wide cause (a filter that also takes ws-tls, a raw-TCP block, a broken dest, an
+# expired cert, a black-holed port) affects every arm identically and cancels — only a preset-keyed filter
+# yields a DEAD/ALIVE asymmetry. Writes ONLY its OWN advisory marker ($STATE_DIR/fp_probe.json) with NEUTRAL
+# verdict tokens; it NEVER rotates and is NOT folded into the transport L7 marker. INERT until the daemon
+# fold consumes it (RP-0015 B2/B3).
+#   verdict: fingerprint-specific  current DEAD + an alternate ALIVE (target = first-alive)
+#            transport-wide        current DEAD + ALL alternates DEAD (defer to the >=2-family backstop)
+#            clean                 no fingerprint-carrying member is DEAD
+#            cannot-judge          the L7 marker is absent/unreadable (a transient — never a signal)
+measure_fp_ab_probe() {
+	have openssl && have jq || return 0
+	[ -f "$SINGBOX_CONFIG" ] || return 0
+	local marker l7marker ts cur verdict target suspect
+	marker="${1:-$STATE_DIR/fp_probe.json}"
+	l7marker="${2:-$STATE_DIR/l7_selftest.json}"
+	ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	cur="$(myc_client_fingerprint "$(jq -c . "${PARAMS_JSON:-}" 2>/dev/null || printf '{}')")"
+	verdict="clean"; target=""; suspect=""
+
+	if [ ! -f "$l7marker" ] || ! jq -e '.dead' "$l7marker" >/dev/null 2>&1; then
+		# The current-preset verdict source is missing/unreadable -> a transient; emit no actionable signal.
+		verdict="cannot-judge"
+	else
+		local dead rows suspect_ref suspect_dest suspect_tag suspect_port suspect_reality r row
+		dead="$(jq -r '.dead[]?' "$l7marker" 2>/dev/null || true)"
+		# fingerprint-CARRYING members only (REALITY families + ShadowTLS), keyed by ref (tag minus "-in"),
+		# extracted from the live served config exactly as measure_l7_probe does.
+		rows="$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-reality-xhttp-in" or .type=="shadowtls")
+			| {ref:(.tag|sub("-in$";"")), tag, type:.type, port:.listen_port,
+			   reality:((.tls.reality.enabled)//false),
+			   dest:(.tls.reality.handshake.server // .tls.server_name // "")}' "$SINGBOX_CONFIG" 2>/dev/null || true)"
+		suspect_ref=""; suspect_dest=""; suspect_tag=""; suspect_port=""; suspect_reality=""
+		for r in $dead; do
+			row="$(printf '%s\n' "$rows" | jq -c --arg r "$r" 'select(.ref==$r)' 2>/dev/null | head -n1 || true)"
+			[ -n "$row" ] || continue
+			suspect_ref="$r"
+			suspect_dest="$(printf '%s' "$row" | jq -r '.dest // ""' 2>/dev/null || true)"
+			suspect_tag="$(printf '%s' "$row" | jq -r '.tag // ""' 2>/dev/null || true)"
+			suspect_port="$(printf '%s' "$row" | jq -r '.port // ""' 2>/dev/null || true)"
+			suspect_reality="$(printf '%s' "$row" | jq -r '.reality' 2>/dev/null || true)"
+			break
+		done
+		if [ -n "$suspect_ref" ]; then
+			suspect="\"$suspect_ref\""
+			# The A/B: walk the closed vocab (current excluded, canonical order), SAME listener, alt preset
+			# only, 3-attempt retry-debounce per arm, STOP at first ALIVE. Provisional verdict transport-wide,
+			# overwritten to fingerprint-specific iff an alternate revives the same member.
+			local vocab alts alt arc a
+			vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+			alts="$(jq -r --arg cur "$cur" '.client_fingerprints[]? | select(. != $cur)' "$vocab" 2>/dev/null || true)"
+			verdict="transport-wide"
+			for alt in $alts; do
+				arc=1
+				for a in 1 2 3; do
+					arc=0
+					if [ "$suspect_reality" = "true" ]; then
+						donor_verify_reality "$suspect_dest" "$alt" || arc=$?
+					else
+						_l7_probe_shadowtls_dial "$suspect_tag" "$suspect_port" "$alt" || arc=$?
+					fi
+					[ "$arc" -eq 0 ] && break   # ALIVE under this alternate preset
+					[ "$arc" -eq 2 ] && break   # cannot-judge this arm -> not a target, stop retrying
+					sleep 1                      # rc 1 (DEAD) -> retry-debounce
+				done
+				if [ "$arc" -eq 0 ]; then target="$alt"; verdict="fingerprint-specific"; break; fi
+			done
+		fi
+	fi
+
+	printf '{"observed_at":"%s","current_fingerprint":"%s","verdict":"%s","target_fingerprint":"%s","suspect_refs":[%s]}\n' \
+		"$ts" "$cur" "$verdict" "$target" "$suspect" >"$marker.tmp" 2>/dev/null \
+		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+	if [ "$verdict" = "fingerprint-specific" ]; then
+		warn "fp A/B: the current uTLS preset reads client-DEAD on '${suspect//\"/}' but preset '$target' reads ALIVE on the same listener -> fingerprint-specific (advisory; no rotation unless armed)."
+	fi
+	return 0
+}
+
 # measure_l7_probe_amneziawg — node-local L7 liveness for the AmneziaWG (obfuscated-WireGuard) UDP
 # data-plane, which measure_l7_probe cannot see: AmneziaWG is served by a SEPARATE engine (amneziawg-go on
 # awg0), never appears in $SINGBOX_CONFIG, and its UDP listener defeats the L4 reach probe (a TCP connect to

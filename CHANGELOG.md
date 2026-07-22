@@ -13,6 +13,21 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Added
+- **Fingerprint-adaptivity — the A/B discriminator producer (RP-0015 increment B, B1; inert).** `measure_fp_ab_probe`
+  (`control/lib/nb_selftest.sh`) resolves whether a client-DEAD verdict on a fingerprint-carrying member
+  (a REALITY family, or ShadowTLS) is caused by the CURRENT uTLS preset or by the transport underneath it,
+  via a same-listener A/B: it consumes the L7 marker's dead list and, for the first dead fingerprint-carrying
+  member, re-dials the IDENTICAL dest/cover/port/engine/auth changing ONLY the preset, walking the closed
+  vocab (current excluded, canonical order) and stopping at the first ALIVE. Verdicts (neutral tokens, own
+  advisory marker `fp_probe.json`): `fingerprint-specific` (current dead + an alternate alive → target =
+  first-alive), `transport-wide` (all alternates dead → defer to the ≥2-family backstop), `clean`,
+  `cannot-judge`. Holding everything but the ClientHello preset constant means only a preset-keyed filter can
+  produce the DEAD/ALIVE asymmetry — so the useless "rotate the fingerprint when the transport is blocked"
+  case reads `transport-wide` and emits no signal. INERT: it never rotates and is not folded into the
+  transport L7 marker (the daemon fold + gated actuation are B2/B3). Pinned by the `fp_ab_probe_producer`
+  conformance gate (the four-verdict table + walk-to-first-alive + the closed-set/no-randomiser/own-marker/
+  inert invariants). A `fp-probe` node subcommand invokes it. Mechanism resolved via a design panel (proposal
+  updated).
 - **Fingerprint-adaptivity — the operator knob (RP-0015 increment A).** The client uTLS ClientHello preset
   ("fingerprint"), previously the literal `chrome` hardcoded in a dozen render/verify/probe sites with no
   single source, is now a single-sourced, closed-vocabulary, operator-settable parameter (`client_fingerprint`,

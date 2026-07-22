@@ -825,6 +825,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		l7-probe-awg)      measure_l7_probe_amneziawg ;;
 		l7-probe-xhttp)    measure_l7_probe_xhttp ;;
 		pathsig-probe)     measure_pathsig_probe ;;
+		fp-probe)          measure_fp_ab_probe ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
 fi
