@@ -551,6 +551,126 @@ _awg_apply_dialect() {
 
 regen_awg_dialect() { _awg_apply_dialect "$(_awg_read_epoch)" "awg-regen"; }
 
+# issue_awg_client NAME — issue (or RE-issue) a ready-to-import AmneziaWG CLIENT config on a LIVE node.
+# This is the server doing its job: the node mints the client's keypair + PSK, enrols it as a [Peer] in the
+# live awg0.conf, and renders a COMPLETE client .conf at the node's CURRENT dialect (epoch-aware) — so an
+# operator never hand-edits a client file, and a dialect regen/rotation is followed by simply re-issuing.
+#
+# Idempotent: an existing NAME reuses its stored keypair/PSK + its already-assigned tunnel address and only
+# RE-RENDERS the .conf (the usual path after --awg-regen/--awg-rotate). A new NAME gets the next free
+# address in .2–.239 (.240–.254 stays reserved for the L7 probe, matching render_awg0's fail-closed rule).
+#
+# Selective Growth (VIS-0009/ADR-0027) is honoured exactly as in render_awg0: the client carries only
+# impaired-path traffic by default; a deliberate full tunnel needs AWG_FULL_TUNNEL_OPTOUT=1, and a
+# region-exclude set comes from AWG_REGION_EXCLUDE_FILE. We never silently full-tunnel.
+issue_awg_client() {
+	local name="$1"
+	need_root
+	[ -n "$name" ] || die "awg-issue: a client NAME is required (--awg-issue NAME)."
+	case "$name" in *[!A-Za-z0-9._-]*) die "awg-issue: client NAME '$name' has characters outside [A-Za-z0-9._-]." ;; esac
+	have awg || die "awg-issue: the awg tools are missing — bootstrap the node first."
+	local awg_conf="/etc/amnezia/amneziawg/awg0.conf" awg_state="$STATE_DIR/awg"
+	[ -f "$awg_conf" ] || die "awg-issue: no live awg0.conf at $awg_conf (bootstrap the node first)."
+
+	# The node's own dialect at its CURRENT epoch, from the key in the live config (see _awg_apply_dialect).
+	local srv_key srv_pub port node_addr has_v6 epoch
+	srv_key="$(grep -E '^PrivateKey = ' "$awg_conf" | head -1 | sed -E 's/^PrivateKey = //; s/[[:space:]]*$//')"
+	[ -n "$srv_key" ] || die "awg-issue: could not read the server PrivateKey from $awg_conf."
+	epoch="$(_awg_read_epoch)"
+	derive_awg_dialect "$srv_key" "$epoch"
+	# here-string, never a pipe: a pipeline into awg can SIGPIPE under set -o pipefail (RP-0014 lesson).
+	srv_pub="$(awg pubkey <<<"$srv_key")" || die "awg-issue: could not derive the server public key."
+	port="$(grep -E '^ListenPort = ' "$awg_conf" | head -1 | sed -E 's/^ListenPort = //; s/[[:space:]]*$//')"
+	[ -n "$port" ] || port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || echo 51820)"
+	node_addr="$(resolve_node_address 2>/dev/null || printf '%s' "$NODE_ADDRESS_PLACEHOLDER")"
+	has_v6=0; grep -qE '^Address = .*,' "$awg_conf" && has_v6=1
+
+	local clients_dir="$awg_state/clients"
+	install -d -m 0700 "$clients_dir" || die "awg-issue: could not create $clients_dir."
+
+	# Keys: reuse this client's stored material when present (re-issue), else mint it once.
+	local cpriv cpub cpsk reissue=0
+	[ -f "$clients_dir/$name.private" ] && reissue=1
+	[ -f "$clients_dir/$name.private" ] || ( umask 077; awg genkey >"$clients_dir/$name.private" )
+	cpriv="$(cat "$clients_dir/$name.private")"
+	cpub="$(awg pubkey <<<"$cpriv")" || die "awg-issue: could not derive the client public key."
+	[ -f "$clients_dir/$name.psk" ] || ( umask 077; awg genpsk >"$clients_dir/$name.psk" )
+	cpsk="$(cat "$clients_dir/$name.psk")"
+
+	# Address: keep this client's existing one (matched by its public key), else take the next free slot.
+	local n existing
+	existing="$(awk -v pub="$cpub" '
+		/^\[Peer\]/{p=""; a=""}
+		/^PublicKey = /{p=$3}
+		/^AllowedIPs = /{a=$3; if (p==pub) {print a; exit}}' "$awg_conf" 2>/dev/null | head -1)"
+	if [ -n "$existing" ]; then
+		n="$(printf '%s' "$existing" | sed -E 's#^[0-9]+\.[0-9]+\.[0-9]+\.([0-9]+)/.*#\1#')"
+	else
+		n=2
+		while grep -qE "^AllowedIPs = ${AWG_PEER_BASE_V4//./\\.}\.$n/32" "$awg_conf"; do n=$(( n + 1 )); done
+	fi
+	[ "$n" -lt 240 ] || die "awg-issue: no free client address (.2–.239 exhausted; .240–.254 is reserved for the L7 probe)."
+
+	local cv6="" client_dns="1.1.1.1"
+	if [ "$has_v6" -eq 1 ]; then cv6=", ${AWG_PEER_BASE_V6}${n}/128"; client_dns="1.1.1.1, 2606:4700:4700::1111"; fi
+
+	# Selective Growth: the same policy render_awg0 applies — never a silent full tunnel.
+	local client_allowed
+	compute_client_allowed "$has_v6" || die "awg-issue: client AllowedIPs unresolved — set AWG_FULL_TUNNEL_OPTOUT=1 to deliberately full-tunnel, or supply AWG_REGION_EXCLUDE_FILE."
+	client_allowed="$(sg_allowed_join)"
+
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "[dry-run] awg-issue would $( [ "$reissue" -eq 1 ] && printf 're-issue' || printf 'issue' ) client '$name' at ${AWG_PEER_BASE_V4}.$n (dialect epoch $epoch) -> $clients_dir/$name.conf"
+		[ -n "$existing" ] || log "[dry-run]   and enrol a new [Peer] in $awg_conf"
+		return 0
+	fi
+
+	# Enrol the peer when it is not already in the live config (re-issue leaves the server config untouched).
+	if [ -z "$existing" ]; then
+		cp -a "$awg_conf" "$awg_conf.awg-issue.bak" 2>/dev/null || true
+		{
+			printf '\n[Peer]\n# name = %s\n' "$name"
+			printf 'PublicKey = %s\n' "$cpub"
+			printf 'PresharedKey = %s\n' "$cpsk"
+			printf 'AllowedIPs = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
+		} >> "$awg_conf" || die "awg-issue: could not append the [Peer] to $awg_conf."
+		log "awg-issue: enrolled '$name' as a new peer at ${AWG_PEER_BASE_V4}.$n"
+	else
+		log "awg-issue: '$name' is already a peer at ${AWG_PEER_BASE_V4}.$n — re-rendering its config only."
+	fi
+
+	# Render the COMPLETE client config at the node's current dialect.
+	( umask 077; {
+		printf '[Interface]\n'
+		printf 'PrivateKey = %s\n' "$cpriv"
+		printf 'Address = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
+		printf 'DNS = %s\n' "$client_dns"
+		printf 'MTU = %s\n' "$AWG_MTU"
+		printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
+		printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
+		printf '\n[Peer]\n'
+		printf 'PublicKey = %s\n' "$srv_pub"
+		printf 'PresharedKey = %s\n' "$cpsk"
+		printf 'Endpoint = %s:%s\n' "$node_addr" "$port"
+		[ -n "$SG_MARKER" ] && printf '%s\n' "$SG_MARKER"
+		printf 'AllowedIPs = %s\n' "$client_allowed"
+		printf 'PersistentKeepalive = 25\n'
+	} > "$clients_dir/$name.conf" ) || die "awg-issue: could not write $clients_dir/$name.conf."
+	chmod 0600 "$clients_dir/$name.conf"
+
+	# Apply the peer change to the running interface, then L7-verify the data-plane.
+	if [ -z "$existing" ]; then
+		systemctl restart awg-quick@awg0 2>/dev/null || warn "awg-issue: could not restart awg-quick@awg0 — the peer is in the config but may not be live yet."
+	fi
+	if command -v measure_l7_probe_amneziawg >/dev/null 2>&1; then
+		measure_l7_probe_amneziawg "$STATE_DIR/l7_awg_issue.json" \
+			&& log "awg-issue: L7 selftest OK — the data-plane completes handshakes." \
+			|| warn "awg-issue: the L7 selftest flagged the data-plane DEAD — inspect 'journalctl -u awg-quick@awg0'."
+	fi
+	log "awg-issue: client '$name' ready (dialect epoch $epoch): $clients_dir/$name.conf"
+	log "awg-issue: hand it over out-of-band; it is a complete ready-to-import config (0600, node-local)."
+}
+
 # rotate_awg_dialect — ROTATE this node's AmneziaWG dialect to a FRESH one: bump the rotation epoch and
 # re-derive, so the node moves to a completely different H1..H4 + jitter WITHOUT touching any key or peer.
 # Unlike --awg-regen (idempotent: it re-derives the CURRENT epoch, used to migrate a node onto its per-node
