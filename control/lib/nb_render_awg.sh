@@ -391,3 +391,106 @@ setup_amneziawg() {
 		die "awg-quick@awg0 is not active — the AmneziaWG/UDP second family failed to come up. Inspect 'journalctl -u awg-quick@awg0' (is amneziawg-go on PATH and the unit forcing WG_QUICK_USERSPACE_IMPLEMENTATION?). Fix and re-run, or --no-amneziawg to opt out."
 	fi
 }
+
+# _awg_dialect_lines FILE — count the [Interface] obfuscation lines (Jc/Jmin/Jmax/S1/S2/H1..H4) present in
+# FILE. A standard rendered awg config carries exactly 9. Pure read.
+_awg_dialect_lines() { grep -cE '^(Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4) = ' "$1" 2>/dev/null || printf '0'; }
+
+# _awg_swap_dialect FILE — rewrite ONLY the 9 [Interface] obfuscation lines of FILE to the derived AWG_*
+# values, leaving every [Peer], key, address and route untouched. Verifies the 9 lines exist BEFORE (a
+# non-standard/hand-tuned config is refused, not mangled) and that the rewrite kept exactly 9. Writes in
+# place via a temp file so FILE keeps its owner + 0600 mode. Fail-closed.
+_awg_swap_dialect() {
+	local f="$1" tmp n
+	n="$(_awg_dialect_lines "$f")"
+	[ "$n" -eq 9 ] || die "awg-regen: $f is not a standard rendered config (expected 9 dialect lines, found $n) — refusing to edit it. Regenerate this node manually."
+	tmp="$(mktemp)" || die "awg-regen: mktemp failed."
+	sed -E \
+		-e "s/^Jc = .*/Jc = $AWG_JC/" \
+		-e "s/^Jmin = .*/Jmin = $AWG_JMIN/" \
+		-e "s/^Jmax = .*/Jmax = $AWG_JMAX/" \
+		-e "s/^S1 = .*/S1 = $AWG_S1/" \
+		-e "s/^S2 = .*/S2 = $AWG_S2/" \
+		-e "s/^H1 = .*/H1 = $AWG_H1/" \
+		-e "s/^H2 = .*/H2 = $AWG_H2/" \
+		-e "s/^H3 = .*/H3 = $AWG_H3/" \
+		-e "s/^H4 = .*/H4 = $AWG_H4/" \
+		"$f" > "$tmp" || { rm -f "$tmp"; die "awg-regen: sed rewrite of $f failed."; }
+	n="$(_awg_dialect_lines "$tmp")"
+	[ "$n" -eq 9 ] || { rm -f "$tmp"; die "awg-regen: post-swap sanity failed for $f (found $n dialect lines, want 9) — NOT applied."; }
+	# Truncate-and-write to preserve FILE's inode metadata (owner + 0600); never mv (would reset perms).
+	cat "$tmp" > "$f" || { rm -f "$tmp"; die "awg-regen: could not write $f."; }
+	rm -f "$tmp"
+}
+
+# regen_awg_dialect — Audit-0008 S1-4 MIGRATION: swap a LIVE node's AmneziaWG obfuscation dialect from the
+# old committed network-wide constant to this node's PER-NODE derived dialect (derive_awg_dialect), in
+# place, on the live awg0.conf + every rendered client config. SURGICAL: it rewrites ONLY the 9 [Interface]
+# obfuscation lines — every server/client keypair, PSK, tunnel address, AllowedIPs and [Peer] is preserved,
+# so no client identity changes; each client only needs to re-import its refreshed .conf (same keys, new
+# dialect). Backup-first + restore-on-failure (reversible). This is the deliberate manual action the
+# renderer's never-clobber design defers to (setup_amneziawg leaves a live awg0.conf untouched). Root-only.
+#
+# NOTE the migration window: once the SERVER is restarted onto the new dialect, already-deployed clients
+# (still on the old dialect) cannot handshake until they import the refreshed client .conf — hand them out
+# out-of-band (the paths are logged). Do it one node at a time.
+regen_awg_dialect() {
+	need_root
+	[ "$DO_AMNEZIAWG" -eq 1 ] || die "awg-regen: AmneziaWG is disabled on this node (--no-amneziawg); nothing to regenerate."
+	have awg && have awg-quick || die "awg-regen: AmneziaWG tools missing — bootstrap the node first."
+	local awg_conf="/etc/amnezia/amneziawg/awg0.conf" awg_state="$STATE_DIR/awg"
+	[ -f "$awg_conf" ] || die "awg-regen: no live awg0.conf at $awg_conf — this node has no AmneziaWG to migrate (bootstrap it first)."
+	[ -f "$awg_state/private.key" ] || die "awg-regen: no AmneziaWG node key at $awg_state/private.key — cannot derive a dialect."
+
+	# Derive THIS node's dialect from its own key (sets AWG_H1..AWG_H4 + AWG_JC/AWG_JMIN/AWG_JMAX/AWG_S1/AWG_S2).
+	derive_awg_dialect "$(cat "$awg_state/private.key")"
+	log "awg-regen: derived per-node dialect H1=$AWG_H1 H2=$AWG_H2 H3=$AWG_H3 H4=$AWG_H4 Jc=$AWG_JC Jmin=$AWG_JMIN Jmax=$AWG_JMAX S1=$AWG_S1 S2=$AWG_S2"
+
+	# Enumerate the client configs to refresh alongside the server config.
+	local clients_dir="$awg_state/clients" cfgs=("$awg_conf") c
+	if [ -d "$clients_dir" ]; then
+		for c in "$clients_dir"/*.conf; do [ -f "$c" ] && cfgs+=("$c"); done
+	fi
+
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "[dry-run] awg-regen would back up + swap the dialect in ${#cfgs[@]} file(s):"
+		for c in "${cfgs[@]}"; do log "[dry-run]   $c (dialect lines: $(_awg_dialect_lines "$c"))"; done
+		log "[dry-run] then: systemctl restart awg-quick@awg0 + L7 verify. No changes made."
+		return 0
+	fi
+
+	# Backup the live server + client configs (reversible).
+	local stamp bak
+	stamp="$(date +%Y%m%d-%H%M%S)"
+	bak="$awg_state/backup-$stamp"
+	install -d -m 0700 "$bak" || die "awg-regen: could not create backup dir $bak."
+	cp -a "$awg_conf" "$bak/awg0.conf" || die "awg-regen: could not back up $awg_conf."
+	[ -d "$clients_dir" ] && cp -a "$clients_dir" "$bak/clients"
+	log "awg-regen: backed up the live awg0.conf + client configs to $bak"
+
+	# Swap the dialect in every config (server first). Each swap is fail-closed on a non-standard file.
+	for c in "${cfgs[@]}"; do _awg_swap_dialect "$c"; done
+	log "awg-regen: swapped the dialect in ${#cfgs[@]} config(s) (peers/keys/addresses untouched)."
+
+	# Apply: restart the interface onto the new dialect. Restore the backup on any bring-up failure.
+	if ! systemctl restart awg-quick@awg0 || ! systemctl is-active --quiet awg-quick@awg0; then
+		warn "awg-regen: awg-quick@awg0 did not come up on the new dialect — RESTORING the previous config from $bak."
+		cp -a "$bak/awg0.conf" "$awg_conf" 2>/dev/null || true
+		systemctl restart awg-quick@awg0 2>/dev/null || true
+		die "awg-regen: FAILED to bring up the new dialect; restored the previous awg0.conf from $bak. Inspect 'journalctl -u awg-quick@awg0'."
+	fi
+	log "awg-regen: awg-quick@awg0 is up on the new per-node dialect."
+
+	# Advisory L7 verify (a real loopback WG handshake against awg0 with the new dialect). Advisory: bring-up
+	# already succeeded, and the probe is self-cleaning — a DEAD result points the operator at the backup.
+	if command -v measure_l7_probe_amneziawg >/dev/null 2>&1; then
+		if measure_l7_probe_amneziawg "$STATE_DIR/l7_awg_regen.json"; then
+			log "awg-regen: L7 AmneziaWG probe OK — the data-plane processes handshakes on the new dialect."
+		else
+			warn "awg-regen: L7 AmneziaWG probe flagged DEAD on the new dialect. If clients cannot connect, restore: cp $bak/awg0.conf $awg_conf && systemctl restart awg-quick@awg0"
+		fi
+	fi
+
+	log "awg-regen: DONE. Hand out the refreshed client configs out-of-band (same keys, new dialect): $clients_dir/*.conf"
+	log "awg-regen: backup kept at $bak (restore with: cp $bak/awg0.conf $awg_conf && systemctl restart awg-quick@awg0)"
+}

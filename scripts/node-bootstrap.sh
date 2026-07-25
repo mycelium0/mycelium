@@ -51,6 +51,12 @@
 #     --revoke NAME    revoke a client (NAME|ID) + re-render + reload + refresh the served bundle
 #     --disable-two-hop  remove the node-local two_hop.json overlay, re-render + reload + refresh the
 #                        served bundle (the supported way to turn two-hop OFF; no manual file surgery)
+#     --awg-regen      migrate this node's AmneziaWG obfuscation dialect from the old committed constant to
+#                        its PER-NODE derived dialect (Audit-0008 S1-4). Surgical: rewrites only the 9
+#                        [Interface] obfuscation lines in the live awg0.conf + every client .conf, keeping
+#                        all keys/peers/addresses; backup-first, restore-on-failure, then restart awg0 +
+#                        L7 verify. Supports --dry-run (preview). Clients must re-import their refreshed
+#                        .conf (same keys, new dialect). Do one node at a time.
 #     --rotate         apply a rotation plan (RP-0012). DEFAULT = DRY-RUN: apply the plan's params delta
 #                        to a temp copy, render + validate (sing-box check); promotes NOTHING. Plan path:
 #                        ROTATE_PLAN (default $STATE_DIR/rotate_plan.json), from `myceliumctl rotate-plan`.
@@ -146,7 +152,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg | l7-probe-xhttp | pathsig-probe
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | awg-regen | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg | l7-probe-xhttp | pathsig-probe
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -258,6 +264,7 @@ while [ "$#" -gt 0 ]; do
 		--revoke)          MODE="revoke"; REVOKE_NAME="${2:?--revoke needs a client NAME or ID}"; shift 2 ;;
 		--disable-two-hop) MODE="disable-two-hop"; shift ;;
 		--node-apply)      MODE="node-apply"; shift ;;
+		--awg-regen)       MODE="awg-regen"; shift ;;
 		--rotate)          MODE="rotate"; shift ;;
 		--apply-rotation)  ROTATE_APPLY=1; shift ;;
 		--rotate-arm)      MODE="rotate-arm"; shift ;;
@@ -816,6 +823,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		revoke)          flow_revoke ;;
 		disable-two-hop) flow_disable_two_hop ;;
 		node-apply)      flow_node_apply ;;
+		awg-regen)       regen_awg_dialect ;;
 		rotate)          flow_rotate ;;
 		rotate-arm)      rotate_arm ;;
 		rotate-disarm)   rotate_disarm ;;
