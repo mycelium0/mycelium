@@ -440,10 +440,16 @@ regen_awg_dialect() {
 	have awg && have awg-quick || die "awg-regen: AmneziaWG tools missing — bootstrap the node first."
 	local awg_conf="/etc/amnezia/amneziawg/awg0.conf" awg_state="$STATE_DIR/awg"
 	[ -f "$awg_conf" ] || die "awg-regen: no live awg0.conf at $awg_conf — this node has no AmneziaWG to migrate (bootstrap it first)."
-	[ -f "$awg_state/private.key" ] || die "awg-regen: no AmneziaWG node key at $awg_state/private.key — cannot derive a dialect."
 
-	# Derive THIS node's dialect from its own key (sets AWG_H1..AWG_H4 + AWG_JC/AWG_JMIN/AWG_JMAX/AWG_S1/AWG_S2).
-	derive_awg_dialect "$(cat "$awg_state/private.key")"
+	# Derive THIS node's dialect from the server PrivateKey carried IN awg0.conf — the authoritative key the
+	# running interface uses, and ALWAYS present (unlike $STATE_DIR/awg/private.key, which only exists on a
+	# setup_amneziawg-bootstrapped node; nodes provisioned another way carry a self-contained awg0.conf with
+	# no state-dir key). On a setup_amneziawg node the two are identical, so the derived dialect matches what
+	# a fresh render_awg0 would produce. The key never leaves the node. Sets AWG_H1..AWG_H4 + AWG_JC..AWG_S2.
+	local srv_key
+	srv_key="$(grep -E '^PrivateKey = ' "$awg_conf" | head -1 | sed -E 's/^PrivateKey = //; s/[[:space:]]*$//')"
+	[ -n "$srv_key" ] || die "awg-regen: could not read the server PrivateKey from $awg_conf — cannot derive the per-node dialect."
+	derive_awg_dialect "$srv_key"
 	log "awg-regen: derived per-node dialect H1=$AWG_H1 H2=$AWG_H2 H3=$AWG_H3 H4=$AWG_H4 Jc=$AWG_JC Jmin=$AWG_JMIN Jmax=$AWG_JMAX S1=$AWG_S1 S2=$AWG_S2"
 
 	# Enumerate the client configs to refresh alongside the server config.

@@ -79,11 +79,13 @@ else
 	bad "the swap does not verify the 9-dialect-line invariant before/after"
 fi
 
-# 4) KEY-PRESERVING: regen never regenerates identity (no render_awg0 / awg genkey|genpsk in its body).
-if printf '%s\n' "$body" | grep -qE 'render_awg0|awg genkey|awg genpsk|awg pubkey'; then
+# 4) KEY-PRESERVING: regen never regenerates identity (no render_awg0 / awg genkey|genpsk CALL in its body).
+#    Match CODE only — strip full-line comments so an accurate prose mention (e.g. "what render_awg0 would
+#    produce") does not false-trigger; a real call is on a non-comment line.
+if printf '%s\n' "$body" | grep -vE '^[[:space:]]*#' | grep -qE 'render_awg0|awg genkey|awg genpsk|awg pubkey'; then
 	bad "regen_awg_dialect regenerates identity (render_awg0 / awg genkey|genpsk|pubkey) — it must PRESERVE keys"
 else
-	ok "regen preserves keys (no render_awg0 / awg genkey|genpsk|pubkey — only the dialect changes)"
+	ok "regen preserves keys (no render_awg0 / awg genkey|genpsk|pubkey call — only the dialect changes)"
 fi
 
 # 5) DRY-RUN: a preview branch returns without mutating.
