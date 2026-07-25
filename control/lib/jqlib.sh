@@ -181,3 +181,17 @@ myc_client_fingerprint() {
 		printf '%s\n' "$def"
 	fi
 }
+
+# myc_fp_vocab — echo the closed client-fingerprint vocabulary as a compact JSON array from the single
+# source (control/vocab.json .client_fingerprints), falling back to the documented set if the vocab file
+# is unreadable so a render never hard-fails on a missing file. Used where the normalization must run
+# INSIDE a jq program (per-link, e.g. the aggregate parser) rather than on a single precomputed value:
+# pass the result as `--argjson fpvocab` and apply the in-jq `normfp` twin. Single-sources the vocab so
+# the aggregate's normalization never restates the list. Pure; reads one file.
+myc_fp_vocab() {
+	local vocab list
+	vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	list="$(jq -c '.client_fingerprints // empty' "$vocab" 2>/dev/null || true)"
+	[ -n "$list" ] || list='["chrome","firefox","edge","safari","ios","android"]'
+	printf '%s\n' "$list"
+}

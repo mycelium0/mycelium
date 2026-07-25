@@ -23,9 +23,12 @@
 #      (nb_donor.sh), and the ShadowTLS L7 probe (nb_selftest.sh). A drifting hardcoded `fingerprint:
 #      "chrome"` / `client-fingerprint: chrome` / `fp=chrome` at any of those sites fails the gate.
 #
-# DELIBERATELY out of scope (asserted static, not policed as drift): the QUIC hy2/tuic uTLS (a separate
-# handshake axis; hy2/tuic share-links carry no fp) and the two-hop egress `$th.fingerprint` (its own
-# overlay-driven axis). Those carry an `fp-static` annotation / a `// "chrome"` field-driven default.
+# DELIBERATELY out of scope (asserted static, not policed as drift): ONLY the QUIC hy2/tuic uTLS — a
+# separate handshake axis; hy2/tuic share-links carry no fp, so those outbounds keep a static
+# `fingerprint: "chrome"` (`fp-static` annotation). The two-hop egress and the aggregate share-link fp are
+# NO LONGER waived: since Audit-0008 S2-3/S2-4 both normalize through the closed vocab (the Go
+# NormalizeClientFingerprint + its shell twins myc_client_fingerprint / the jq `normfp`), and section 5
+# below polices them as drift.
 #
 # jq-only + grep; no Go required (the Go registry + render threading are covered by
 # `go test ./internal/spec/...` and the share_link/subscription equivalence gates).
@@ -205,6 +208,32 @@ if [ -f "$RA" ]; then
 	fi
 else
 	badln "nb_rotate_apply.sh not found: $RA"
+fi
+
+# --- 5: the two-hop egress + aggregate share-link fp normalize through the closed vocab (Audit-0008 S2-3/S2-4) --
+# render_singbox.sh two-hop: the egress uTLS preset is the NORMALIZED value ($thfp, from myc_client_fingerprint),
+# never a bare field-default that could splice an invalid uTLS token into the second hop.
+if [ -f "$RS" ]; then
+	if has "$RS" 'fingerprint: $thfp' && [ "$(cnt "$RS" 'fingerprint: ($th.fingerprint // "chrome")')" -eq 0 ]; then
+		okln "render_singbox.sh two-hop egress fingerprint is normalized (\$thfp), no bare field-default (S2-3)"
+	else
+		badln "render_singbox.sh two-hop egress fingerprint is not normalized through the closed vocab (S2-3 regressed)"
+	fi
+else
+	badln "render_singbox.sh not found (two-hop fp check): $RS"
+fi
+# render_aggregate.sh: the parsed share-link fp for the TLS/reality/trojan outbounds runs through `normfp`
+# (the jq twin of NormalizeClientFingerprint); no bare `$q.fp // "chrome"` splice remains. The QUIC hy2/tuic
+# `fingerprint: "chrome"` literals are the separate fp-static axis and are intentionally NOT policed here.
+RAG="$LIB/render_aggregate.sh"
+if [ -f "$RAG" ]; then
+	if has "$RAG" 'def normfp:' && has "$RAG" '| normfp)' && [ "$(cnt "$RAG" '$q.fp // "chrome"')" -eq 0 ]; then
+		okln "render_aggregate.sh normalizes share-link fp through normfp, no bare (\$q.fp // \"chrome\") splice (S2-4)"
+	else
+		badln "render_aggregate.sh does not normalize the share-link fp through the closed vocab (S2-4 regressed)"
+	fi
+else
+	badln "render_aggregate.sh not found (aggregate fp check): $RAG"
 fi
 
 printf '\n-- Result --\n'

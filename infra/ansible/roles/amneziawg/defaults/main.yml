@@ -59,18 +59,18 @@ awg_sg_optout_marker: "# selective-growth: opt-out (full-tunnel)"
 # Seconds between keepalive packets so NAT mappings survive idle periods on UDP.
 awg_persistent_keepalive: 25
 
-# --- Obfuscation knobs (SHARED by server + all clients; tunable by Layer 2, not secret) -------
-# Constraints the role asserts: Jmin < Jmax; H1..H4 distinct; (S1 + 56) != S2.
-awg_obfs:
-  Jc: 4          # junk packet count before the real handshake
-  Jmin: 40       # junk packet minimum size (bytes)
-  Jmax: 70       # junk packet maximum size (bytes)
-  S1: 51         # init-packet junk size (bytes)
-  S2: 102        # response-packet junk size (bytes)  (51 + 56 = 107 != 102, OK)
-  H1: 1148403838 # randomized header value for message type 1 (init)
-  H2: 1351874800 # randomized header value for message type 2 (response)
-  H3: 1936608092 # randomized header value for message type 3 (cookie)
-  H4: 1830553362 # randomized header value for message type 4 (transport data)
+# --- Obfuscation knobs (SHARED by server + all clients; not secret) ---------------------------
+# Audit-0008 S1-4: the dialect is NOT a committed constant. A hardcoded network-wide dialect in a public
+# repo is a free network-wide block — one passive UDP payload-match rule keyed on the published H1 drops
+# the AmneziaWG family on EVERY node at once. Leave awg_obfs EMPTY (the default) and the role DERIVES the
+# dialect per node deterministically from that node's own AmneziaWG server key (H1..H4 + jitter) — server
+# and every client of one node derive the SAME dialect (the handshake matches) while different nodes get
+# different dialects and the repo discloses none of them. This mirrors the shell bootstrap's
+# derive_awg_dialect (control/lib/nb_render_awg.sh), the canonical deploy path.
+#
+# Set awg_obfs explicitly ONLY to PIN a specific dialect (e.g. to interop with an externally-provisioned
+# peer). If you do, it MUST be UNIQUE to this node and satisfy: Jmin < Jmax; H1..H4 distinct; (S1+56)!=S2.
+awg_obfs: {}
 
 # --- Install strategy -------------------------------------------------------------------------
 # "module"   : kernel module + tools from the official Amnezia PPA (preferred on Debian/Ubuntu).

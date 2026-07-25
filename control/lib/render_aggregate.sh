@@ -70,12 +70,18 @@ myc_agg_assert_bundle() {
 # Every value flows through --arg, so nothing from the link is ever interpreted as shell or jq.
 # An unrecognised scheme yields empty (the caller fails closed).
 myc_agg_link_outbound() {
-	local tag link
+	local tag link fpvocab
 	tag="$1"; link="$2"
-	jq -nc --arg tag "$tag" --arg link "$link" '
+	fpvocab="$(myc_fp_vocab)"   # Audit-0008 S2-4: closed client-fp vocab for the in-jq normfp (below).
+	jq -nc --arg tag "$tag" --arg link "$link" --argjson fpvocab "$fpvocab" '
 		# --- pure-jq URI parsing helpers (operate only on the passed string) ---
 		def after($sep): if (. | contains($sep)) then (./ $sep)[1:] | join($sep) else "" end;
 		def before($sep): (./ $sep)[0];
+		# normfp — Audit-0008 S2-4: the byte-twin of Go spec.NormalizeClientFingerprint. A share-link fp
+		# that is a member of the closed vocab ($fpvocab) passes through; an absent/empty/unknown value
+		# resolves to "chrome" (DefaultClientFingerprint). Keeps a hand-edited or foreign Link from
+		# splicing an invalid uTLS token into the merged client profile (fail-serve / distinguishable).
+		def normfp: . as $f | if ($f != "" and ($fpvocab | index($f)) != null) then $f else "chrome" end;
 		# C07: percent-decode one URI component (the inverse of render_bundle.sh @uri). jq has no
 		# built-in URI-decode, so decode %XX byte-by-byte: split on "%", keep the first chunk literal,
 		# and for every following chunk turn its leading two hex digits into the byte they encode and
@@ -142,10 +148,10 @@ myc_agg_link_outbound() {
 				($q.security // "") as $sec
 				| (if $sec == "reality"
 					then { enabled: true, server_name: ($q.sni // ""),
-					       utls: { enabled: true, fingerprint: ($q.fp // "chrome") },
+					       utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
 					       reality: { enabled: true, public_key: ($q.pbk // ""), short_id: ($q.sid // "") } }
 					else { enabled: true, server_name: ($q.sni // ""),
-					       utls: { enabled: true, fingerprint: ($q.fp // "chrome") },
+					       utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
 					       alpn: (($q.alpn // "h2,http/1.1") | split(",")) }
 				end) as $tls
 				| ({ type: "vless", tag: $tag, server: $host, server_port: $port,
@@ -198,7 +204,7 @@ myc_agg_link_outbound() {
 				{ type: "trojan", tag: $tag, server: $host, server_port: $port,
 				  password: $userinfo,
 				  tls: { enabled: true, server_name: ($q.sni // ""),
-				         utls: { enabled: true, fingerprint: ($q.fp // "chrome") },
+				         utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
 				         alpn: (($q.alpn // "h2,http/1.1") | split(",")) } }
 			else
 				null

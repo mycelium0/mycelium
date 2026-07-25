@@ -23,7 +23,8 @@ package spec
 // the served family set (it swaps the active shape / regenerates a parameter, it does not remove a family).
 
 // DistinctClasses returns the set of distinct transport FAMILIES (TransportClass) present in the bundle's
-// endpoints, in first-seen (registry-priority) order. Deterministic; pure.
+// endpoints, in first-seen (registry-priority) order. Deterministic; pure. (Diagnostic detail; the recovery
+// contract counts BLOCK families, below — DistinctBlockFamilies.)
 func (b Bundle) DistinctClasses() []TransportClass {
 	seen := make(map[TransportClass]bool, len(b.Endpoints))
 	out := make([]TransportClass, 0, len(b.Endpoints))
@@ -36,21 +37,55 @@ func (b Bundle) DistinctClasses() []TransportClass {
 	return out
 }
 
-// IndependentFallbackOK reports whether the served bundle satisfies the RP-0013 e2e recovery contract:
-// >= 2 DISTINCT transport families, so no single-family block can remove the client's last path. A bundle
-// that lists several endpoints of ONE family (e.g. REALITY Vision + gRPC + XHTTP) is NOT ok — they fail
-// together. This is the "always a live fallback" precondition for end-to-end client recovery. Pure.
-func (b Bundle) IndependentFallbackOK() bool {
-	return len(b.DistinctClasses()) >= 2
+// blockFamily folds a TransportClass to its BLOCK-INDEPENDENCE family — the coarser grouping the recovery
+// contract must count, because two DISTINCT classes are NOT an independent fallback for one another if a
+// SINGLE block takes both (Audit-0008 S1-3). After RP-0015 every own-cert TLS class presents the node's ONE
+// tls_sni AND the ONE node-wide uTLS ClientHello preset, so a single SNI- or fingerprint-keyed block on the
+// client→node handshake takes ws-tls + xhttp-tls + trojan + the QUIC families TOGETHER — they share the
+// dominant block axis and fold to one family. The genuinely independent axes each stay their own family:
+// reality-tcp (borrowed donor SNI + keypair), shadowtls-tcp (a distinct cover host), shadowsocks-tcp (no SNI),
+// amneziawg-udp (no TLS). The fold is conservative on purpose — it demands MORE independent redundancy, never
+// less — so a config of only own-cert-TLS families no longer false-certifies "always a live fallback".
+func blockFamily(c TransportClass) TransportClass {
+	switch c {
+	case TransportClassXHTTPTLS, TransportClassWSTLS, TransportClassQUICUDP, TransportClassTrojanTLS:
+		return TransportClass("own-tls-sni")
+	default:
+		return c
+	}
 }
 
-// enabledFamiliesDistinct counts the distinct transport FAMILIES (TransportClass) across a set of enabled
-// proto descriptors — the same RP-0013 fallback contract applied on a render path that works from
-// descriptors (RenderSubscription's sing-box-dialable set) rather than a finished Bundle. Pure.
+// DistinctBlockFamilies returns the distinct BLOCK-independence families across the bundle's endpoints,
+// first-seen order. Deterministic; pure.
+func (b Bundle) DistinctBlockFamilies() []TransportClass {
+	seen := make(map[TransportClass]bool, len(b.Endpoints))
+	out := make([]TransportClass, 0, len(b.Endpoints))
+	for _, ep := range b.Endpoints {
+		fam := blockFamily(ep.TransportClass)
+		if !seen[fam] {
+			seen[fam] = true
+			out = append(out, fam)
+		}
+	}
+	return out
+}
+
+// IndependentFallbackOK reports whether the served bundle satisfies the RP-0013 e2e recovery contract:
+// >= 2 DISTINCT BLOCK-independence families, so no single block can remove the client's last path. Several
+// endpoints of one family (REALITY Vision + gRPC + XHTTP), OR several own-cert-TLS classes sharing the one
+// SNI + preset (ws-tls + trojan), are each NOT ok — they fail together. The "always a live fallback"
+// precondition for end-to-end client recovery. Pure.
+func (b Bundle) IndependentFallbackOK() bool {
+	return len(b.DistinctBlockFamilies()) >= 2
+}
+
+// enabledFamiliesDistinct counts the distinct BLOCK-independence families across a set of enabled proto
+// descriptors — the same RP-0013 fallback contract applied on a render path that works from descriptors
+// (RenderSubscription's sing-box-dialable set) rather than a finished Bundle. Pure.
 func enabledFamiliesDistinct(ds []ProtoDescriptor) int {
 	seen := make(map[TransportClass]bool, len(ds))
 	for i := range ds {
-		seen[ds[i].Class] = true
+		seen[blockFamily(ds[i].Class)] = true
 	}
 	return len(seen)
 }

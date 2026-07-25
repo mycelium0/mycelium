@@ -297,7 +297,11 @@ func buildTwoHop(thRaw json.RawMessage, params map[string]json.RawMessage, clien
 	if u, ok := th["uuid"]; ok && !isJSONNull(u) {
 		uuidRaw = u
 	}
-	fingerprint := thStr(th, "fingerprint", "chrome")
+	// RP-0015 / Audit-0008 S2-3: the two-hop egress uTLS preset must come from the SAME closed vocabulary
+	// as every other client fingerprint — a typo or stale value in the (signed) two_hop overlay must render
+	// as the default, never as an invalid uTLS token that fail-serves the egress. Byte-twin of the shell's
+	// myc_client_fingerprint applied to two_hop.fingerprint (render_singbox.sh).
+	fingerprint := NormalizeClientFingerprint(thStr(th, "fingerprint", DefaultClientFingerprint))
 	alpn := thStr(th, "alpn", "http/1.1")
 	wsPath := thStr(th, "ws_path", "/ws")
 	wsHost := thStr(th, "ws_host", sni)

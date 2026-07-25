@@ -242,13 +242,30 @@ persist_rotation_state() {
 # Needs the Go spine binary + a node-local rotate_limits.json; both are present on the Go-bearing node
 # where live rotation runs. Degrades to a warning (the rollback itself already happened) if either is
 # missing — for the drill rollback-latch case (Step 3/4) both MUST be present.
+# _rotate_limits_file — the RotationLimits JSON a rollback record (rotate.RecordOutcome) needs. Prefers an
+# explicit rotate_limits.json; else DERIVES it from the limits the MEASURE daemon already carries in
+# measure.config.json (the single source), so the rollback budget + hold latch is never inert just because a
+# standalone rotate_limits.json was never provisioned (Audit-0008 S2-6). Prints the path, or empty if neither.
+_rotate_limits_file() {
+	local explicit="${ROTATE_LIMITS:-$STATE_DIR/rotate_limits.json}"
+	if [ -f "$explicit" ]; then printf '%s' "$explicit"; return 0; fi
+	local mc="$STATE_DIR/measure.config.json" auto="$STATE_DIR/rotate_limits.autogen.json"
+	if [ -f "$mc" ] && have jq && jq -e '.limits' "$mc" >/dev/null 2>&1; then
+		if jq -c '.limits' "$mc" >"$auto.tmp" 2>/dev/null && ( umask 077; mv -f "$auto.tmp" "$auto" ); then
+			printf '%s' "$auto"; return 0
+		fi
+		rm -f "$auto.tmp" 2>/dev/null || true
+	fi
+	printf ''
+}
+
 record_rotation_rollback() {
 	local plan="$1"
 	local spine="${SPINE_BIN:-$TOOLING_DIR/bin/myceliumctl-go}"
-	local limits="${ROTATE_LIMITS:-$STATE_DIR/rotate_limits.json}"
+	local limits; limits="$(_rotate_limits_file)"
 	[ "$DRY_RUN" -eq 0 ] || return 0
 	[ -x "$spine" ] || { warn "rotation: spine binary absent ($spine); rollback NOT recorded (budget/latch unchanged)."; return 0; }
-	[ -f "$limits" ] || { warn "rotation: no $limits; rollback NOT recorded (budget/latch unchanged). Provide rotate_limits.json to enable the latch."; return 0; }
+	[ -n "$limits" ] || { warn "rotation: no rotate_limits.json and no measure.config .limits; rollback NOT recorded (budget/latch unchanged)."; return 0; }
 	local input next tmp
 	input="$(jq -n --slurpfile p "$plan" --slurpfile l "$limits" \
 		'{state: ($p[0].next_state // {}), limits: $l[0], rolled_back: true}')" \
@@ -527,10 +544,10 @@ persist_fp_rotation_state() {
 record_fp_rotation_rollback() {
 	local plan="$1"
 	local spine="${SPINE_BIN:-$TOOLING_DIR/bin/myceliumctl-go}"
-	local limits="${ROTATE_LIMITS:-$STATE_DIR/rotate_limits.json}"
+	local limits; limits="$(_rotate_limits_file)"   # Audit-0008 S2-6: falls back to measure.config .limits.
 	[ "$DRY_RUN" -eq 0 ] || return 0
 	[ -x "$spine" ] || { warn "fp-rotation: spine binary absent ($spine); rollback NOT recorded (budget/latch unchanged)."; return 0; }
-	[ -f "$limits" ] || { warn "fp-rotation: no $limits; rollback NOT recorded (budget/latch unchanged)."; return 0; }
+	[ -n "$limits" ] || { warn "fp-rotation: no rotate_limits.json and no measure.config .limits; rollback NOT recorded (budget/latch unchanged)."; return 0; }
 	local input next tmp
 	input="$(jq -n --slurpfile p "$plan" --slurpfile l "$limits" \
 		'{state: ($p[0].next_state // {}), limits: $l[0], rolled_back: true}')" \
@@ -565,6 +582,23 @@ rotate_apply_fp_dryrun() {
 	fi
 	rm -f "$tmp_params" "$candidate" 2>/dev/null || true
 	die "fp-rotation: candidate failed 'sing-box check' (fail-closed; nothing changed)."
+}
+
+# _fp_postapply_alive — the fail-closed half of the fp verify (Audit-0008 S2-5). verify_post_apply treats a
+# client-DEAD member as ADVISORY (warns, returns 0), and a client_fingerprint change leaves the SERVER config
+# byte-identical (no restart, so the sing-box-active + listen-port checks always pass) — so on their own they
+# certify a client-DEAD preset as "verified" and the fp rollback never fires. This reads the marker
+# verify_post_apply just wrote ($STATE_DIR/l7_postapply.json) and returns NON-ZERO iff a fingerprint-CARRYING
+# member (a REALITY family or ShadowTLS — the members whose L7 probe mimics the client preset) is client-DEAD
+# under the NEW preset. Fail-SAFE: an absent/unparseable marker or missing jq yields ALIVE (never fabricate a
+# rollback on a can't-judge), matching the probe-side philosophy — the rollback triggers only on a POSITIVE dead.
+_fp_postapply_alive() {
+	local marker="$STATE_DIR/l7_postapply.json"
+	have jq || return 0
+	[ -f "$marker" ] || return 0
+	local deadfp
+	deadfp="$(jq -r '[.dead[]? | select((. | test("reality")) or . == "shadowtls" or (. | test("shadowtls")))] | length' "$marker" 2>/dev/null || echo 0)"
+	[ "${deadfp:-0}" -eq 0 ]
 }
 
 # --- LIVE executor (fp-armed + --apply-rotation + DRY_RUN=0 only) -------------------------------------
@@ -622,12 +656,15 @@ rotate_apply_fp_live() {
 		}
 	fi
 	rm -f "$candidate" 2>/dev/null || true
-	if verify_post_apply; then
+	# verify_post_apply runs the L7 probe (writing l7_postapply.json) but folds a client-DEAD member as
+	# advisory; _fp_postapply_alive is the fail-closed gate that makes the fp verify->rollback REAL — it fails
+	# iff a fingerprint-carrying member reads DEAD under the NEW preset (Audit-0008 S2-5).
+	if verify_post_apply && _fp_postapply_alive; then
 		persist_fp_rotation_state "$plan"
 		log "fp-rotation: LIVE apply verified (client_fingerprint $from -> $to; server restart=$restarted). Client bundle re-rendered; between-tick state persisted."
 		return 0
 	fi
-	warn "fp-rotation: post-apply verification FAILED (the node does not handshake on the new preset); rolling back preset + overlay (fail-closed)."
+	warn "fp-rotation: post-apply verification FAILED (a fingerprint-carrying member does not handshake on the new preset); rolling back preset + overlay (fail-closed)."
 	revert_fp_overlay
 	( write_params ) || warn "fp-rotation: write_params failed during rollback; params.json may still hold the rotated preset — operator attention needed."
 	render_serve_bundle

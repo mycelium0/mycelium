@@ -43,14 +43,17 @@
           No AmneziaWG asset mapping for architecture '{{ ansible_facts['architecture'] }}'.
           Supported: {{ awg_go_asset_by_arch.keys() | list }}.
 
-    - name: Assert the obfuscation knobs satisfy AmneziaWG constraints
+    # Audit-0008 S1-4: when the operator PINS a dialect (awg_obfs non-empty) validate it up front. The
+    # empty default is derived per-node later (after the node key exists) and validated there instead.
+    - name: Assert an operator-PINNED obfuscation dialect satisfies AmneziaWG constraints
+      when: (awg_obfs | default({})) | length > 0
       ansible.builtin.assert:
         that:
           - (awg_obfs.Jmin | int) < (awg_obfs.Jmax | int)
           - ([awg_obfs.H1, awg_obfs.H2, awg_obfs.H3, awg_obfs.H4] | map('int') | list | unique | length) == 4
           - ((awg_obfs.S1 | int) + 56) != (awg_obfs.S2 | int)
         fail_msg: >-
-          Invalid AmneziaWG obfuscation knobs (awg_obfs). Require: Jmin < Jmax; H1..H4 distinct;
+          Invalid pinned AmneziaWG obfuscation knobs (awg_obfs). Require: Jmin < Jmax; H1..H4 distinct;
           (S1 + 56) != S2. These values must also be IDENTICAL on every client, or the handshake
           fails. Got Jmin={{ awg_obfs.Jmin }} Jmax={{ awg_obfs.Jmax }} S1={{ awg_obfs.S1 }}
           S2={{ awg_obfs.S2 }} H1..H4={{ [awg_obfs.H1, awg_obfs.H2, awg_obfs.H3, awg_obfs.H4] }}.
@@ -401,6 +404,49 @@
       ansible.builtin.set_fact:
         _awg_server_public_key: "{{ _awg_identity.server.public_key }}"
       no_log: true
+
+    # -----------------------------------------------------------------------
+    # 3c. Per-node obfuscation dialect (Audit-0008 S1-4). When awg_obfs is EMPTY (the default), derive
+    #     H1..H4 + jitter DETERMINISTICALLY from THIS node's AmneziaWG server key, so server + every
+    #     client of this node share one dialect while different nodes differ and the repo discloses none.
+    #     Mirrors the shell bootstrap's derive_awg_dialect (control/lib/nb_render_awg.sh). An operator
+    #     that PINNED awg_obfs keeps theirs (this block is skipped).
+    # -----------------------------------------------------------------------
+    - name: Derive the per-node AmneziaWG dialect seed from the node key (S1-4)
+      when: (awg_obfs | default({})) | length == 0
+      ansible.builtin.set_fact:
+        _awg_dseed: "{{ (_awg_identity.server.private_key ~ '|mycelium-awg-dialect-v1') | hash('sha256') }}"
+      no_log: true
+
+    - name: Derive the per-node AmneziaWG obfuscation dialect (H1..H4 + jitter) from the seed (S1-4)
+      when: (awg_obfs | default({})) | length == 0
+      ansible.builtin.set_fact:
+        # Byte-for-byte the same slicing/ranges as the shell derive_awg_dialect: headers are distinct
+        # uint32 all > 4 (never the WireGuard message types 1..4); Jmin<Jmax; (S1+56)!=S2 (Jmax/S2 inline
+        # their Jmin/S1 subexpression so this single dict is self-contained — no intra-dict references).
+        awg_obfs:
+          H1: "{{ 5 + (_awg_dseed[0:8]  | int(base=16)) % 4294967291 }}"
+          H2: "{{ 5 + (_awg_dseed[8:16] | int(base=16)) % 4294967291 }}"
+          H3: "{{ 5 + (_awg_dseed[16:24]| int(base=16)) % 4294967291 }}"
+          H4: "{{ 5 + (_awg_dseed[24:32]| int(base=16)) % 4294967291 }}"
+          Jc: "{{ 3 + (_awg_dseed[32:34] | int(base=16)) % 8 }}"
+          Jmin: "{{ 24 + (_awg_dseed[34:36] | int(base=16)) % 41 }}"
+          Jmax: "{{ (24 + (_awg_dseed[34:36] | int(base=16)) % 41) + 16 + (_awg_dseed[36:38] | int(base=16)) % 49 }}"
+          S1: "{{ 24 + (_awg_dseed[38:40] | int(base=16)) % 73 }}"
+          S2: "{{ (24 + (_awg_dseed[38:40] | int(base=16)) % 73) + 57 + (_awg_dseed[40:42] | int(base=16)) % 104 }}"
+      no_log: true
+
+    - name: Assert the effective AmneziaWG dialect satisfies the constraints (derived or pinned)
+      ansible.builtin.assert:
+        that:
+          - (awg_obfs.Jmin | int) < (awg_obfs.Jmax | int)
+          - ([awg_obfs.H1, awg_obfs.H2, awg_obfs.H3, awg_obfs.H4] | map('int') | list | unique | length) == 4
+          - ((awg_obfs.S1 | int) + 56) != (awg_obfs.S2 | int)
+        fail_msg: >-
+          The effective AmneziaWG dialect fails the constraints (Jmin<Jmax; H1..H4 distinct; (S1+56)!=S2).
+          For a derived dialect a distinct-header collision is astronomically rare — re-run to re-derive,
+          or regenerate the node key. Got Jmin={{ awg_obfs.Jmin }} Jmax={{ awg_obfs.Jmax }}
+          S1={{ awg_obfs.S1 }} S2={{ awg_obfs.S2 }} H1..H4={{ [awg_obfs.H1, awg_obfs.H2, awg_obfs.H3, awg_obfs.H4] }}.
 
     - name: Render the AmneziaWG interface config from the template
       ansible.builtin.template:

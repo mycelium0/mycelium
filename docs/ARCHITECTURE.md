@@ -42,27 +42,32 @@ therefore travels over the same resilient channels as data traffic.
 The goal is **statistical indistinguishability** from legitimate HTTPS/QUIC — not merely "a
 hidden VPN". Multiple transports run in parallel; Layer 3 selects the active one.
 
-### Transport matrix (modern set, current as of June 2026)
+### Transport matrix (modern set; the registry `control/vocab.json .protos[]` is the source of truth)
 
 The full modern transport set and the rationale for every inclusion and exclusion is recorded in
-[ADR-0010](adr/0010-phase0-transport-set.md). **Engine:** **sing-box is the primary engine** (one
-server, many protocols); **AmneziaWG** runs as a **separate** non-TLS/UDP path; **Xray-core** is
-retained as an **optional alternative engine** for the VLESS+REALITY+Vision shape. Every transport
-is **individually toggleable** (per-deployment `group_vars`), so an operator exposes only a chosen
-subset and keeps the exposed surface minimal.
+[ADR-0010](adr/0010-phase0-transport-set.md); the engine model in
+[ADR-0032](adr/0032-xray-automated-toggleable-engine.md). **Engine:** **sing-box is the primary
+engine** (one server, most protocols); **Xray-core** is an **automated, per-protocol-toggleable**
+engine that serves the one Xray-only shape — `vless-xhttp-tls` (XHTTP over genuine TLS), which sing-box
+cannot serve — and runs on a node **iff** that shape is toggled on (default-off); **AmneziaWG** runs as
+a **separate** non-TLS/UDP dataplane. Each transport is served by the single engine the registry assigns
+it (`vocab.json .protos[].engine`) — that field is the single source of truth, never duplicated per
+shape. Every transport is **individually toggleable** (per-deployment `group_vars`), so an operator
+exposes only a chosen subset and keeps the exposed surface minimal.
 
 | Transport | Basis | Strength | Where it breaks | Role |
 |---|---|---|---|---|
 | **VLESS + REALITY + XTLS-Vision (TCP)** | TCP/TLS, borrows the handshake of a real donor site | Best survivability against network degradation + active probing; Vision equalises TLS record lengths | Targeted blocking events aimed at VLESS-TCP-TLS | **Primary** |
 | **VLESS + REALITY + gRPC** | HTTP/2 wrapper over TLS | Survives some conditions that take down bare TCP-TLS; multiplexes through HTTP/2-aware middleboxes | Higher latency cost | First TLS-family fallback |
 | **VLESS + REALITY + XHTTP** | HTTP-framed transport over TLS | Resilient where plain streams are disrupted; friendlier to HTTP-shaped paths and CDNs | Higher framing overhead | Second TLS-family fallback |
-| **VLESS + XHTTP over genuine TLS** (family `xhttp-tls`, port `2087`) | HTTP-framed transport over a **single, genuine** TLS 1.3 session terminated by the node's **OWN** certificate (NO REALITY donor) | A structurally **distinct** family from the REALITY shapes: it is real single-layer TLS, so it survives paths where the TLS-record-inside-TLS pattern (the REALITY families nest TLS inside TLS) is specifically detected and dropped. Own-cert means the SNI and certificate are the operator's own and consistent. | A genuine cert/SNI is a server-attributable identifier; depends on a clean own-cert reputation. Default-OFF. | TLS-in-TLS-blocked-path fallback (own-cert, distinct from the REALITY families) |
+| **VLESS + XHTTP over genuine TLS** (family `xhttp-tls`, port `2087`, **Xray** engine) | HTTP-framed transport over a **single, genuine** TLS 1.3 session terminated by the node's **OWN** certificate (NO REALITY donor). Served by the **Xray** engine — sing-box cannot serve the `xhttp` transport ([ADR-0032](adr/0032-xray-automated-toggleable-engine.md)). | One of two structurally **distinct** genuine-TLS families (the other is `ws-tls`, below): real single-layer TLS, so it survives paths where the TLS-record-inside-TLS pattern (the REALITY families nest TLS inside TLS) is specifically detected and dropped. Own-cert means the SNI and certificate are the operator's own and consistent. | A genuine cert/SNI is a server-attributable identifier; depends on a clean own-cert reputation. Default-OFF. | TLS-in-TLS-blocked-path fallback (own-cert, distinct from the REALITY families) |
+| **VLESS + WebSocket over genuine TLS** (family `ws-tls`, port `2089`) | WebSocket-framed transport over a **single, genuine** own-certificate TLS 1.3 session (NO REALITY donor), served by **sing-box** | The second genuine own-cert TLS family: real single-layer TLS like `xhttp-tls` but WS-framed and sing-box-native (no second engine required), so it is available on any node. WS-over-TLS is a very common, CDN-frontable shape. | Shares the own-cert SNI + ClientHello preset axis with the other own-cert-TLS families (they fold to one *block family* for the recovery contract, `internal/spec/e2e_recovery.go`). Default-OFF. | Genuine-TLS fallback that needs no second engine |
 | **Hysteria2** | QUIC/UDP with aggressive congestion control | Strong on lossy, throttled, high-latency links | Depends on live UDP | UDP-friendly networks |
 | **TUIC v5** | QUIC/UDP, low-overhead multiplexing | A second, independent QUIC fingerprint so the QUIC family is not a single point of failure | Depends on live UDP | UDP-friendly networks |
 | **Shadowsocks-2022 (AEAD)** | `2022-blake3-aes-256-gcm`, per-session salts | Lightweight non-VLESS shape; independent fallback | Plain TCP shape without a TLS cover on its own | Independent fallback |
 | **ShadowTLS v3 (wrapping Shadowsocks-2022)** | Real TLS handshake to an external host in front of Shadowsocks | Outer shape looks like ordinary TLS and answers active probing; inner stays a modern AEAD channel | Targeted TLS-shape blocking | TLS-covered fallback |
 | **Trojan over TLS** (optional) | TLS-terminated behind a real certificate | Simple plain-TLS option; independent fallback | Generally dominated by the REALITY shapes | Optional fallback |
-| **AmneziaWG** | WireGuard + junk packets, header randomisation, padding (core unchanged) | Fast, ~3 % overhead over WG; non-TLS UDP path that fails differently from every TLS and QUIC shape; Phase 0 uses a single network-shared obfuscation dialect (per-node dialect diversification is a Phase-2 deliverable) | UDP is fully excised in some network environments | Separate non-TLS path |
+| **AmneziaWG** | WireGuard + junk packets, header randomisation, padding (core unchanged) | Fast, ~3 % overhead over WG; non-TLS UDP path that fails differently from every TLS and QUIC shape; the obfuscation dialect (H1..H4 + jitter) is **derived per node** from the node's own key (`derive_awg_dialect`, `control/lib/nb_render_awg.sh`), so no two nodes share a dialect and the repo discloses none — a repo-derived payload-match rule can no longer block the family network-wide | UDP is fully excised in some network environments | Separate non-TLS path |
 
 Excluded as legacy / easily-fingerprinted / superseded (full reasoning in
 [ADR-0010](adr/0010-phase0-transport-set.md)): **VMess, plain Shadowsocks (pre-2022), plain
@@ -244,8 +249,8 @@ without modification.
 
 | Purpose | Choice | Rationale |
 |---|---|---|
-| Tunnel + transport multiplexing | **sing-box** (primary engine); **Xray-core** (optional alternative) | One server, many protocols (REALITY/Vision/gRPC/XHTTP, Hysteria2, TUIC, Shadowsocks-2022, ShadowTLS, Trojan); see [ADR-0010](adr/0010-phase0-transport-set.md) |
-| Non-TLS fallback | **AmneziaWG** | Obfuscated WireGuard; Phase 0 uses a single network-shared dialect (per-node dialect diversification is a Phase-2 deliverable) |
+| Tunnel + transport multiplexing | **sing-box** (primary engine); **Xray-core** (automated, per-protocol-toggleable — serves the Xray-only `vless-xhttp-tls`) | sing-box: one server, most protocols (REALITY/Vision/gRPC/XHTTP, ws-tls, Hysteria2, TUIC, Shadowsocks-2022, ShadowTLS, Trojan); Xray: `vless-xhttp-tls`; see [ADR-0010](adr/0010-phase0-transport-set.md) + [ADR-0032](adr/0032-xray-automated-toggleable-engine.md) |
+| Non-TLS fallback | **AmneziaWG** | Obfuscated WireGuard; the obfuscation dialect (H1..H4 + jitter) is derived **per node** from the node's own key (`derive_awg_dialect`), so no two nodes share it and the repo discloses none |
 | Cover / anti-probing | **Caddy/nginx** + real donor site | Legitimate response to any probe |
 | Coordinator (phase 3) | **Headscale** or custom Noise control plane | Proven WireGuard control-plane pattern |
 | P2P / mesh (phase 4+) | **libp2p** (Kademlia, GossipSub, AutoNAT, circuit-relay) | Mature DHT/gossip/NAT-traversal primitives |

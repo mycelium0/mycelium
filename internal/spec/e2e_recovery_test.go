@@ -79,6 +79,35 @@ func TestBundleIndependentFallbackSingleFamily(t *testing.T) {
 	}
 }
 
+// TestBundleBlockFamilyFold (Audit-0008 S1-3): two DISTINCT own-cert-TLS classes are NOT an independent
+// fallback for one another — after RP-0015 they share the node's ONE tls_sni AND the ONE uTLS ClientHello
+// preset, so a single SNI/fingerprint-keyed block on the client→node handshake takes them together. The
+// recovery contract must count BLOCK families, not raw classes, and reject a config of only own-cert-TLS.
+func TestBundleBlockFamilyFold(t *testing.T) {
+	// (a) ws-tls + trojan-tls: TWO distinct classes, but ONE block family (both own-cert TLS, shared SNI+preset).
+	own := Bundle{Version: NetworkStateVersion, Endpoints: []Endpoint{
+		{Tag: "mycelium-ws-tls", TransportClass: TransportClassWSTLS},
+		{Tag: "mycelium-trojan-tls", TransportClass: TransportClassTrojanTLS},
+	}}
+	if got := own.DistinctClasses(); len(got) != 2 {
+		t.Fatalf("ws-tls + trojan are 2 distinct CLASSES, got %v", got)
+	}
+	if got := own.DistinctBlockFamilies(); len(got) != 1 || got[0] != TransportClass("own-tls-sni") {
+		t.Fatalf("ws-tls + trojan must fold to ONE block family [own-tls-sni], got %v", got)
+	}
+	if own.IndependentFallbackOK() {
+		t.Fatal("two own-cert-TLS classes share SNI+preset — one block takes both; must FAIL the fallback contract")
+	}
+	// (b) ws-tls + reality-tcp: own-cert TLS vs borrowed-donor REALITY — genuinely independent block axes.
+	mixed := Bundle{Version: NetworkStateVersion, Endpoints: []Endpoint{
+		{Tag: "mycelium-ws-tls", TransportClass: TransportClassWSTLS},
+		{Tag: "mycelium-vless-reality-vision", TransportClass: TransportClassRealityTCP},
+	}}
+	if !mixed.IndependentFallbackOK() {
+		t.Fatalf("own-cert-TLS + REALITY are independent block families %v — must satisfy the fallback contract", mixed.DistinctBlockFamilies())
+	}
+}
+
 // TestBundleDistinctClassesDeterministic: the family set is first-seen (registry-priority) order and stable.
 func TestBundleDistinctClassesDeterministic(t *testing.T) {
 	p := baseE2EParams(t, `,

@@ -182,6 +182,13 @@
 #                               the badge block makes no operated-network/uptime/online claim
 #                               (ADR-0016), and every shields endpoint references only this repo's
 #                               slug (RP-0011 Operability chunk A / AC-10). OFFLINE
+#   * config_least_privilege.sh — the live data-plane config (sing-box + xray, which inline the REALITY
+#                               private key / passwords / UUIDs / clash_api Bearer) is promoted 0640
+#                               root:<engine group> in a 0750 dir — never world-readable (Audit-0008
+#                               S1-1). OFFLINE
+#   * architecture_matrix_currency.sh — docs/ARCHITECTURE.md's transport/engine matrix stays current with
+#                               the registry (control/vocab.json .protos[]): every family + engine is
+#                               documented and the engine model matches ADR-0032 (Audit-0008 S2-2). OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -267,6 +274,8 @@ GATES=(
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/version_changelog_sync.sh"
 	"tests/conformance/readme_badges_honest.sh"
+	"tests/conformance/config_least_privilege.sh"
+	"tests/conformance/architecture_matrix_currency.sh"
 	"control/selftest.sh"
 )
 

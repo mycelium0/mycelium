@@ -103,7 +103,9 @@ ensure_singbox_user() {
 		run useradd --system --gid "$SINGBOX_RUN_GROUP" --no-create-home \
 			--shell /usr/sbin/nologin "$SINGBOX_RUN_USER"
 	fi
-	run install -d -m 0755 "$SINGBOX_ETC"
+	# 0750 root:<sing-box group>, NOT 0755 (Audit-0008 S1-1): the live config (with its inlined secrets) lives
+	# here; only root + the service group may traverse this dir. Defence-in-depth with the config's own 0640.
+	run install -d -m 0750 -o root -g "$SINGBOX_RUN_GROUP" "$SINGBOX_ETC"
 	run install -d -m 0710 -o root -g "$SINGBOX_RUN_GROUP" "$STATE_DIR"
 	run install -d -m 0750 -o root -g "$SINGBOX_RUN_GROUP" "$TLS_DIR"
 	run install -d -m 0750 -o "$SINGBOX_RUN_USER" -g "$SINGBOX_RUN_GROUP" "$STATE_DIR/run"

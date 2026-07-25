@@ -461,12 +461,17 @@ myc_sb_render_server() {
 		if [ -n "$th_sn" ] && [ -n "$ingress_sni" ] && [ "$th_sn" = "$ingress_sni" ]; then
 			myc_die "render-server: params.two_hop.sni '$th_sn' equals this node's donor_sni — refusing a two-hop whose egress shares the ingress SNI (fail-closed; egress must be a distinct node)."
 		fi
-		rendered="$(printf '%s' "$rendered" | jq --argjson th "$two_hop" '
+		# Audit-0008 S2-3: normalize the two-hop egress uTLS preset against the closed vocab (byte-twin of
+		# Go spec.NormalizeClientFingerprint via myc_client_fingerprint) so a typo/stale value in the signed
+		# two_hop overlay renders as the default, never as an invalid uTLS token that fail-serves the egress.
+		local th_fp
+		th_fp="$(myc_client_fingerprint "$(printf '%s' "$two_hop" | jq -c '{client_fingerprint: (.fingerprint // "")}')")"
+		rendered="$(printf '%s' "$rendered" | jq --argjson th "$two_hop" --arg thfp "$th_fp" '
 			.outbounds += [{
 				type: "vless", tag: $th.tag, server: $th.server,
 				server_port: ($th.server_port | tonumber), uuid: $th.uuid, flow: "",
 				tls: { enabled: true, server_name: $th.sni,
-				       utls: { enabled: true, fingerprint: ($th.fingerprint // "chrome") },
+				       utls: { enabled: true, fingerprint: $thfp },
 				       alpn: [ ($th.alpn // "http/1.1") ] },
 				transport: { type: "ws", path: ($th.ws_path // "/ws"),
 				             headers: { Host: ($th.ws_host // $th.sni) } }

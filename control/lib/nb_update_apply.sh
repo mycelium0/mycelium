@@ -159,7 +159,11 @@ promote_config() {
 	need_root
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] promote $candidate -> $SINGBOX_CONFIG"; return 0; fi
 	if [ -f "$SINGBOX_CONFIG" ]; then cp -f "$SINGBOX_CONFIG" "$LASTGOOD_CONFIG"; fi
-	install -m 0644 "$candidate" "$SINGBOX_CONFIG"
+	# 0640 root:<sing-box group>, NOT 0644 (Audit-0008 S1-1): the live config INLINES the REALITY private
+	# key, every transport password + client UUID, and the clash_api Bearer secret — it must not be
+	# world-readable. The service reads it via Group=$SINGBOX_RUN_GROUP; a co-resident non-group principal
+	# (e.g. node_exporter) must not. Mirrors the ansible path + how privkey/params are already held (0640/0600).
+	install -m 0640 -o root -g "$SINGBOX_RUN_GROUP" "$candidate" "$SINGBOX_CONFIG"
 	log "promoted candidate to live config: $SINGBOX_CONFIG"
 }
 
@@ -167,7 +171,7 @@ rollback_config() {
 	need_root
 	if [ -f "$LASTGOOD_CONFIG" ]; then
 		warn "rolling back to last known-good config (fail-closed)."
-		run install -m 0644 "$LASTGOOD_CONFIG" "$SINGBOX_CONFIG"
+		run install -m 0640 -o root -g "$SINGBOX_RUN_GROUP" "$LASTGOOD_CONFIG" "$SINGBOX_CONFIG"
 	else
 		warn "no last-known-good config to roll back to; leaving the running service untouched."
 	fi
@@ -210,9 +214,11 @@ promote_xray_config() {
 	local candidate="$1"
 	need_root
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] promote $candidate -> $XRAY_CONFIG"; return 0; fi
-	install -d -m 0755 "$XRAY_ETC"
+	install -d -m 0750 -o root -g "$XRAY_RUN_GROUP" "$XRAY_ETC"
 	if [ -f "$XRAY_CONFIG" ]; then cp -f "$XRAY_CONFIG" "$XRAY_LASTGOOD_CONFIG"; fi
-	install -m 0644 "$candidate" "$XRAY_CONFIG"
+	# 0640 root:<xray group>, NOT 0644 (Audit-0008 S1-1): the xray config inlines the same class of secrets;
+	# xray reads it via Group=$XRAY_RUN_GROUP. Not world-readable.
+	install -m 0640 -o root -g "$XRAY_RUN_GROUP" "$candidate" "$XRAY_CONFIG"
 	log "promoted xray candidate to live config: $XRAY_CONFIG"
 }
 
@@ -220,7 +226,7 @@ rollback_xray_config() {
 	need_root
 	if [ -f "$XRAY_LASTGOOD_CONFIG" ]; then
 		warn "rolling back xray to last known-good config (fail-closed)."
-		run install -m 0644 "$XRAY_LASTGOOD_CONFIG" "$XRAY_CONFIG"
+		run install -m 0640 -o root -g "$XRAY_RUN_GROUP" "$XRAY_LASTGOOD_CONFIG" "$XRAY_CONFIG"
 	else
 		warn "no last-known-good xray config to roll back to; leaving the running service untouched."
 	fi

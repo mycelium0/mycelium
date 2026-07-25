@@ -467,6 +467,12 @@ flow_node_apply() {
 	rm -f "$candidate" 2>/dev/null || true
 	# ADR-0032 dual-engine: serve/refresh xray independently of the sing-box change above (no-op on a stock node).
 	apply_node_xray_engine
+	# Reconcile the host firewall with the (possibly newly-enabled) served ports (Audit-0008 S1-2). Without
+	# this, a family enabled via --node-apply on a new port binds a ufw-BLOCKED listener while verify_post_apply
+	# (L4 bind + loopback L7 — both firewall-blind) reports "applied + verified" — a phantom fallback the
+	# operator would treat as a live path. harden_ufw is idempotent + anti-lockout and reads the LIVE config's
+	# ports (the single source of truth), so it opens EXACTLY the now-served set. Respects --no-harden.
+	[ "${DO_HARDEN:-1}" -eq 1 ] && harden_ufw
 	render_serve_bundle
-	log "node profile applied + verified; config reloaded + served bundle refreshed."
+	log "node profile applied + verified; firewall reconciled; config reloaded + served bundle refreshed."
 }

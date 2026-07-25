@@ -19,8 +19,10 @@ longer matches a fixed WireGuard fingerprint. The goal is **indistinguishability
 This path is **complementary**, not primary. The primary transports are the sing-box / Xray
 **TLS** (VLESS + XTLS-Vision + REALITY) and **QUIC** (Hysteria2 / TUIC) protocols. AmneziaWG fills
 the niche where those are degraded but UDP still flows: it is fast (~3 % overhead over plain
-WireGuard) and Phase 0 uses a single network-shared obfuscation dialect; per-node dialect
-diversification is a Phase 2 deliverable. The trade-off is that **UDP is
+WireGuard). Its obfuscation dialect (H1..H4 + jitter) is **derived per node** from the node's own
+AmneziaWG key (`derive_awg_dialect`, `control/lib/nb_render_awg.sh`) — server and every client of one
+node share it while different nodes differ and the repo discloses none, so a repo-derived UDP
+payload-match rule cannot block the family network-wide. The trade-off is that **UDP is
 excised entirely on some networks**, so this path is provisioned as a fallback and never relied on
 as the only route.
 

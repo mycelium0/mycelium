@@ -28,7 +28,10 @@
 #   2. RenderBundle stamps the family (TransportClass) onto every served Endpoint — so the invariant is
 #      checkable on the artifact a client actually imports, not just the template.
 #   3. The e2e contract is CODIFIED: internal/spec/e2e_recovery.go defines Bundle.DistinctClasses +
-#      Bundle.IndependentFallbackOK (>= 2 distinct families).
+#      Bundle.IndependentFallbackOK, and the count is over >= 2 distinct BLOCK-independence families
+#      (Bundle.DistinctBlockFamilies), not raw classes — plus the blockFamily fold itself must fold the
+#      own-cert-TLS classes together. Audit-0008 S1-3: two distinct CLASSES are not an independent fallback
+#      for one another when one block takes both (they share the node's one tls_sni + one uTLS preset).
 #   4. The invariant is proven MEANINGFUL (not vacuous): the test suite asserts a single-family
 #      (REALITY-only) bundle FAILS the contract.
 #
@@ -79,11 +82,22 @@ if grep -Eq 'func \(b Bundle\) IndependentFallbackOK\(\) bool' "$INV" \
 else
 	badln "the e2e fallback invariant (Bundle.IndependentFallbackOK / DistinctClasses) is not codified"
 fi
-# 3b. It must actually require >= 2 distinct families.
-if grep -Eq 'len\(b\.DistinctClasses\(\)\) >= 2' "$INV"; then
-	okln "IndependentFallbackOK requires >= 2 distinct families (a single-family bundle is a single point of block)"
+# 3b. It must actually require >= 2 distinct BLOCK-independence families. Audit-0008 S1-3 strengthened the
+# count from raw TransportClass to the coarser BLOCK family: two distinct classes are NOT an independent
+# fallback for one another when a SINGLE block takes both (every own-cert TLS class shares the node's one
+# tls_sni + the one uTLS preset). Counting raw classes here would re-weaken the contract.
+if grep -Eq 'len\(b\.DistinctBlockFamilies\(\)\) >= 2' "$INV"; then
+	okln "IndependentFallbackOK requires >= 2 distinct BLOCK families (a single-block bundle is a single point of block)"
 else
-	badln "IndependentFallbackOK does not require >= 2 distinct families — the contract is weakened"
+	badln "IndependentFallbackOK does not require >= 2 distinct BLOCK families — the contract is weakened"
+fi
+# 3c. The block-family fold must EXIST and must fold the own-cert-TLS classes together (the S1-3 fix). A fold
+# that mapped every class to itself would silently restore the old, weaker class-counting contract.
+if grep -Eq 'func blockFamily\(c TransportClass\) TransportClass' "$INV" \
+	&& grep -Eq 'TransportClassXHTTPTLS, TransportClassWSTLS, TransportClassQUICUDP, TransportClassTrojanTLS' "$INV"; then
+	okln "the block-family fold folds the own-cert-TLS classes (shared SNI + ClientHello preset) into one family"
+else
+	badln "the block-family fold is missing or does not fold the own-cert-TLS classes — SNI/preset-sharing families would falsely certify a fallback"
 fi
 
 # 4. The invariant is proven meaningful: a single-family bundle must be rejected by the tests.

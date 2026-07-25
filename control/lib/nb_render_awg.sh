@@ -35,18 +35,73 @@ AWG_TOOLS_REPO="https://github.com/amnezia-vpn/amneziawg-tools"
 AWG_GO_TAG="v0.2.18"
 AWG_TOOLS_TAG="v1.0.20260223"
 
-# AmneziaWG canonical "dialect": the in-tunnel addressing + obfuscation knobs shared network-wide. Every
-# peer (server + all its clients) MUST share Jc/Jmin/Jmax/S1/S2/H1..H4 or the handshake fails. These
-# are TUNABLE, NOT secret — and are the SAME values as infra/ansible/roles/amneziawg/defaults/main.yml
-# (a node + its clients are one dialect). The render below uses them ONLY when first creating a node's
-# awg0.conf; an existing awg0.conf is never overwritten.
+# AmneziaWG in-tunnel addressing. The obfuscation "dialect" (Jc/Jmin/Jmax/S1/S2/H1..H4) is NOT a committed
+# constant — see derive_awg_dialect below (Audit-0008 S1-4). Every peer (server + all its clients) MUST
+# share the dialect or the handshake fails; we get that for free by deriving it deterministically from the
+# node's own AmneziaWG key at render time, so server + every client of ONE node compute the SAME dialect
+# while DIFFERENT nodes get DIFFERENT dialects. The render below uses these ONLY when first creating a
+# node's awg0.conf; an existing awg0.conf is never overwritten.
 AWG_TUNNEL_V4="10.13.13.1/24"      # server in-tunnel v4 (RFC1918); peers get .2, .3, …
 AWG_TUNNEL_V6="fd13:13:13::1/64"   # server in-tunnel v6 (RFC4193 ULA); used only if the node has global v6
 AWG_PEER_BASE_V4="10.13.13"
 AWG_PEER_BASE_V6="fd13:13:13::"
 AWG_MTU="1280"
-AWG_JC="4"; AWG_JMIN="40"; AWG_JMAX="70"; AWG_S1="51"; AWG_S2="102"
-AWG_H1="1148403838"; AWG_H2="1351874800"; AWG_H3="1936608092"; AWG_H4="1830553362"
+# The dialect vars (AWG_JC/AWG_JMIN/AWG_JMAX/AWG_S1/AWG_S2/AWG_H1..AWG_H4) are set by derive_awg_dialect
+# at render time — NOT hardcoded here. A hardcoded network-wide dialect committed in a public repo is a
+# free network-wide block (one passive UDP payload-match rule keyed on the published H1 drops the AWG
+# family on every node at once); per-node derivation removes that single point (Audit-0008 S1-4).
+
+# _awg_digest INPUT SALT — emit 64 hex chars = SHA-256("<INPUT>|mycelium-awg-dialect-v1|<SALT>"), via the
+# audited sha256sum (universal on Linux nodes) or openssl as a fallback. Domain-separated + salted so a
+# caller can re-draw (the distinct-header retry) deterministically. Reads no files; touches no network.
+_awg_digest() {
+	if have sha256sum; then
+		printf '%s|mycelium-awg-dialect-v1|%s' "$1" "$2" | sha256sum | cut -d' ' -f1
+	else
+		printf '%s|mycelium-awg-dialect-v1|%s' "$1" "$2" | openssl dgst -sha256 -r | cut -d' ' -f1
+	fi
+}
+
+# derive_awg_dialect INPUT — Audit-0008 S1-4: set the per-node AmneziaWG obfuscation dialect
+# (AWG_H1..AWG_H4 + AWG_JC/AWG_JMIN/AWG_JMAX/AWG_S1/AWG_S2) DETERMINISTICALLY from INPUT (the node's own
+# AmneziaWG private key). Deterministic ⇒ server + every client of THIS node get the SAME dialect (the
+# handshake matches); keyed on a per-node value ⇒ DIFFERENT nodes get DIFFERENT dialects and the repo
+# discloses none. Constraints held by construction: H1..H4 are distinct uint32 all > 4 (never collide with
+# WireGuard's message types 1..4); Jmin < Jmax; (S1 + 56) != S2.
+#
+# ADR-0002 note: this is HEADER RANDOMIZATION + junk-packet sizing — obfuscation the ADR EXPLICITLY permits
+# ("shaping, padding, junk packets, header randomization ... permitted — but not a confidentiality
+# boundary"). It produces NO key material and is not a confidentiality boundary; SHA-256 is used only as an
+# off-the-shelf digest from the audited sha256sum/openssl. No custom primitive is introduced.
+derive_awg_dialect() {
+	local input="$1" salt=0 dg
+	[ -n "$input" ] || die "AWG dialect derivation: empty node value (cannot derive a per-node dialect)."
+	have sha256sum || have openssl || die "AWG dialect derivation needs sha256sum or openssl (neither found)."
+	# Headers: 4 distinct uint32 in [5, 2^32-1]. 4294967291 = 2^32-5, so (word % 4294967291) + 5 ∈ [5, 2^32-1].
+	# Collisions among 4 draws are ~1e-9; on the off chance, bump the salt and re-draw (deterministic).
+	while :; do
+		dg="$(_awg_digest "$input" "$salt")"
+		[ "${#dg}" -ge 42 ] || die "AWG dialect derivation: short digest (sha256 tool misbehaved)."
+		AWG_H1=$(( 5 + (16#${dg:0:8} % 4294967291) ))
+		AWG_H2=$(( 5 + (16#${dg:8:8} % 4294967291) ))
+		AWG_H3=$(( 5 + (16#${dg:16:8} % 4294967291) ))
+		AWG_H4=$(( 5 + (16#${dg:24:8} % 4294967291) ))
+		if [ "$AWG_H1" -ne "$AWG_H2" ] && [ "$AWG_H1" -ne "$AWG_H3" ] && [ "$AWG_H1" -ne "$AWG_H4" ] \
+			&& [ "$AWG_H2" -ne "$AWG_H3" ] && [ "$AWG_H2" -ne "$AWG_H4" ] && [ "$AWG_H3" -ne "$AWG_H4" ]; then
+			break
+		fi
+		salt=$(( salt + 1 ))
+		[ "$salt" -lt 16 ] || die "AWG dialect derivation: could not obtain 4 distinct headers (unexpected)."
+	done
+	# Jitter within tight, known-good bounds (each a fresh byte of the same digest): Jc 3..10, Jmin 24..64,
+	# Jmax = Jmin+16..Jmin+64 (so Jmin<Jmax with margin), S1 24..96, S2 = S1+57..S1+160 (so (S1+56)!=S2, S2>S1).
+	AWG_JC=$((   3 + (16#${dg:32:2} % 8)  ))
+	AWG_JMIN=$(( 24 + (16#${dg:34:2} % 41) ))
+	AWG_JMAX=$(( AWG_JMIN + 16 + (16#${dg:36:2} % 49) ))
+	AWG_S1=$((   24 + (16#${dg:38:2} % 73) ))
+	AWG_S2=$((   AWG_S1 + 57 + (16#${dg:40:2} % 104) ))
+	log "derived per-node AmneziaWG dialect from the node key (Audit-0008 S1-4: not a committed network-wide constant)."
+}
 
 # --- Selective Growth: client-side split-tunnel defaults (VIS-0009; ADR-0027; closed-by-default lineage
 # ADR-0026) -------------------------------------------------------------------------------------------
@@ -143,6 +198,10 @@ render_awg0() {
 	local spriv spub port wan has_v6 addr postup postdown
 	spriv="$(cat "$awg_state/private.key")"
 	spub="$(cat "$awg_state/public.key")"
+	# Audit-0008 S1-4: set the per-node obfuscation dialect (H1..H4 + jitter) from THIS node's key before
+	# writing either the server awg0.conf or any client config, so both sides of every handshake match and
+	# no two nodes share a dialect. The key was just read (spriv) — derivation cannot fail on a real node.
+	derive_awg_dialect "$spriv"
 	port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || echo 51820)"
 	wan="$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 	[ -n "$wan" ] || { warn "could not detect the WAN interface; using 'eth0' in awg0.conf — verify it."; wan="eth0"; }

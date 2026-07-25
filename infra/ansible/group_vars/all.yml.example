@@ -171,19 +171,15 @@ awg_go_sha256:
   amd64: "REPLACE_WITH_SHA256_OF_amneziawg-go-linux-amd64.tar.gz"
   arm64: "REPLACE_WITH_SHA256_OF_amneziawg-go-linux-arm64.tar.gz"
 
-# Obfuscation knobs SHARED by the server and every client (must be identical on all peers, or the
-# handshake fails). These are tunable values (Layer 2 may A/B-tune them), NOT secrets. Constraints:
-# Jmin < Jmax ; H1..H4 distinct ; (S1 + 56) != S2. See nodes/dataplane/amneziawg/README.md.
-awg_obfs:
-  Jc: 4          # junk packet count
-  Jmin: 40       # junk packet min size (bytes)
-  Jmax: 70       # junk packet max size (bytes)
-  S1: 51         # init-packet junk size
-  S2: 102        # response-packet junk size
-  H1: 1148403838 # randomized header for message type 1 (init)
-  H2: 1351874800 # randomized header for message type 2 (response)
-  H3: 1936608092 # randomized header for message type 3 (cookie)
-  H4: 1830553362 # randomized header for message type 4 (transport data)
+# Obfuscation dialect (H1..H4 + jitter), SHARED by the server and every client of ONE node. Audit-0008
+# S1-4: DO NOT commit a network-wide dialect — a hardcoded value in a public repo is a free network-wide
+# block (one passive UDP payload-match rule keyed on the published H1 drops the AmneziaWG family on every
+# node at once). Leave awg_obfs EMPTY: the role DERIVES it per node from that node's own AmneziaWG key, so
+# server + all its clients match while different nodes differ and the repo discloses nothing (mirrors the
+# shell bootstrap's derive_awg_dialect). Set it ONLY to PIN a specific dialect — then it must be UNIQUE to
+# this node and satisfy: Jmin < Jmax ; H1..H4 distinct ; (S1 + 56) != S2. See
+# nodes/dataplane/amneziawg/README.md.
+awg_obfs: {}
 
 # The AmneziaWG path reuses the same client_names roster as the VLESS+REALITY path above; one
 # keypair (and optional pre-shared key) is generated per name on the node.

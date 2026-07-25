@@ -429,11 +429,15 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$NB_SELF --l7-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
+# The `-` prefix (Audit-0008 S2-1) makes systemd IGNORE a non-zero exit: measure_l7_probe intentionally
+# `return 1`s when a member is client-DEAD (a valid signal — the verdict is in the marker, not the exit code),
+# and under Type=oneshot a failing ExecStart would (a) mark the unit failed and (b) SKIP the chained --fp-probe
+# below — so the RP-0015 fingerprint A/B would never run in exactly the DEAD scenario it exists to diagnose.
+ExecStart=-$NB_SELF --l7-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
 # RP-0015 B: the fingerprint A/B post-pass runs on the SAME cadence (no new timer/host). Type=oneshot runs
 # these sequentially, so it consumes the l7_selftest.json the probe above just wrote. It only re-dials (with
 # alternate presets) when a fingerprint-carrying member already read DEAD, so it is cheap on a healthy node.
-ExecStart=$NB_SELF --fp-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
+ExecStart=-$NB_SELF --fp-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
 Nice=10
 IOSchedulingClass=idle
 UNIT
