@@ -74,8 +74,15 @@ _awg_digest() {
 # boundary"). It produces NO key material and is not a confidentiality boundary; SHA-256 is used only as an
 # off-the-shelf digest from the audited sha256sum/openssl. No custom primitive is introduced.
 derive_awg_dialect() {
-	local input="$1" salt=0 dg
+	local input="$1" epoch="${2:-0}" salt=0 dg
 	[ -n "$input" ] || die "AWG dialect derivation: empty node value (cannot derive a per-node dialect)."
+	# Rotation epoch (RP/Audit-0008 S1-4 follow-up): epoch 0 — the default, and the state of every node
+	# migrated before rotation existed — derives from the key ALONE, so introducing rotation reproduces a
+	# node's original dialect byte-for-byte. Each bump (--awg-rotate) folds the counter in and yields a
+	# completely different dialect from the SAME key, so a node can move off a known/blocked dialect
+	# without touching any key or peer.
+	case "$epoch" in ''|*[!0-9]*) epoch=0 ;; esac
+	[ "$epoch" -eq 0 ] || input="$input|epoch$epoch"
 	have sha256sum || have openssl || die "AWG dialect derivation needs sha256sum or openssl (neither found)."
 	# Headers: 4 distinct uint32 in [5, 2^32-1]. 4294967291 = 2^32-5, so (word % 4294967291) + 5 ∈ [5, 2^32-1].
 	# Collisions among 4 draws are ~1e-9; on the off chance, bump the salt and re-draw (deterministic).
@@ -201,7 +208,9 @@ render_awg0() {
 	# Audit-0008 S1-4: set the per-node obfuscation dialect (H1..H4 + jitter) from THIS node's key before
 	# writing either the server awg0.conf or any client config, so both sides of every handshake match and
 	# no two nodes share a dialect. The key was just read (spriv) — derivation cannot fail on a real node.
-	derive_awg_dialect "$spriv"
+	# Per-node dialect at this node's CURRENT rotation epoch (0 on a fresh node) — so a re-render after an
+	# --awg-rotate keeps the rotated dialect instead of reverting to the epoch-0 one.
+	derive_awg_dialect "$spriv" "$(_awg_read_epoch)"
 	port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || echo 51820)"
 	wan="$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 	[ -n "$wan" ] || { warn "could not detect the WAN interface; using 'eth0' in awg0.conf — verify it."; wan="eth0"; }
@@ -434,23 +443,44 @@ _awg_swap_dialect() {
 # NOTE the migration window: once the SERVER is restarted onto the new dialect, already-deployed clients
 # (still on the old dialect) cannot handshake until they import the refreshed client .conf — hand them out
 # out-of-band (the paths are logged). Do it one node at a time.
-regen_awg_dialect() {
-	need_root
-	[ "$DO_AMNEZIAWG" -eq 1 ] || die "awg-regen: AmneziaWG is disabled on this node (--no-amneziawg); nothing to regenerate."
-	have awg && have awg-quick || die "awg-regen: AmneziaWG tools missing — bootstrap the node first."
-	local awg_conf="/etc/amnezia/amneziawg/awg0.conf" awg_state="$STATE_DIR/awg"
-	[ -f "$awg_conf" ] || die "awg-regen: no live awg0.conf at $awg_conf — this node has no AmneziaWG to migrate (bootstrap it first)."
+# _awg_epoch_file -> echo the path of the node-local dialect-epoch file. The epoch is the ROTATION counter
+# folded into the derivation (see derive_awg_dialect): epoch 0 (the file absent) reproduces the node's
+# ORIGINAL per-node dialect, so introducing rotation never disturbs an already-migrated node.
+_awg_epoch_file() { printf '%s\n' "$STATE_DIR/awg/dialect.epoch"; }
 
-	# Derive THIS node's dialect from the server PrivateKey carried IN awg0.conf — the authoritative key the
-	# running interface uses, and ALWAYS present (unlike $STATE_DIR/awg/private.key, which only exists on a
-	# setup_amneziawg-bootstrapped node; nodes provisioned another way carry a self-contained awg0.conf with
-	# no state-dir key). On a setup_amneziawg node the two are identical, so the derived dialect matches what
-	# a fresh render_awg0 would produce. The key never leaves the node. Sets AWG_H1..AWG_H4 + AWG_JC..AWG_S2.
+# _awg_read_epoch -> echo the current rotation epoch as an integer (0 when absent/unreadable/non-numeric).
+_awg_read_epoch() {
+	local f v
+	f="$(_awg_epoch_file)"
+	v="$(cat "$f" 2>/dev/null | tr -dc '0-9')"
+	[ -n "$v" ] || v=0
+	printf '%s\n' "$v"
+}
+
+# _awg_apply_dialect EPOCH TAG — the SHARED migrate/rotate machinery: derive this node's dialect AT EPOCH
+# from the server PrivateKey carried IN awg0.conf, back up, surgically swap it into the live server config +
+# every client config, restart awg0, and L7-verify with a real loopback handshake. Fail-safe: a failed
+# bring-up OR a DEAD L7 selftest restores the backup, reverts the epoch file, restarts, and dies — so the
+# node never sits on a dialect it cannot serve. TAG ("awg-regen"/"awg-rotate") only labels the log lines.
+#
+# The key is read from awg0.conf (not $STATE_DIR/awg/private.key): it is the authoritative key the running
+# interface uses and is ALWAYS present, whereas the state-dir key exists only on a setup_amneziawg-
+# bootstrapped node (a node provisioned another way carries a self-contained awg0.conf). On a
+# setup_amneziawg node the two are identical, so the derived dialect matches a fresh render. The key never
+# leaves the node.
+_awg_apply_dialect() {
+	local epoch="$1" tag="$2"
+	need_root
+	[ "$DO_AMNEZIAWG" -eq 1 ] || die "$tag: AmneziaWG is disabled on this node (--no-amneziawg); nothing to do."
+	have awg && have awg-quick || die "$tag: AmneziaWG tools missing — bootstrap the node first."
+	local awg_conf="/etc/amnezia/amneziawg/awg0.conf" awg_state="$STATE_DIR/awg"
+	[ -f "$awg_conf" ] || die "$tag: no live awg0.conf at $awg_conf — this node has no AmneziaWG (bootstrap it first)."
+
 	local srv_key
 	srv_key="$(grep -E '^PrivateKey = ' "$awg_conf" | head -1 | sed -E 's/^PrivateKey = //; s/[[:space:]]*$//')"
-	[ -n "$srv_key" ] || die "awg-regen: could not read the server PrivateKey from $awg_conf — cannot derive the per-node dialect."
-	derive_awg_dialect "$srv_key"
-	log "awg-regen: derived per-node dialect H1=$AWG_H1 H2=$AWG_H2 H3=$AWG_H3 H4=$AWG_H4 Jc=$AWG_JC Jmin=$AWG_JMIN Jmax=$AWG_JMAX S1=$AWG_S1 S2=$AWG_S2"
+	[ -n "$srv_key" ] || die "$tag: could not read the server PrivateKey from $awg_conf — cannot derive the per-node dialect."
+	derive_awg_dialect "$srv_key" "$epoch"
+	log "$tag: derived per-node dialect (epoch $epoch) H1=$AWG_H1 H2=$AWG_H2 H3=$AWG_H3 H4=$AWG_H4 Jc=$AWG_JC Jmin=$AWG_JMIN Jmax=$AWG_JMAX S1=$AWG_S1 S2=$AWG_S2"
 
 	# Enumerate the client configs to refresh alongside the server config.
 	local clients_dir="$awg_state/clients" cfgs=("$awg_conf") c
@@ -459,44 +489,78 @@ regen_awg_dialect() {
 	fi
 
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "[dry-run] awg-regen would back up + swap the dialect in ${#cfgs[@]} file(s):"
+		log "[dry-run] $tag would back up + swap the dialect (epoch $epoch) in ${#cfgs[@]} file(s):"
 		for c in "${cfgs[@]}"; do log "[dry-run]   $c (dialect lines: $(_awg_dialect_lines "$c"))"; done
-		log "[dry-run] then: systemctl restart awg-quick@awg0 + L7 verify. No changes made."
+		log "[dry-run] then: systemctl restart awg-quick@awg0 + L7 selftest. No changes made."
 		return 0
 	fi
 
-	# Backup the live server + client configs (reversible).
-	local stamp bak
+	# Backup the live server + client configs + the current epoch (fully reversible).
+	local stamp bak prev_epoch
+	prev_epoch="$(_awg_read_epoch)"
 	stamp="$(date +%Y%m%d-%H%M%S)"
 	bak="$awg_state/backup-$stamp"
-	install -d -m 0700 "$bak" || die "awg-regen: could not create backup dir $bak."
-	cp -a "$awg_conf" "$bak/awg0.conf" || die "awg-regen: could not back up $awg_conf."
+	install -d -m 0700 "$bak" || die "$tag: could not create backup dir $bak."
+	cp -a "$awg_conf" "$bak/awg0.conf" || die "$tag: could not back up $awg_conf."
 	[ -d "$clients_dir" ] && cp -a "$clients_dir" "$bak/clients"
-	log "awg-regen: backed up the live awg0.conf + client configs to $bak"
+	printf '%s\n' "$prev_epoch" > "$bak/dialect.epoch" 2>/dev/null || true
+	log "$tag: backed up the live awg0.conf + client configs + epoch ($prev_epoch) to $bak"
 
 	# Swap the dialect in every config (server first). Each swap is fail-closed on a non-standard file.
 	for c in "${cfgs[@]}"; do _awg_swap_dialect "$c"; done
-	log "awg-regen: swapped the dialect in ${#cfgs[@]} config(s) (peers/keys/addresses untouched)."
+	log "$tag: swapped the dialect in ${#cfgs[@]} config(s) (peers/keys/addresses untouched)."
 
-	# Apply: restart the interface onto the new dialect. Restore the backup on any bring-up failure.
-	if ! systemctl restart awg-quick@awg0 || ! systemctl is-active --quiet awg-quick@awg0; then
-		warn "awg-regen: awg-quick@awg0 did not come up on the new dialect — RESTORING the previous config from $bak."
+	# Persist the new epoch BEFORE bring-up so a crash leaves the epoch matching the on-disk config; the
+	# rollback below reverts it in lockstep with the config.
+	install -d -m 0700 "$awg_state" 2>/dev/null || true
+	printf '%s\n' "$epoch" > "$(_awg_epoch_file)" 2>/dev/null || warn "$tag: could not persist the dialect epoch (a later re-render may re-derive the previous dialect)."
+
+	# _awg_rollback REASON — restore config + epoch, restart, and die (single fail-safe exit).
+	_awg_rollback() {
+		warn "$tag: $1 — RESTORING the previous config + epoch from $bak."
 		cp -a "$bak/awg0.conf" "$awg_conf" 2>/dev/null || true
+		[ -d "$bak/clients" ] && cp -a "$bak/clients/." "$clients_dir/" 2>/dev/null || true
+		printf '%s\n' "$prev_epoch" > "$(_awg_epoch_file)" 2>/dev/null || true
 		systemctl restart awg-quick@awg0 2>/dev/null || true
-		die "awg-regen: FAILED to bring up the new dialect; restored the previous awg0.conf from $bak. Inspect 'journalctl -u awg-quick@awg0'."
-	fi
-	log "awg-regen: awg-quick@awg0 is up on the new per-node dialect."
+		die "$tag: FAILED ($1); restored the previous dialect from $bak. Inspect 'journalctl -u awg-quick@awg0'."
+	}
 
-	# Advisory L7 verify (a real loopback WG handshake against awg0 with the new dialect). Advisory: bring-up
-	# already succeeded, and the probe is self-cleaning — a DEAD result points the operator at the backup.
+	# Apply: restart the interface onto the new dialect.
+	if ! systemctl restart awg-quick@awg0 || ! systemctl is-active --quiet awg-quick@awg0; then
+		_awg_rollback "awg-quick@awg0 did not come up on the new dialect"
+	fi
+	log "$tag: awg-quick@awg0 is up on the new per-node dialect (epoch $epoch)."
+
+	# L7 SELFTEST — a real loopback WireGuard handshake against awg0 on the NEW dialect. Fail-closed: a DEAD
+	# data-plane rolls back automatically (a dialect the node cannot actually serve is never left live).
 	if command -v measure_l7_probe_amneziawg >/dev/null 2>&1; then
-		if measure_l7_probe_amneziawg "$STATE_DIR/l7_awg_regen.json"; then
-			log "awg-regen: L7 AmneziaWG probe OK — the data-plane processes handshakes on the new dialect."
+		if measure_l7_probe_amneziawg "$STATE_DIR/l7_awg_${tag#awg-}.json"; then
+			log "$tag: L7 selftest OK — the data-plane completes handshakes on the new dialect."
 		else
-			warn "awg-regen: L7 AmneziaWG probe flagged DEAD on the new dialect. If clients cannot connect, restore: cp $bak/awg0.conf $awg_conf && systemctl restart awg-quick@awg0"
+			_awg_rollback "the L7 selftest found the data-plane DEAD on the new dialect"
 		fi
+	else
+		warn "$tag: the L7 AmneziaWG probe is unavailable here — applied WITHOUT a handshake selftest."
 	fi
 
-	log "awg-regen: DONE. Hand out the refreshed client configs out-of-band (same keys, new dialect): $clients_dir/*.conf"
-	log "awg-regen: backup kept at $bak (restore with: cp $bak/awg0.conf $awg_conf && systemctl restart awg-quick@awg0)"
+	log "$tag: DONE (epoch $epoch). Refresh every AmneziaWG CLIENT with this dialect or it cannot handshake:"
+	log "$tag:   Jc = $AWG_JC / Jmin = $AWG_JMIN / Jmax = $AWG_JMAX / S1 = $AWG_S1 / S2 = $AWG_S2"
+	log "$tag:   H1 = $AWG_H1 / H2 = $AWG_H2 / H3 = $AWG_H3 / H4 = $AWG_H4"
+	log "$tag: node-held client configs (if any): $clients_dir/*.conf ; backup: $bak"
+}
+
+regen_awg_dialect() { _awg_apply_dialect "$(_awg_read_epoch)" "awg-regen"; }
+
+# rotate_awg_dialect — ROTATE this node's AmneziaWG dialect to a FRESH one: bump the rotation epoch and
+# re-derive, so the node moves to a completely different H1..H4 + jitter WITHOUT touching any key or peer.
+# Unlike --awg-regen (idempotent: it re-derives the CURRENT epoch, used to migrate a node onto its per-node
+# dialect), this deliberately changes the on-the-wire dialect — the response to "this node's dialect became
+# known/blocked." Fail-closed via the shared machinery: a failed bring-up or a DEAD L7 selftest rolls the
+# config AND the epoch back. Every client must be refreshed with the new dialect (logged).
+rotate_awg_dialect() {
+	local cur next
+	cur="$(_awg_read_epoch)"
+	next=$(( cur + 1 ))
+	log "awg-rotate: rotating the AmneziaWG dialect (epoch $cur -> $next); keys, peers and addresses are untouched."
+	_awg_apply_dialect "$next" "awg-rotate"
 }
