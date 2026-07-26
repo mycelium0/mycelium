@@ -100,6 +100,21 @@ else
 	okln "every control/lib/nb_*.sh module is registered in the entrypoint's source loop"
 fi
 
+# 5. PORTED DECISIONS KEEP THEIR GO PIN. This gate historically inspected ONLY the entrypoint, so control
+#    logic could (and did) accumulate in control/lib/*.sh unnoticed — the libs are the RP-0009 extraction
+#    target, not an exemption from RP-0008. A general "is this shell function a control decision?" test is
+#    not mechanisable, but the decisions ALREADY ported to Go have a checkable property: each keeps a
+#    registered byte-equivalence gate. Without that, a shell twin could drift from its Go owner silently,
+#    which for the AmneziaWG dialect means clients that cannot handshake.
+RUN_SH="$REPO_ROOT/tests/run.sh"
+for pin in awg_dialect_go_equiv awg_routes_go_equiv awg_client_conf_go_equiv; do
+	if [ -f "$REPO_ROOT/tests/conformance/$pin.sh" ] && grep -qF "tests/conformance/$pin.sh" "$RUN_SH" 2>/dev/null; then
+		okln "the ported decision pinned by $pin.sh exists AND is registered in the suite"
+	else
+		badln "$pin.sh is missing or not registered in tests/run.sh — a ported decision lost its Go equivalence pin"
+	fi
+done
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: node-bootstrap.sh is not orchestration-only — a control decision leaked back into the entrypoint.\n' >&2

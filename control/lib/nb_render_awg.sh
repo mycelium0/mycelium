@@ -640,8 +640,12 @@ issue_awg_client() {
 	fi
 
 	# Enrol the peer when it is not already in the live config (re-issue leaves the server config untouched).
+	# The pre-enrolment backup lives in the state dir (like the regen/rotate backups) and is REAL: if the
+	# interface will not come back up with the new peer, we restore it rather than leave the live config
+	# mutated behind a warning.
+	local enrol_bak="$awg_state/awg0.pre-issue.conf"
 	if [ -z "$existing" ]; then
-		cp -a "$awg_conf" "$awg_conf.awg-issue.bak" 2>/dev/null || true
+		cp -a "$awg_conf" "$enrol_bak" 2>/dev/null || die "awg-issue: could not back up $awg_conf before enrolling the peer."
 		{
 			printf '\n[Peer]\n# name = %s\n' "$name"
 			printf 'PublicKey = %s\n' "$cpub"
@@ -661,14 +665,27 @@ issue_awg_client() {
 
 	# Apply the peer change to the running interface, then L7-verify the data-plane.
 	if [ -z "$existing" ]; then
-		systemctl restart awg-quick@awg0 2>/dev/null || warn "awg-issue: could not restart awg-quick@awg0 — the peer is in the config but may not be live yet."
+		if ! systemctl restart awg-quick@awg0 2>/dev/null || ! systemctl is-active --quiet awg-quick@awg0; then
+			warn "awg-issue: awg0 did not come back up with the new peer — RESTORING the pre-enrolment config."
+			cp -a "$enrol_bak" "$awg_conf" 2>/dev/null || true
+			rm -f "$clients_dir/$name.conf" 2>/dev/null || true
+			systemctl restart awg-quick@awg0 2>/dev/null || true
+			die "awg-issue: FAILED to enrol '$name' (awg0 would not come up); restored the previous config. Inspect 'journalctl -u awg-quick@awg0'."
+		fi
+		rm -f "$enrol_bak" 2>/dev/null || true
 	fi
 	if command -v measure_l7_probe_amneziawg >/dev/null 2>&1; then
 		measure_l7_probe_amneziawg "$STATE_DIR/l7_awg_issue.json" \
 			&& log "awg-issue: L7 selftest OK — the data-plane completes handshakes." \
 			|| warn "awg-issue: the L7 selftest flagged the data-plane DEAD — inspect 'journalctl -u awg-quick@awg0'."
 	fi
-	log "awg-issue: client '$name' ready (dialect epoch $epoch): $clients_dir/$name.conf"
+	local route_mode="split-tunnel (safe narrow)"
+	case "$client_allowed" in
+		*0.0.0.0/0*) route_mode="FULL TUNNEL (deliberate opt-out)" ;;
+		*) [ -n "$AWG_REGION_EXCLUDE_FILE" ] && route_mode="split-tunnel (region-exclude list)" ;;
+	esac
+	log "awg-issue: client '$name' ready (dialect epoch $epoch, routes: $route_mode): $clients_dir/$name.conf"
+	log "awg-issue:   AllowedIPs = $client_allowed"
 	log "awg-issue: hand it over out-of-band; it is a complete ready-to-import config (0600, node-local)."
 }
 
