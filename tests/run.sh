@@ -197,6 +197,10 @@
 #                               and rotation epochs. Server and client configs are rendered by either
 #                               producer, so a single digit of drift would take the AmneziaWG family down
 #                               (RP-0008 / Audit-0008 S1-4). OFFLINE
+#   * awg_routes_go_equiv.sh  — the Go-owned Selective-Growth client-route decision (spec.ResolveAWGRoutes /
+#                               `myceliumctl awg-routes`) is BYTE-IDENTICAL to the bash twin, AND neither
+#                               producer ever yields a default route except through the deliberate,
+#                               marker-recorded opt-out (VIS-0009 / ADR-0027, RP-0008). OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -286,6 +290,7 @@ GATES=(
 	"tests/conformance/architecture_matrix_currency.sh"
 	"tests/conformance/awg_regen_failsafe.sh"
 	"tests/conformance/awg_dialect_go_equiv.sh"
+	"tests/conformance/awg_routes_go_equiv.sh"
 	"control/selftest.sh"
 )
 

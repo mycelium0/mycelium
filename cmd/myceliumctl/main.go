@@ -65,6 +65,8 @@ func run(args []string) error {
 		return cmdVocab(rest)
 	case "awg-dialect":
 		return cmdAWGDialect(rest)
+	case "awg-routes":
+		return cmdAWGRoutes(rest)
 	case "rotate-plan":
 		return cmdRotatePlan(rest)
 	case "fingerprint-plan":
@@ -839,6 +841,53 @@ func cmdAWGDialect(args []string) error {
 	}
 	if _, err := os.Stdout.Write(out); err != nil {
 		return fmt.Errorf("awg-dialect: write: %w", err)
+	}
+	return nil
+}
+
+// cmdAWGRoutes resolves the Selective-Growth client AllowedIPs (VIS-0009 / ADR-0027) and prints the
+// resolved value — i.e. exactly what follows "AllowedIPs = " in a client config. With --json it emits the
+// full decision (routes, opt-out marker, advisory notes).
+//
+// The region-exclude list is read from FILE (or stdin with "-"); the decision itself is pure, so the
+// filesystem read stays here at the edge.
+func cmdAWGRoutes(args []string) error {
+	fs := flag.NewFlagSet("awg-routes", flag.ContinueOnError)
+	fullTunnel := fs.Bool("full-tunnel", false, "deliberate, recorded full-tunnel opt-out")
+	noSplit := fs.Bool("no-split-tunnel", false, "disable split-tunnel (refused unless --full-tunnel)")
+	hasV6 := fs.Bool("has-v6", false, "the node carries global IPv6 (dual-stack tunnel)")
+	region := fs.String("region-exclude", "", "path to a region-exclude AllowedIPs file (\"-\" for stdin)")
+	asJSON := fs.Bool("json", false, "emit the full decision as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("awg-routes: takes no positional arguments")
+	}
+	p := spec.AWGRoutePolicy{FullTunnelOptOut: *fullTunnel, SplitTunnel: !*noSplit, HasV6: *hasV6}
+	if *region != "" {
+		raw, err := readFileOrStdin(*region)
+		if err != nil {
+			return fmt.Errorf("awg-routes: read region-exclude: %w", err)
+		}
+		p.RegionExclude = strings.Split(string(raw), "\n")
+	}
+	r, err := spec.ResolveAWGRoutes(p)
+	if err != nil {
+		return err
+	}
+	var out []byte
+	if *asJSON {
+		b, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			return fmt.Errorf("awg-routes: marshal: %w", err)
+		}
+		out = append(b, '\n')
+	} else {
+		out = []byte(r.Join() + "\n")
+	}
+	if _, err := os.Stdout.Write(out); err != nil {
+		return fmt.Errorf("awg-routes: write: %w", err)
 	}
 	return nil
 }
