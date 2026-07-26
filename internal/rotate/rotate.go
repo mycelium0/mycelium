@@ -232,9 +232,33 @@ func registryOrder() map[string]int {
 
 // better reports whether candidate a should be preferred over b: higher weight wins; on an exact
 // tie, the lower registry index wins (deterministic).
+// better ranks two viable candidates. EXPOSURE FIRST: the safest tier wins outright, so a riskier shape
+// is chosen only when nothing safer is viable (dead / reset / collapsing / not beating the incumbent are
+// all filtered out before this point). Measured weight ranks only WITHIN a tier, and the registry order
+// breaks a remaining tie.
+//
+// Weight deliberately does NOT out-rank exposure: a risky shape that happens to work today would
+// otherwise be promoted over a safe one, which inverts the point. The cost of a risky shape is not paid
+// while it works — it is paid when it is classified, and by then it has also taught the observer what
+// this node is. Availability is protected by the viability filters above, not by demoting safety here.
 func better(a, b spec.RotationCandidate, order map[string]int) bool {
+	ea, eb := exposureOf(a.Proto), exposureOf(b.Proto)
+	if ea != eb {
+		return ea < eb
+	}
 	if a.Weight != b.Weight {
 		return a.Weight > b.Weight
 	}
 	return order[a.Proto] < order[b.Proto]
+}
+
+// exposureOf returns a proto's detection-exposure tier from the closed registry. An unknown proto sorts
+// LAST (never silently treated as safe) — Validate rejects it upstream, so this is a belt, not a path.
+func exposureOf(proto string) spec.ExposureTier {
+	for _, d := range spec.TransportRegistry() {
+		if d.Proto == proto {
+			return d.Exposure
+		}
+	}
+	return spec.ExposureNoCover + 1
 }

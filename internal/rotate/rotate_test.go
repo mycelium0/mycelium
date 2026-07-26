@@ -376,3 +376,63 @@ func TestPlanInputCarriesNoGlobalSignal(t *testing.T) {
 		}
 	}
 }
+
+// TestPlanPrefersSaferExposureOverWeight: the load-bearing property of the exposure ranking — a RISKIER
+// shape that currently measures BETTER must not be promoted over a viable safer one. Weight ranks only
+// within a tier; the cost of a risky shape is paid when it is classified, not while it works.
+func TestPlanPrefersSaferExposureOverWeight(t *testing.T) {
+	in := base()
+	// shadowsocks (tier 6, NO COVER) measures far better than vless-ws-tls (tier 3, own-cert TLS).
+	// The safer one must still win.
+	in.Ranked = []spec.RotationCandidate{
+		cand("shadowsocks", 0.99, true),
+		cand("vless-ws-tls", 0.55, true),
+	}
+	p, err := Plan(in)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if !p.Act {
+		t.Fatalf("expected a rotation, got hold: %s", p.Reason)
+	}
+	if p.To.Proto != "vless-ws-tls" {
+		t.Fatalf("promoted %q over the safer own-cert-TLS candidate — exposure must out-rank weight", p.To.Proto)
+	}
+}
+
+// TestPlanFallsBackToRiskierWhenSaferIsNotViable: the other half of the contract — the risky axis EXISTS
+// to be used when nothing safer can carry traffic. With the safer candidate L7-dead, the last-resort
+// no-cover shape must be chosen rather than holding.
+func TestPlanFallsBackToRiskierWhenSaferIsNotViable(t *testing.T) {
+	in := base()
+	dead := cand("vless-ws-tls", 0.90, true)
+	dead.L7Dead = true
+	in.Ranked = []spec.RotationCandidate{dead, cand("shadowsocks", 0.60, true)}
+	p, err := Plan(in)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if !p.Act || p.To.Proto != "shadowsocks" {
+		t.Fatalf("with every safer candidate dead the last-resort axis must be used; got act=%v to=%q (%s)", p.Act, p.To.Proto, p.Reason)
+	}
+}
+
+// TestExposureTiersAreTotalAndOrdered: every registry proto carries a tier, REALITY is the safest and the
+// uncovered TCP shape is the riskiest — so a future edit cannot quietly leave a proto untiered (which
+// would sort it as safe) or reorder the two ends without arguing with this test.
+func TestExposureTiersAreTotalAndOrdered(t *testing.T) {
+	for _, d := range spec.TransportRegistry() {
+		if d.Exposure < spec.ExposureBorrowedTLS || d.Exposure > spec.ExposureNoCover {
+			t.Errorf("proto %q has no valid exposure tier (%d)", d.Proto, d.Exposure)
+		}
+	}
+	if exposureOf("vless-reality-vision") != spec.ExposureBorrowedTLS {
+		t.Error("REALITY must be the safest tier (it borrows a real donor handshake)")
+	}
+	if exposureOf("shadowsocks") != spec.ExposureNoCover {
+		t.Error("standalone Shadowsocks must be the last-resort tier (no handshake cover at all)")
+	}
+	if exposureOf("no-such-proto") <= spec.ExposureNoCover {
+		t.Error("an unknown proto must sort LAST, never be treated as safe")
+	}
+}

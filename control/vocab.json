@@ -62,7 +62,8 @@
       "port_key": "vless_reality_vision_port",
       "default_port": 443,
       "scheme": "vless",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 1
     },
     {
       "proto": "vless-reality-grpc",
@@ -71,7 +72,8 @@
       "port_key": "vless_reality_grpc_port",
       "default_port": 8443,
       "scheme": "vless",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 1
     },
     {
       "proto": "vless-reality-xhttp",
@@ -80,7 +82,8 @@
       "port_key": "vless_reality_xhttp_port",
       "default_port": 2096,
       "scheme": "vless",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 1
     },
     {
       "proto": "vless-xhttp-tls",
@@ -89,7 +92,8 @@
       "port_key": "vless_xhttp_tls_port",
       "default_port": 2087,
       "scheme": "vless",
-      "engine": "xray"
+      "engine": "xray",
+      "exposure": 3
     },
     {
       "proto": "vless-ws-tls",
@@ -98,7 +102,8 @@
       "port_key": "vless_ws_tls_port",
       "default_port": 2089,
       "scheme": "vless",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 3
     },
     {
       "proto": "hysteria2",
@@ -107,7 +112,8 @@
       "port_key": "hysteria2_port",
       "default_port": 8444,
       "scheme": "hysteria2",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 4
     },
     {
       "proto": "tuic",
@@ -116,7 +122,8 @@
       "port_key": "tuic_port",
       "default_port": 8445,
       "scheme": "tuic",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 4
     },
     {
       "proto": "shadowsocks",
@@ -125,7 +132,8 @@
       "port_key": "shadowsocks_port",
       "default_port": 8388,
       "scheme": "ss",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 6
     },
     {
       "proto": "shadowtls",
@@ -134,7 +142,8 @@
       "port_key": "shadowtls_port",
       "default_port": 8446,
       "scheme": "ss",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 2
     },
     {
       "proto": "trojan",
@@ -143,7 +152,8 @@
       "port_key": "trojan_port",
       "default_port": 8447,
       "scheme": "trojan",
-      "engine": "sing-box"
+      "engine": "sing-box",
+      "exposure": 3
     },
     {
       "proto": "amneziawg",
@@ -152,7 +162,8 @@
       "port_key": "",
       "default_port": 0,
       "scheme": "",
-      "engine": "amneziawg"
+      "engine": "amneziawg",
+      "exposure": 5
     }
   ]
 }

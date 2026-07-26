@@ -45,6 +45,42 @@ const (
 )
 
 // ProtoDescriptor is one row of the canonical transport registry: a concrete wire
+// ExposureTier ranks a transport by HOW EXPOSED IT IS TO DETECTION — not by how well it currently
+// performs. Lower is safer, and the selection prefers the safest VIABLE shape: a riskier tier is reached
+// only when nothing in a safer tier can carry the traffic (dead / reset / collapsing / not better than the
+// incumbent). This is deliberately NOT the measured weight: a risky shape that happens to work today would
+// otherwise out-rank a safe one, which is exactly backwards — the cost of a risky shape is not paid when it
+// works, it is paid when it is classified, and by then it has also taught the observer what this node is.
+//
+// The ordering is the ADR-0010 per-transport reasoning made machine-readable; the one-line reasons live on
+// each constant so a future edit has to argue with them rather than silently renumber.
+type ExposureTier int
+
+const (
+	// ExposureBorrowedTLS — the handshake belongs to a REAL third-party site the node authenticates to
+	// (REALITY's authenticated dest steal). An active probe reaches a genuine site. ADR-0010: "best
+	// survivability against network degradation + active probing".
+	ExposureBorrowedTLS ExposureTier = 1
+	// ExposureCoveredTLS — a real TLS handshake to a real EXTERNAL cover host in front of the payload
+	// (ShadowTLS v3). The outer layer answers active probing with someone else's certificate.
+	ExposureCoveredTLS ExposureTier = 2
+	// ExposureOwnCertTLS — genuine single-layer TLS terminated by the node's OWN certificate. Shape-wise
+	// ordinary HTTPS, but the SNI/cert are server-attributable: it identifies THIS node, and every family
+	// in this tier shares that one SNI (they fold to one block family — see e2e_recovery.go).
+	ExposureOwnCertTLS ExposureTier = 3
+	// ExposureQUIC — ordinary-looking QUIC/UDP, but UDP on a non-443 port is conspicuous where TCP/443 is
+	// not, and whole networks excise UDP outright. Availability risk as much as detection risk.
+	ExposureQUIC ExposureTier = 4
+	// ExposureObfuscatedUDP — deliberately non-standard UDP that mimics nothing (AmneziaWG). The per-node
+	// dialect means it is not matchable from the public repo, but it is still an unexplained UDP flow.
+	ExposureObfuscatedUDP ExposureTier = 5
+	// ExposureNoCover — high-entropy TCP with NO handshake cover at all (Shadowsocks-2022 standalone).
+	// ADR-0010: "plain TCP shape without a TLS cover on its own". A classic flow-classifier target, and it
+	// shares the node's IP with the strong shapes — the "taint" ADR-0010 rejected a wider set over. LAST
+	// RESORT: valuable precisely because it is the only axis that survives a total TLS/QUIC failure.
+	ExposureNoCover ExposureTier = 6
+)
+
 // PROTO (the dash-form name the shell renderer switches on, e.g. "vless-reality-vision")
 // mapped to its coarse transport CLASS, the params keys that enable it and set its
 // port, its default port, its share-link URI scheme, and the engine that serves it.
@@ -58,6 +94,7 @@ type ProtoDescriptor struct {
 	DefaultPort int            `json:"default_port"` // canonical default listen port (0 if not params-toggled)
 	Scheme      string         `json:"scheme"`       // share-link URI scheme ("" if it has no bundle share-link)
 	Engine      ProtoEngine    `json:"engine"`       // data-plane engine that serves it
+	Exposure    ExposureTier   `json:"exposure"`     // detection-exposure tier; lower = safer = preferred
 }
 
 // transportRegistry is the ordered canonical proto table. The order of the
@@ -66,17 +103,17 @@ type ProtoDescriptor struct {
 // separate UDP dataplane, not a sing-box inbound. Editing this slice is the ONLY
 // place the proto->class/port/key/scheme/engine facts are defined.
 var transportRegistry = []ProtoDescriptor{
-	{Proto: "vless-reality-vision", Class: TransportClassRealityTCP, EnableKey: "vless_reality_vision_enabled", PortKey: "vless_reality_vision_port", DefaultPort: 443, Scheme: "vless", Engine: EngineSingBox},
-	{Proto: "vless-reality-grpc", Class: TransportClassRealityTCP, EnableKey: "vless_reality_grpc_enabled", PortKey: "vless_reality_grpc_port", DefaultPort: 8443, Scheme: "vless", Engine: EngineSingBox},
-	{Proto: "vless-reality-xhttp", Class: TransportClassRealityTCP, EnableKey: "vless_reality_xhttp_enabled", PortKey: "vless_reality_xhttp_port", DefaultPort: 2096, Scheme: "vless", Engine: EngineSingBox},
-	{Proto: "vless-xhttp-tls", Class: TransportClassXHTTPTLS, EnableKey: "vless_xhttp_tls_enabled", PortKey: "vless_xhttp_tls_port", DefaultPort: 2087, Scheme: "vless", Engine: EngineXray},
-	{Proto: "vless-ws-tls", Class: TransportClassWSTLS, EnableKey: "vless_ws_tls_enabled", PortKey: "vless_ws_tls_port", DefaultPort: 2089, Scheme: "vless", Engine: EngineSingBox},
-	{Proto: "hysteria2", Class: TransportClassQUICUDP, EnableKey: "hysteria2_enabled", PortKey: "hysteria2_port", DefaultPort: 8444, Scheme: "hysteria2", Engine: EngineSingBox},
-	{Proto: "tuic", Class: TransportClassQUICUDP, EnableKey: "tuic_enabled", PortKey: "tuic_port", DefaultPort: 8445, Scheme: "tuic", Engine: EngineSingBox},
-	{Proto: "shadowsocks", Class: TransportClassShadowsocksTCP, EnableKey: "shadowsocks_enabled", PortKey: "shadowsocks_port", DefaultPort: 8388, Scheme: "ss", Engine: EngineSingBox},
-	{Proto: "shadowtls", Class: TransportClassShadowTLSTCP, EnableKey: "shadowtls_enabled", PortKey: "shadowtls_port", DefaultPort: 8446, Scheme: "ss", Engine: EngineSingBox},
-	{Proto: "trojan", Class: TransportClassTrojanTLS, EnableKey: "trojan_enabled", PortKey: "trojan_port", DefaultPort: 8447, Scheme: "trojan", Engine: EngineSingBox},
-	{Proto: "amneziawg", Class: TransportClassAmneziaWGUDP, EnableKey: "", PortKey: "", DefaultPort: 0, Scheme: "", Engine: EngineAmneziaWG},
+	{Proto: "vless-reality-vision", Class: TransportClassRealityTCP, EnableKey: "vless_reality_vision_enabled", PortKey: "vless_reality_vision_port", DefaultPort: 443, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureBorrowedTLS},
+	{Proto: "vless-reality-grpc", Class: TransportClassRealityTCP, EnableKey: "vless_reality_grpc_enabled", PortKey: "vless_reality_grpc_port", DefaultPort: 8443, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureBorrowedTLS},
+	{Proto: "vless-reality-xhttp", Class: TransportClassRealityTCP, EnableKey: "vless_reality_xhttp_enabled", PortKey: "vless_reality_xhttp_port", DefaultPort: 2096, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureBorrowedTLS},
+	{Proto: "vless-xhttp-tls", Class: TransportClassXHTTPTLS, EnableKey: "vless_xhttp_tls_enabled", PortKey: "vless_xhttp_tls_port", DefaultPort: 2087, Scheme: "vless", Engine: EngineXray, Exposure: ExposureOwnCertTLS},
+	{Proto: "vless-ws-tls", Class: TransportClassWSTLS, EnableKey: "vless_ws_tls_enabled", PortKey: "vless_ws_tls_port", DefaultPort: 2089, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureOwnCertTLS},
+	{Proto: "hysteria2", Class: TransportClassQUICUDP, EnableKey: "hysteria2_enabled", PortKey: "hysteria2_port", DefaultPort: 8444, Scheme: "hysteria2", Engine: EngineSingBox, Exposure: ExposureQUIC},
+	{Proto: "tuic", Class: TransportClassQUICUDP, EnableKey: "tuic_enabled", PortKey: "tuic_port", DefaultPort: 8445, Scheme: "tuic", Engine: EngineSingBox, Exposure: ExposureQUIC},
+	{Proto: "shadowsocks", Class: TransportClassShadowsocksTCP, EnableKey: "shadowsocks_enabled", PortKey: "shadowsocks_port", DefaultPort: 8388, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureNoCover},
+	{Proto: "shadowtls", Class: TransportClassShadowTLSTCP, EnableKey: "shadowtls_enabled", PortKey: "shadowtls_port", DefaultPort: 8446, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureCoveredTLS},
+	{Proto: "trojan", Class: TransportClassTrojanTLS, EnableKey: "trojan_enabled", PortKey: "trojan_port", DefaultPort: 8447, Scheme: "trojan", Engine: EngineSingBox, Exposure: ExposureOwnCertTLS},
+	{Proto: "amneziawg", Class: TransportClassAmneziaWGUDP, EnableKey: "", PortKey: "", DefaultPort: 0, Scheme: "", Engine: EngineAmneziaWG, Exposure: ExposureObfuscatedUDP},
 }
 
 // transportClasses is the canonical CLOSED transport-class vocabulary in audited
