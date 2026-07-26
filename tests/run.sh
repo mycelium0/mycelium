@@ -201,6 +201,11 @@
 #                               `myceliumctl awg-routes`) is BYTE-IDENTICAL to the bash twin, AND neither
 #                               producer ever yields a default route except through the deliberate,
 #                               marker-recorded opt-out (VIS-0009 / ADR-0027, RP-0008). OFFLINE
+#   * awg_client_conf_go_equiv.sh — the Go-owned AmneziaWG CLIENT config renderer
+#                               (spec.RenderAWGClientConfig / `myceliumctl awg-client-conf`) is
+#                               BYTE-IDENTICAL to the shared bash renderer across hosts/dual-stack/epochs/
+#                               route modes; a full tunnel always carries the recorded opt-out marker; and
+#                               the shell has exactly ONE client renderer (RP-0008). OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -291,6 +296,7 @@ GATES=(
 	"tests/conformance/awg_regen_failsafe.sh"
 	"tests/conformance/awg_dialect_go_equiv.sh"
 	"tests/conformance/awg_routes_go_equiv.sh"
+	"tests/conformance/awg_client_conf_go_equiv.sh"
 	"control/selftest.sh"
 )
 

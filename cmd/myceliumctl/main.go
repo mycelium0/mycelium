@@ -67,6 +67,8 @@ func run(args []string) error {
 		return cmdAWGDialect(rest)
 	case "awg-routes":
 		return cmdAWGRoutes(rest)
+	case "awg-client-conf":
+		return cmdAWGClientConf(rest)
 	case "rotate-plan":
 		return cmdRotatePlan(rest)
 	case "fingerprint-plan":
@@ -888,6 +890,84 @@ func cmdAWGRoutes(args []string) error {
 	}
 	if _, err := os.Stdout.Write(out); err != nil {
 		return fmt.Errorf("awg-routes: write: %w", err)
+	}
+	return nil
+}
+
+// cmdAWGClientConf renders one complete, ready-to-import AmneziaWG client config. The client PRIVATE key
+// and the PSK are read from files (or "-" for stdin) rather than argv, so they cannot leak into a process
+// listing; the node key that derives the dialect is likewise read from a file.
+func cmdAWGClientConf(args []string) error {
+	fs := flag.NewFlagSet("awg-client-conf", flag.ContinueOnError)
+	privFile := fs.String("private-key-file", "", "file holding the CLIENT private key (\"-\" for stdin)")
+	pskFile := fs.String("psk-file", "", "file holding the client pre-shared key")
+	nodeKeyFile := fs.String("node-key-file", "", "file holding the NODE key the dialect derives from")
+	serverPub := fs.String("server-public-key", "", "the node's AmneziaWG public key")
+	endpoint := fs.String("endpoint", "", "the node's reachable address:port")
+	host := fs.Int("host", 0, "the client's in-tunnel host number (.2-.239)")
+	hasV6 := fs.Bool("has-v6", false, "render a dual-stack client")
+	epoch := fs.Int("epoch", 0, "the node's dialect rotation epoch")
+	mtu := fs.Int("mtu", spec.AWGDefaultMTU, "tunnel MTU")
+	fullTunnel := fs.Bool("full-tunnel", false, "deliberate, recorded full-tunnel opt-out")
+	noSplit := fs.Bool("no-split-tunnel", false, "disable split-tunnel (refused unless --full-tunnel)")
+	region := fs.String("region-exclude", "", "path to a region-exclude AllowedIPs file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("awg-client-conf: takes no positional arguments")
+	}
+	readTrimmed := func(path, what string) (string, error) {
+		if path == "" {
+			return "", fmt.Errorf("awg-client-conf: --%s is required", what)
+		}
+		raw, err := readFileOrStdin(path)
+		if err != nil {
+			return "", fmt.Errorf("awg-client-conf: read %s: %w", what, err)
+		}
+		return strings.TrimSpace(string(raw)), nil
+	}
+	priv, err := readTrimmed(*privFile, "private-key-file")
+	if err != nil {
+		return err
+	}
+	nodeKey, err := readTrimmed(*nodeKeyFile, "node-key-file")
+	if err != nil {
+		return err
+	}
+	psk := ""
+	if *pskFile != "" {
+		raw, err := readFileOrStdin(*pskFile)
+		if err != nil {
+			return fmt.Errorf("awg-client-conf: read psk: %w", err)
+		}
+		psk = strings.TrimSpace(string(raw))
+	}
+	dialect, err := spec.DeriveAWGDialect(nodeKey, *epoch)
+	if err != nil {
+		return err
+	}
+	rp := spec.AWGRoutePolicy{FullTunnelOptOut: *fullTunnel, SplitTunnel: !*noSplit, HasV6: *hasV6}
+	if *region != "" {
+		raw, err := readFileOrStdin(*region)
+		if err != nil {
+			return fmt.Errorf("awg-client-conf: read region-exclude: %w", err)
+		}
+		rp.RegionExclude = strings.Split(string(raw), "\n")
+	}
+	routes, err := spec.ResolveAWGRoutes(rp)
+	if err != nil {
+		return err
+	}
+	out, err := spec.RenderAWGClientConfig(spec.AWGClientConfig{
+		PrivateKey: priv, Host: *host, HasV6: *hasV6, MTU: *mtu, Dialect: dialect,
+		ServerPublicKey: *serverPub, PresharedKey: psk, Endpoint: *endpoint, Routes: routes,
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stdout.WriteString(out); err != nil {
+		return fmt.Errorf("awg-client-conf: write: %w", err)
 	}
 	return nil
 }

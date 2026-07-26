@@ -189,6 +189,34 @@ sg_allowed_join() {
 	printf '%s' "$out"
 }
 
+# render_awg_client_conf CPRIV HOST HAS_V6 SPUB CPSK ENDPOINT ALLOWED MARKER — emit ONE complete,
+# ready-to-import AmneziaWG client config on stdout. This is the SINGLE shell client renderer: both the
+# first-time render (render_awg0) and the live issue path (issue_awg_client) go through it, so the two can
+# never drift. It is the byte-twin of Go spec.RenderAWGClientConfig, pinned by
+# tests/conformance/awg_client_conf_go_equiv.sh. Uses the AWG_* dialect vars set by derive_awg_dialect.
+# Pure text emission: no files, no network (the caller redirects + chmods).
+render_awg_client_conf() {
+	local cpriv="$1" host="$2" has_v6="$3" spub="$4" cpsk="$5" endpoint="$6" allowed="$7" marker="$8"
+	local cv6="" cdns="1.1.1.1"
+	if [ "$has_v6" -eq 1 ]; then
+		cv6=", ${AWG_PEER_BASE_V6}${host}/128"; cdns="1.1.1.1, 2606:4700:4700::1111"
+	fi
+	printf '[Interface]\n'
+	printf 'PrivateKey = %s\n' "$cpriv"
+	printf 'Address = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$host" "$cv6"
+	printf 'DNS = %s\n' "$cdns"
+	printf 'MTU = %s\n' "$AWG_MTU"
+	printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
+	printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
+	printf '\n[Peer]\n'
+	printf 'PublicKey = %s\n' "$spub"
+	printf 'PresharedKey = %s\n' "$cpsk"
+	printf 'Endpoint = %s\n' "$endpoint"
+	[ -n "$marker" ] && printf '%s\n' "$marker"
+	printf 'AllowedIPs = %s\n' "$allowed"
+	printf 'PersistentKeepalive = 25\n'
+}
+
 # render_awg0 — FIRST-TIME render of the AmneziaWG server config (awg0.conf) + one [Peer] per client,
 # plus a ready-to-import client config per identity. Mirrors the audited amneziawg Ansible role
 # (templates/awg0.conf.j2 + defaults). The CALLER invokes this ONLY when awg0.conf is ABSENT, so a
@@ -237,7 +265,7 @@ render_awg0() {
 	} > "$out" )
 	# One [Peer] per client; generate the client's keypair+psk once and emit a ready client config.
 	local node_addr; node_addr="$(resolve_node_address 2>/dev/null || printf '%s' "$NODE_ADDRESS_PLACEHOLDER")"
-	local n=2 name cpub cpriv cpsk cv6 client_allowed client_dns
+	local n=2 name cpub cpriv cpsk cv6 client_allowed
 	for name in $CLIENT_NAMES; do
 		# 10.13.13.240–.254 is RESERVED for the node-local L7 liveness probe (nb_selftest.sh
 		# measure_l7_probe_amneziawg enrols an ephemeral probe-peer in that block). Fail CLOSED before a
@@ -251,9 +279,9 @@ render_awg0() {
 		[ -f "$clients_dir/$name.psk" ] || ( umask 077; awg genpsk >"$clients_dir/$name.psk" )
 		cpsk="$(cat "$clients_dir/$name.psk")"
 		if [ "$has_v6" -eq 1 ]; then
-			cv6=", ${AWG_PEER_BASE_V6}${n}/128"; client_dns="1.1.1.1, 2606:4700:4700::1111"
+			cv6=", ${AWG_PEER_BASE_V6}${n}/128"
 		else
-			cv6=""; client_dns="1.1.1.1"
+			cv6=""
 		fi
 		# Selective Growth (VIS-0009/ADR-0027): the client tunnel carries ONLY impaired-path traffic by default.
 		compute_client_allowed "$has_v6" || die "AmneziaWG client AllowedIPs unresolved — set AWG_FULL_TUNNEL_OPTOUT=1 to deliberately full-tunnel, or supply AWG_REGION_EXCLUDE_FILE."
@@ -264,22 +292,8 @@ render_awg0() {
 			printf 'PresharedKey = %s\n' "$cpsk"
 			printf 'AllowedIPs = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
 		} >> "$out"
-		( umask 077; {
-			printf '[Interface]\n'
-			printf 'PrivateKey = %s\n' "$cpriv"
-			printf 'Address = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
-			printf 'DNS = %s\n' "$client_dns"
-			printf 'MTU = %s\n' "$AWG_MTU"
-			printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
-			printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
-			printf '\n[Peer]\n'
-			printf 'PublicKey = %s\n' "$spub"
-			printf 'PresharedKey = %s\n' "$cpsk"
-			printf 'Endpoint = %s:%s\n' "$node_addr" "$port"
-			[ -n "$SG_MARKER" ] && printf '%s\n' "$SG_MARKER"
-			printf 'AllowedIPs = %s\n' "$client_allowed"
-			printf 'PersistentKeepalive = 25\n'
-		} > "$clients_dir/$name.conf" )
+		( umask 077; render_awg_client_conf "$cpriv" "$n" "$has_v6" "$spub" "$cpsk" \
+			"$node_addr:$port" "$client_allowed" "$SG_MARKER" > "$clients_dir/$name.conf" )
 		run chmod 0600 "$clients_dir/$name.conf"
 		n=$((n + 1))
 	done
@@ -611,8 +625,8 @@ issue_awg_client() {
 	fi
 	[ "$n" -lt 240 ] || die "awg-issue: no free client address (.2–.239 exhausted; .240–.254 is reserved for the L7 probe)."
 
-	local cv6="" client_dns="1.1.1.1"
-	if [ "$has_v6" -eq 1 ]; then cv6=", ${AWG_PEER_BASE_V6}${n}/128"; client_dns="1.1.1.1, 2606:4700:4700::1111"; fi
+	local cv6=""
+	if [ "$has_v6" -eq 1 ]; then cv6=", ${AWG_PEER_BASE_V6}${n}/128"; fi
 
 	# Selective Growth: the same policy render_awg0 applies — never a silent full tunnel.
 	local client_allowed
@@ -640,22 +654,9 @@ issue_awg_client() {
 	fi
 
 	# Render the COMPLETE client config at the node's current dialect.
-	( umask 077; {
-		printf '[Interface]\n'
-		printf 'PrivateKey = %s\n' "$cpriv"
-		printf 'Address = %s.%s/32%s\n' "$AWG_PEER_BASE_V4" "$n" "$cv6"
-		printf 'DNS = %s\n' "$client_dns"
-		printf 'MTU = %s\n' "$AWG_MTU"
-		printf 'Jc = %s\nJmin = %s\nJmax = %s\nS1 = %s\nS2 = %s\n' "$AWG_JC" "$AWG_JMIN" "$AWG_JMAX" "$AWG_S1" "$AWG_S2"
-		printf 'H1 = %s\nH2 = %s\nH3 = %s\nH4 = %s\n' "$AWG_H1" "$AWG_H2" "$AWG_H3" "$AWG_H4"
-		printf '\n[Peer]\n'
-		printf 'PublicKey = %s\n' "$srv_pub"
-		printf 'PresharedKey = %s\n' "$cpsk"
-		printf 'Endpoint = %s:%s\n' "$node_addr" "$port"
-		[ -n "$SG_MARKER" ] && printf '%s\n' "$SG_MARKER"
-		printf 'AllowedIPs = %s\n' "$client_allowed"
-		printf 'PersistentKeepalive = 25\n'
-	} > "$clients_dir/$name.conf" ) || die "awg-issue: could not write $clients_dir/$name.conf."
+	( umask 077; render_awg_client_conf "$cpriv" "$n" "$has_v6" "$srv_pub" "$cpsk" \
+		"$node_addr:$port" "$client_allowed" "$SG_MARKER" > "$clients_dir/$name.conf" ) \
+		|| die "awg-issue: could not write $clients_dir/$name.conf."
 	chmod 0600 "$clients_dir/$name.conf"
 
 	# Apply the peer change to the running interface, then L7-verify the data-plane.
