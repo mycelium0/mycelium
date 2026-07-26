@@ -311,16 +311,20 @@ func TestPlanRotatesPastPathCollapseToLiveSibling(t *testing.T) {
 	}
 }
 
+// TestPlanPicksHighestWeightDeterministically: within ONE exposure tier, the highest-weight promoted
+// candidate wins, deterministically. The candidates are deliberately same-tier (all own-cert TLS) because
+// weight only ranks inside a tier — across tiers the safer one wins regardless of weight, which is pinned
+// separately by TestPlanPrefersSaferExposureOverWeight.
 func TestPlanPicksHighestWeightDeterministically(t *testing.T) {
 	in := base()
 	in.Ranked = []spec.RotationCandidate{
-		cand("vless-reality-grpc", 0.6, true),
-		cand("vless-ws-tls", 0.9, true),
-		cand("amneziawg", 0.7, true),
+		cand("trojan", 0.6, true),       // own-cert TLS
+		cand("vless-ws-tls", 0.9, true), // own-cert TLS — highest weight in the tier
+		cand("vless-xhttp-tls", 0.7, true),
 	}
 	p := mustPlan(t, in)
 	if !p.Act || p.To.Proto != "vless-ws-tls" {
-		t.Fatalf("must pick the highest-weight promoted candidate (ws-tls), got act=%v to=%q", p.Act, p.To.Proto)
+		t.Fatalf("must pick the highest-weight promoted candidate within the tier (ws-tls), got act=%v to=%q", p.Act, p.To.Proto)
 	}
 }
 
