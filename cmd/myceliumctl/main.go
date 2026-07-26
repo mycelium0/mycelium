@@ -63,6 +63,8 @@ func run(args []string) error {
 		return cmdValidateBundle(rest)
 	case "vocab":
 		return cmdVocab(rest)
+	case "awg-dialect":
+		return cmdAWGDialect(rest)
 	case "rotate-plan":
 		return cmdRotatePlan(rest)
 	case "fingerprint-plan":
@@ -796,6 +798,47 @@ func cmdVocab(args []string) error {
 	}
 	if _, err := os.Stdout.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("vocab: write: %w", err)
+	}
+	return nil
+}
+
+// cmdAWGDialect derives a node's AmneziaWG obfuscation dialect (Audit-0008 S1-4) and emits it either as
+// the nine canonical [Interface] lines (default) or as JSON. The node KEY is read from stdin, never passed
+// as an argument, so it cannot leak into a process listing or a shell history.
+//
+// This is the authoritative producer; control/lib/nb_render_awg.sh keeps a bash twin for nodes without the
+// spine binary, and tests/conformance/awg_dialect_go_equiv.sh pins the two byte-identical.
+func cmdAWGDialect(args []string) error {
+	fs := flag.NewFlagSet("awg-dialect", flag.ContinueOnError)
+	epoch := fs.Int("epoch", 0, "rotation epoch (0 derives from the key alone)")
+	asJSON := fs.Bool("json", false, "emit JSON instead of the nine [Interface] lines")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("awg-dialect: takes no positional arguments (the node key is read from stdin)")
+	}
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("awg-dialect: read key from stdin: %w", err)
+	}
+	key := strings.TrimSpace(string(raw))
+	d, err := spec.DeriveAWGDialect(key, *epoch)
+	if err != nil {
+		return err
+	}
+	var out []byte
+	if *asJSON {
+		b, err := json.MarshalIndent(d, "", "  ")
+		if err != nil {
+			return fmt.Errorf("awg-dialect: marshal: %w", err)
+		}
+		out = append(b, '\n')
+	} else {
+		out = []byte(d.RenderINI())
+	}
+	if _, err := os.Stdout.Write(out); err != nil {
+		return fmt.Errorf("awg-dialect: write: %w", err)
 	}
 	return nil
 }
