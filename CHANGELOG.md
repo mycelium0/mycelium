@@ -13,6 +13,45 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Added
+- **AmneziaWG per-node obfuscation dialect + its operator verbs (Audit-0008 S1-4).** The dialect
+  (`H1..H4` + `Jc/Jmin/Jmax/S1/S2`) is no longer a network-wide constant committed in the public repo — a
+  published constant is a free network-wide block, since ONE passive UDP payload-match rule keyed on the
+  known `H1` drops the AmneziaWG family on every node at once, collapsing a default node's two-family
+  redundancy to REALITY-only. Each node now DERIVES its own from its own AmneziaWG key
+  (`derive_awg_dialect`, SHA-256 over a per-node value): deterministic, so a node's server config and all
+  its clients agree; keyed per node, so no two nodes share a dialect and the repo discloses none. Per
+  ADR-0002 this is header randomisation + junk sizing — obfuscation the ADR explicitly permits, producing
+  no key material and forming no confidentiality boundary. The committed literals are gone from the shell,
+  the Ansible role, `group_vars`, and the docs; a fresh `fungi deploy` gets a per-node dialect with no
+  operator action. Three verbs, all `--dry-run`-able and root-only:
+  `--awg-regen` (migrate a live node onto its per-node dialect; **idempotent**, it re-derives the CURRENT
+  epoch), `--awg-rotate` (move to a genuinely FRESH dialect by bumping a node-local epoch and re-deriving
+  from the SAME key — no key, peer or address changes), and `--awg-issue NAME` (the node itself mints the
+  keypair + PSK, enrols the `[Peer]`, and renders a COMPLETE ready-to-import client config at the node's
+  current dialect; idempotent re-issue is how clients are refreshed after a regen/rotation). All three are
+  surgical (only the nine `[Interface]` dialect lines are rewritten; every key, peer and address is
+  preserved), backup-first, and fail-closed: a failed bring-up OR a DEAD L7 handshake selftest restores the
+  config and reverts the epoch in lockstep, so a node is never left on a dialect it cannot serve. Epoch 0
+  derives from the key ALONE, so introducing rotation reproduced every already-migrated node's dialect
+  byte-for-byte. Pinned by `awg_regen_failsafe` (15 checks: backup-first, restore-on-failure, surgical,
+  key-preserving, dry-run, epoch-0 compatibility, lockstep rollback, re-render epoch awareness).
+- **AmneziaWG control logic moved into the Go spine (RP-0008).** The dialect derivation, the
+  Selective-Growth route decision and the client-config render were shell arithmetic and shell text —
+  control decisions outside their owning layer, and the only renderers in the tree with no Go twin and no
+  equivalence pin. Now `internal/spec`: `DeriveAWGDialect(key, epoch)` with `Valid()` stating the AmneziaWG
+  constraints (`H1..H4` distinct and > 4 so they never collide with the WireGuard message types,
+  `Jmin < Jmax`, `(S1+56) != S2`) and refusing to emit a dialect that violates them; `ResolveAWGRoutes`
+  (VIS-0009/ADR-0027, including the IPv6-leak guard) as a pure function over a policy struct;
+  `NextAWGPeerHost`/`UsedAWGPeerHosts` (fails closed at `.239` rather than reaching into the `.240–.254`
+  probe range); and `RenderAWGClientConfig`, whose `Validate()` refuses a full tunnel WITHOUT the recorded
+  Selective-Growth marker — the silent full tunnel the doctrine forbids. New verbs `myceliumctl
+  awg-dialect | awg-routes | awg-client-conf`; every secret is read from a file or stdin, never argv, so
+  none can land in a process listing. Per the RP-0008 strangler pattern the bash twins stay and are pinned
+  byte-identical by `awg_dialect_go_equiv` (25 key×epoch vectors), `awg_routes_go_equiv` (25 decisions) and
+  `awg_client_conf_go_equiv` (36 renders); each also asserts the underlying PROPERTY on BOTH producers —
+  no input except the deliberate opt-out may yield a default route — because two implementations can agree
+  and still both be wrong. The shell client render is now a single shared function used by both the
+  first-time render and the live issue path.
 - **Fingerprint-adaptivity — the gated actuator (RP-0015 increment B, B3; ships disarmed).** `flow_rotate_fingerprint`
   (`control/lib/nb_rotate_apply.sh`) is the scalar twin of the transport `flow_rotate`: it drives the SAME
   proven render→validate→promote→apply→verify_post_apply→rollback primitives behind its OWN triple gate

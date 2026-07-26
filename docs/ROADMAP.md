@@ -123,7 +123,8 @@ endpoint. Engine and protocol versions pinned to concrete tags (see
   removes only that inbound and leaves the others working. ("Independent shapes" = independent
   transport **families**: REALITY/TLS-over-TCP is one family regardless of Vision/gRPC/XHTTP framing;
   the canonical Phase-0 second family is **AmneziaWG/UDP** on every node — see
-  [ADR-0020](adr/0020-phase0-scope-reconciliations.md).)
+  [ADR-0020](adr/0020-phase0-scope-reconciliations.md). Its obfuscation dialect is derived **per node**,
+  so the second family cannot be removed network-wide by one rule keyed on a published constant.)
 - Active probing of the server returns a genuine donor-site response, not a suspicious one.
 - Node is deployed from zero with a single command; a client credential is revoked without
   reinstalling the node.
@@ -260,6 +261,10 @@ on one node.
   a non-degraded shape — under rate limits, anti-flap, and **rollback**, on the node itself.
 - **Self-tuning** (A/B obfuscation). AmneziaWG junk-packet parameters, ClientHello padding, packet
   sizes/timings — tuned by survivability feedback (the reinforce-and-evaporate decay law).
+  *Partially delivered:* the AmneziaWG dialect is now **per node**, derived from the node's own key rather
+  than a network-wide constant (Audit-0008 S1-4), and `--awg-rotate` moves a node to a fresh dialect
+  behind a fail-closed L7 handshake selftest. What remains for this bullet is the **feedback** half —
+  today a rotation is operator-triggered, not yet driven by survivability signal.
 - **Node-local diagnosis.** The node classifies its own channel as a **node-local** signal;
   *publishing* it as advisory network weather is Phase 3.
 
