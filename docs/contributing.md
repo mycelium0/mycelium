@@ -14,7 +14,7 @@ later. See the LICENSE file in the repository root.
 > [refactoring.md](refactoring.md) (audits, severity, gate criteria),
 > [ARCHITECTURE.md](ARCHITECTURE.md) (layers 1–5),
 > [THREAT-MODEL.md](THREAT-MODEL.md) (adversary, assets, opsec),
-> [ROADMAP.md](ROADMAP.md) (phases 0→5), [commit-template.txt](commit-template.txt).
+> [ROADMAP.md](ROADMAP.md) (phases 0→8), [commit-template.txt](commit-template.txt).
 
 Mycelium is software for resilient, private connectivity over unreliable networks. The contribution bar is
 therefore higher than a typical OSS project: **user safety is functional requirement #1**
@@ -220,9 +220,10 @@ netsim with SLO; every regression bug — regression test; everything that touch
 
 > **Socket/Docker/netem tests (§7.5).** Some network-degradation and netsim suite tests open real sockets,
 > netem, or Docker. They **must not** be treated as failing merely because a standard sandbox
-> blocks bind/connect/Docker. Run them in your local dev environment
-> (`make test-degradation`, `make netsim SCENARIO=...`,
-> `docker compose -f tests/netsim/compose.yml up --build`) and record this in the RP report
+> blocks bind/connect/Docker. Run them in your local dev environment and record this in the RP report.
+> *(Illustrative — `make test-degradation`, `make netsim`, and `tests/netsim/` are NOT in the tree today;
+> the real local entry point is `make conformance` / `bash tests/run.sh`, plus the on-node drills under
+> `tests/e2e/`.)* The RP report
 > and in the commit's `Verification:` block.
 
 ---
@@ -350,8 +351,8 @@ ENV — loaded at runtime and rotated without rebuilding.
 
 - A new external dependency expands the attack surface and supply chain — add only for a specific
   need; record *what* and *why*. Imports from projects with licences incompatible with
-  proprietary commercial use (GPL-family etc.) require explicit sign-off from Owner
-  (development.md §13).
+  **AGPL-3.0-or-later** require explicit sign-off from the Owner (development.md §13; see
+  dependency-policy.md — reuse is one-way *into* AGPL, and LGPL/GPL-with-linking upstreams are fine).
 - MCP servers (development.md §11): in `.mcp.json` at the root (committed), added for a specific
   need, tokens via ENV — **not** in the file; what/why is recorded in the commit; removal is an
   ordinary commit; "just in case" is not justification.

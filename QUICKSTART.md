@@ -33,9 +33,11 @@ tar -xzf "mycelium-${ver#v}.tar.gz" && cd "mycelium-${ver#v}"
 scripts/verify-release.sh .. --allowed-signers /path/to/allowed_signers --signer <signer-id> --tag "$ver"
 ```
 
-Without `--allowed-signers` — or before `SHA256SUMS.sig` is attached — the helper checks **integrity only**
-and warns that authenticity is unverified. For a real deployment always supply the key AND wait for the
-signature: re-run with `--allowed-signers` once `SHA256SUMS.sig` lands.
+Without `--allowed-signers` the helper checks **integrity only** and warns that authenticity is
+unverified. Passing `--allowed-signers` **before** `SHA256SUMS.sig` is attached **fails closed** (exit 1) —
+it will not silently downgrade to integrity-only. So: run the integrity-only form while the signature is
+pending, and re-run with the key once `SHA256SUMS.sig` lands. For a real deployment always end up on the
+signed form.
 
 ## 2. Deploy
 
@@ -65,12 +67,17 @@ scripts/fungi plan          # preview what this node will deploy (read-only)
 ## Later
 
 ```sh
-scripts/fungi update        # fetch + re-render + validate + apply, with rollback on failure
+# `update` VERIFIES the signed ref before it runs anything it fetched, so it needs the key
+# (the first deploy does not: it runs from the tarball you already verified above).
+scripts/fungi update --repo-ref vX.Y.Z --allowed-signers /path/to/allowed_signers
 scripts/fungi apply         # apply node-descriptor changes (transports / reachability) to the node
 ```
 
 Choose what the node serves with the profile verbs — a single `fungi` surface. Each edits the node-local
 descriptor / front config (write-only intent); nothing mutates a live node until `fungi apply` converges it:
+
+(Run these from the checkout as `scripts/fungi …`, or symlink it once:
+`sudo ln -s /opt/mycelium/scripts/fungi /usr/local/bin/fungi` — nothing installs it on `$PATH` for you.)
 
 ```sh
 fungi transport list                          # the closed registry (proto / class / port / frontable)
@@ -113,6 +120,10 @@ enable a second non-REALITY family (e.g. `vless-ws-tls`) too. A CDN front is **c
 reachability where IP/SNI is blocked; the in-region two-hop stays primary (ADR-0033).
 
 ## Notes
+
+- **Two descriptors, not one:** `fungi transport` / `fungi reachable` record intent in
+  `node.config.json`; `fungi front` writes the separate `front.config.json`. Both live in the node
+  state dir and both are read by the deploy path.
 
 - **Covered architectures:** amd64 and arm64 resolve pins from the manifest automatically. On other
   architectures (e.g. armv7) pass `--singbox-version` / `--singbox-sha256` (and `--xray-*` if an

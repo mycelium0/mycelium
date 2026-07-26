@@ -5,7 +5,7 @@ This file is part of Mycelium, licensed under the GNU Affero General Public Lice
 later. See the LICENSE file in the repository root.
 -->
 
-> **Use restriction.** Mycelium is licensed for educational, research, humanitarian, and civil use only. Use for military operations, covert surveillance, or illegal activities is prohibited. See ACCEPTABLE-USE.md.
+> **Use policy.** The code is AGPL-3.0-or-later with **no field-of-use restriction** (LICENSE) — an AGPL grant cannot be narrowed to "civil use only". The prohibited-use list (military operations, covert surveillance, illegal activity) attaches to the shared **name, marks and trust roots**: use them for that and you lose the right to the marks, not the right to the code. See ACCEPTABLE-USE.md and TRADEMARKS.md.
 
 # AGENTS.md — Operating doctrine for AI agents in this repository
 

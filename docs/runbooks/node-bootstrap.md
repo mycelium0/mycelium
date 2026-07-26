@@ -102,7 +102,9 @@ What that does, in order (all idempotent, all fail-closed):
 8. **Install + start** the hardened `sing-box.service`.
 9. **Set up the userspace AmneziaWG path** (`amneziawg-go`, kernel-independent) — out-of-band of
    the sing-box render. If the userspace tools are not yet built from source, this step prints
-   exactly what to build and converges on the next run.
+   the AmneziaWG userspace tools from pinned source (the pinned Go toolchain + build-essential) and
+   **aborts** if that second transport family does not come up — `--no-amneziawg` is the deliberate
+   one-family opt-out.
 10. **Verify listeners** — fails closed if the service is not active.
 
 Re-running the same command **converges/updates** the node without regenerating identity.
@@ -185,7 +187,7 @@ ls -l /var/lib/mycelium/config.lastgood.json
 
 # The updater rolls back automatically on failure. To roll back manually (applying a config is a
 # RESTART — sing-box is Type=simple with no real reload — so this briefly drops live connections):
-sudo install -m 0644 /var/lib/mycelium/config.lastgood.json /usr/local/etc/sing-box/config.json
+sudo install -m 0640 -o root -g sing-box /var/lib/mycelium/config.lastgood.json /usr/local/etc/sing-box/config.json
 sudo systemctl restart sing-box
 ```
 
@@ -225,8 +227,9 @@ sudo systemctl restart sing-box
   signed tag. Without this the updater refuses to apply (fail-closed) unless `--insecure-no-verify`
   is explicitly set (testing only).
 - The canonical sing-box `--singbox-version` + `--singbox-sha256` pins must be supplied per release.
-- The AmneziaWG userspace tools (`amneziawg-go`, `awg`, `awg-quick`) are built from source
-  (kernel-independent); the bootstrap converges once they are on `PATH`.
+- The AmneziaWG userspace tools (`amneziawg-go`, `awg`, `awg-quick`) are built from pinned source by
+  the bootstrap itself (kernel-independent, using the pinned Go toolchain). If the family cannot be
+  brought up the bootstrap fails closed rather than reporting a one-family node as complete.
 - The renderer-compatible template
   ([`nodes/dataplane/singbox/server.template.renderer.json`](../../nodes/dataplane/singbox/server.template.renderer.json))
   is used because the historical canonical template's inbound tags diverge from the renderer's

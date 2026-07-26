@@ -71,8 +71,9 @@ exposes only a chosen subset and keeps the exposed surface minimal.
 
 Excluded as legacy / easily-fingerprinted / superseded (full reasoning in
 [ADR-0010](adr/0010-phase0-transport-set.md)): **VMess, plain Shadowsocks (pre-2022), plain
-WireGuard, OpenVPN, L2TP/IPsec, PPTP, SSTP, IKEv2.** A CDN-fronted (Cloudflare) path remains
-available as a last-resort wrapper around a TLS-family shape.
+WireGuard, OpenVPN, L2TP/IPsec, PPTP, SSTP, IKEv2.** An operator bring-your-own-domain CDN/ingress
+front ([ADR-0033](adr/0033-operator-cdn-front-relay-byod.md), default-off) remains available as a
+last-resort wrapper around the own-cert genuine-TLS shapes; core names no vendor.
 
 **Two TLS families on purpose (TLS-in-TLS resilience).** The REALITY shapes nest a TLS record stream
 *inside* the borrowed-donor TLS session (TLS-in-TLS); the `xhttp-tls` family above presents a single,
@@ -177,8 +178,8 @@ evolution track.
 | Phase | Mechanism | Trust model | NAT traversal |
 |---|---|---|---|
 | 0–2 | Static config / config distribution endpoint (Phase 0: out-of-band hand-off, no public always-on endpoint — ADR-0020 §1; matured endpoint is Phase 1) | Operator owns everything | Nodes on public IPs |
-| 4 | Coordinator registry (Headscale-style) | Per-Commune coordinator issues membership | Coordinator DERP relays |
-| 5–6 | DHT + gossip (libp2p Kademlia + GossipSub) | Invitation tree / social graph / PoW | ICE/STUN/TURN, hole-punching, circuit-relay |
+| 3 | Coordinator registry (Headscale / Nebula-lighthouse pattern) | Per-Commune coordinator issues membership | Coordinator DERP relays |
+| 4+ | DHT + gossip (libp2p Kademlia + GossipSub) | Invitation tree / social graph / PoW | ICE/STUN/TURN, hole-punching, circuit-relay |
 
 **Sybil-resistance** is critical from the moment joining becomes open: without it an adversary
 floods the mesh with surveillance nodes, enumerates ingress points, and blocks or de-anonymises
@@ -255,7 +256,7 @@ without modification.
 | Coordinator (phase 3) | **Headscale** or custom Noise control plane | Proven WireGuard control-plane pattern |
 | P2P / mesh (phase 4+) | **libp2p** (Kademlia, GossipSub, AutoNAT, circuit-relay) | Mature DHT/gossip/NAT-traversal primitives |
 | Browser ephemeral ingress | **Snowflake** pattern (WebRTC + broker) | Proven volunteer-node model |
-| Fronting / last resort | **Cloudflare** (CDN-front, WARP) | Best survivability in combination with REALITY |
+| Fronting / last resort | **Operator bring-your-own-domain CDN/ingress front** ([ADR-0033](adr/0033-operator-cdn-front-relay-byod.md); relay-preferred, default-off — core names and registers no vendor) | Complementary reachability where the IP or SNI is blocked. Sits ONLY in front of the own-cert genuine-TLS families (`vless-xhttp-tls` / `vless-ws-tls`); REALITY, raw and UDP shapes are fail-closed un-frontable by construction |
 | Infrastructure / deploy | **Terraform + Ansible** | Reproducibility; fast IP/AS migration |
 | Observability / measurement | **Prometheus/Alertmanager** + **OONI** methodology | Feeds the adaptation layer with real data |
 | Control agents | **Go** (primary; Rust for sealed organs — ADR-0012) | Single binary; strong libp2p/sing-box ecosystem |

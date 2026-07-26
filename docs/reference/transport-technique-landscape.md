@@ -77,14 +77,14 @@ follows the ADR-0027 topology split (in-region ingress; out-of-region carried no
 | VLESS + REALITY + XTLS-Vision | ADR-0010 #1, TCP/443, sing-box-served | **Yes, in-region.** Out-of-region degraded (lab handshake break patched upstream; out-of-region connection-policing). Treat as in-region ingress (ADR-0027). | High | github.com/XTLS/Xray-core |
 | VLESS + REALITY + gRPC | ADR-0010 #2, TCP/8443 | Yes, as an independent TLS-family fallback. | High | github.com/XTLS/REALITY |
 | VLESS + REALITY + XHTTP (stream-up / stream-one / packet-up) | ADR-0010 #3, Xray | Yes — strongest HTTP-framed shape; the up/down split targets the Sept-2025 single-connection TLS-in-TLS classifier. | High | github.com/XTLS/Xray-core/discussions/4113 |
-| VLESS + XHTTP over genuine single-layer TLS (real cert, non-REALITY) | Current set (RP-0007-a); HAVE-the-design for the naive-client and the standards-track web-tunnel / HTTPT patterns | Yes — the doctrine-clean answer to TLS-in-TLS; CDN-frontable. **Not yet in the ADR-0010 table — doc gap.** | High | github.com/net4people/bbs/issues/318 |
-| VLESS + WebSocket + TLS (CDN-frontable) | Current set; covers the domain-fronting-successor role + the Outline SS-over-WS pattern | Yes, as the broadest-compatibility CDN fallback. **Not yet in the ADR-0010 table — doc gap.** | High | github.com/XTLS/Xray-core |
+| VLESS + XHTTP over genuine single-layer TLS (real cert, non-REALITY) | Current set (RP-0007-a); HAVE-the-design for the naive-client and the standards-track web-tunnel / HTTPT patterns | Yes — the doctrine-clean answer to TLS-in-TLS; CDN-frontable. **ADR-0010 decision-table row #10** (added by the 2026-06-14 amendment). | High | github.com/net4people/bbs/issues/318 |
+| VLESS + WebSocket + TLS (CDN-frontable) | Current set; covers the domain-fronting-successor role + the Outline SS-over-WS pattern | Yes, as the broadest-compatibility CDN fallback. **ADR-0010 decision-table row #11** (added by the 2026-06-14 amendment). | High | github.com/XTLS/Xray-core |
 | Hysteria2 (bare) — Salamander obfs + H3 masquerade DESIGN-spec'd, **not yet wired** | ADR-0010 #4, sing-box; default-off per ADR-0022. Bare Hysteria2 (TLS + h3) is HAVE. The Salamander+masquerade design exists in ADR-0010 but is **NOT in the deployed render path**: `render_singbox.sh` has no obfs logic, and the placeholder-bearing `server.template.json` was inert (tags never matched) and was removed when the renderer template became canonical (Audit-0005 C02). | Bare: yes where UDP survives. Salamander (which removes the parseable SNI): **a pre-enablement GAP**, must be wired before the QUIC leg is enabled in a hostile-QUIC network. | High | github.com/apernet/hysteria |
 | TUIC v5 (QUIC) | ADR-0010 #5, sing-box; default-off | Yes — QUIC fingerprint diversity. | High | github.com/EAimTY/tuic |
 | AmneziaWG (Jc/Jmin/Jmax, S1–S2, H1–H4) | ADR-0010 #9, separate userspace awg service | **Yes — current survivor.** Obfuscated UDP lives where TCP-TLS dies (matches field observation). | High | github.com/amnezia-vpn/amneziawg-go |
 | ShadowTLS v3 (wrapping SS-2022) | ADR-0010 #7, default-OFF per ADR-0022 | Wounded (active-probe differential); keep OFF as a diversity leg, do not promote. | Med | github.com/ihciah/shadow-tls |
 | Trojan / Shadowsocks-2022 (bare) | ADR-0010 #8 / #6, optional fallbacks | Weak alone; correct as independent-failure-mode fallbacks. | Med | github.com/shadowsocks/shadowsocks-rust |
-| uTLS fingerprint mimicry | Implicit via REALITY (both engines bundle a uTLS fork) | Mechanism HAVE; **currency is the gap** — see ADOPT #1. | High | github.com/refraction-networking/utls |
+| uTLS fingerprint mimicry | Explicit closed-vocab per-node knob (`client_fingerprint`, `control/vocab.json`) threaded through every render/verify/probe site, plus sentinel-gated A/B rotation (RP-0015, landed + live-drill-validated) | Mechanism and selection are both HAVE; what remains is **currency of the presets** (they must track real browsers). | High | github.com/refraction-networking/utls |
 | QUIC Initial SNI-slicing (client-side) | Transitive via the QUIC library default-on (sing-box 1.12+ / Xray pins) | Yes, inherited by version-pinning. | Med-High | github.com/quic-go/quic-go |
 | Remote-profile auto-update loop + `profile-update-interval` | RP-0007-b; VIS-0007 | Yes — universal, mandated in the sing-box client spec. | High | sing-box.sagernet.org |
 | Client-side multi-sub merge + urltest / least-ping failover | RP-0007-c/d; `myceliumctl aggregate` (local merged profile) | Yes — the authoritative, decentralization-preserving failover signal. | High | sing-box.sagernet.org |
@@ -182,11 +182,10 @@ version-pin / inert knob hardening; 1 = config-render seam; 2 = inert schema onl
 4. **Spec the AmneziaWG 2.0 upgrade** (ADOPT #4) as an ADR-0010 amendment + a dependency-pin bump +
    a controlled-packet-signature snapshot-currency note; correct the I1–I5 provenance (from 1.5, retained)
    and forbid itime / J1–J3.
-5. **Reconcile VIS-0007** on the 301/308 redirect: the "refuted as a documented standard" wording is now
-   **stale** — the XTLS standard mandates 301/308 as a MUST. Correct it to "documented but doctrinally
-   insufficient as a sole resilience mechanism (single point of block)," then add the
+5. ~~**Reconcile VIS-0007** on the 301/308 redirect~~ — **DONE.** VIS-0007 now states that 301/308
+   endpoint-migration IS documented and standard (a MUST) but is doctrinally insufficient as a sole
+   resilience mechanism (single point of block). What remains of this item is the still-open half: add the
    **announce / profile-title / support-url** signaling subset (ADOPT #6) to RP-0007-b.
-   *(Flag: a live doc-vs-reality contradiction; not yet fixed in the tree.)*
 
 ---
 
@@ -195,7 +194,6 @@ version-pin / inert knob hardening; 1 = config-render seam; 2 = inert schema onl
 - **sing-box REALITY post-handshake-mimicry parity** — no changelog entry found; treat REALITY-via-sing-box
   as **PARTIAL** for the post-handshake active-probe differential until confirmed. Argues for serving
   REALITY via Xray where post-handshake conformance matters, or filing a sing-box upstream issue.
-- **The VIS-0007 301/308 contradiction is real and unfixed** in the tree (confirmed at the cited lines).
 - **Version provenance** (corrected against the survey): the REALITY post-handshake fix first landed in
   v25.6.8; VLESS-Encryption landed in v25.8.31.
 - **The cross-layer RTT fingerprint and the destination-AS download throttle remain honestly unsolved at

@@ -40,16 +40,19 @@ L2TP/IPsec, PPTP, SSTP, IKEv2).
 
 ## Pinned version
 
-- **sing-box: `v1.11.8`** (minimum `1.11.x`; this is the latest patch in the 1.11 series). Pin the
-  deployed binary to this concrete tag — do not float to `latest`. REALITY/transport wire behaviour
+- **sing-box:** the concrete pin lives in **`control/engines.manifest.json`** — that file is the
+  single source of truth, and the deploy path fills it in as the default `--singbox-version` /
+  `--singbox-sha256` when the operator passes no flag (`control/lib/nb_install.sh`). At the time of
+  writing it pins **`v1.13.13`**; the enforced currency floor is **`v1.13.0`**
+  ([ADR-0028](../../../docs/adr/0028-dependency-and-transport-currency-policy.md)).
+  Do not float to `latest` and do not restate a literal tag here: REALITY/transport wire behaviour
   and config field names evolve between minor versions, and reproducible deployment (a Phase-0
-  acceptance criterion) requires a fixed tag. Pin by version **and** by the upstream release SHA256,
-  and record the exact deployed tag in the node's `state/` directory at deploy time. Updating this
-  pin is a separate, verified change.
+  acceptance criterion) requires a fixed, checksum-verified tag. Updating the pin is a separate,
+  verified change.
 
-> Note: at the time of writing, sing-box has newer minor series (1.13.x). The 1.11.x series is
-> pinned here as the project's tested floor; bumping to a newer minor is a deliberate, reviewed
-> migration, not an automatic upgrade, because transport schemas change across minors.
+> Note: passing `--singbox-version` for a DIFFERENT tag without also passing the matching
+> `--singbox-sha256` will fail closed — the manifest's checksum is filled in as the default and will
+> not match the archive you asked for. Change both together, or change the manifest.
 
 ## No custom cryptography (ADR-0002)
 
@@ -87,9 +90,12 @@ under a **gitignored** path (`state/`, `secrets/`, `out/`, or `server.json` itse
 
 - For each REALITY inbound: `tls.reality.private_key`, `tls.reality.short_id[]`,
   `tls.server_name` / `tls.reality.handshake.server` ← the donor values + generated keys.
-- Per-protocol secrets (`SENTINEL_SS2022_SERVER_PASSWORD`, `SENTINEL_SHADOWTLS_SS_PASSWORD`,
-  `SENTINEL_HYSTERIA2_OBFS_PASSWORD`, `SENTINEL_CLASH_API_SECRET`, the TLS cert/key paths, the gRPC
-  service name and XHTTP path) ← generated or operator-supplied values from the params file.
+- Per-protocol material — the sentinels the template actually carries: `SENTINEL_SS_PASSWORD`,
+  `SENTINEL_REALITY_PRIVATE_KEY`, `SENTINEL_SHORTID`, `SENTINEL_TLS_SNI`, `SENTINEL_TLS_CERT_PATH`,
+  `SENTINEL_TLS_KEY_PATH`, `SENTINEL_GRPC_SERVICE_NAME`, `SENTINEL_XHTTP_PATH`, `SENTINEL_WS_PATH`,
+  `SENTINEL_DONOR_HOST`, `SENTINEL_DONOR_SNI` ← generated or operator-supplied values from the params
+  file. (The remaining per-protocol passwords and the `clash_api` secret are injected at render time
+  from the identity/secrets state, not carried as sentinels in this template.)
 - `users[]` arrays (shipped empty) ← one object per identity from the identity state, so identities
   are issued and revoked **without redeploying the node**.
 

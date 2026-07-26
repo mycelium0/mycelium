@@ -17,9 +17,11 @@ later. See the LICENSE file in the repository root.
 > [README.md](../README.md)): a multi-protocol sing-box data plane (PRIMARY) with an optional
 > Xray alternative engine and a separate AmneziaWG UDP path, the `myceliumctl` control tooling,
 > the Ansible deployment, observability, the conformance tests, and the operational runbooks are
-> all present in the tree. What remains is **live deployment and Definition-of-Done verification**,
-> which await an operator-provided server (the DoD checklist is validated against a real node, not
-> in CI). This document describes the *idealised* structure (`nodes/`, `control/`, `infra/`); the
+> all present in the tree. Phases **0, 1 and 2 are GO-signed against live operator nodes** (see the
+> phase-0 / phase-1 / phase-2 acceptance ledgers) and the from-zero deploy path is proven. What remains
+> per ROADMAP Decision C is the **release mechanism** (reproducible signed artifacts + verify + a
+> QUICKSTART) plus the operator's own on-device authoritative run — Definition-of-Done evidence is
+> validated against a real node, not in CI. This document describes the *idealised* structure (`nodes/`, `control/`, `infra/`); the
 > actual tree may differ — that is acceptable under §6 ("if the structure differs, it must preserve
 > the same architectural boundaries"). Any accepted deviation is recorded in an ADR, not silently
 > absorbed.
@@ -172,8 +174,9 @@ erodes audit discipline):
 
 Enforcement: the offline gate `version_changelog_sync` asserts `internal/spec.Version` equals
 the newest `## [X.Y.Z]` CHANGELOG heading (the const and the changelog can never drift apart);
-CI additionally checks that a touched version file carries its README + CHANGELOG edits in the
-diff. Neither gate can prove a chunk *should* have bumped — that stays the bump-per-chunk
+The coupling is enforced by two CONTENT gates, not by a diff check: `version_changelog_sync` pins
+`internal/spec.Version` to the newest `## [X.Y.Z]` heading, and `readme_badges_honest` pins every README
+version pill to `internal/spec.Version` — so a bump cannot land without both edits. Neither gate can prove a chunk *should* have bumped — that stays the bump-per-chunk
 discipline above, enforced at review.
 
 The platform (root) version and the version table in the root `README.md` are updated only
@@ -1048,7 +1051,7 @@ Minimum set:
 - `docs/development.md` (this document);
 - `docs/refactoring.md` (audit and refactoring policy);
 - `docs/ARCHITECTURE.md` (architectural canon, Layers 1–5);
-- `docs/ROADMAP.md` (Phases 0→6, Definition of Done);
+- `docs/ROADMAP.md` (Phases 0→8, Definition of Done);
 - `docs/THREAT-MODEL.md` (adversary, assets, attack surface, legal/opsec);
 - `docs/contributing.md` (new-component onboarding);
 - per-component `README.md` + `CHANGELOG.md` (service passports);

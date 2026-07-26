@@ -49,7 +49,7 @@ openssl s_client -connect OLD_NODE_IP:443 -alpn h2 -tls1_3 -servername DONOR_SNI
   </dev/null 2>/dev/null | grep -E 'ALPN protocol|Protocol *:|Verify return'
 
 # The same conformance probe used at deploy time:
-tests/conformance/cover_site_probe.sh OLD_NODE_IP DONOR_SNI
+tests/conformance/cover_site_probe.sh --node OLD_NODE_IP --donor DONOR_SNI
 ```
 
 Interpretation:
@@ -98,7 +98,7 @@ ansible-playbook -i inventory.new.ini playbook.yml
 the new node before cutting over, using [`deploy-node.md`](deploy-node.md) §6:
 
 ```sh
-tests/conformance/cover_site_probe.sh NEW_NODE_IP DONOR_SNI
+tests/conformance/cover_site_probe.sh --node NEW_NODE_IP --donor DONOR_SNI
 ```
 
 ### Reusing client UUIDs/keys — where it is safe

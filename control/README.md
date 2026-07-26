@@ -64,9 +64,11 @@ see also [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) Layer 2 and the Phase
 | `yq` | params files written in YAML | optional; JSON params always work without it |
 
 `render-server` and `subscription` need only `bash` + `jq` for **either** engine — they place values
-that already exist in the params file (no key generation at render time). `reality-keys` and
-`identity add` need `xray` + `openssl`; if `xray` is missing they fail with a clear error and
-generate **nothing** — the tool never falls back to hand-rolled key generation. The deployed
+that already exist in the params file (no key generation at render time). `reality-keys` needs
+`openssl` plus **either** `xray` or `sing-box` — it prefers `xray x25519` and falls back to
+`sing-box generate reality-keypair` (Audit-0004 F-008), so a sing-box-only node can still rotate
+REALITY keys; `identity add` is still `xray`-strict. When the required generator is missing they fail
+with a clear error and generate **nothing** — the tool never falls back to hand-rolled key generation. The deployed
 **server** binaries are pinned separately: **sing-box ≥ `v1.11.x`** (primary) and/or
 **xray ≥ `v26.2.4`** (optional).
 
@@ -77,8 +79,10 @@ myceliumctl reality-keys [--shortids N] [--shortid-bytes B]
 myceliumctl identity add    --name NAME [--state FILE]
 myceliumctl identity revoke NAME|ID    [--state FILE]
 myceliumctl identity list              [--state FILE]
-myceliumctl render-server [--engine singbox|xray] [--template FILE] --params FILE [--state FILE] [--out FILE]
+myceliumctl render-server [--engine singbox|xray] [--proto NAME] [--template FILE] --params FILE [--state FILE] [--out FILE]
 myceliumctl subscription  [--engine singbox|xray] --params FILE [--state FILE] [--out DIR]
+myceliumctl bundle    --params FILE [--state FILE] [--out FILE]
+myceliumctl aggregate --bundle FILE [--name LABEL] ... --out FILE
 myceliumctl help
 ```
 
@@ -219,7 +223,10 @@ whose fields are:
 | `shadowtls_password` | ShadowTLS handshake password |
 
 The protocol tokens are: `vless_reality_vision`, `vless_reality_grpc`, `vless_reality_xhttp`,
-`hysteria2`, `tuic`, `shadowsocks`, `shadowtls`, `trojan`. The legacy/easily-fingerprinted
+`vless_ws_tls` (own-cert genuine TLS, port 2089, path key `ws_path`), `vless_xhttp_tls`
+(own-cert genuine TLS, port 2087, path key `xhttp_path_tls` — **xray engine only**; the sing-box
+render fail-closes on it), `hysteria2`, `tuic`, `shadowsocks`, `shadowtls`, `trojan`.
+`control/vocab.json` (Go-owned) is the authoritative registry — this list mirrors it. The legacy/easily-fingerprinted
 protocols (VMess, plain pre-2022 Shadowsocks, plain WireGuard, OpenVPN, L2TP/IPsec, PPTP, SSTP,
 IKEv2) are **excluded by design** and have no params. AmneziaWG is a **separate** non-TLS/UDP path
 (see `nodes/dataplane/amneziawg/`) and is not rendered by this engine.
@@ -314,6 +321,11 @@ myceliumctl libs above — node-bootstrap sources them, myceliumctl does not.
 | `nb_render_awg.sh` | AmneziaWG dialect/render + split-tunnel AllowedIPs + userspace setup | mixed |
 | `nb_update_apply.sh` | signed-pull → render → validate → promote → rollback apply state machine | **control-logic** |
 | `nb_observability.sh` | node_exporter + the dataplane-metrics generator | OS-glue |
+| `nb_engine_manifest.sh` | resolves the pinned engine/toolchain versions + checksums from `control/engines.manifest.json` | OS-glue |
+| `nb_front.sh` | the ADR-0033 operator-front wiring (default-off, node-local `front.config.json`) | control-glue |
+| `nb_selftest.sh` | the node-local L7 liveness probes (per-family handshakes, AmneziaWG + xhttp siblings) | OS-glue |
+| `nb_rotate_apply.sh` | the `--rotate` / `--fp-rotate` gated executors (dry-run default, arm sentinel, promote→verify→rollback) | **control-logic** |
+| `nb_measure.sh` | the MEASURE plane: daemon config/units, marker refresh, plan hand-off to the rotation executor | **control-logic** |
 
 The "no new control-decisions-in-bash" rule (the entrypoint may only define helpers / `flow_*` / `verify_*`)
 is enforced by `tests/conformance/no_new_control_decisions_in_bash.sh`. The **control-logic** modules are

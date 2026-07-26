@@ -326,8 +326,8 @@ Part of the disclosure infrastructure will be finalised by separate ADRs
 - **Dedicated security contact and PGP key.** Publishing a dedicated `security@<domain>` alias
   alongside the GitHub private-advisory channel, the real PGP fingerprint, `docs/security/pgp.asc`,
   and `.well-known/security.txt`.
-- **Exact licence text** (`LICENSE` / `NOTICE.md`) in its final wording — synchronised with the
-  licensing ADR (`docs/adr/NNNN-licensing.md`).
+<!-- RESOLVED: the licence is fixed as AGPL-3.0-or-later by ADR-0003 (accepted 2026-06-11), with the
+     full text in LICENSE. No NOTICE.md is used. -->
 - **Bug-bounty decision** (needed or not, scope, payments) — separate ADR.
 
 Until those ADRs are adopted, this policy in its current version applies, and the channel for

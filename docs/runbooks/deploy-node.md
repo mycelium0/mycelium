@@ -183,7 +183,9 @@ The playbook applies four roles in order:
 | Role | What it does |
 |---|---|
 | `hardening` | UFW (allow OpenSSH + `443/tcp`, deny the rest), `unattended-upgrades`, baseline sysctl, optional `fail2ban`. |
-| `xray` | Installs the pinned, checksum-verified Xray-core; generates REALITY keys + per-client UUIDs + shortIds **on the node**; renders `config.json`; installs a hardened `xray.service`; validates with `xray run -test`; fetches subscriptions back to `./out/`. |
+| `singbox` | **DEFAULT engine** (`engine: singbox`). Installs the pinned, checksum-verified sing-box; generates REALITY keys + per-client UUIDs + shortIds **on the node**; renders `config.json`; installs a hardened `sing-box.service`; validates with `sing-box check`; fetches subscriptions back to `./out/`. Tags: `[singbox, dataplane]`. |
+| `xray` | **Alternative engine**, runs only when `engine: xray`. Same shape on Xray-core (`xray run -test`, `xray.service`). Tags: `[xray, dataplane]`. |
+| `amneziawg` | The non-TLS/UDP second family. Runs only when `enable_amneziawg: true`; renders `awg0.conf` + per-client configs and brings up `awg-quick@awg0`. |
 | `caddy` | Installs pinned Caddy; deploys an optional loopback cover origin (used only if you self-host your own donor). |
 | `observability` | Installs pinned `node_exporter`, bound to loopback only. |
 
@@ -214,7 +216,10 @@ client_names:
 
 ```sh
 cd infra/ansible
-ansible-playbook playbook.yml --tags xray
+# `dataplane` is engine-agnostic: both engine roles carry it, so this works on a
+# default (singbox) node AND on an `engine: xray` node. `--tags xray` alone applies
+# NOTHING on a default node — that role is gated `when: engine == "xray"`.
+ansible-playbook playbook.yml --tags dataplane
 ```
 
 A fresh UUID (`xray uuid`) is generated for `carol`, `config.json` is re-rendered, the service
@@ -299,7 +304,8 @@ From [`docs/ROADMAP.md`](../ROADMAP.md) Phase 0. The node is "done" when **all f
       command (`scripts/bootstrap.sh`), with no manual post-steps beyond handing out
       subscriptions.
 - [ ] **A client credential is revoked without reinstalling the node.** Remove the name from
-      `client_names` and re-run `ansible-playbook playbook.yml --tags xray` (or
+      `client_names` and re-run `ansible-playbook playbook.yml --tags dataplane` (engine-agnostic;
+      `--tags xray` applies nothing unless the node runs `engine: xray`) (or
       `myceliumctl identity revoke <name|uuid>` on the node): the UUID is dropped from
       `config.json`, the node stops accepting that identity, and **no redeploy** of the node is
       required. Other clients keep working.
