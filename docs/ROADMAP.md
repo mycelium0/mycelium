@@ -146,8 +146,10 @@ attack surface that breadth introduces.
 > multiplexed REALITY, the self-replenishing subscription seam) were proven on the operator's live
 > restrictive link on both LTE and Wi-Fi. Authoritative status + on-device evidence + named deferrals
 > (Xray-XHTTP serving path, observability dashboard, Hysteria2/Salamander) are in the
-> [Phase-1 acceptance ledger](phase1-acceptance-ledger.md). The **pre-Phase-2 research** is the next gate
-> before the Phase-2 detector/measurement track opens.
+> [Phase-1 acceptance ledger](phase1-acceptance-ledger.md). The **pre-Phase-2 research** completed
+> 2026-06-17; its build-vs-reuse decisions are recorded in
+> [ADR-0031](adr/0031-build-vs-reuse-compose-proven-patterns.md), and the Phase-2 detector/measurement
+> track opened on that basis (core GO-signed 2026-07-03 — [phase2-acceptance-ledger.md](phase2-acceptance-ledger.md)).
 
 **Goal.** The multi-protocol node from Phase 0 already speaks several transport "dialects"; Phase 1
 makes the **distribution, health, and failover** around them mature. The config distribution
@@ -186,17 +188,25 @@ clients failover automatically, and block visibility emerges: *what exactly* is 
   convenience is the Inoculum bundle (deferred post-release design,
   [RP-0005](proposals/0005-inoculum-bundle-and-toolkit.md)); Phase 1 ships only the
   standard-subscription self-update plus client-side merge.
-- **Per-transport health and failover:** per-endpoint metrics (handshake success rate,
-  time-to-first-byte, connection resets) feed the bundle's health metadata so standard clients
-  fail over between the Phase 0 transports cleanly.
+- **Per-transport health and failover:** failover is **client-native** across the multi-endpoint
+  subscription — a standard client moves between the Phase 0 transports on its own. The bundle carries a
+  health FIELD, but in Phase 1 it is advisory-only and structurally pinned to `unknown`
+  (`Endpoint.Validate` rejects any other value — `internal/spec/bundle.go`). The per-endpoint metrics that
+  would populate it (handshake success rate, time-to-first-byte, connection resets) are the **Phase-2**
+  measurement track, not Phase-1 scope (see AC-c in the acceptance ledger).
 - Port and SNI diversification; multiple donor sites across the enabled shapes.
-- A **CDN-fronted** path (Cloudflare) added as a last-resort wrapper around a TLS-family shape.
+- A **CDN-fronted** path as a last-resort wrapper around a TLS-family shape. Core names and registers
+  **no CDN vendor**: the shipped shape is the operator-self-hosted, bring-your-own-domain, relay-preferred
+  front of [ADR-0033](adr/0033-operator-cdn-front-relay-byod.md) — decided after the Phase-1 GO, scoped
+  **Phase 2+**, opt-in and default-off. The Phase-1 on-device trial of a CDN-fronted shape came back
+  *throttled/partial*; the direct genuine-TLS path is the working alternative (acceptance ledger).
 - UDP-friendly transports (Hysteria2 / TUIC) are surfaced in the bundle but flagged as
   conditional, with the understanding that UDP is excised entirely in some environments.
 
 **Stack.** The Phase 0 engines (sing-box primary; AmneziaWG separate; Xray optional);
-sing-box/Clash-Meta config distribution format; Cloudflare as CDN front; per-endpoint health
-collection feeding the bundle.
+sing-box/Clash-Meta config distribution format; an operator-self-hosted, bring-your-own-domain CDN front
+(ADR-0033, Phase 2+, opt-in — no vendor in core); the bundle's advisory health field (populated only from
+Phase 2 onward).
 
 **Definition of Done.**
 - When one transport is blocked, standard clients switch to a working one **within the same
@@ -225,10 +235,15 @@ migration (phase 2). UDP paths are provisioned but not relied upon as the primar
 > induced degradation was detected, the impaired streak persisted to the flip threshold under the
 > anti-flap guard, the planner emitted a rotation, and the rotation was recorded with the rate/latch
 > limits and rollback path in force. Detector decisions are measurable (precision/recall on labelled
-> incidents), and the L4-only detection blind spot is closed for the REALITY + genuine-TLS families
-> ([ADR-0036](adr/0036-node-local-l7-liveness-probe.md); the detection-fidelity hardening — Audit-0007 S1 +
-> all of S2 — is landed and CI-green). What remains to **close the phase** is its **first-release
-> milestone** (below) — end-to-end client recovery + a reproducible signed release. Authoritative status,
+> incidents), and the L4-only detection blind spot is closed for **every closed family** — REALITY
+> (vision/gRPC/XHTTP), genuine-TLS ws-tls, the QUIC pair (Hysteria2/TUIC) and ShadowTLS v3 folded into the
+> rotation marker, with AmneziaWG and Xray xhttp-tls covered by advisory sibling probes
+> ([ADR-0036](adr/0036-node-local-l7-liveness-probe.md),
+> [RP-0014](proposals/0014-phase2-detector-hardening.md); the detection-fidelity hardening — Audit-0007
+> S1 + all of S2, and Audit-0008 S1 + S2 — is landed and CI-green). What remains to **close the phase** is its **first-release
+> milestone** (below): end-to-end client recovery is **delivered** (RP-0013, harness-drilled in both
+> directions on a live node), so the outstanding work is the release **MECHANISM** — reproducible signed
+> artifacts + verify + a QUICKSTART — plus the operator's own on-device authoritative run. Authoritative status,
 > acceptance evidence, and carry-forwards are in the [Phase-2 acceptance ledger](phase2-acceptance-ledger.md).
 
 **Goal.** What operators previously did by hand over hours in response to a blocking event
@@ -290,8 +305,11 @@ amplifies the heuristics, it never replaces them.
 **Status. Adaptivity core GO-signed 2026-07-03**
 ([phase2-acceptance-ledger.md](phase2-acceptance-ledger.md)). Detector + tuner + measure + planner +
 gated rotation + rollback are built and the node-local self-drive **closed autonomously on a live
-node**; detection fidelity is hardened (ADR-0036 + Audit-0007 S1/all-S2, CI-green). The phase **closes on
-its first-release milestone** (e2e client recovery + a signed release, above). The advisory / fungi hypha
+node**; detection fidelity is hardened (ADR-0036 + RP-0014 + Audit-0007 S1/all-S2 + Audit-0008 S1/S2,
+CI-green); e2e client recovery (RP-0013) is delivered and harness-drilled both directions. Per **Decision
+C** the release bar is **reached**, so the phase now **closes on the release MECHANISM** (reproducible
+signed artifacts + verify + QUICKSTART) plus the operator's on-device authoritative run — not on another
+RP. The advisory / fungi hypha
 boundary is built here as an **inert seam** — the groundwork that goes live in **Phase 3**.
 
 ---
@@ -318,9 +336,9 @@ the Commune boundary), per [ADR-0037](adr/0037-federation-transport-substrate.md
   k-floored, TTL, signed — [ADR-0030](adr/0030-advisory-network-awareness.md)) starts publishing; the
   **F2F hypha** bond — an intra-Commune, same-operator node-to-node edge-fusion — activates under Nebula,
   with the constrained introduction contract enforced at runtime ("a fungi MAY introduce, MUST NOT
-  enumerate"; double-opt-in, 1–2-hop depth, TTL, no neighbour-list sharing;
-  [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md),
-  [ADR-0034](adr/0034-unified-node-profile.md) capabilities). Cross-*Commune* Anastomosis Bridges stay
+  enumerate"; double-opt-in, 1–2-hop depth, TTL, no neighbour-list sharing —
+  [ADR-0029](adr/0029-community-federated-ingress.md) Decision 5, with the capability classes of
+  [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md) Decision 3). Cross-*Commune* Anastomosis Bridges stay
   **inert** here — they light up in Phase 5.
 - **Per-Commune coordinator** (Headscale / Nebula-lighthouse pattern; the operator's OWN, never a
   global authority): node registry, config distribution, block-intelligence aggregation within the
@@ -585,7 +603,7 @@ real, self-healing access; Phase 8 makes it more efficient, it is not a precondi
 | **Security and anonymity** | De-anonymisation threats, traffic-correlation attacks, node compromise; what a node knows about users | Baked into the protocol from the start — cannot be bolted on later |
 | **Measurement** | OONI-style measurements of "what is blocked where and how", replacing guesswork with ground truth. Its public, privacy-preserving surface is the **network-weather explorer** ([vision/0005](vision/0005-network-weather-explorer.md)): opt-in `fungi` nodes emit redacted aggregated digests; the explorer shows fabric health, never a map | Feeds the adaptation layer; without data, adaptation is blind |
 | **Advisory network awareness** (operator-local) | The bridge between Phase-2 self-healing and Phase-3 coordination: several self-healing nodes share **signed, class-aggregate, TTL-bound** advisory weather (per-**class** transport health, bundle freshness, degraded coarse buckets) through an operator-local fungi-lite publisher + `cell-pack` (`aggregate --sign --ttl`). **Federation, not coordination** — no map, no coordinator, no per-node row, no transmitted node id, advisory-never-actuates. Decision + the 10 proof gates in [ADR-0030](adr/0030-advisory-network-awareness.md) | Without it the Phase-2 → Phase-3 jump is a cliff (each node heals itself → a per-Commune coordinator, with no rung between). This rides Phase-2 self-healing, gives the inert weather/immunity `internal/spec` schemas their first caller behind proof gates, and tests the future fungi/explorer model **before any mesh exists**. The advisory shape must be class-aggregate by construction — the per-node-digest design reconstructs the network map (rejected, ADR-0030) |
-| **Client-side hardening** (post-release, single-node) | Ongoing deepening of the client→node handshake's resilience to on-path network interference: the client uTLS fingerprint (its *content*) + gated rotation ([RP-0015](proposals/0015-fingerprint-adaptivity.md)), transport-delivery fragmentation (its *delivery*, [RP-0016](proposals/0016-transport-delivery-hardening.md)), and future ClientHello axes — all engine-native, closed-vocabulary, additive, off by default. Never a bespoke desync tool (ADR-0002/0031): flip an engine flag, be a real client rather than craft a fake handshake | Adaptivity is open-ended — each axis invites the next — so this track lets the first release cut at a **fixed** bar (Decision C) while the hardening continues *afterward*, in parallel with the federation phases, gating neither the release nor Phase 3 |
+| **Client-side hardening** (post-release, single-node) | Ongoing deepening of the client→node handshake's resilience to on-path network interference, building on the landed **pre-release** groundwork of the client uTLS fingerprint knob + gated rotation ([RP-0015](proposals/0015-fingerprint-adaptivity.md), inside Decision C's fixed bar). The track itself is transport-delivery fragmentation (the handshake's *delivery*, [RP-0016](proposals/0016-transport-delivery-hardening.md)), fragmentation-adaptivity, and future ClientHello axes — all engine-native, closed-vocabulary, additive, off by default. Never a bespoke desync tool (ADR-0002/0031): flip an engine flag, be a real client rather than craft a fake handshake | Adaptivity is open-ended — each axis invites the next — so this track lets the first release cut at a **fixed** bar (Decision C) while the hardening continues *afterward*, in parallel with the federation phases, gating neither the release nor Phase 3 |
 | **Legal and operational security** | Distribution/operation of persistent private network tools is subject to legal pressure in some jurisdictions; exit-node liability; operator and user protection | A legal error is irreversible; detailed legal and compliance analysis is maintained in the maintainers' internal knowledge base |
 | **Governance and funding** | Who pays for nodes, how decisions are made, how mesh segments federate | Determines whether the project reaches phases 5–6 |
 
