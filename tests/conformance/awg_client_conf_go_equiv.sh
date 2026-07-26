@@ -46,13 +46,16 @@ if ! ( cd "$REPO_ROOT" && go build -o "$WORK/myceliumctl" ./cmd/myceliumctl ) 2>
 	exit 0
 fi
 
-# SYNTHETIC test material — never a real node/client key.
-NODEKEY="aQ7Xk2mZ0pLb9vN3tR8yF6wJ1cH4dS5gT2uV0eB7i="
-CPRIV="kP3sN8vQ2xL7bM1tR6yH9wJ4cF5dG0aZ8eU3iO7pS2="
-CPSK="ZzYyXxWwVvUuTtSsRrQqPpOoNnMmLlKkJjIiHhGgFf0="
-SPUB="0000000000000000000000000000000000000000111="
+# SYNTHETIC test material. These are deliberately NOT key-shaped high-entropy strings: the renderer
+# embeds whatever string it is given and the derivation hashes it, so realistic-looking base64 would add
+# nothing but a standing secret-scanner false positive (and a reader's moment of doubt). Self-describing
+# placeholders make it evident at a glance that no real material is committed.
+NODEVAL="fixture-node-value-conformance-only-00000001"
+CPRIV="fixture-client-private-conformance-only-0001"
+CPSK="fixture-client-preshared-conformance-only-01"
+SPUB="fixture-server-public-conformance-only-00001"
 ENDPOINT="node.example.invalid:51820"
-printf '%s' "$NODEKEY" > "$WORK/node.key"
+printf '%s' "$NODEVAL" > "$WORK/node.key"
 printf '%s' "$CPRIV"   > "$WORK/client.key"
 printf '%s' "$CPSK"    > "$WORK/client.psk"
 printf '10.0.0.0/8\n172.16.0.0/12\n' > "$WORK/region.txt"
@@ -72,7 +75,7 @@ for host in 2 7 239; do
 					region) AWG_REGION_EXCLUDE_FILE="$WORK/region.txt"; go_mode_args=(--region-exclude "$WORK/region.txt") ;;
 					narrow) : ;;
 				esac
-				derive_awg_dialect "$NODEKEY" "$epoch"
+				derive_awg_dialect "$NODEVAL" "$epoch"
 				compute_client_allowed "$v6" >/dev/null 2>&1 || { printf '  FAIL  shell refused an expected-valid policy (%s)\n' "$mode"; fail=1; continue; }
 				allowed="$(sg_allowed_join)"
 				sh_out="$(render_awg_client_conf "$CPRIV" "$host" "$v6" "$SPUB" "$CPSK" "$ENDPOINT" "$allowed" "$SG_MARKER")"
