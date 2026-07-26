@@ -13,7 +13,7 @@ later. See the LICENSE file in the repository root.
 > **See also:** [README.md](../README.md), [ROADMAP.md](ROADMAP.md),
 > [ARCHITECTURE.md](ARCHITECTURE.md), [THREAT-MODEL.md](THREAT-MODEL.md).
 > Audit and refactoring proposal templates and ADRs are in [templates/](templates/);
-> completed reports are in [audits/](audits/) and [proposals/](proposals/).
+> completed reports are in `docs/audits/` (maintainer-local, never published) and [proposals/](proposals/).
 
 ## 1. Purpose
 
@@ -975,7 +975,7 @@ mycelial layer (coordinator/DHT, layer boundaries, routing/bridging, carrier
 adapters, telemetry, and topology centralization). They are scoped to the
 project's own vocabulary (spore, cord, gradient, trust scope, carrier adapter,
 coordinator, master map) and were introduced by `Audit-0001`
-([audits/0001-preliminary-architecture-audit.md](audits/0001-preliminary-architecture-audit.md)):
+(`docs/audits/0001-preliminary-architecture-audit.md`, maintainer-local):
 
 | ID | Severity (default) | Description |
 |---|---|---|
@@ -1180,7 +1180,7 @@ stabilizes. After a series of fix-forward commits, a **Closure Verification**
 
 Every significant audit must be formatted according to the template.
 The template is at [templates/audit.md](templates/audit.md).
-Completed reports are stored in [audits/](audits/).
+Completed reports are stored in `docs/audits/` (maintainer-local, never published).
 
 ### 12.1. Header
 - date;

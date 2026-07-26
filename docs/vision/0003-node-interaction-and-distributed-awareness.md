@@ -16,7 +16,7 @@ later. See the LICENSE file in the repository root.
 - **Layer(s):** discovery, control plane, routing, cross-cutting
 - **Related:** [0001-mycelium-vision-and-scope.md](0001-mycelium-vision-and-scope.md),
   [0002-carrier-agnostic-mycelial-doctrine.md](0002-carrier-agnostic-mycelial-doctrine.md),
-  [../audits/0001-preliminary-architecture-audit.md](../audits/0001-preliminary-architecture-audit.md),
+  `docs/audits/0001-preliminary-architecture-audit.md` (maintainer-local record),
   [../adr/0002-no-custom-cryptography.md](../adr/0002-no-custom-cryptography.md),
   [../adr/0011-carrier-agnostic-bridging.md](../adr/0011-carrier-agnostic-bridging.md),
   [../ARCHITECTURE.md](../ARCHITECTURE.md), [../ROADMAP.md](../ROADMAP.md),

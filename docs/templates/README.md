@@ -14,7 +14,7 @@ Canonical templates. Copy to the appropriate folder, assign the next `NNNN`, fil
 | [adr.md](adr.md) | Architecture Decision Record (decision "why this way") | [../adr/](../adr/) |
 | [refactoring-proposal.md](refactoring-proposal.md) | Refactoring / Change Proposal (work "how") | [../proposals/](../proposals/) |
 | [vision.md](vision.md) | Vision & Scope (initiative direction) | [../vision/](../vision/) |
-| [audit.md](audit.md) | Audit report (Expert-Lens + findings) | [../audits/](../audits/) |
+| [audit.md](audit.md) | Audit report (Expert-Lens + findings) | `docs/audits/` (maintainer-local) |
 | [research-note.md](research-note.md) | Dated research note feeding the adaptation layer | [../research/](../research/) |
 
 Usage policy is in [../development.md](../development.md) and [../refactoring.md](../refactoring.md).

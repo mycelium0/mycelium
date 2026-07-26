@@ -206,6 +206,10 @@
 #                               BYTE-IDENTICAL to the shared bash renderer across hosts/dual-stack/epochs/
 #                               route modes; a full tunnel always carries the recorded opt-out marker; and
 #                               the shell has exactly ONE client renderer (RP-0008). OFFLINE
+#   * docs_link_integrity.sh  — every relative link in a TRACKED document resolves, and no tracked
+#                               document links to an UNTRACKED path (docs/audits/ and docs/research/ are
+#                               local-only by design — a public doc pointing at one is a 404 for every
+#                               reader). Offline; external URLs are deliberately not fetched. OFFLINE
 #   * control/selftest.sh     — myceliumctl render/identity self-test (bash + jq, no network)
 #
 # DELIBERATELY EXCLUDED: cover_site_probe.sh — it is a POST-DEPLOY gate that requires a live
@@ -297,6 +301,7 @@ GATES=(
 	"tests/conformance/awg_dialect_go_equiv.sh"
 	"tests/conformance/awg_routes_go_equiv.sh"
 	"tests/conformance/awg_client_conf_go_equiv.sh"
+	"tests/conformance/docs_link_integrity.sh"
 	"control/selftest.sh"
 )
 

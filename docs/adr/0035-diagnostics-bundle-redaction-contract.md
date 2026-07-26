@@ -21,7 +21,7 @@ later. See the LICENSE file in the repository root.
 - **Layer(s):** control plane (operator tooling) / cross-cutting (logging & knowledge-minimisation)
 - **Phase:** Phase 2 — Operability & Release track, closing first-release milestone (re-phasing Decision B, 2026-07-04)
 - **Related:** [RP-0011](../proposals/0011-phase2-fungi-packaging-and-cli.md) chunk E (the diagnostics
-  bundle + AC-9); [Audit-0006](../audits/0006-diagnostics-redactor-pr-audit.md) (the PR audit that
+  bundle + AC-9); Audit-0006 (maintainer-local record; the PR audit that
   prompted this record); [SECURITY.md §4.2](../../SECURITY.md); [THREAT-MODEL.md](../THREAT-MODEL.md)
   → *"Attack surface: the node diagnostics bundle"*; [refactoring.md §15.3](../refactoring.md)
   (knowledge minimisation is a boundary).

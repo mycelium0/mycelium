@@ -48,7 +48,7 @@ These I can land immediately; they harden Phase-0 and complete the self-containe
 - **DONE — ROADMAP line annotation** — the observability DoD line in [ROADMAP.md](ROADMAP.md) now points at ADR-0021 (deferral of alerting / per-transport handshake to the per-operator monitor / Phase-2), mirroring the ADR-0020 cross-refs.
 
 ## Audit-0004 (full-scale) — transition-gating S1 closed
-Audit-0004 ([audits/0004-phase0-to-phase1-full-scale-audit.md](audits/0004-phase0-to-phase1-full-scale-audit.md))
+Audit-0004 (`docs/audits/0004-phase0-to-phase1-full-scale-audit.md` — a maintainer-local record, not published)
 closed **F-001** (AF_NETLINK unit parity — `AF_NETLINK` now on both Ansible units, `singbox.service.j2` /
 `xray.service.j2`, with the `unit_netlink_parity.sh` conformance gate guarding all unit-producing sources)
 and **F-002 / F-004** (the structural gates now describe the *deployed* artifact via `live_artifact_posture.sh`,
