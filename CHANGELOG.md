@@ -12,6 +12,32 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
+### Fixed
+- **The one unit nothing owns had drifted on two live nodes, and the documented install procedure
+  would have armed it.** `mycelium-update.{service,timer}` are the only systemd units here with no
+  code path behind them: every other unit is written by a heredoc in `control/lib` and rewritten on
+  every apply, while these two are templates the operator copies by hand (RP-0003 workstream W3).
+  Nothing reconciles a deployed copy — not `--node-apply`, not `--update`, not any gate — so a local
+  edit persists forever and is invisible to a suite that can only see the repo. Two nodes were found
+  carrying a hand-written unit predating the shipped template (no `[Install]` section at all) whose
+  `ExecStart` had grown `--insecure-no-verify`, a literal node address and a client list. That flag
+  makes `verify_signed_ref` return before it checks anything — ADR-0015's provenance gate — so the
+  unit was one `systemctl enable` away from a periodic, root-level, unauthenticated fetch-merge-
+  install-compile. Nothing had run: the timer was disabled and had been since a single failed run
+  weeks earlier. But the arming command was not hypothetical, it was **step three of the runbook**,
+  and `verify-phase0-acceptance.md` listed an *active* timer as a precondition — the exact state
+  RP-0003 forbids before a signed release exists.
+  The runbook now separates installing from arming, with the signing precondition stated **before**
+  the `enable` rather than in a paragraph below it; the Phase-0 precondition is corrected; and the
+  template header records the ownership asymmetry explicitly, because implicit ownership is what
+  produced the drift. Two new checks split by what each can actually see: the offline gate
+  `update_unit_template_shape` keeps the shipped template node-agnostic, bypass-free and unarmed-on-
+  copy (7 checks, 10 mutations verified — including the exact deployed shape), and the on-node drill
+  `scripts/update_unit_drift_drill.sh` diffs a *deployed* unit against the template and fails on a
+  provenance bypass or a timer armed without `--allowed-signers` + `--repo-ref`. The gate is honest
+  about its limit in its own header: it would have passed on the day the drift was introduced, since
+  the defect never existed in the repo. The drill is what closes that class.
+
 ### Added
 - **L7 liveness for standalone Shadowsocks — the last-resort transport is no longer measured only by
   whether its port is bound.** Standalone Shadowsocks is the lowest exposure tier

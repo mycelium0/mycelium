@@ -12,9 +12,28 @@
 #   ROLL BACK on any failure (fail-closed). A byte-identical candidate is NOT applied (no restart).
 #   It never regenerates keys and never touches the running service unless a validated config is ready.
 #
-# REQUIRED: the operator's out-of-band signing key must be referenced so fetched code is
-# authenticated before it ever runs as root. Append "--allowed-signers /path/to/allowed_signers"
+# OWNERSHIP (explicit, because implicit ownership is what produced the drift below): NO code path in
+# this repo installs, edits or removes this unit. Every unit the control plane owns is written by a
+# heredoc in control/lib (mycelium-measure, mycelium-rotate, mycelium-l7probe, node_exporter, …) and
+# is reconciled on every apply. This one is a DOCUMENTATION-GRADE TEMPLATE the operator copies BY
+# HAND, per docs/runbooks/node-bootstrap.md, and installing it is tracked as RP-0003 workstream W3.
+# Consequence an operator must know: nothing reconciles a deployed copy back to this file. A local
+# edit persists forever and drifts silently — `--node-apply` will never notice or correct it. Re-`cp`
+# this file to reset a node; that is the only reset there is.
+#
+# Observed 2026-07-27: two live nodes carried a hand-edited copy of this unit whose ExecStart had
+# grown "--insecure-no-verify" plus a baked-in node address and client list. It sat unnoticed for
+# weeks because no gate, verb or apply path looks at /etc/systemd/system. The units were backed up,
+# removed and masked; scripts/update_unit_drift_drill.sh is the on-node check that would have caught
+# it, and tests/conformance/update_unit_template_shape.sh keeps THIS file from ever shipping that
+# shape. Keep this template NODE-AGNOSTIC: no address, no client list, no credentials.
+#
+# REQUIRED BEFORE ARMING: the operator's out-of-band signing key must be referenced so fetched code
+# is authenticated before it ever runs as root. Append "--allowed-signers /path/to/allowed_signers"
 # (and pin "--repo-ref <signed-tag>") to ExecStart below. Without it the updater fails closed.
+# NEVER put "--insecure-no-verify" in this file or in a deployed copy: it makes verify_signed_ref
+# return before it checks anything, and an installed unit is one `systemctl enable` away from an
+# unauthenticated root-level auto-pull. It is a by-hand, local-testing flag only.
 #
 # To switch a node to the stricter stage-and-wait cadence, append "--staged" to ExecStart and
 # promote with "node-bootstrap.sh --ack" once the operator has reviewed the staged candidate.

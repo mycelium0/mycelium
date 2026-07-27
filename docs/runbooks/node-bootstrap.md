@@ -145,19 +145,41 @@ each node, every few minutes (mycelium-update.timer):
   yes → done (node now matches the network)
 ```
 
-Install the timer on every node:
+Install the units on every node. **Installing is not arming** — the two steps are deliberately
+separate, and the second one has a precondition:
 
 ```sh
 sudo cp /opt/mycelium/infra/systemd/mycelium-update.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
+```
+
+**Do NOT run `systemctl enable --now mycelium-update.timer` yet.** Arming this timer hands a
+periodic, root-level, unattended `git fetch` + merge + install + `promote_config` to whatever the
+pinned ref resolves to. That is only safe once the fetch is *authenticated*, so the arming step has
+a hard precondition:
+
+> **Arm only when BOTH are true:** the unit's `ExecStart` carries `--allowed-signers
+> /etc/mycelium/allowed_signers` **and** `--repo-ref <immutable signed tag>`. Ship the operator's
+> signing key **out-of-band** (never in the repo). Until the signed-release pipeline exists
+> ([RP-0003](../proposals/0003-network-rollout-signed-self-updating.md) W1), there is no signed tag
+> to pin and this timer **must stay unarmed**.
+
+```sh
+# ONLY after the precondition above holds:
 sudo systemctl enable --now mycelium-update.timer
 ```
 
-The updater needs the operator's signing key to verify pushes. Ship it **out-of-band** (never in
-the repo) and point the unit at it, e.g. append `--allowed-signers /etc/mycelium/allowed_signers`
-to the unit's `ExecStart`, and pin `--repo-ref` to an **immutable signed tag** rather than a
-branch. (For local testing only, `--insecure-no-verify` bypasses verification with a loud warning;
-never run the network timer with it.)
+`--insecure-no-verify` bypasses the signature gate entirely (`verify_signed_ref` returns before it
+checks anything — [control/lib/nb_update_apply.sh](../../control/lib/nb_update_apply.sh)). It is a
+**local-testing escape hatch, run by hand, with a loud warning**. It must **never** appear in a unit
+file, armed or not: a flag sitting in an installed `ExecStart` is one `systemctl enable` away from
+an unauthenticated auto-pull, and the person who types that command is usually not the person who
+added the flag. The same applies to baking a node's own address or client list into the unit — the
+shipped template is node-agnostic on purpose, so `cp`-ing it fresh is always a safe reset.
+
+If you need to park an installed-but-not-yet-armed node so the arming command cannot succeed by
+accident, `sudo systemctl mask mycelium-update.timer mycelium-update.service` makes it fail closed;
+`unmask` reverses it when the precondition is finally met.
 
 - **Default mode** (`--update`): re-exec from an immutable copy → fetch → **verify signature** →
   re-render → validate → **apply with rollback** (a no-op when the candidate equals the live

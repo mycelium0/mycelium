@@ -21,7 +21,13 @@ later. See the LICENSE file in the repository root.
 
 ## Preconditions
 - The network is healthy: on each node `systemctl is-active sing-box` and `systemctl is-active
-  awg-quick@awg0` are `active`, and the `mycelium-update.timer` is active.
+  awg-quick@awg0` are `active`.
+  (This precondition previously also demanded an **active** `mycelium-update.timer`. That was wrong
+  pre-[RP-0003](../proposals/0003-network-rollout-signed-self-updating.md) W1: with no signed tag to
+  pin, arming that timer is an unauthenticated root-level auto-pull, which the same RP forbids. The
+  timer is part of W3 and is armed only once W1 lands — see
+  [node-bootstrap.md](node-bootstrap.md). Phase-0 GO was recorded 2026-06-15 regardless, so nothing
+  in the ledger depends on this line.)
 - `bash tests/run.sh` is green on the deployed `--repo-ref` (the offline gates describe the deployed
   artifact, per Audit-0004 F-002).
 - You have a **real client device on a restrictive network** (mobile LTE in the target region is the
