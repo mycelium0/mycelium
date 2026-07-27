@@ -208,10 +208,18 @@ PATHSIG_NFT_TABLE="inet mycelium_measure"
 # shadowsocks detour (which listens on 127.0.0.1, not `::`/0.0.0.0).
 _pathsig_tcp_ports() {
 	[ -f "$SINGBOX_CONFIG" ] || return 0
-	jq -r '.inbounds[]? | select((.type=="vless" or .type=="shadowtls" or .type=="trojan") and (.listen_port!=null) and ((.listen // "::")|test("^(::|0\\.0\\.0\\.0)$"))) | .listen_port' \
+	jq -r '.inbounds[]? | select((.type=="vless" or .type=="shadowtls" or .type=="trojan" or .type=="shadowsocks") and (.listen_port!=null) and ((.listen // "::")|test("^(::|0\\.0\\.0\\.0)$"))) | .listen_port' \
 		"$SINGBOX_CONFIG" 2>/dev/null | sort -un
 }
 
+# NOTE on the type list: standalone `shadowsocks` is included DELIBERATELY. It is the one served family
+# with no L7 probe (SS-2022 gives the client no observable handshake, so a reconstructed probe-client
+# reports ALIVE against a listener whose key no longer matches — see the COVERAGE block in nb_selftest.sh),
+# and it is also the LAST-RESORT exposure tier (spec.ExposureNoCover). These passive per-port counters are
+# therefore the only observability that axis has: SYNs arriving with few RSTs is evidence it is carrying
+# traffic. The listen filter keeps this to PUBLIC listeners only, so the loopback inner SS of a ShadowTLS
+# detour is excluded (it is not a served family, and its outer layer is counted on its own port).
+#
 # pathsig_nft_apply — install the passive per-port RST/SYN counters (idempotent: delete + recreate). No-op
 # (fail-safe) if nft/jq/config absent or there are no served TCP ports.
 pathsig_nft_apply() {
