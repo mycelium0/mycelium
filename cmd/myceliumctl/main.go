@@ -1091,7 +1091,7 @@ func cmdReachable(args []string) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("reachable: unexpected extra argument(s) after %q", state)
 	}
-	var p spec.NodeProfile
+	p := spec.NewNodeProfile()
 	if data, rerr := os.ReadFile(*cfgPath); rerr == nil {
 		parsed, perr := spec.ParseNodeProfile(bytes.NewReader(data))
 		if perr != nil {
@@ -1163,7 +1163,7 @@ func cmdDeployPlan(args []string) error {
 	}
 
 	// Descriptor — an absent file means "the default-on transport set" (a fresh node), not an error.
-	var p spec.NodeProfile
+	p := spec.NewNodeProfile()
 	if data, rerr := os.ReadFile(*cfgPath); rerr == nil {
 		parsed, perr := spec.ParseNodeProfile(bytes.NewReader(data))
 		if perr != nil {
@@ -1308,7 +1308,7 @@ func cmdTransportSet(args []string, enable bool) error {
 		return fmt.Errorf("transport %s: %q is not a known operator-toggleable transport (see 'transport list')", verb, proto)
 	}
 	// Read the existing descriptor (fail-closed if present-but-invalid); start from empty if absent.
-	var p spec.NodeProfile
+	p := spec.NewNodeProfile()
 	if data, rerr := os.ReadFile(*cfgPath); rerr == nil {
 		parsed, perr := spec.ParseNodeProfile(bytes.NewReader(data))
 		if perr != nil {

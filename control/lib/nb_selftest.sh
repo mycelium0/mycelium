@@ -60,8 +60,20 @@
 # always-on tunnel with no in-engine sibling to promote). The Xray-served vless-xhttp-tls (a separate config,
 # a distinct engine, never a sing-box measure member) is covered by the SIBLING probe measure_l7_probe_xhttp
 # — an ADVISORY/ACCEPTANCE own-cert outer-TLS check (openssl loopback to the xray port; a sing-box client
-# cannot dial xhttp, so the inner xhttp/VLESS layer is a documented residual). Every closed family now has an
-# L7 probe; coverage is asserted here, never a silent claim, per ADR-0036.
+# cannot dial xhttp, so the inner xhttp/VLESS layer is a documented residual).
+#
+# STANDALONE Shadowsocks-2022 is a SECOND documented residual, and deliberately has NO probe here. It was
+# built and MEASURED on a live node, then removed: SS-2022 gives the client no observable handshake, so a
+# reconstructed probe-client returns ALIVE even against a listener whose key no longer matches — a
+# false-alive on precisely the failure the probe would exist to catch, which is worse than no probe (the
+# planner would rotate ONTO a dead last resort believing it healthy). Making the verdict real needs a data
+# round-trip to a responsive target, and there is none available node-locally: the node BLOCKS private
+# destinations by design (route rule `ip_is_private -> block`, a control that must not be weakened for a
+# self-test), and an own-public-address hairpin returned nothing when measured. So standalone SS liveness
+# rests on the L4 reach window plus engine health, and that limit is stated rather than papered over.
+# (This matters because SS is the LAST-RESORT exposure tier — see spec.ExposureNoCover.)
+#
+# Coverage is asserted here, never a silent claim, per ADR-0036.
 # _l7_singbox_dial OUTBOUNDS_JSON TIMEOUT — the SHARED sing-box-as-client dial + classify used by the QUIC
 # and ShadowTLS L7 probes (openssl speaks neither QUIC nor the ShadowTLS/SS layering). OUTBOUNDS_JSON is the
 # pre-built outbound ARRAY whose FIRST element is tagged "probe-out"; it is wrapped as {log, outbounds} into

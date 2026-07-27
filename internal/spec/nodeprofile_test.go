@@ -138,3 +138,37 @@ func TestParseNodeProfileValidatesContent(t *testing.T) {
 		t.Fatal("ParseNodeProfile accepted weather.enabled=true; expected the reserved-slot rejection")
 	}
 }
+
+// TestNewNodeProfileMatchesAbsentDescriptor: the constructor must reproduce the ABSENT-descriptor wire
+// posture (public). The Go zero value is deliberately the opposite, so a CLI verb that starts an edit from
+// the zero value silently takes a live public node off the network on the next apply — which is exactly
+// what happened before this existed.
+func TestNewNodeProfileMatchesAbsentDescriptor(t *testing.T) {
+	if !NewNodeProfile().Reachable {
+		t.Fatal("NewNodeProfile must be PUBLIC — an absent descriptor renders public on the wire")
+	}
+	var zero NodeProfile
+	if zero.Reachable {
+		t.Fatal("the Go zero value is expected to be non-public; if that changed, the constructor's reason to exist changed too")
+	}
+}
+
+// TestTransportEditPreservesPosture: editing the transport set on a node that had NO descriptor must not
+// change its reachability posture. This is the regression: `transport enable X` created a descriptor with
+// reachable=false and would have rebound a public node to loopback on the next apply.
+func TestTransportEditPreservesPosture(t *testing.T) {
+	p := NewNodeProfile().WithTransport("shadowsocks", true)
+	if !p.Reachable {
+		t.Fatal("enabling a transport must not flip a public node to non-public")
+	}
+	// And the edit still did its job.
+	found := false
+	for _, tr := range p.Transports {
+		if tr == "shadowsocks" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the transport edit was lost")
+	}
+}

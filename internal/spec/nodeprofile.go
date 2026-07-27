@@ -178,6 +178,22 @@ func (p NodeProfile) WithTransport(proto string, enable bool) NodeProfile {
 // ParseNodeProfile decodes a node profile, fail-closed: it REFUSES unknown fields so a stray node-"type"
 // enum, an engine selector, or any field outside the closed capability set is rejected (ADR-0034 —
 // capabilities, not types), then runs Validate. Pure; no I/O beyond the reader.
+// NewNodeProfile returns the descriptor that is EQUIVALENT TO HAVING NO DESCRIPTOR AT ALL, and is the
+// only correct starting point when a CLI verb creates one for a node that had none.
+//
+// This exists because the two defaults deliberately disagree: on the WIRE an absent `reachable` key means
+// PUBLIC (the additive guard — a node that never adopted the field must render byte-identically), while
+// the Go zero value is `false`. Starting an edit from the zero value therefore SILENTLY FLIPS a live
+// public node to non-public as a side effect of an unrelated change — e.g. `transport enable X` on a node
+// with no descriptor would, on the next apply, rebind its listeners to loopback and take it off the
+// network. That happened on a live node; the apply only failed closed for an unrelated reason.
+//
+// Verbs that set a field explicitly (`reachable on|off`) overwrite it anyway; verbs that do not MUST start
+// here so an edit changes exactly what the operator asked for and nothing else.
+func NewNodeProfile() NodeProfile {
+	return NodeProfile{Reachable: true}
+}
+
 func ParseNodeProfile(r io.Reader) (NodeProfile, error) {
 	var p NodeProfile
 	dec := json.NewDecoder(r)
