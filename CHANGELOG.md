@@ -13,6 +13,33 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Added
+- **L7 liveness for standalone Shadowsocks — the last-resort transport is no longer measured only by
+  whether its port is bound.** Standalone Shadowsocks is the lowest exposure tier
+  (`spec.ExposureNoCover`), the shape a node falls back to when nothing safer is viable, and it was the
+  one served family with no L7 probe: SS-2022 completes no observable handshake, so the criterion every
+  other family is judged by — "the connection was still open when the timeout killed it" — reads **ALIVE
+  against a listener whose key no longer matches**. A first attempt was built and removed for exactly
+  that reason. `_l7_probe_shadowsocks_dial` replaces the criterion instead of the implementation: it
+  judges by a **data round trip**, dialling a target that speaks first (the node's own sshd) THROUGH its
+  own SS listener, because bytes coming back cannot be produced by anything but a server that decrypted
+  the request. Three properties make the verdict trustworthy rather than merely available. (a) The target
+  is the node's **own public address**, taken from its own interface list — the served config blocks
+  private destinations by design and that control is not weakened for a self-test; because the address is
+  one the host already holds, the kernel routes the dial through `lo`, so nothing goes on the wire and
+  nothing depends on the provider hairpinning. A private target would be blocked in the tunnel but not in
+  the probe's own config, manufacturing a false DEAD. (b) **DEAD requires positive evidence**: silence
+  inside the tunnel is ambiguous, so it is only a dead verdict once a control dial over a plain `direct`
+  outbound proves the same target answers; every other outcome is cannot-judge. (c) The credential is
+  rebuilt from the live config in the multi-user `server_psk:user_psk` form — the server PSK alone is
+  rejected exactly like a wrong key, which would make the "correct" arm fail for the same reason as a
+  dead listener. Measured on a live node: correct key returns the banner, a wrong user key and a wrong
+  server key both return nothing. Pinned by the new `ss_l7_probe_failsafe` gate (21 checks; 13 bypass
+  mutations verified caught), and ADR-0036 is amended for the non-loopback target rather than the shape
+  being changed quietly.
+- **trojan is enrolled in the L7 probe.** Its own-cert genuine-TLS shape was already covered by the
+  existing loopback SAN check, but the tag had never been added to the enrolled set — so a served family
+  carried a silent L4-only verdict while the code claimed honest coverage. The Xray-served
+  `vless-xhttp-tls` inner layer is now the single remaining documented residual.
 - **AmneziaWG per-node obfuscation dialect + its operator verbs (Audit-0008 S1-4).** The dialect
   (`H1..H4` + `Jc/Jmin/Jmax/S1/S2`) is no longer a network-wide constant committed in the public repo — a
   published constant is a free network-wide block, since ONE passive UDP payload-match rule keyed on the

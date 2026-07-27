@@ -68,12 +68,34 @@ budgeted, jittered systemd timer — realized per transport family:
    node's own `dest`: that is **the cover traffic REALITY already produces**, indistinguishable from
    normal REALITY operation, and MUST target **only** the node's own cover host — **never** a peer /
    member reference, a client-vantage endpoint, or a third-party service.
+3. **Standalone Shadowsocks-2022 (amended 2026-07-27):** a **data round trip through the node's own SS
+   listener to a target that speaks first**, judged on **bytes returned**, with a **control dial** of the
+   same target over a plain `direct` outbound deciding the ambiguous no-bytes case. SS-2022 completes no
+   observable handshake, so the criteria in (1) and (2) — and the hold-until-timeout criterion the QUIC /
+   ShadowTLS probes use — read **ALIVE against a listener whose key no longer matches**. Only bytes that
+   came *back* through the tunnel prove a server decrypted the request. Two constraints are load-bearing
+   and are pinned by gate (`ss_l7_probe_failsafe`):
+   - **The target is the node's own PUBLIC address, not `127.0.0.1`.** The served config blocks private
+     destinations (`route.rules: ip_is_private -> block`) — a deliberate control that MUST NOT be
+     weakened for a self-test. The address MUST be one **this host already holds** (taken from its own
+     interface list, never from the operator-settable `params.node_address`, which may be a hostname
+     pointing at a front or another host), so the kernel routes the dial through `lo`: **still no packet
+     on the wire**, and no dependence on the provider hairpinning its own public address. A **private**
+     target would be blocked in the tunnel but *not* in the probe's own route-rule-free config, so the
+     control dial would succeed where the tunnel failed — **manufacturing a false DEAD**.
+   - **DEAD requires positive evidence.** Silence inside the tunnel is ambiguous (dead listener vs. no
+     sshd vs. a firewalled hairpin), so a DEAD verdict is reachable **only** after the control dial
+     proves the target itself answers. Everything else — no public own-address, no banner-first target,
+     no tooling, a secret-less inbound — is **cannot-judge**, never dead.
 
 **Boundary** (reconciling ADR-0019 and RP-0010 AC-6). The prohibition is "**no new EXTERNAL /
 third-party / client-vantage fingerprint**", **not** "zero external packets". Loopback for genuine-TLS;
-own-`dest` cover contact for REALITY. **Forbidden:** any synthetic request egressed to a **third party**
-on a cadence (e.g. fetching a fixed `/generate_204` through the tunnel per tick — the exact beacon
-VIS-0004 warns against).
+own-`dest` cover contact for REALITY; an **own-address, host-local** round trip for Shadowsocks — the
+target is this node's own service, reached at an address the node itself holds, so nothing is contacted
+off-host and no third party is involved. **Forbidden:** any synthetic request egressed to a **third
+party** on a cadence (e.g. fetching a fixed `/generate_204` through the tunnel per tick — the exact
+beacon VIS-0004 warns against), and — for the Shadowsocks round trip specifically — any target that is
+**not an address of this host**.
 
 **Invariants** (VIS-0004 hyphal-probe). The probe MUST be **budgeted, jittered, bounded**, and MUST NOT
 run every tick (it is the expensive hyphal probe, not the cheap reach probe); it MUST **debounce**
@@ -101,9 +123,22 @@ sing-box + openssl + `crypto/tls` only.
   with **one** schema (stamped `observed_at`) and **one** key convention (measure ref = inbound tag minus
   `-in`). A deploy-time acceptance self-test MUST use the same own-cover/loopback contact profile (no
   third-party beacon), never a divergent schema on the same path.
-- **Honest coverage:** the probe covers the families it enrolls; today only the REALITY (vision/grpc) and
-  ws-tls tags are probed — other enrolled transports (HY2/TUIC/shadowtls/trojan/xhttp) carry an **L4-only**
-  verdict and MUST NOT be claimed L7-covered. Extending per-family L7 coverage is a follow-on.
+- **Honest coverage:** the probe covers the families it enrolls, and the claim is asserted in the code,
+  never assumed. *Originally* only the REALITY (vision/grpc) and ws-tls tags were probed, with
+  HY2/TUIC/shadowtls/trojan/xhttp carrying an **L4-only** verdict. RP-0014 chunk A closed HY2/TUIC and
+  ShadowTLS; the 2026-07-27 amendment closes **standalone Shadowsocks** (3, above) and enrols **trojan**,
+  whose own-cert genuine-TLS shape the existing loopback SAN check already covered but which had never
+  been added to the enrolled set — a silent L4-only verdict on a served family. The **one** remaining
+  residual is the **inner** layer of the Xray-served `vless-xhttp-tls`: a sing-box client cannot dial
+  xhttp, so its sibling probe (`measure_l7_probe_xhttp`) checks the outer own-cert TLS only. Nothing else
+  may be claimed L7-covered without a probe that exercises it.
+- **A per-family criterion is not a per-family implementation detail.** Shadowsocks proved that a probe
+  can be *structurally* correct — right engine, right config, right port — and still be **hollow**: the
+  first build of it reported ALIVE against a listener whose key had been changed, because it inherited
+  the TLS families' hold-until-timeout criterion. A family whose failure mode is *silence* cannot be
+  judged by a criterion whose ALIVE signal is also silence. Any future family added here MUST state the
+  observable that distinguishes its healthy case from its dead one, and a probe that cannot name one is a
+  documented residual, not a probe.
 - **REALITY liveness is inseparable from `dest` viability:** a flaky `dest` can produce a fresh-but-wrong
   DEAD marker; contained by the in-run debounce + the detector hysteresis + the rotate `MinInterval`
   ([ADR-0030](0030-advisory-network-awareness.md)), not eliminated.
@@ -137,6 +172,11 @@ sing-box + openssl + `crypto/tls` only.
 - Egressing a synthetic request to a **third party** on any cadence (a beacon).
 - Targeting a **peer / member reference** or a client-vantage endpoint — this is a node-local self-probe,
   never a discovery or client-simulation surface.
+- For the Shadowsocks round trip: targeting an address this host does **not** hold, targeting a
+  **private** address, or returning **DEAD** without a control dial that proves the target answers.
+- **Weakening a served-config control to make a self-test work** — in particular relaxing the
+  `ip_is_private -> block` route rule so a probe can use a loopback target. The probe adapts to the
+  control, never the reverse.
 - Writing the daemon-consumed marker from **more than one** producer, or with a divergent schema/key.
 - Claiming a transport family is L7-covered when the probe does not exercise it.
 
@@ -146,8 +186,19 @@ sing-box + openssl + `crypto/tls` only.
   (healthy) for absent/stale/malformed/unstamped/empty-dead; only a **fresh** marker naming dead refs
   faults — a probe outage never rotates a healthy transport (covered by `TestLoadL7Liveness`).
 - **No third-party beacon:** the cadenced probe + the deploy-time acceptance test contact only
-  `127.0.0.1` (genuine-TLS) or the node's own `dest`/cover host (REALITY); a fixed third-party fetch on a
-  cadence is a review-blocking finding.
+  `127.0.0.1` (genuine-TLS, QUIC, ShadowTLS), the node's own `dest`/cover host (REALITY), or an address
+  the node itself holds (Shadowsocks); a fixed third-party fetch on a cadence is a review-blocking
+  finding.
+- **Shadowsocks fail-safe (gate):** `ss_l7_probe_failsafe` pins, on the shell directly, that the DEAD
+  verdict is control-gated, that private/ULA/CGNAT candidates are rejected, that the verdict is the size
+  of the captured round-trip output rather than an exit status, that a payload is sent before reading
+  (SS-2022 flushes its request header only with the first payload — an empty-stdin dial reads DEAD on a
+  healthy listener), that the target comes from the host's own interface list, and that the ShadowTLS
+  inbound's hidden loopback inner SS is never enrolled as a served family.
+- **Operator-visible footprint (Shadowsocks):** the round trip leaves one benign line per probe run in
+  the node's **own** sshd log, from the node's own address. If a node runs `fail2ban`/`sshguard` in an
+  aggressive mode that bans on it, the ban lands on the node's own address and the probe degrades to
+  **cannot-judge** (the control dial stops answering too) — fail-safe, not a false dead.
 - **Ships-disabled:** the L7 probe timer is written + enabled only by `--measure-enable`, removed by
   `--measure-disable`; nothing arms it at plain `--node-apply` (`measure_daemon_ships_disabled`).
 - **Advisory-only:** `ActiveProbeOK` folds into a `rotate.PlanInput` behind the RP-0012 gate; it never

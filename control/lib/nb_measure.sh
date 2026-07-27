@@ -212,13 +212,15 @@ _pathsig_tcp_ports() {
 		"$SINGBOX_CONFIG" 2>/dev/null | sort -un
 }
 
-# NOTE on the type list: standalone `shadowsocks` is included DELIBERATELY. It is the one served family
-# with no L7 probe (SS-2022 gives the client no observable handshake, so a reconstructed probe-client
-# reports ALIVE against a listener whose key no longer matches — see the COVERAGE block in nb_selftest.sh),
-# and it is also the LAST-RESORT exposure tier (spec.ExposureNoCover). These passive per-port counters are
-# therefore the only observability that axis has: SYNs arriving with few RSTs is evidence it is carrying
-# traffic. The listen filter keeps this to PUBLIC listeners only, so the loopback inner SS of a ShadowTLS
-# detour is excluded (it is not a served family, and its outer layer is counted on its own port).
+# NOTE on the type list: standalone `shadowsocks` is included DELIBERATELY. It is the LAST-RESORT exposure
+# tier (spec.ExposureNoCover) — the axis a planner reaches only when nothing safer is viable, so the one
+# whose silent death is most expensive. It is now also L7-probed (`_l7_probe_shadowsocks_dial` judges it by
+# a data round trip, since SS-2022 offers no observable handshake), but the two signals answer DIFFERENT
+# questions and neither replaces the other: the L7 probe confirms READINESS while the family sits idle,
+# these counters confirm it is actually CARRYING traffic (SYNs arriving with few RSTs) and can see
+# path-level interference the node's own loopback vantage cannot. The listen filter keeps this to PUBLIC
+# listeners only, so the loopback inner SS of a ShadowTLS detour is excluded (it is not a served family,
+# and its outer layer is counted on its own port).
 #
 # pathsig_nft_apply — install the passive per-port RST/SYN counters (idempotent: delete + recreate). No-op
 # (fail-safe) if nft/jq/config absent or there are no served TCP ports.

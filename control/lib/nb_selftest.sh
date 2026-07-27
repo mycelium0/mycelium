@@ -51,7 +51,9 @@
 # VIS-0004), NOT every tick. Self-cleaning.
 # COVERAGE (Audit-0007 S2 + RP-0014 chunk A, honest scope): measure_l7_probe covers the sing-box REALITY
 # families (vless-reality-vision/-grpc/-xhttp — the authenticated dest steal, identical mechanism), the
-# own-cert genuine-TLS ws-tls (loopback SAN match), the QUIC families hysteria2/tuic (a real sing-box client
+# own-cert genuine-TLS families ws-tls and trojan (loopback SAN match — the same own cert, the same
+# check; trojan was enumerated late, so it carried an L4-only verdict while its shape was already
+# covered), the QUIC families hysteria2/tuic (a real sing-box client
 # handshake + protocol auth over loopback — _l7_probe_quic_dial), and ShadowTLS v3 (the real inner-SS-over-
 # outer-ShadowTLS handshake, the outer layer relaying the node's cover — _l7_probe_shadowtls_dial). AmneziaWG
 # (a separate UDP engine, never in the sing-box config) is covered by the SIBLING probe
@@ -62,16 +64,20 @@
 # — an ADVISORY/ACCEPTANCE own-cert outer-TLS check (openssl loopback to the xray port; a sing-box client
 # cannot dial xhttp, so the inner xhttp/VLESS layer is a documented residual).
 #
-# STANDALONE Shadowsocks-2022 is a SECOND documented residual, and deliberately has NO probe here. It was
-# built and MEASURED on a live node, then removed: SS-2022 gives the client no observable handshake, so a
-# reconstructed probe-client returns ALIVE even against a listener whose key no longer matches — a
-# false-alive on precisely the failure the probe would exist to catch, which is worse than no probe (the
-# planner would rotate ONTO a dead last resort believing it healthy). Making the verdict real needs a data
-# round-trip to a responsive target, and there is none available node-locally: the node BLOCKS private
-# destinations by design (route rule `ip_is_private -> block`, a control that must not be weakened for a
-# self-test), and an own-public-address hairpin returned nothing when measured. So standalone SS liveness
-# rests on the L4 reach window plus engine health, and that limit is stated rather than papered over.
-# (This matters because SS is the LAST-RESORT exposure tier — see spec.ExposureNoCover.)
+# STANDALONE Shadowsocks-2022 is covered by _l7_probe_shadowsocks_dial, on a criterion no other family
+# uses: a DATA ROUND TRIP. SS-2022 completes no observable handshake, so the hold-until-timeout criterion
+# every TLS/QUIC family judges by ("the connection was still open when the timeout killed it") reads ALIVE
+# against a listener whose key no longer matches — a false-alive on precisely the failure the probe exists
+# to catch. Bytes that come BACK through the tunnel cannot be produced by anything but a server that
+# decrypted the request, so the probe dials a target that SPEAKS FIRST (this node's own sshd) THROUGH its
+# own SS listener and judges on those bytes; when none come back, a CONTROL dial of the SAME target over a
+# plain `direct` outbound separates a dead listener (control speaks -> DEAD) from an unusable target
+# (control silent -> cannot-judge, NEVER dead). The target is the node's own PUBLIC address, not
+# 127.0.0.1: the live config BLOCKS private destinations (route rule `ip_is_private -> block`, a control
+# this probe must not weaken), while the address is one the kernel already holds — so the dial is routed
+# through `lo` and still puts no packet on the wire (the ADR-0036 boundary, amended there for this
+# family). This matters because SS is the LAST-RESORT exposure tier (spec.ExposureNoCover): the axis
+# reached when nothing safer is left is the one whose silent death is most expensive.
 #
 # Coverage is asserted here, never a silent claim, per ADR-0036.
 # _l7_singbox_dial OUTBOUNDS_JSON TIMEOUT — the SHARED sing-box-as-client dial + classify used by the QUIC
@@ -172,6 +178,146 @@ _l7_probe_shadowtls_dial() {
 	_l7_singbox_dial "$ob" 17
 }
 
+# _l7_own_public_addr — echo this node's first LOCALLY-ASSIGNED, PUBLIC address (IPv4 preferred, then
+# IPv6 global unicast); empty output + rc 1 when there is none. Two properties make this the only kind of
+# address the Shadowsocks probe may aim at, and BOTH are load-bearing:
+#   * LOCALLY ASSIGNED — the kernel routes a dial to an address held on one of its OWN interfaces through
+#     `lo`, so the probe still puts NO packet on the wire (the ADR-0036 boundary), and it does not depend
+#     on the provider hairpinning traffic sent to its own public address.
+#   * PUBLIC — the live served config BLOCKS private destinations (`route.rules: ip_is_private -> block`),
+#     a deliberate control this probe must not weaken. Were the target a PRIVATE own-address, that rule
+#     would block the tunnelled dial while the CONTROL dial (a plain `direct` outbound in the probe's own
+#     config, which carries no route rules) still succeeded — manufacturing a FALSE DEAD on a healthy
+#     listener. The asymmetry is eliminated by never selecting such an address, not by relaxing the rule.
+# The reject list is a strict SUPERSET of sing-box's `ip_is_private` (RFC1918 + loopback + link-local, plus
+# CGNAT / benchmarking / IETF-protocol / multicast, and for IPv6 everything outside global unicast
+# 2000::/3 — which excludes ULA fc00::/7). Over-rejection is SAFE BY CONSTRUCTION: a rejected candidate
+# can only ever cost a cannot-judge verdict, never a false dead. Local detection only, no external service
+# contacted. It deliberately does NOT reuse params.node_address: that value is operator-settable and may
+# be a HOSTNAME pointing at a front/CDN — i.e. not this host, which would break both properties above.
+_l7_own_public_addr() {
+	have ip || return 1
+	local cand a
+	cand="$( { ip -o -4 addr show scope global; ip -o -6 addr show scope global; } 2>/dev/null \
+		| awk '{print $4}' | cut -d/ -f1 || true)"
+	for a in $cand; do
+		case "$a" in
+			*:*)
+				# IPv6: accept ONLY global unicast 2000::/3 (rejects ULA fd00::/8 and link-local fe80::/10).
+				case "$a" in 2*|3*) printf '%s\n' "$a"; return 0 ;; *) continue ;; esac ;;
+			*)
+				case "$a" in
+					0.*|10.*|127.*|169.254.*|192.168.*|192.0.0.*|198.1[89].*)     continue ;;
+					172.1[6-9].*|172.2[0-9].*|172.3[01].*)                        continue ;;
+					100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) continue ;;
+					22[4-9].*|2[3-4][0-9].*|25[0-5].*)                            continue ;;
+					*) printf '%s\n' "$a"; return 0 ;;
+				esac ;;
+		esac
+	done
+	return 1
+}
+
+# _l7_connect_bytes OUTBOUNDS_JSON TARGET — dial TARGET through the FIRST outbound of OUTBOUNDS_JSON
+# (tagged "probe-out") with sing-box as the client, send a one-byte payload, hold the connection briefly,
+# and report whether the target sent anything BACK: rc 0 = bytes received, rc 1 = none (or setup failed).
+#
+# WHY A BYTE CRITERION rather than _l7_singbox_dial's hold-until-timeout one: Shadowsocks-2022 completes
+# no observable handshake. The client encrypts and sends; a listener whose key no longer matches simply
+# never replies, and the connection is HELD OPEN in both the healthy and the key-drifted case — so
+# "exit 124 = alive" (correct for the TLS/QUIC families, whose engines answer or fail the handshake) reads
+# ALIVE on a dead listener. Only a DATA ROUND TRIP is honest evidence.
+#
+# WHY THE PAYLOAD IS NOT OPTIONAL: SS-2022 flushes its request header together with the FIRST PAYLOAD, so
+# a dial with EMPTY stdin (what every TLS-family probe here passes) never sends the header at all and the
+# server logs a bare EOF — the connection looks identical to a dead one. This cost three wrong
+# "SS liveness is unmeasurable" verdicts before it was found; the newline is the fix, not a formality.
+#
+# WHY stdin IS HELD: without the hold the client's own stdin-EOF teardown races the target's reply. A
+# loopback banner lands in ~100 ms so 1 s is generous, and the verdict stops depending on that race;
+# `timeout` is only the outer bound for a client that never exits at all. The dial's EXIT STATUS is
+# deliberately ignored — a healthy dial ends either by the target closing or by the timeout kill, and
+# neither is evidence either way. Creds transit OUTBOUNDS_JSON + the 0600 temp config (removed after the
+# dial); avoid `set -x` here.
+_l7_connect_bytes() {
+	local ob="$1" tgt="$2" tmpc tmpo rc=1
+	[ -n "${SINGBOX_BIN:-}" ] && [ -x "$SINGBOX_BIN" ] || return 1
+	command -v timeout >/dev/null 2>&1 || return 1
+	[ -n "$ob" ] && [ -n "$tgt" ] || return 1
+	tmpc="$(mktemp 2>/dev/null)" || return 1
+	tmpo="$(mktemp 2>/dev/null)" || { rm -f "$tmpc" 2>/dev/null; return 1; }
+	if ( umask 077; printf '{"log":{"level":"error"},"outbounds":%s}\n' "$ob" >"$tmpc" ) 2>/dev/null; then
+		{ printf '\n'; sleep 1; } \
+			| timeout 5 "$SINGBOX_BIN" tools connect -c "$tmpc" -o probe-out "$tgt" >"$tmpo" 2>/dev/null || true
+		if [ -s "$tmpo" ]; then rc=0; fi
+	fi
+	rm -f "$tmpc" "$tmpo" 2>/dev/null
+	return "$rc"
+}
+
+# _l7_probe_shadowsocks_dial TAG PORT — STANDALONE Shadowsocks-2022 L7 liveness (the LAST-RESORT exposure
+# tier, spec.ExposureNoCover). Returns 0 alive / 1 dead / 2 cannot-judge. Three steps:
+#
+#   (1) TARGET. A family judged by a data round trip needs a target that SPEAKS FIRST — otherwise silence
+#       proves nothing. The node's own sshd is the one such service a node always runs, reached at the
+#       node's own PUBLIC address (see _l7_own_public_addr for why public and why locally-assigned). The
+#       sshd port is read from the running config, falling back to 22; either way step (3) validates the
+#       choice before any DEAD verdict, so a wrong guess costs a cannot-judge, not a false dead.
+#   (2) PROBE CLIENT, reconstructed from the LIVE inbound so a rotated secret is caught. The password form
+#       is the one SS-2022 multi-user detail that silently breaks a probe: an inbound with `users[]` takes
+#       `server_psk:user_psk`, and sending the server PSK alone is REJECTED exactly like a wrong key — the
+#       "correct" arm then fails for the same reason as the negative arm and the probe proves nothing. A
+#       single-user inbound (no `users[]`) takes the bare server PSK.
+#   (3) VERDICT. Bytes back through the tunnel -> ALIVE, and no control dial is needed (the round trip
+#       already proves the listener decrypted the request), so the healthy path costs ONE dial. No bytes
+#       is AMBIGUOUS — a dead listener and an unreachable/silent target look identical from inside the
+#       tunnel — so the same target is dialled over a plain `direct` outbound: control speaks -> the
+#       tunnel is what failed -> DEAD; control silent (no sshd, a firewalled hairpin, a fail2ban ban on
+#       the node's own address) -> cannot-judge. FAIL-SAFE by construction: every precondition failure
+#       (no sing-box/timeout/jq, no public own-address, a malformed or secret-less inbound) returns 2, so
+#       this probe can only ever mark the last-resort transport dead on POSITIVE evidence that its own
+#       target is fine.
+#
+# LOG NOTE (honest, operator-visible): the newline payload is not a valid SSH identification string, so
+# each run leaves one benign line in the node's own sshd log ("banner exchange: ... invalid format") from
+# the node's own address. That is the whole footprint; nothing is contacted off-host.
+_l7_probe_shadowsocks_dial() {
+	local tag="$1" port="$2"
+	[ -n "${SINGBOX_BIN:-}" ] && [ -x "$SINGBOX_BIN" ] || return 2
+	command -v timeout >/dev/null 2>&1 || return 2
+	have jq || return 2
+	[ -n "$tag" ] && [ -n "$port" ] || return 2
+
+	# (1) the banner-first target.
+	local addr sshport tgt
+	addr="$(_l7_own_public_addr)" || return 2
+	[ -n "$addr" ] || return 2
+	sshport="$(sshd -T 2>/dev/null | sed -n 's/^port[[:space:]]*//p' | head -n1)" || sshport=""
+	case "$sshport" in ''|*[!0-9]*) sshport=22 ;; esac
+	case "$addr" in *:*) tgt="[$addr]:$sshport" ;; *) tgt="$addr:$sshport" ;; esac
+
+	# (2) the probe client.
+	local ob
+	ob="$(jq -c --arg tag "$tag" --argjson port "$port" \
+		'.inbounds[] | select(.tag==$tag)
+		 | (if ((.users // []) | length) > 0
+		    then ((.password // "") + ":" + (.users[0].password // ""))
+		    else (.password // "") end) as $pw
+		 | [{type:"shadowsocks",tag:"probe-out",server:"127.0.0.1",server_port:$port,method:.method,password:$pw}]' \
+		"$SINGBOX_CONFIG" 2>/dev/null)" || ob=""
+	# well-formed iff the method, the port AND every secret in the composed password are present — the
+	# `^:|:$` test rejects a multi-user inbound with an empty server OR user PSK, which would otherwise
+	# dial with a valid-SHAPED but unusable credential and read DEAD on a healthy listener.
+	{ [ -n "$ob" ] && printf '%s' "$ob" | jq -e '.[0]
+		| (.method // "") != "" and (.password // "") != ""
+		  and ((.password | test("^:|:$")) | not) and .server_port != null' >/dev/null 2>&1; } || return 2
+
+	# (3) the verdict.
+	if _l7_connect_bytes "$ob" "$tgt"; then return 0; fi
+	if _l7_connect_bytes '[{"type":"direct","tag":"probe-out"}]' "$tgt"; then return 1; fi
+	return 2
+}
+
 measure_l7_probe() {
 	have openssl && have jq || return 0
 	[ -f "$SINGBOX_CONFIG" ] || return 0
@@ -209,6 +355,19 @@ measure_l7_probe() {
 				[ "$qrc" -ne 1 ] && { ok=1; break; }
 				sleep 1
 			done
+		elif [ "$type" = "shadowsocks" ]; then
+			# STANDALONE Shadowsocks-2022: a DATA ROUND TRIP through the node's own SS listener to a
+			# target that speaks first, with a control dial deciding the ambiguous no-bytes case
+			# (_l7_probe_shadowsocks_dial). This family has no observable handshake, so a key-drifted,
+			# wedged or down listener is invisible to every other criterion in this probe — and it is the
+			# LAST-RESORT tier, the one a planner reaches only when nothing safer is viable.
+			for attempt in 1 2 3; do
+				qrc=0; _l7_probe_shadowsocks_dial "$tag" "$port" || qrc=$?
+				# 0 = alive, 2 = cannot judge (no tooling / no public own-address / control silent) -> NOT
+				# dead; 1 = dead -> retry-debounce.
+				[ "$qrc" -ne 1 ] && { ok=1; break; }
+				sleep 1
+			done
 		elif [ "$type" = "hysteria2" ] || [ "$type" = "tuic" ]; then
 			# QUIC (hysteria2/tuic): openssl cannot speak QUIC, so we complete a REAL handshake + protocol
 			# auth against the own listener with sing-box as the client, plus an expiry check on the served
@@ -242,7 +401,7 @@ measure_l7_probe() {
 				sleep 1
 			done
 		else
-			# genuine-TLS: own-cert loopback handshake; the presented leaf must be non-expired AND carry
+			# genuine-TLS (ws-tls, trojan): own-cert loopback handshake; the presented leaf must be non-expired AND carry
 			# $sni in its SAN (pure loopback, no external contact). A dead listener / missing cert yields no
 			# leaf; a WRONG-domain cert (a mis-render, or a stale cert for another host) is caught by the SAN
 			# match (Audit-0007 S3). We grep the SAN rather than `-verify_hostname -verify_return_error`
@@ -265,8 +424,15 @@ measure_l7_probe() {
 		fi
 		tested=$(( tested + 1 ))
 		[ "$ok" -eq 1 ] || dead="$dead $ref"
+	# The enrolled set. The standalone `shadowsocks` clause is qualified where the others are not: the
+	# ShadowTLS inbound carries a SECOND shadowsocks inbound as its hidden inner detour, which is not a
+	# served family (it listens on 127.0.0.1 with no listen_port, and its outer layer is probed on its own
+	# tag). Requiring a wildcard `listen` + a real port enrols exactly the PUBLIC SS listener — the same
+	# predicate nb_measure's `_pathsig_tcp_ports` uses, so the probe and the passive counters observe the
+	# same member.
 	done <<PROBE_EOF
-$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-reality-xhttp-in" or .tag=="vless-ws-tls-in" or .type=="hysteria2" or .type=="tuic" or .type=="shadowtls")
+$(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-reality-grpc-in" or .tag=="vless-reality-xhttp-in" or .tag=="vless-ws-tls-in" or .type=="hysteria2" or .type=="tuic" or .type=="shadowtls" or .type=="trojan"
+		or (.type=="shadowsocks" and (.listen_port != null) and ((.listen // "::") | test("^(::|0\\.0\\.0\\.0)$"))))
 	| {tag, type:.type, port:.listen_port, reality:((.tls.reality.enabled)//false), sni:(.tls.server_name),
 	   dest:(.tls.reality.handshake.server // .tls.server_name)}' "$SINGBOX_CONFIG" 2>/dev/null)
 PROBE_EOF
@@ -278,7 +444,7 @@ PROBE_EOF
 		warn "L7 measure-probe: client-DEAD transport(s):$dead (own-listener handshake failed)."
 		return 1
 	fi
-	log "L7 measure-probe: all $tested L7-covered transport(s) (REALITY + genuine-TLS + QUIC + ShadowTLS; xhttp-tls remains L4-only) complete the own-listener handshake."
+	log "L7 measure-probe: all $tested L7-covered transport(s) (REALITY + genuine-TLS + QUIC + ShadowTLS + Shadowsocks; the Xray-served xhttp-tls is covered by its own sibling probe) pass their own-listener check."
 	return 0
 }
 

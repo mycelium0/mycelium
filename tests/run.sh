@@ -291,6 +291,7 @@ GATES=(
 	"tests/conformance/measure_daemon_advisory.sh"
 	"tests/conformance/measure_daemon_ships_disabled.sh"
 	"tests/conformance/pathsig_passive_observer.sh"
+	"tests/conformance/ss_l7_probe_failsafe.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/version_changelog_sync.sh"
