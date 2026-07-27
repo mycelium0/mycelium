@@ -18,7 +18,8 @@
 #
 # CHECKS
 #   1. Every function DEFINED in scripts/node-bootstrap.sh matches the orchestration allowlist.
-#   2. The entrypoint still SOURCES its libs (the `for _lib in nb_* ...` loop is present) — the
+#   2. The entrypoint still SOURCES its libs (the `for _lib in ...` loop is present; it may lead with the
+#      shared common/jqlib that nb_* modules call at runtime) — the
 #      decomposition is intact, not re-inlined.
 #   3. A denylist of known control-logic function names is NOT defined in the entrypoint (they live in
 #      libs) — a direct regression guard against moving render/validate/policy back in.
@@ -65,7 +66,9 @@ else
 fi
 
 # 2. The decomposition is intact: the entrypoint still sources its nb_* libs.
-if grep -qE '^for _lib in nb_[a-z_].*; do' "$NB" && grep -qE 'NB_LIB_DIR="\$ARTIFACT_ROOT/control/lib"' "$NB"; then
+# The loop may lead with the SHARED libs (common, jqlib) that several nb_* modules call at runtime;
+# what matters is that a single sourcing loop exists and resolves from ARTIFACT_ROOT.
+if grep -qE '^for _lib in [a-z_]+( [a-z_]+)*; do' "$NB" && grep -qE 'NB_LIB_DIR="\$ARTIFACT_ROOT/control/lib"' "$NB"; then
 	okln "the entrypoint sources control/lib/nb_*.sh from ARTIFACT_ROOT (decomposition intact, not re-inlined)"
 else
 	badln "the nb_* lib sourcing loop (from ARTIFACT_ROOT) is missing — the entrypoint must source its modules"
@@ -87,7 +90,7 @@ fi
 #    A module that exists on disk but is not named in the loop is SILENTLY never sourced — its functions
 #    are undefined at call time (the RP-0009 decomposition splits control logic INTO libs, so a lib the
 #    entrypoint forgot to source is a latent "command not found"). Diff the loop's list against disk.
-loop_libs="$(grep -oE 'for _lib in nb_[a-z_ ]+' "$NB" | head -1 | sed -E 's/for _lib in //')"
+loop_libs="$(grep -oE '^for _lib in [a-z_ ]+' "$NB" | head -1 | sed -E 's/^for _lib in //')"
 missing_from_loop=""
 for f in "$REPO_ROOT"/control/lib/nb_*.sh; do
 	[ -e "$f" ] || continue
@@ -114,6 +117,37 @@ for pin in awg_dialect_go_equiv awg_routes_go_equiv awg_client_conf_go_equiv; do
 		badln "$pin.sh is missing or not registered in tests/run.sh — a ported decision lost its Go equivalence pin"
 	fi
 done
+
+# 6. EVERY SHARED HELPER A LIB CALLS IS ACTUALLY SOURCED. The libs are sourced into ONE process, so a
+#    module may only call `myc_*` helpers that some sourced file defines. This is not theoretical: RP-0015
+#    threaded `myc_client_fingerprint` (defined in jqlib.sh) into nb_donor/nb_selftest/nb_rotate_apply,
+#    but the entrypoint sourced only the nb_* modules — so `--l7-probe` died with "command not found" ON
+#    THE NODE while every offline gate stayed green, because no gate runs the entrypoint end-to-end. The
+#    node-local L7 liveness signal — which rotation uses to exclude dead members — was silently dead for
+#    days. This check makes that class impossible to reship.
+defined_fns="$(for lib in $loop_libs; do
+		f="$REPO_ROOT/control/lib/${lib}.sh"
+		[ -f "$f" ] && grep -oE '^[a-z_][a-z0-9_]*\(\)' "$f" | tr -d '()'
+	done; grep -oE '^[a-z_][a-z0-9_]*\(\)' "$NB" | tr -d '()' )"
+missing_helpers=""
+for lib in $loop_libs; do
+	f="$REPO_ROOT/control/lib/${lib}.sh"
+	[ -f "$f" ] || continue
+	# CALL sites only: drop comment lines and the function's own definition line.
+	while IFS= read -r fn; do
+		[ -n "$fn" ] || continue
+		printf '%s\n' "$defined_fns" | grep -qxF -- "$fn" && continue
+		case " $missing_helpers " in *" $fn "*) ;; *) missing_helpers="$missing_helpers $fn" ;; esac
+	done <<INNER
+$(grep -vE '^[[:space:]]*#' "$f" | grep -oE '\bmyc_[a-z0-9_]+' | sort -u)
+INNER
+done
+if [ -n "$missing_helpers" ]; then
+	badln "a sourced lib CALLS shared helper(s) that nothing in the source loop defines:$missing_helpers"
+	badln "  -> add the defining lib (e.g. common / jqlib) to the entrypoint's source loop, or the call dies with 'command not found' on a real node."
+else
+	okln "every myc_* helper the sourced libs call is defined by a lib in the source loop"
+fi
 
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then

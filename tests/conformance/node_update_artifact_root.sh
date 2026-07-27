@@ -47,11 +47,14 @@ REAL_TEMPLATE="$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json"
 REAL_LIB_DIR="$REPO_ROOT/control/lib"
 # RP-0009: the orchestrator SOURCES its libs (nb_*.sh) from ARTIFACT_ROOT/control/lib. The fake checkout
 # must carry the FULL set the sourcing loop expects, or the (fail-closed) loop aborts before any flow
-# runs. DERIVE the set straight from the entrypoint's `for _lib in nb_...` loop so this stays in lockstep
+# runs. DERIVE the set straight from the entrypoint's `for _lib in ...` loop so this stays in lockstep
 # AUTOMATICALLY — a lib added to the loop can never again be forgotten here (that exact drift red-CI'd the
 # L7 self-test lib on its first push). The loop is the single source of truth.
-NB_LIBS="$(grep -oE 'for _lib in nb_[a-z_ ]+' "$SCRIPT" | head -1 | sed -E 's/for _lib in //')"
-[ -n "$NB_LIBS" ] || { printf 'FAIL: could not derive the nb_* lib list from the source loop in %s\n' "$SCRIPT" >&2; exit 2; }
+# Take the WHOLE list, not just the nb_* entries: the loop now leads with the shared common/jqlib that
+# several nb_* modules call at runtime, and the fixture must stage everything the loop sources or the
+# fail-closed loop aborts before any flow runs — which is precisely the lockstep this derivation exists for.
+NB_LIBS="$(grep -oE '^for _lib in [a-z_ ]+' "$SCRIPT" | head -1 | sed -E 's/^for _lib in //')"
+[ -n "$NB_LIBS" ] || { printf 'FAIL: could not derive the lib list from the source loop in %s\n' "$SCRIPT" >&2; exit 2; }
 
 command -v git >/dev/null 2>&1 || { printf 'SKIP: git not available; cannot stage a fake checkout.\n'; exit 0; }
 [ -f "$SCRIPT" ]        || { printf 'FAIL: node-bootstrap.sh not found: %s\n' "$SCRIPT" >&2; exit 2; }

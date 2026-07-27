@@ -69,7 +69,10 @@ grep -qE '^for _lib in .*\bnb_engine_manifest\b' "$NB" \
 # node_update_artifact_root DERIVES its staged-lib set straight from the entrypoint's `for _lib in …`
 # loop (single source of truth), so being in the loop (checked above) already guarantees the --update
 # re-exec stages nb_engine_manifest. Assert the derivation is in place rather than a literal lib name.
-grep -qE '^NB_LIBS="\$\(grep -oE .for _lib in nb_' "$ART" \
+# The entrypoint loop now leads with the shared common/jqlib, so the derivation takes the WHOLE list
+# rather than an `nb_`-anchored one; what this gate cares about is that it is still DERIVED from that loop
+# (never a restated literal), which is what keeps nb_engine_manifest staged in lockstep.
+grep -qE '^NB_LIBS="\$\(grep -oE .\^?for _lib in ' "$ART" \
 	&& ok "node_update_artifact_root derives NB_LIBS from the entrypoint loop (nb_engine_manifest staged in lockstep)" \
 	|| badln "node_update_artifact_root NB_LIBS no longer derives from the entrypoint loop — the --update re-exec may fail to source nb_engine_manifest"
 
