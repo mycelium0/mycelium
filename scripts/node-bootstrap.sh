@@ -375,7 +375,14 @@ fi
 # They define functions + their dedicated constants only; the constants reference STATE_DIR (already
 # final after arg-parse, above) and the function bodies reference shared globals/helpers at call time.
 NB_LIB_DIR="$ARTIFACT_ROOT/control/lib"
-for _lib in nb_identity nb_donor nb_harden nb_engine_manifest nb_install nb_render_params nb_serve_bundle nb_front nb_two_hop nb_render_awg nb_update_apply nb_selftest nb_rotate_apply nb_measure nb_observability; do
+# common.sh + jqlib.sh come FIRST and are not optional: several nb_* libs call the shared `myc_*` helpers
+# at RUNTIME (nb_donor, nb_selftest and nb_rotate_apply all resolve the client uTLS preset through
+# `myc_client_fingerprint`, which lives in jqlib.sh and needs common.sh's myc_die/myc_require_jq). They
+# were previously reached only through `myceliumctl`, which sources them itself — so a function called
+# directly from a lib died with "command not found" on the node while every offline gate stayed green,
+# because no gate runs the entrypoint end-to-end. Both files define ONLY `myc_`-prefixed names, so they
+# cannot clobber this script's own die/log/warn/have helpers.
+for _lib in common jqlib nb_identity nb_donor nb_harden nb_engine_manifest nb_install nb_render_params nb_serve_bundle nb_front nb_two_hop nb_render_awg nb_update_apply nb_selftest nb_rotate_apply nb_measure nb_observability; do
 	# shellcheck source=/dev/null
 	. "$NB_LIB_DIR/${_lib}.sh" || die "cannot source $NB_LIB_DIR/${_lib}.sh (fail-closed; the control/lib tree must be present in the checkout)"
 done
