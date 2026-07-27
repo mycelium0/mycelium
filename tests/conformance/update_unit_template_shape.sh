@@ -122,12 +122,17 @@ else
 fi
 
 # 4. The "no code path owns this unit" contract. Scoped to git ls-files so an untracked local file
-#    cannot make this red locally and green in CI.
+#    cannot make this red locally and green in CI. (That scoping bit me the other way round on first
+#    run: the drill below was still untracked, so the sweep did not see it and the gate passed
+#    locally, then failed in CI the moment it was committed. Hence the ALLOWLIST is explicit and its
+#    read-only claim is CHECKED, not asserted — an exclusion nobody verifies is just a hole.)
+READONLY_INSPECTORS="scripts/update_unit_drift_drill.sh"
 owners=""
 if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	while IFS= read -r f; do
 		[ -n "$f" ] || continue
 		case "$f" in infra/systemd/*|docs/*|tests/conformance/update_unit_template_shape.sh) continue ;; esac
+		case " $READONLY_INSPECTORS " in *" $f "*) continue ;; esac
 		case "$f" in *.sh|*.yml|*.yaml|*.j2|*.go) ;; *) continue ;; esac
 		grep -vE '^[[:space:]]*(#|//)' "$REPO_ROOT/$f" 2>/dev/null | grep -q 'mycelium-update' && owners="$owners $f"
 	done <<EOF
@@ -139,6 +144,25 @@ EOF
 	else
 		ok "no tracked code path installs, edits or removes the unit (the hand-copy contract holds; RP-0003 W3)"
 	fi
+
+	# 4b. The allowlist is only sound while the allowlisted file really is read-only. A mutating
+	#     systemctl verb at COMMAND position would make it an owner in disguise — and it would be
+	#     invisible to check 4, since the allowlist skips it. Operator-guidance strings that merely
+	#     NAME those commands (`crit "  systemctl disable --now …"`) do not start a line, so quoting
+	#     advice stays legal while actually running it does not.
+	for f in $READONLY_INSPECTORS; do
+		if [ ! -f "$REPO_ROOT/$f" ]; then
+			bad "allowlisted read-only inspector is missing: $f — remove it from READONLY_INSPECTORS or restore it (a stale allowlist silently widens the sweep's blind spot)"
+			continue
+		fi
+		if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?systemctl[[:space:]]+(enable|disable|start|stop|restart|mask|unmask|link|preset)' "$REPO_ROOT/$f" >/dev/null 2>&1; then
+			bad "$f is allowlisted as READ-ONLY but invokes a mutating systemctl verb:"
+			grep -nE '^[[:space:]]*(sudo[[:space:]]+)?systemctl[[:space:]]+(enable|disable|start|stop|restart|mask|unmask|link|preset)' "$REPO_ROOT/$f" | sed 's/^/          /'
+			bad "  -> a drill that arms, disarms or masks the unit is an OWNER, and check 4 cannot see it because the allowlist skips it."
+		else
+			ok "$f is allowlisted and verified read-only (no mutating systemctl verb at command position)"
+		fi
+	done
 else
 	printf '  SKIP  not a git work tree — cannot scope the ownership sweep to tracked files\n'
 fi
