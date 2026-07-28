@@ -31,6 +31,11 @@ config.candidate.json
 config.staged.json
 config.lastgood.json
 config.staged.ack
+# Anti-flap + operator-evidence snapshots of a rendered config: same class as the three above — each
+# inlines the REALITY private key and every transport password, and this repo is public.
+config.failed.json
+config.failed.since
+config.invalid.json
 cert.sha256.txt
 awg.port
 # Node-local reachability monitor config (ADR-0019): real anchors are operator state, never

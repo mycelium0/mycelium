@@ -101,7 +101,7 @@ fi
 # 2. The provenance-bypass flag appears in NO unit template, armed or not.
 for pair in "service:$svc_d" "timer:$tmr_d"; do
 	name="${pair%%:*}"; body="${pair#*:}"
-	if printf '%s\n' "$body" | grep -q -- '--insecure-no-verify'; then
+	if grep -q -- '--insecure-no-verify' <<<"$body"; then
 		bad "$name template carries --insecure-no-verify — it makes verify_signed_ref return before checking anything (ADR-0015's provenance gate), and an installed unit is one \`systemctl enable\` away from an unauthenticated root-level auto-pull"
 	else
 		ok "$name template does not carry --insecure-no-verify"
@@ -109,12 +109,20 @@ for pair in "service:$svc_d" "timer:$tmr_d"; do
 done
 
 # 3. No node-specific pin. The template must be copyable to ANY node unmodified.
+# HERE-STRINGS, not `printf … | grep -q … && pin_hit=…`. Under the `pipefail` set above that shape is a
+# race that fails OPEN here: `grep -q` exits on the first match and closes the pipe, `printf` can die of
+# SIGPIPE (141), pipefail reports the pipeline as failed even though the pattern MATCHED, the `&&` does
+# not fire — and the pin goes UNRECORDED, so the gate passes on a template it should reject. The same
+# shape produced a ~5-in-40 flaky FAILURE in node_two_hop_failclosed; here it would have been a silent
+# miss instead, which is worse. Both variables are fed as one string so a single here-string covers both.
+both="$svc_d
+$tmr_d"
 pin_hit=""
-printf '%s\n' "$svc_d" "$tmr_d" | grep -qE '(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)' && pin_hit="$pin_hit IPv4-literal"
-printf '%s\n' "$svc_d" "$tmr_d" | grep -qE '([0-9a-fA-F]{1,4}:){3,}[0-9a-fA-F]{0,4}'          && pin_hit="$pin_hit IPv6-literal"
-printf '%s\n' "$svc_d" "$tmr_d" | grep -q -- '--node-address'                                  && pin_hit="$pin_hit --node-address"
-printf '%s\n' "$svc_d" "$tmr_d" | grep -q -- '--clients'                                       && pin_hit="$pin_hit --clients"
-printf '%s\n' "$svc_d" "$tmr_d" | grep -q -- '--allowed-signers'                               && pin_hit="$pin_hit --allowed-signers"
+grep -qE '(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)' <<<"$both" && pin_hit="$pin_hit IPv4-literal"
+grep -qE '([0-9a-fA-F]{1,4}:){3,}[0-9a-fA-F]{0,4}'          <<<"$both" && pin_hit="$pin_hit IPv6-literal"
+grep -q -- '--node-address'                                  <<<"$both" && pin_hit="$pin_hit --node-address"
+grep -q -- '--clients'                                       <<<"$both" && pin_hit="$pin_hit --clients"
+grep -q -- '--allowed-signers'                               <<<"$both" && pin_hit="$pin_hit --allowed-signers"
 if [ -n "$pin_hit" ]; then
 	bad "the template carries node-specific value(s):$pin_hit — a committed node address is an OPSEC leak, and a committed signer path or client list makes the shipped template unusable on any other node"
 else
@@ -168,12 +176,12 @@ else
 fi
 
 # 5. Installing is never arming: a plain `cp` must leave the timer DISABLED.
-if printf '%s\n' "$tmr_d" | grep -qE '^[[:space:]]*WantedBy=timers\.target'; then
+if grep -qE '^[[:space:]]*WantedBy=timers\.target' <<<"$tmr_d"; then
 	ok "timer [Install] is WantedBy=timers.target (a plain cp yields 'disabled', not 'enabled')"
 else
 	bad "the timer's [Install] is not WantedBy=timers.target — an unexpected install target can arm the timer as a side effect of copying it"
 fi
-if printf '%s\n' "$svc_d" | grep -qE '^[[:space:]]*WantedBy=multi-user\.target'; then
+if grep -qE '^[[:space:]]*WantedBy=multi-user\.target' <<<"$svc_d"; then
 	ok "service [Install] is WantedBy=multi-user.target"
 else
 	bad "the service's [Install] target changed — re-confirm that copying the unit cannot start it"

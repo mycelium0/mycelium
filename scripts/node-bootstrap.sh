@@ -409,6 +409,15 @@ ACK_MARKER="$STATE_DIR/config.staged.ack"
 # mtimes give an escalating hold with no counter to parse. Deleting either forces an immediate retry.
 FAILED_CONFIG="$STATE_DIR/config.failed.json"
 FAILED_SINCE="$STATE_DIR/config.failed.since"
+# The candidate that last failed `sing-box check` — kept byte-for-byte for the OPERATOR, not for a guard.
+# Mechanically a peer of FAILED_CONFIG (same dir, same convention, inlines the same secrets, so 0600) and
+# its exact opposite in purpose: NOTHING EVER READS THIS FILE TO DECIDE ANYTHING. A schema-invalid
+# candidate is never promoted, so there is no restart to suppress and nothing to hold back; the only thing
+# missing on that path was the EVIDENCE — flow_update deleted the offending bytes and died, leaving the
+# operator a journal line and no config to diff. Re-rendering by hand is possible, but a later tick can
+# rewrite params.json first; the snapshot preserves the exact bytes. Rewritten ONLY when they CHANGE, so
+# its mtime means "when this exact invalid candidate first appeared".
+INVALID_CONFIG="$STATE_DIR/config.invalid.json"
 # Bounded, escalating refusal to RE-promote a candidate byte-identical to the one that last failed
 # post-apply verification: hold = clamp(MIN, MAX, how long this candidate has been failing). NEVER
 # permanent — after the hold the same candidate is retried unconditionally, so a TRANSIENT failure
@@ -608,9 +617,23 @@ flow_bootstrap() {
 	fi
 	setup_amneziawg
 	setup_observability
-	# Render the served distribution bundle (RP-0007-b). Fail-closed: keeps last-known-good on failure.
-	render_serve_bundle
-	if [ "$DO_HARDEN" -eq 1 ]; then harden_ufw; fi
+	# SHARED CONVERGENCE TAIL (converge_node_tail, control/lib/nb_render_params.sh). Bootstrap was the
+	# one promote path still carrying its own inlined copy — render_serve_bundle then harden_ufw — so
+	# every step added to the tail reached flow_update/flow_ack/flow_revoke/flow_node_apply and silently
+	# missed the FIRST-TIME deploy, the single path where a gap strands a brand-new node. Two things
+	# about WHERE this sits:
+	#   * AFTER setup_amneziawg, which is the writer of $STATE_DIR/awg.port and harden_ufw its only
+	#     reader. Hoisting the tail above it would ship a first-time node whose AmneziaWG UDP port is
+	#     ufw-BLOCKED while every other family reports healthy — losing the family most likely to
+	#     survive a hostile access network.
+	#   * AFTER the inline xray block above, which stays put on purpose: serving xray BEFORE the
+	#     minutes-long amneziawg-go build (which can fail outright) is what keeps a half-finished
+	#     bootstrap from leaving a node with no secondary engine at all.
+	# The tail runs ufw BEFORE the bundle; bootstrap used to do the reverse. That reordering is inert
+	# (harden_ufw reads only sshd -T / the live configs / awg.port; render_serve_bundle only params +
+	# identities) and is a small improvement: a bundle render that dies now leaves the node FIREWALLED
+	# rather than open. --no-harden is honoured identically — the tail guards on ${DO_HARDEN:-1}.
+	converge_node_tail
 	verify_listeners
 	log "bootstrap complete. The REALITY private key, client UUIDs, and per-protocol secrets remain"
 	log "ONLY on this node ($STATE_DIR, 0600). Export only the REALITY public key + subscriptions."
@@ -668,9 +691,29 @@ flow_update() {
 	local candidate="$STATE_DIR/config.candidate.json"
 	render_candidate "$candidate"
 	if ! validate_config "$candidate"; then
+		# KEEP THE EVIDENCE, THEN STILL FAIL LOUDLY. NO HOLD, NO SUPPRESSION — read this before
+		# "improving" it. The anti-flap guard below exists because a candidate that passes check and
+		# fails at RUNTIME is PROMOTED: two sing-box restarts per tick. A candidate that fails check is
+		# never promoted — no restart, no rollback, no dropped connection — and myc_fetch_artifacts above
+		# still lands every new rev, so the FIRST rev that renders a valid config self-heals this node
+		# with no operator action. There is no flap here to damp. What a hold WOULD buy is a zero-exit
+		# tick, and that is worth nothing: `systemctl is-failed mycelium-update.service` is the ONLY
+		# signal this node emits (the unit has no OnFailure=). Suppressing it turns a node stuck on a
+		# stale config into a node that LOOKS HEALTHY while stuck on a stale config.
+		# The `cmp -s` is load-bearing, not an optimisation: rewriting every tick would reset the mtime
+		# to "one tick ago" and destroy the only thing separating a blip from a six-hour outage.
+		if [ ! -f "$INVALID_CONFIG" ] || ! cmp -s "$candidate" "$INVALID_CONFIG"; then
+			run install -m 0600 "$candidate" "$INVALID_CONFIG" 2>/dev/null || true
+		fi
 		rm -f "$candidate" 2>/dev/null || true
+		warn "the rejected candidate was kept at $INVALID_CONFIG (0600); its mtime is when these exact bytes first failed."
+		warn "'$SINGBOX_BIN check -c $INVALID_CONFIG' reproduces the failure without re-rendering; diff it against $SINGBOX_CONFIG."
 		die "candidate failed 'sing-box check' — NOT applied; live config + service untouched (fail-closed)."
 	fi
+	# This rev renders a schema-valid config: drop the rejected-candidate evidence. Cleared HERE, on the
+	# validate result itself, and NOT on the two proven-good paths FAILED_CONFIG uses — a candidate that
+	# passes check and then fails at RUNTIME is the anti-flap guard's business, not this record's.
+	run rm -f "$INVALID_CONFIG"
 	# NO-OP SHORT-CIRCUIT — SING-BOX ONLY. A byte-identical candidate must cause ZERO restarts of the
 	# PRIMARY engine: the timer runs every few minutes and a restart drops live client connections on an
 	# always-on PPN. It is NOT an early return out of the whole flow (it was, until this commit): an

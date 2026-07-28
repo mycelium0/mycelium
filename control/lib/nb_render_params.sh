@@ -405,7 +405,13 @@ apply_node_xray_engine() {
 		die "xray candidate failed 'xray run -test' applying the node profile (fail-closed; nothing promoted)."
 	fi
 	if [ "$DRY_RUN" -eq 1 ]; then
-		rm -f "$xray_candidate" 2>/dev/null || true
+		# NO rm here. Under --dry-run render_xray_candidate wrote NOTHING (its myceliumctl call goes
+		# through run()) and validate_xray_config returned early, so this path never created the file.
+		# The rm could therefore ONLY ever unlink a CONCURRENT REAL RUN's candidate — a preview
+		# sabotaging a live timer tick, which is now reachable: the update timer fires every 15 minutes
+		# and an operator runs --dry-run by hand whenever they want to look. --dry-run mutates nothing,
+		# deletion included. A candidate left behind by a crashed real run is overwritten, then removed,
+		# by the next real run.
 		log "[dry-run] xray-engine transport enabled; candidate validates + WOULD be served."
 		return 0
 	fi
@@ -468,7 +474,8 @@ flow_node_apply() {
 	local sb_changed=1
 	if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then sb_changed=0; fi
 	if [ "$DRY_RUN" -eq 1 ]; then
-		rm -f "$candidate" 2>/dev/null || true
+		# NO rm here — same reason as apply_node_xray_engine above: under --dry-run nothing created this
+		# file, so removing it can only destroy a concurrent real run's candidate.
 		log "[dry-run] node profile validates and WOULD be applied (not promoted)."
 		apply_node_xray_engine
 		return 0
