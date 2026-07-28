@@ -203,6 +203,22 @@ The shipped cadence (`OnUnitActiveSec=5min`) is aggressive for an unattended pat
 the data plane and rebuild the Go spine as root. Prefer 15 minutes or slower unless you are actively
 watching a node.
 
+**Verify arming by the next elapse, never by `is-enabled`.** The shipped triggers are monotonic and
+anchored on the unit's last trigger, so a node re-armed after a long parked period can settle into
+`SubState=elapsed` with `Trigger: n/a` — never firing again while still reporting `enabled` and
+`active`. Two of three nodes did exactly that on 2026-07-28 and looked correctly armed. Deleting the
+stamp file does not clear it; the anchor lives in systemd's in-memory unit state.
+
+```sh
+systemctl show mycelium-update.timer -p NextElapseUSecMonotonic   # "infinity" = dead
+systemctl status mycelium-update.timer | grep Trigger             # "n/a"      = dead
+```
+
+The remedy is a calendar trigger in the drop-in (`OnBootSec=` and `OnUnitActiveSec=` emptied to reset
+the inherited monotonic ones, then `OnCalendar=`); it derives the next elapse from the wall clock and
+cannot be poisoned by a stale anchor. It also makes `Persistent=` meaningful — that setting only ever
+applied to `OnCalendar=` timers, so with the shipped monotonic pair it is a documented no-op.
+
 `--insecure-no-verify` bypasses the signature gate entirely (`verify_signed_ref` returns before it
 checks anything — [control/lib/nb_update_apply.sh](../../control/lib/nb_update_apply.sh)). It is a
 **local-testing escape hatch, run by hand, with a loud warning**. It must **never** appear in a unit

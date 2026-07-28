@@ -111,30 +111,65 @@ for pair in "$SVC_NAME:$TPL_SVC" "$TMR_NAME:$TPL_TMR"; do
 	fi
 done
 
-# --- 2. the provenance bypass ---------------------------------------------------------------------
+# --- the EFFECTIVE ExecStart ----------------------------------------------------------------------
+# Per-node flags (the signer path, the ref pin) belong in a systemd DROP-IN, not in the unit file —
+# hand-editing the unit is the exact drift this drill exists to catch, and a drop-in keeps the
+# installed unit a pristine template copy that `systemctl revert` resets in one command.
+#
+# So every check about WHAT WILL RUN must read the MERGED unit, not the file. Reading the file was
+# wrong in both directions: it false-CRITs a correctly-armed node whose flags live in a drop-in, and —
+# far worse — it is BLIND to a drop-in that adds --insecure-no-verify. A check that is permanently red
+# on a correct node stops being read, and a check with a hole that big is not a check.
+# Falls back to the file's ExecStart if systemctl cannot report (unit absent / systemd not answering).
+exec_eff="$(systemctl show "$SVC_NAME" -p ExecStart --value 2>/dev/null \
+	| sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p' | head -1 | sed 's/[[:space:]]*$//')"
+[ -n "$exec_eff" ] || exec_eff="$(directives "$UNIT_DIR/$SVC_NAME" 2>/dev/null | grep -E '^ExecStart=' | head -1 | sed 's/^ExecStart=//')"
+dropins="$(systemctl show "$SVC_NAME" -p DropInPaths --value 2>/dev/null)"
+if [ -n "$dropins" ]; then
+	printf '  note  per-node flags come from drop-in(s): %s\n' "$dropins"
+	printf '        (the unit FILE stays a pristine template copy; `systemctl revert %s` resets it)\n' "$SVC_NAME"
+fi
+
+# --- 2. the provenance bypass (over the EFFECTIVE command + both unit files) ------------------------
 bypass=0
+if printf '%s' "$exec_eff" | grep -q -- '--insecure-no-verify'; then
+	bypass=1
+	crit "the EFFECTIVE ExecStart carries --insecure-no-verify — verify_signed_ref returns BEFORE checking anything."
+	crit "        Fetched code would be merged, installed and COMPILED as root unauthenticated."
+	[ -n "$dropins" ] && crit "        It is coming from a DROP-IN, which the unit file does not show: $dropins"
+fi
 for name in "$SVC_NAME" "$TMR_NAME"; do
 	[ -f "$UNIT_DIR/$name" ] || continue
 	if directives "$UNIT_DIR/$name" | grep -q -- '--insecure-no-verify'; then
 		bypass=1
-		crit "$name: carries --insecure-no-verify — verify_signed_ref returns BEFORE checking anything."
-		crit "        Fetched code would be merged, installed and COMPILED as root unauthenticated."
+		crit "$name (unit file): carries --insecure-no-verify — the shipped template must never carry it."
 	fi
 done
-[ "$bypass" -eq 0 ] && ok "no deployed unit carries --insecure-no-verify"
+[ "$bypass" -eq 0 ] && ok "no provenance bypass in the effective command or either unit file"
 
-# --- 3. arming safety ------------------------------------------------------------------------------
-exec_line="$(directives "$UNIT_DIR/$SVC_NAME" 2>/dev/null | grep -E '^ExecStart=' | head -1 || true)"
+# --- 3. arming safety (over the EFFECTIVE command) --------------------------------------------------
+# An armed timer is only as safe as the command it actually runs, so this reads the merged unit. The
+# signature covers the pinned ref's TIP; `merge --ff-only` then ingests every intervening commit, so a
+# signed pin is a real provenance gate but NOT a per-commit one. A MUTABLE pin (a branch) is an
+# accepted posture on an operator-owned node and is reported, not failed — what fails is arming with
+# no authentication at all.
 if [ "$tmr_state" = "enabled" ] || [ "$tmr_active" = "active" ]; then
 	has_signers=0; has_ref=0
-	printf '%s' "$exec_line" | grep -q -- '--allowed-signers' && has_signers=1
-	printf '%s' "$exec_line" | grep -q -- '--repo-ref'        && has_ref=1
+	printf '%s' "$exec_eff" | grep -q -- '--allowed-signers' && has_signers=1
+	printf '%s' "$exec_eff" | grep -q -- '--repo-ref'        && has_ref=1
 	if [ "$has_signers" -eq 1 ] && [ "$has_ref" -eq 1 ] && [ "$bypass" -eq 0 ]; then
-		ok "the timer is ARMED and the ExecStart is authenticated (--allowed-signers + --repo-ref, no bypass)"
+		ok "the timer is ARMED and the effective command is authenticated (--allowed-signers + --repo-ref, no bypass)"
+		ref="$(printf '%s' "$exec_eff" | sed -n 's/.*--repo-ref[= ]\{1,\}\([^ ]*\).*/\1/p')"
+		case "$ref" in
+			v[0-9]*|*[0-9].[0-9]*) ok "  pinned to '$ref' (tag-shaped: an immutable approval)" ;;
+			'')                    warn "  --repo-ref present but its value could not be parsed" ;;
+			*)                     warn "  pinned to the MUTABLE ref '$ref': every push to it reaches this node within one cadence, and the signature covers only the tip (intervening commits ride in on the fast-forward). Accepted posture for an operator-owned node; not for a shared one." ;;
+		esac
 	else
 		crit "THE TIMER IS ARMED WITHOUT AN AUTHENTICATED FETCH."
 		[ "$has_signers" -eq 0 ] && crit "        missing --allowed-signers (no key to verify against)"
-		[ "$has_ref" -eq 0 ]     && crit "        missing --repo-ref (tracking a MUTABLE branch, not an immutable signed tag)"
+		[ "$has_ref" -eq 0 ]     && crit "        missing --repo-ref (no pinned ref to verify)"
+		[ "$bypass" -eq 1 ]      && crit "        and the provenance gate is explicitly bypassed"
 		crit "        A periodic root-level unattended pull is running now. Disarm immediately:"
 		crit "          systemctl disable --now $TMR_NAME"
 	fi
@@ -142,16 +177,20 @@ else
 	ok "the timer is not armed (enabled=$tmr_state active=$tmr_active) — installing is not arming"
 fi
 
-# --- 4. node-specific pins -------------------------------------------------------------------------
-if [ -n "$exec_line" ]; then
+# --- 4. node-specific pins (over the EFFECTIVE command) --------------------------------------------
+# A per-node value in a DROP-IN is fine and expected (that is where the signer path belongs). What this
+# flags is a value that pins the command to ONE node: an address literal or a client list. Those make
+# the unit non-portable and put a node address in a root-run command line.
+if [ -n "$exec_eff" ]; then
 	pins=""
-	printf '%s' "$exec_line" | grep -qE '(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)' && pins="$pins address-literal"
-	printf '%s' "$exec_line" | grep -q -- '--clients'                                      && pins="$pins --clients"
+	printf '%s' "$exec_eff" | grep -qE '(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)' && pins="$pins address-literal"
+	printf '%s' "$exec_eff" | grep -q -- '--clients'                                      && pins="$pins --clients"
+	printf '%s' "$exec_eff" | grep -q -- '--node-address'                                 && pins="$pins --node-address"
 	if [ -n "$pins" ]; then
-		warn "the ExecStart bakes in node-specific value(s):$pins"
-		warn "  -> the unit is no longer resettable by a plain re-cp, and a node address in a unit file is an OPSEC item."
+		warn "the effective ExecStart bakes in node-specific value(s):$pins"
+		warn "  -> a node address in a root-run command line is an OPSEC item, and the unit stops being resettable by a plain re-cp."
 	else
-		ok "the ExecStart carries no baked-in node address or client list"
+		ok "the effective ExecStart carries no baked-in node address or client list"
 	fi
 fi
 

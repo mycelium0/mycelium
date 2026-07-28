@@ -13,8 +13,33 @@
 [Unit]
 Description=Run the Mycelium semi-auto node update periodically
 
+# TRAP, observed live 2026-07-28 — read before trusting `systemctl is-enabled`. Both triggers below are
+# MONOTONIC and anchored on the unit's LAST TRIGGER, which systemd persists (and also holds in memory
+# across stop/start). On a node whose timer last fired long ago — e.g. one re-armed after a period
+# parked/masked — both anchors compute in the PAST, so the timer settles into
+# `SubState=elapsed, Trigger=n/a` and NEVER FIRES AGAIN, while still reporting `enabled` and `active`.
+# Two of three nodes landed in exactly that state and looked correctly armed. Deleting
+# /var/lib/systemd/timers/stamp-mycelium-update.timer does NOT clear it (the anchor is in systemd's
+# in-memory unit state), and neither does restart.
+#
+# ALWAYS verify arming with the NEXT ELAPSE, never with is-enabled/is-active:
+#     systemctl show mycelium-update.timer -p NextElapseUSecMonotonic   # `infinity` = dead
+#     systemctl status mycelium-update.timer | grep Trigger             # `n/a` = dead
+#
+# The fix, when it happens, is a calendar trigger — it derives the next elapse from the wall clock, so
+# it cannot be poisoned by a stale anchor, and it makes Persistent= below actually meaningful (that
+# setting only ever applied to OnCalendar= timers; with the monotonic pair it is a documented no-op).
+# Set it in a DROP-IN (`systemctl edit mycelium-update.timer`), which is also where per-node cadence
+# belongs — the empty assignments are required to reset the inherited monotonic triggers:
+#     [Timer]
+#     OnBootSec=
+#     OnUnitActiveSec=
+#     OnCalendar=*:0/15
+#     RandomizedDelaySec=300
+#     Persistent=true
 [Timer]
-# First run shortly after boot, then every few minutes.
+# First run shortly after boot, then every few minutes. See the TRAP note above before re-arming a
+# node that has run this timer before.
 OnBootSec=2min
 OnUnitActiveSec=5min
 RandomizedDelaySec=90
