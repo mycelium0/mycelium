@@ -154,11 +154,28 @@ if printf '%s\n' "$FR" | grep -q 'render_serve_bundle'; then
 else
 	badln "C25: flow_revoke does NOT call render_serve_bundle (served bundle would point at a revoked UUID)"
 fi
+# C25: the served bundle must be re-rendered on every exit that leaves the node CONVERGED — not merely
+# mentioned somewhere in the body. The previous check was branch-blind: it grepped flow_update for the
+# literal `render_serve_bundle` and reported green while the byte-identical path returned early, above
+# it, without converging anything. Both promote paths now reach the bundle through the shared
+# convergence tail, so assert the tail is called on BOTH: the sing-box-byte-identical path AND the
+# apply-success path. Only --staged may return without it (nothing was promoted; flow_ack carries it).
 FU="$(fn_body flow_update)"
-if printf '%s\n' "$FU" | grep -q 'render_serve_bundle'; then
-	okln "C25: flow_update re-renders the served bundle (served distribution stays current on update)"
+tail_n="$(printf '%s\n' "$FU" | grep -cE '^[[:space:]]*converge_node_tail[[:space:]]*$' || true)"
+if [ "$tail_n" -ge 2 ]; then
+	okln "C25: flow_update converges on both the no-op and the apply path ($tail_n call sites)"
 else
-	badln "C25: flow_update does NOT call render_serve_bundle"
+	badln "C25: flow_update calls converge_node_tail $tail_n time(s) (expected >=2: byte-identical AND apply-success) — a path that promotes or skips without converging leaves the xray engine/firewall/bundle behind"
+fi
+if printf '%s\n' "$(fn_body converge_node_tail)" | grep -q 'render_serve_bundle'; then
+	okln "C25: converge_node_tail re-renders the served bundle (served distribution stays current)"
+else
+	badln "C25: converge_node_tail does NOT render the served bundle"
+fi
+if printf '%s\n' "$(fn_body flow_ack)" | grep -q 'converge_node_tail'; then
+	okln "C25: flow_ack converges after promoting a staged candidate"
+else
+	badln "C25: flow_ack promotes a staged candidate without converging (stale xray/firewall/bundle)"
 fi
 if grep -q 'bundle_served_age_seconds' $NB_SRC && grep -q 'record_bundle_served_age' $NB_SRC; then
 	okln "C25: a bundle_served_age_seconds staleness signal is exposed (a stuck last-known-good is observable)"

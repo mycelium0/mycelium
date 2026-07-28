@@ -659,12 +659,17 @@ flow_update() {
 		rm -f "$candidate" 2>/dev/null || true
 		die "candidate failed 'sing-box check' — NOT applied; live config + service untouched (fail-closed)."
 	fi
-	# NO-OP SHORT-CIRCUIT: if the validated candidate is byte-identical to the live config, do not
-	# promote/restart. The timer runs every few minutes; an unchanged push must cause ZERO restarts
-	# (a restart drops live client connections on an always-on PPN).
+	# NO-OP SHORT-CIRCUIT — SING-BOX ONLY. A byte-identical candidate must cause ZERO restarts of the
+	# PRIMARY engine: the timer runs every few minutes and a restart drops live client connections on an
+	# always-on PPN. It is NOT an early return out of the whole flow (it was, until this commit): an
+	# xray-only change, a listen-port move, or a revoked identity can leave the sing-box config
+	# byte-identical while the xray engine and the firewall still need converging. Returning here meant an
+	# armed timer silently skipped convergence on exactly the ticks where nothing looked like it changed.
+	# Same sb_changed shape flow_node_apply uses.
 	if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then
 		rm -f "$candidate" 2>/dev/null || true
-		log "candidate is identical to the live config; no change to apply (service untouched)."
+		log "sing-box candidate identical to the live config; primary engine untouched (no restart)."
+		converge_node_tail
 		return 0
 	fi
 	if [ "$STAGED" -eq 1 ]; then
@@ -681,9 +686,10 @@ flow_update() {
 	install_singbox_unit
 	if apply_singbox && verify_post_apply; then
 		log "update applied and verified."
-		# Re-render the served bundle from the now-live identity/params (fail-closed: keeps
-		# last-known-good if the fresh render does not validate — never serves an invalid bundle).
-		render_serve_bundle
+		# Converge the rest of the node with the primary engine: xray, firewall, then the served bundle
+		# re-rendered from the now-live identity/params (see converge_node_tail). Previously this path
+		# refreshed only the bundle, so an armed timer left the xray engine and the firewall behind.
+		converge_node_tail
 	else
 		warn "post-apply verification failed; rolling back."
 		rollback_config
@@ -704,6 +710,10 @@ flow_ack() {
 	if apply_singbox && verify_post_apply; then
 		run rm -f "$STAGED_CONFIG" "$ACK_MARKER"
 		log "staged candidate promoted and verified."
+		# --update --staged deliberately defers convergence (nothing is promoted until this ack), so the
+		# ack is where it happens. Before this, an ack promoted the sing-box config and converged NOTHING:
+		# no xray, no firewall, no served bundle — the stricter, more cautious mode was the LEAST convergent.
+		converge_node_tail
 	else
 		warn "post-apply verification failed; rolling back."
 		rollback_config
@@ -736,11 +746,16 @@ flow_revoke() {
 	if apply_singbox && verify_post_apply; then
 		# C25: the served distribution bundle embeds the FIRST identity's UUID as the endpoint credential.
 		# Revoking that identity without re-rendering leaves the served bundle's Link pointing at a dead
-		# UUID. Re-render the served bundle on this promotion path too (fail-closed: keeps last-known-good
-		# if the fresh render does not validate), so the served distribution never advertises a revoked
-		# credential.
-		render_serve_bundle
-		log "revoked '$REVOKE_NAME'; config re-rendered + sing-box reloaded + served bundle refreshed — the client's UUID is gone from every inbound. Other clients' links are unchanged."
+		# UUID. Re-render it here (fail-closed: keeps last-known-good if the fresh render does not
+		# validate), so the served distribution never advertises a revoked credential.
+		#
+		# SECURITY (the reason this is the shared tail and not a bare render_serve_bundle): the xray
+		# inbound also carries client UUIDs — render_xray_candidate renders from identities.json
+		# (nb_update_apply.sh:198). Re-rendering only the sing-box config left the revoked UUID LIVE on
+		# the xray inbound of every xray-serving node until someone happened to run --node-apply, while
+		# this very line logged that it was "gone from every inbound". Revocation must reach both engines.
+		converge_node_tail
+		log "revoked '$REVOKE_NAME'; config re-rendered + sing-box reloaded + xray engine + firewall converged + served bundle refreshed — the client's UUID is gone from every inbound on BOTH engines. Other clients' links are unchanged."
 	else
 		warn "post-apply verification failed after revoke; rolling back."
 		rollback_config

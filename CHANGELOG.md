@@ -13,6 +13,31 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Fixed
+- **Three paths that promote a config each converged a different subset of the node — including one
+  that left a revoked client live.** `flow_node_apply` ends with a convergence tail: reconcile the
+  xray engine, reconcile the firewall, re-render the served bundle. The other promote paths each
+  carried a different fragment of it, and the gaps were invisible because every one of them logged
+  success. `flow_update` reconciled sing-box and the bundle but never the xray engine or the
+  firewall — and it reached even the bundle only on the apply branch, returning early whenever the
+  rendered candidate was byte-identical, which is *most* ticks on a cadence. `flow_ack` — the
+  stricter, operator-gated mode — promoted a staged candidate and converged **nothing**. Worst,
+  `flow_revoke` re-rendered the sing-box config and the bundle but not the xray config, which is
+  rendered from `identities.json` and carries client UUIDs: a revoked client stayed **valid on the
+  xray inbound** of every xray-serving node until someone happened to run `--node-apply`, while that
+  same code path logged that the UUID was "gone from every inbound". Verified live on a node: the
+  xray inbound does carry the identity.
+  All four now end in one shared `converge_node_tail`. The order is load-bearing — xray first,
+  because `harden_ufw` reads the xray config's ports and would otherwise open the previous set;
+  firewall second; bundle last, so the served distribution only describes a node that is already
+  live and already reachable. Every step is idempotent and self-no-ops, which is what makes it safe
+  on a timer: the xray step returns immediately on a node with no xray family enabled. The
+  byte-identical short-circuit is now a flag rather than a return, so a change that touches only the
+  xray or firewall side still converges. `--staged` deliberately keeps no tail (nothing is promoted;
+  the ack carries it). Two gates were updated rather than worked around: the served-bundle check was
+  branch-blind and reported green while the bundle was skipped on every byte-identical tick, and the
+  xray "no auto path starts xray" ban would have been evaded by one level of indirection, so it now
+  also asserts the stock-node guard is the first statement of the function the tail calls. Four
+  mutations verified caught.
 - **The one unit nothing owns had drifted on two live nodes, and the documented install procedure
   would have armed it.** `mycelium-update.{service,timer}` are the only systemd units here with no
   code path behind them: every other unit is written by a heredoc in `control/lib` and rewritten on

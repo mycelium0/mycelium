@@ -84,7 +84,11 @@ else
 	badln "flow_bootstrap's restart_xray is not governed by a node_needs_xray guard (serve could start on a stock node)"
 fi
 
-# 5. No auto-pull path starts xray.
+# 5. No auto-pull path starts xray DIRECTLY. The auto paths now converge the node through the shared
+#    converge_node_tail (which calls apply_node_xray_engine) — that is deliberate and is what keeps an
+#    updated/acked/revoked node from leaving its xray engine at the previous revision. A BARE
+#    restart_xray/apply_xray in one of these flows would bypass the stock-node guard, so the direct-literal
+#    ban stays.
 auto_bad=""
 for fn in flow_update flow_ack flow_revoke; do
 	body="$(func_body "$fn" "$NB")"
@@ -93,8 +97,32 @@ for fn in flow_update flow_ack flow_revoke; do
 	fi
 done
 [ -z "$auto_bad" ] \
-	&& ok "no auto path (flow_update/flow_ack/flow_revoke) starts xray" \
-	|| badln "an auto path starts xray:$auto_bad"
+	&& ok "no auto path (flow_update/flow_ack/flow_revoke) starts xray directly" \
+	|| badln "an auto path starts xray directly (bypassing the stock-node guard):$auto_bad"
+
+# 5b. The permitted indirection is only safe while it is GUARDED. apply_node_xray_engine's FIRST
+#     statement must be the stock-node bail-out, so converge_node_tail installs, renders and starts
+#     NOTHING on a node with no xray-engine family enabled. Without this assertion the ban above is
+#     cosmetic: one level of indirection would evade the literal grep and silently start a second engine
+#     on every node on the update cadence.
+XRAY_APPLY_LIB="$LIB/nb_render_params.sh"
+if [ -f "$XRAY_APPLY_LIB" ]; then
+	gfirst="$(func_body apply_node_xray_engine "$XRAY_APPLY_LIB" | sed -n '2p')"
+	case "$gfirst" in
+		*"node_needs_xray || return 0"*)
+			ok "apply_node_xray_engine bails out on a stock node before any install/render/start (the indirection is guarded)" ;;
+		*)
+			badln "apply_node_xray_engine no longer OPENS with 'node_needs_xray || return 0' (first statement: ${gfirst:-<empty>}) — an auto path reaching it via converge_node_tail could install/start xray on a stock node" ;;
+	esac
+	# And the tail really is the route the auto paths take, so this guard is load-bearing, not decorative.
+	if func_body converge_node_tail "$XRAY_APPLY_LIB" | grep -q 'apply_node_xray_engine'; then
+		ok "converge_node_tail reaches xray through the guarded apply_node_xray_engine"
+	else
+		badln "converge_node_tail no longer calls apply_node_xray_engine — an updated node would keep serving a stale xray config"
+	fi
+else
+	badln "cannot locate nb_render_params.sh to verify the xray stock-node guard"
+fi
 
 # 6. Default-off: the only vocab engine=="xray" proto is vless-xhttp-tls, default-disabled in write_params.
 if command -v jq >/dev/null 2>&1; then

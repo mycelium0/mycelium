@@ -153,21 +153,55 @@ sudo cp /opt/mycelium/infra/systemd/mycelium-update.{service,timer} /etc/systemd
 sudo systemctl daemon-reload
 ```
 
-**Do NOT run `systemctl enable --now mycelium-update.timer` yet.** Arming this timer hands a
+**Do not run `systemctl enable --now mycelium-update.timer` yet.** Arming this timer hands a
 periodic, root-level, unattended `git fetch` + merge + install + `promote_config` to whatever the
 pinned ref resolves to. That is only safe once the fetch is *authenticated*, so the arming step has
 a hard precondition:
 
-> **Arm only when BOTH are true:** the unit's `ExecStart` carries `--allowed-signers
-> /etc/mycelium/allowed_signers` **and** `--repo-ref <immutable signed tag>`. Ship the operator's
-> signing key **out-of-band** (never in the repo). Until the signed-release pipeline exists
-> ([RP-0003](../proposals/0003-network-rollout-signed-self-updating.md) W1), there is no signed tag
-> to pin and this timer **must stay unarmed**.
+> **Arm only when BOTH are true:** the effective `ExecStart` carries `--allowed-signers
+> /etc/mycelium/allowed_signers` **and** a `--repo-ref` that is **signed**. Ship the operator's
+> signing key **out-of-band** (never in the repo).
+
+The pin has two acceptable forms, and the difference is *what the signature approves*, not whether
+there is one. The signature gate is never optional.
+
+| posture | `--repo-ref` | when |
+|---|---|---|
+| **Release** | an **immutable signed tag** | any node not solely operated by the person who controls the repo. The approval is frozen: the ref cannot change under the node. |
+| **Development** | a **signed branch tip** (e.g. `main`, with `commit.gpgsign` on) | operator-owned nodes only. Provenance is fully enforced — an unsigned or foreign-signed commit is refused — but the approval is **mutable**: every push to that branch reaches every node within one cadence. Your branch discipline becomes a production control. |
+
+A signed branch tip does **not** require the release pipeline
+([RP-0003](../proposals/0003-network-rollout-signed-self-updating.md) W1) and does not weaken
+[ADR-0015](../adr/0015-network-artifact-delivery-and-node-update.md): `verify_signed_ref` verifies
+whatever ref is pinned, tag or commit. What W1 adds is the *immutable* approval, not the check.
+
+Know the limit you are accepting either way: the signature covers the **tip**, and
+`merge --ff-only` then ingests every intervening commit. One signed push after a run of unsigned
+ones launders the lot. Converge a lagging node by hand before arming it, so the first tick has no
+backlog to swallow.
 
 ```sh
 # ONLY after the precondition above holds:
 sudo systemctl enable --now mycelium-update.timer
 ```
+
+**Set the per-node flags with a drop-in, not by editing the unit:**
+
+```sh
+sudo systemctl edit mycelium-update.service     # [Service] / ExecStart=  (empty, to clear) / ExecStart=…
+sudo systemctl edit mycelium-update.timer       # [Timer]   / OnUnitActiveSec=15min
+```
+
+The signer path and the ref pin are per-node values; putting them in the unit file is precisely the
+hand-edit that produced the drift this section exists to prevent. A drop-in keeps the installed unit
+a pristine copy of the template (so `update_unit_drift_drill.sh` stays green and meaningful), and
+`systemctl revert mycelium-update.service` is a true one-command reset. Note the drill reads the
+unit **file**, so it will not show your drop-in — read `systemctl cat mycelium-update.service`
+alongside it to see the effective `ExecStart`.
+
+The shipped cadence (`OnUnitActiveSec=5min`) is aggressive for an unattended path that can restart
+the data plane and rebuild the Go spine as root. Prefer 15 minutes or slower unless you are actively
+watching a node.
 
 `--insecure-no-verify` bypasses the signature gate entirely (`verify_signed_ref` returns before it
 checks anything — [control/lib/nb_update_apply.sh](../../control/lib/nb_update_apply.sh)). It is a

@@ -425,6 +425,31 @@ apply_node_xray_engine() {
 	measure_l7_probe_xhttp "$STATE_DIR/l7_xhttp_postapply.json" || warn "post-apply L7 xhttp-tls liveness flagged a dead outer-TLS layer (marker: $STATE_DIR/l7_xhttp_postapply.json) — the xray xhttp-tls listener is bound but a real client would fail the outer TLS layer."
 }
 
+# converge_node_tail — the SHARED convergence tail EVERY path that promotes a config must end with.
+# Extracted from flow_node_apply because the other promote paths each carried a DIFFERENT subset of it,
+# and the gaps were invisible: flow_update reconciled sing-box and the bundle but never the xray engine
+# (ADR-0032) or the firewall (Audit-0008 S1-2); flow_ack promoted a staged candidate and converged
+# NOTHING; flow_revoke re-rendered sing-box and the bundle but left the REVOKED client's UUID live on
+# the xray inbound (render_xray_candidate keys on identities.json — nb_update_apply.sh:198). Three
+# call sites, three different answers to the same question, is how a node ends up half-converged.
+#
+# ORDER IS LOAD-BEARING: xray FIRST, because harden_ufw reads $XRAY_CONFIG's inbound ports
+# (nb_harden.sh:180-183) — hardening before the xray promote would open the PREVIOUS port set and leave
+# a newly-served port ufw-blocked. Firewall SECOND. Bundle LAST, so the served distribution only ever
+# describes a node that is already live and already reachable.
+#
+# Every step is idempotent and self-no-ops, which is what makes it safe on a cadence: apply_node_xray_engine
+# returns immediately on a node with no xray family enabled (`node_needs_xray || return 0`) and skips the
+# restart when the rendered xray config is byte-identical; harden_ufw is additive + anti-lockout;
+# render_serve_bundle is fail-closed (keeps last-known-good rather than serving an invalid bundle).
+converge_node_tail() {
+	apply_node_xray_engine
+	# Respects --no-harden. The `if` form, not `[ ] && harden_ufw`: under `set -e` the && form is only
+	# safe because another statement follows it, and that is too subtle to leave as a trap for the next edit.
+	if [ "${DO_HARDEN:-1}" -eq 1 ]; then harden_ufw; fi
+	render_serve_bundle
+}
+
 flow_node_apply() {
 	log "=== apply node profile (local re-render -> validate -> promote -> reload) ==="
 	need_root
@@ -465,14 +490,11 @@ flow_node_apply() {
 		log "sing-box config byte-identical to the live one; primary engine left untouched."
 	fi
 	rm -f "$candidate" 2>/dev/null || true
-	# ADR-0032 dual-engine: serve/refresh xray independently of the sing-box change above (no-op on a stock node).
-	apply_node_xray_engine
-	# Reconcile the host firewall with the (possibly newly-enabled) served ports (Audit-0008 S1-2). Without
-	# this, a family enabled via --node-apply on a new port binds a ufw-BLOCKED listener while verify_post_apply
-	# (L4 bind + loopback L7 — both firewall-blind) reports "applied + verified" — a phantom fallback the
-	# operator would treat as a live path. harden_ufw is idempotent + anti-lockout and reads the LIVE config's
-	# ports (the single source of truth), so it opens EXACTLY the now-served set. Respects --no-harden.
-	[ "${DO_HARDEN:-1}" -eq 1 ] && harden_ufw
-	render_serve_bundle
+	# ADR-0032 dual-engine + Audit-0008 S1-2 firewall reconcile + served bundle, in that order. Runs
+	# independently of the sing-box change above: an xray-only change (enabling vless-xhttp-tls) leaves the
+	# sing-box config byte-identical, and a family enabled on a NEW port would otherwise bind a ufw-BLOCKED
+	# listener while verify_post_apply (L4 bind + loopback L7 — both firewall-blind) reports "applied +
+	# verified", a phantom fallback the operator would treat as a live path. See converge_node_tail.
+	converge_node_tail
 	log "node profile applied + verified; firewall reconciled; config reloaded + served bundle refreshed."
 }
