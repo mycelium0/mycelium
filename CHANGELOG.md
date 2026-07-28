@@ -13,6 +13,30 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 ### Fixed
+- **An unattended updater had no memory of what had already failed, so it could flap forever.**
+  `sing-box check` validates schema; `verify_post_apply` is what catches a candidate that fails at
+  *runtime* — a port already taken, a cert unreadable under the service sandbox, a bind failure. The
+  rollback that follows is correct but keeps no record, and `merge --ff-only` is a no-op once merged,
+  so the checkout stays at the same revision and the next tick re-renders the identical candidate. On
+  a timer that is promote → restart → fail → roll back → restart, on every tick, indefinitely. The
+  failed update was always contained; the **flap** was the damage, at two data-plane restarts per
+  tick, each dropping live client connections.
+  `flow_update` now declines to re-promote a candidate byte-identical to the one that last failed,
+  for a bounded, escalating hold — `clamp(1h, 6h, how long this same candidate has been failing)`,
+  derived from two file mtimes so there is no counter and no JSON to parse on a root-privileged path.
+  Steady state drops from roughly 192 restart-pairs a day to four. The key is the **bytes, not the
+  revision**: `verify_post_apply` fails on what was promoted, so a push that changes what this node
+  renders escapes the hold immediately, while an unrelated commit cannot reset it to zero — which on
+  a branch-tracking node would defeat the guard entirely.
+  It is deliberately fail-**safe**, not fail-closed: a throttle over an already fail-closed path can
+  only decline to re-apply something that already failed *on this node*, so its own failure (no
+  snapshot, unreadable mtime, absent `stat`/`date`, a clock that moved backwards) falls through to
+  promote — the worst case of a broken guard is exactly the previous behaviour. It can never become
+  permanent: the hold expires and the candidate is retried unconditionally, `--ack` and `--node-apply`
+  are never gated, and a node fixed out of band self-clears on the byte-identical path and goes green
+  with nothing to clean up. A guard that could wedge updates would be worse than the flap it removes.
+  Pinned by `update_flap_guard` (9 assertions; 8 fail on the unpatched tree), which checks not just
+  that the refusal exists but that it stays bounded, capped, self-clearing and narrow.
 - **Three paths that promote a config each converged a different subset of the node — including one
   that left a revoked client live.** `flow_node_apply` ends with a convergence tail: reconcile the
   xray engine, reconcile the firewall, re-render the served bundle. The other promote paths each

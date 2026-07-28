@@ -403,6 +403,18 @@ XRAY_LASTGOOD_CONFIG="$STATE_DIR/xray.config.lastgood.json"
 LASTGOOD_CONFIG="$STATE_DIR/config.lastgood.json"
 STAGED_CONFIG="$STATE_DIR/config.staged.json"
 ACK_MARKER="$STATE_DIR/config.staged.ack"
+# The candidate that last FAILED verify_post_apply, kept byte-for-byte for the anti-flap guard in
+# flow_update (peer of LASTGOOD_CONFIG/STAGED_CONFIG — same dir, same snapshot convention, and it inlines
+# the same secrets, so 0600). FAILED_SINCE's mtime is when this same candidate FIRST failed; the two
+# mtimes give an escalating hold with no counter to parse. Deleting either forces an immediate retry.
+FAILED_CONFIG="$STATE_DIR/config.failed.json"
+FAILED_SINCE="$STATE_DIR/config.failed.since"
+# Bounded, escalating refusal to RE-promote a candidate byte-identical to the one that last failed
+# post-apply verification: hold = clamp(MIN, MAX, how long this candidate has been failing). NEVER
+# permanent — after the hold the same candidate is retried unconditionally, so a TRANSIENT failure
+# self-heals with no operator action. Env-overridable so a drill does not have to wait an hour.
+UPDATE_RETRY_HOLD_MIN_SEC="${UPDATE_RETRY_HOLD_MIN_SEC:-3600}"    # 1h floor
+UPDATE_RETRY_HOLD_MAX_SEC="${UPDATE_RETRY_HOLD_MAX_SEC:-21600}"   # 6h cap
 # C2 (RP-0009): the operator-override path (OPERATOR_OVERRIDES + OPERATOR_TOGGLE_KEYS) lives with its
 # functions in control/lib/nb_render_params.sh, and the served-bundle paths (BUNDLE_DIR/BUNDLE_SERVED/
 # BUNDLE_CANDIDATE/BUNDLE_SERVED_AGE_FILE) with theirs in control/lib/nb_serve_bundle.sh — both sourced
@@ -669,6 +681,10 @@ flow_update() {
 	if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ] && cmp -s "$candidate" "$SINGBOX_CONFIG"; then
 		rm -f "$candidate" 2>/dev/null || true
 		log "sing-box candidate identical to the live config; primary engine untouched (no restart)."
+		# What is live is what this rev renders, and it is healthy: drop any anti-flap record. This is the
+		# path an operator reaches after fixing the cause out of band with --node-apply — the unit goes
+		# GREEN again by itself, with no memory of the hold and nothing to clean up by hand.
+		run rm -f "$FAILED_CONFIG" "$FAILED_SINCE"
 		converge_node_tail
 		return 0
 	fi
@@ -679,6 +695,61 @@ flow_update() {
 		log "It will NOT be applied until an operator ack: run '$0 --ack'."
 		return 0
 	fi
+	# ANTI-FLAP (bounded byte-identity refusal). `sing-box check` above validates SCHEMA only;
+	# verify_post_apply is what catches a candidate that fails at RUNTIME (a port already taken, a cert
+	# unreadable under the service sandbox, a bind failure). The rollback below is correct but has NO
+	# MEMORY, and `merge --ff-only` is a no-op once merged: the checkout stays at the same rev, the next
+	# tick re-renders the SAME candidate, and an armed timer promotes -> restarts -> fails -> rolls back
+	# -> restarts on EVERY tick, forever. TWO sing-box restarts per tick drop live client connections on
+	# an always-on PPN — the FLAP is the damage; the failed update itself is already contained by the
+	# rollback. So: do not re-promote a candidate byte-identical to the one that last failed, for a
+	# bounded, escalating hold.
+	#
+	# WHY BYTE-IDENTITY, NOT THE REV: verify_post_apply fails on the promoted BYTES. A rev that changes
+	# what this node renders escapes instantly with no hold to wait out; a rev that changes nothing this
+	# node renders would fail identically; and an unrelated doc/CI commit must not reset the hold to zero
+	# (on a branch-tracking node that would defeat the guard entirely at this repo's push cadence).
+	#
+	# THE HOLD ESCALATES WITHOUT A COUNTER: hold = clamp(MIN, MAX, mtime(FAILED_CONFIG) - mtime(FAILED_SINCE))
+	# = how long this same candidate has been failing. 1h, 1h, 2h, 4h, 6h, 6h… A transient blip costs one
+	# hour, not six; a genuinely dead candidate settles at ~4 restart-pairs/day instead of ~192.
+	#
+	# CLASSIFICATION — fail-SAFE, deliberately. This is a THROTTLE over an already fail-closed path, not a
+	# new provenance or promotion gate: it can only decline to re-apply something that already failed ON
+	# THIS NODE. Its own failure (no snapshot, unreadable mtime, no stat/date, a clock that went
+	# backwards) yields NO SIGNAL -> promote, and the untouched validate/verify/rollback machinery still
+	# protects the node — the worst case of a broken guard is exactly today's behaviour. It can never
+	# become permanent: the hold expires and the candidate is retried unconditionally, any
+	# render-changing push escapes it, --ack/--node-apply are never gated, and removing $FAILED_CONFIG
+	# forces a retry now. A guard that could wedge updates forever would be worse than the flap it fixes.
+	if [ "$DRY_RUN" -eq 0 ] && [ -f "$FAILED_CONFIG" ] && cmp -s "$candidate" "$FAILED_CONFIG"; then
+		local fmtime smtime fnow fage fhold
+		# Portable GNU/BSD mtime (the bundle_served_age_seconds idiom); unusable -> no signal -> promote.
+		fmtime="$(stat -c %Y "$FAILED_CONFIG" 2>/dev/null || stat -f %m "$FAILED_CONFIG" 2>/dev/null || printf '')"
+		smtime="$(stat -c %Y "$FAILED_SINCE"  2>/dev/null || stat -f %m "$FAILED_SINCE"  2>/dev/null || printf '')"
+		fnow="$(date +%s 2>/dev/null || printf '')"
+		case "$fmtime" in ''|*[!0-9]*) fmtime="" ;; esac
+		case "$smtime" in ''|*[!0-9]*) smtime="" ;; esac
+		case "$fnow"   in ''|*[!0-9]*) fnow=""   ;; esac
+		fage=-1
+		fhold="$UPDATE_RETRY_HOLD_MIN_SEC"
+		if [ -n "$fmtime" ] && [ -n "$fnow" ]; then fage=$(( fnow - fmtime )); fi
+		if [ -n "$fmtime" ] && [ -n "$smtime" ] && [ "$fmtime" -ge "$smtime" ]; then
+			[ $(( fmtime - smtime )) -le "$fhold" ] || fhold=$(( fmtime - smtime ))
+		fi
+		[ "$fhold" -le "$UPDATE_RETRY_HOLD_MAX_SEC" ] || fhold="$UPDATE_RETRY_HOLD_MAX_SEC"
+		if [ "$fage" -ge 0 ] && [ "$fage" -lt "$fhold" ]; then
+			rm -f "$candidate" 2>/dev/null || true
+			warn "this candidate is byte-identical to the one that FAILED post-apply verification ${fage}s ago."
+			warn "NOT re-promoting it for another $(( fhold - fage ))s (hold ${fhold}s, cap ${UPDATE_RETRY_HOLD_MAX_SEC}s):"
+			warn "re-applying a known-bad candidate every tick restarts sing-box twice per tick and drops live"
+			warn "client connections. The node stays on its last known-good config and keeps serving."
+			warn "Push a rev that changes what this node renders (applied on the next tick), run '$0 --node-apply'"
+			warn "after fixing the cause out of band, or remove $FAILED_CONFIG to force a retry now."
+			die "update declined: known-bad candidate inside the retry hold (last known-good config still live)."
+		fi
+		log "retry hold elapsed (age ${fage}s, hold ${fhold}s); re-attempting the previously failed candidate once."
+	fi
 	# Default: apply with rollback. Applying = an explicit RESTART (sing-box Type=simple has no real
 	# reload), so we restart and then assert health BEFORE declaring success.
 	promote_config "$candidate"
@@ -686,12 +757,26 @@ flow_update() {
 	install_singbox_unit
 	if apply_singbox && verify_post_apply; then
 		log "update applied and verified."
+		# This candidate is live and healthy: reset the anti-flap record.
+		run rm -f "$FAILED_CONFIG" "$FAILED_SINCE"
 		# Converge the rest of the node with the primary engine: xray, firewall, then the served bundle
 		# re-rendered from the now-live identity/params (see converge_node_tail). Previously this path
 		# refreshed only the bundle, so an armed timer left the xray engine and the firewall behind.
 		converge_node_tail
 	else
 		warn "post-apply verification failed; rolling back."
+		# Remember EXACTLY what failed, BEFORE rollback_config overwrites the live config with the last
+		# known-good. $SINGBOX_CONFIG still holds the promoted candidate byte-for-byte at this point (the
+		# candidate file itself was removed right after promote_config), so this snapshot IS the failed
+		# candidate. 0600 because it inlines the same secrets as the live config and only the guard above
+		# ever reads it. FAILED_SINCE is (re)stamped only when a DIFFERENT candidate starts failing, so
+		# its mtime marks when THIS candidate first failed and the hold escalates across repeats.
+		if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ]; then
+			if [ ! -f "$FAILED_CONFIG" ] || ! cmp -s "$SINGBOX_CONFIG" "$FAILED_CONFIG"; then
+				run install -m 0600 /dev/null "$FAILED_SINCE" 2>/dev/null || true
+			fi
+			run install -m 0600 "$SINGBOX_CONFIG" "$FAILED_CONFIG" 2>/dev/null || true
+		fi
 		rollback_config
 		apply_singbox || true
 		verify_post_apply || warn "service still unhealthy after rollback — operator attention needed."
