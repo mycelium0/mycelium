@@ -710,7 +710,22 @@ rotate_apply_fp_live() {
 	# iff a fingerprint-carrying member reads DEAD under the NEW preset (Audit-0008 S2-5).
 	if verify_post_apply && _fp_postapply_alive; then
 		persist_fp_rotation_state "$plan"
-		log "fp-rotation: LIVE apply verified (client_fingerprint $from -> $to; server restart=$restarted). Client bundle re-rendered; between-tick state persisted."
+		# SHARED CONVERGENCE TAIL. This path promotes a config (conditionally, above), so it owes the same
+		# convergence as every other promote path — no exemption. Today all three steps are no-ops here by
+		# construction: a client fingerprint is a CLIENT-side uTLS preset, so it moves no listen port
+		# (harden_ufw is additive and finds nothing new) and appears nowhere in the served xray config (the
+		# xray template carries no fingerprint, so apply_node_xray_engine short-circuits byte-identical).
+		# It is called anyway on purpose. That "no-op by construction" is a PREMISE, not a guarantee: it
+		# holds only while the fingerprint never threads into the xray render or a port, and an exemption
+		# resting on a premise has to be re-verified forever by someone who remembers why. Converging
+		# unconditionally costs one idempotent xray render and one ufw pass per fp rotation — which is
+		# gated, rare, and ships disarmed — and removes the premise entirely.
+		# The bundle is rendered twice on this path (once at the top of Phase C, deliberately: the fp change
+		# is CLIENT-facing and the bundle is how it reaches clients, so it must be pushed even when the
+		# server config is byte-identical and nothing restarts). The second render is idempotent and
+		# fail-closed; it only restamps generated_at.
+		converge_node_tail
+		log "fp-rotation: LIVE apply verified (client_fingerprint $from -> $to; server restart=$restarted). Client bundle re-rendered; node converged; between-tick state persisted."
 		return 0
 	fi
 	warn "fp-rotation: post-apply verification FAILED (a fingerprint-carrying member does not handshake on the new preset); rolling back preset + overlay (fail-closed)."

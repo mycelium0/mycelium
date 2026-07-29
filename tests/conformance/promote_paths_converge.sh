@@ -36,12 +36,11 @@
 #      xray promote opens the PREVIOUS port set; the bundle is last so the served distribution only ever
 #      describes a node that is already live and already reachable.)
 #   2. Every function that calls promote_config also calls converge_node_tail.
-#   3. No such function calls render_serve_bundle directly — a bare bundle render is the fragment that
-#      the tail replaced, and re-introducing one is how a path silently drops the other two steps.
-#   4. The ONE exemption, rotate_apply_fp_live, is VERIFIED rather than asserted: a fingerprint rotation
-#      changes a CLIENT-side uTLS preset, so it moves no port and the served xray config carries no
-#      fingerprint at all. The gate proves that premise against the xray server template; if a
-#      fingerprint ever appears there, the exemption fails and must be reconsidered.
+#   3. No such function renders the bundle directly INSTEAD of converging — a bare bundle render is the
+#      fragment the tail replaced, and stopping at it is how a path silently drops the other two steps.
+#      Rendering it in ADDITION to converging is legitimate (the fp rotation does, on purpose).
+#   4. No exemptions. Every promote path converges, including the fingerprint rotation — see the note on
+#      EXEMPT below for why the one reasoned exception was removed rather than kept and re-verified.
 #
 # Exit: 0 = every promote path converges, 1 = a violation, 2 = usage/env error.
 
@@ -57,10 +56,13 @@ $REPO_ROOT/control/lib/nb_render_params.sh
 $REPO_ROOT/control/lib/nb_two_hop.sh
 $REPO_ROOT/control/lib/nb_rotate_apply.sh
 $REPO_ROOT/control/lib/nb_update_apply.sh"
-XRAY_TPL="$REPO_ROOT/nodes/dataplane/vless-xhttp-tls/xray.server.template.json"
 
-# The single reasoned exemption. Adding a name here must come with the premise CHECK below.
-EXEMPT="rotate_apply_fp_live"
+# NO EXEMPTIONS. There was one — rotate_apply_fp_live, on the premise that a client fingerprint moves
+# no port and appears nowhere in the served xray config, so converging would be a no-op. The premise was
+# true and the exemption was still wrong: it holds only while the fingerprint never threads into the xray
+# render or a port, so it had to be re-verified forever by whoever remembered it existed. The path now
+# converges unconditionally (the steps are idempotent and no-op there anyway) and the special case is
+# gone. If a future path genuinely cannot converge, say why in ITS code — do not add a name here.
 
 fail=0
 ok()  { printf '  ok    %s\n' "$1"; }
@@ -121,18 +123,19 @@ while IFS= read -r f; do
 		[ "$(calls promote_config "$b")" -ge 1 ] || continue
 		found=$((found + 1))
 		short="${f#"$REPO_ROOT"/}"
-		case " $EXEMPT " in
-			*" $fn "*)
-				ok "$fn ($short): exempt — see the verified premise below"
-				continue ;;
-		esac
-		if [ "$(calls converge_node_tail "$b")" -ge 1 ]; then
+		converges=0
+		[ "$(calls converge_node_tail "$b")" -ge 1 ] && converges=1
+		if [ "$converges" -eq 1 ]; then
 			ok "$fn ($short): promotes and converges"
 		else
 			bad "$fn ($short): calls promote_config but NEVER converge_node_tail — it promotes a config and leaves the xray engine, the firewall and the served bundle describing the previous one"
 		fi
-		if [ "$(calls render_serve_bundle "$b")" -ge 1 ]; then
-			bad "$fn ($short): renders the served bundle DIRECTLY — that is the fragment converge_node_tail replaced, and a path that re-adds it has almost certainly dropped the xray and firewall steps with it"
+		# A DIRECT bundle render is the fragment the tail replaced. It is a defect only when it stands IN
+		# PLACE OF converging — which is exactly how every instance of this bug looked. As a supplement to
+		# converging it is legitimate: rotate_apply_fp_live renders the bundle early on purpose, because a
+		# fingerprint change is client-facing and must reach clients even when nothing restarts.
+		if [ "$(calls render_serve_bundle "$b")" -ge 1 ] && [ "$converges" -eq 0 ]; then
+			bad "$fn ($short): renders the served bundle DIRECTLY and never converges — that is the fragment converge_node_tail replaced, and a path that stops at it has dropped the xray and firewall steps with it"
 		fi
 	done <<INNER
 $(grep -oE '^[a-z_][a-z0-9_]*\(\)' "$f" | sed 's/()//')
@@ -147,17 +150,6 @@ else
 	bad "only $found promote paths found (expected at least 6) — the discovery sweep is not seeing them, so this gate would pass vacuously"
 fi
 
-# 4. The exemption's premise, checked rather than trusted.
-if [ -f "$XRAY_TPL" ]; then
-	if grep -q 'fingerprint' "$XRAY_TPL"; then
-		bad "the xray SERVER template now carries a fingerprint — the reason rotate_apply_fp_live is exempt (a fingerprint is a CLIENT-side preset, so an fp rotation moves no port and changes nothing xray serves) no longer holds. Re-check whether it must converge."
-	else
-		ok "exemption premise holds: the xray server template carries no fingerprint, so an fp rotation changes no served port and no served engine config"
-	fi
-else
-	bad "cannot find the xray server template to verify the fp-rotation exemption — an unverifiable exemption is a hole"
-fi
-
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: a promote path does not converge the node. Every one of these has shipped a real defect\n' >&2
@@ -165,6 +157,6 @@ if [ "$fail" -ne 0 ]; then
 	printf '      firewall, a rotation onto a ufw-blocked port that every check reported as healthy.\n' >&2
 	exit 1
 fi
-printf 'PASS: every promote path converges through converge_node_tail, in the load-bearing order, with the\n'
-printf '      one fp-rotation exemption verified against the xray server template.\n'
+printf 'PASS: every promote path converges through converge_node_tail, in the load-bearing order, with no\n'
+printf '      exemptions.\n'
 exit 0
