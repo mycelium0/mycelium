@@ -237,6 +237,39 @@ persist_rotation_state() {
 	log "rotation: persisted next_state -> $(_rotate_state_file)."
 }
 
+# persist_rotation_state_preapply PLAN — persist the plan's next_state BEFORE the apply, but NEVER over a
+# live rollback latch. This is the call order the planner documents for its executor ("persist NextState,
+# apply, then record the outcome before the next Plan"); rotate_apply_live persisted only at the two ENDS,
+# so every Phase-B/C `die` — and each degradation inside record_rotation_rollback — returned with
+# rotate_state.json BYTE-UNCHANGED. The planner then re-derives the IDENTICAL act plan from unchanged
+# state and unchanged signals, on a 90s timer, and each post-apply-failure edge costs TWO sing-box
+# restarts. That is the rotation twin of the flow_update flap, on a 10x faster cadence.
+#
+# THE REFUSAL IS THE WHOLE SAFETY ARGUMENT. persist_rotation_state writes .next_state WHOLESALE, and an
+# ACT plan can never carry a live hold_until (the planner turns that into a HOLD). So an unconditional
+# pre-apply write would ERASE a live rollback latch whenever a STALE act plan is re-applied — which
+# happens exactly when the spine is briefly absent and the previous plan is kept, the same condition
+# under which record_rotation_rollback degrades and cannot re-latch. Refusing while the ON-DISK state
+# holds a future hold_until makes this write monotonically NON-LOWERING by construction. It is a
+# WRITE-SAFETY refusal, not a policy merge: no budget arithmetic, no latch computation, nothing the
+# planner's own outcome-recording owns. RFC3339 UTC with a fixed Z offset is lexicographically ordered,
+# which is what makes the string compare sound.
+persist_rotation_state_preapply() {
+	local plan="$1" state now hold
+	[ "$DRY_RUN" -eq 0 ] || return 0
+	have jq || return 0
+	state="$(_rotate_state_file)"
+	if [ -f "$state" ]; then
+		now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf '')"
+		hold="$(jq -r '.hold_until // ""' "$state" 2>/dev/null || printf '')"
+		if [ -n "$now" ] && [ -n "$hold" ] && [ "$hold" != "null" ] && [ "$hold" \> "$now" ]; then
+			warn "rotation: a rollback hold is live until $hold; NOT overwriting rotate_state.json before the apply (the latch is stricter than anything this would write)."
+			return 0
+		fi
+	fi
+	persist_rotation_state "$plan"
+}
+
 # record_rotation_rollback PLAN — fold a rollback into the between-tick state via the pure Go
 # rotate.RecordOutcome (spends the per-window rollback budget; latches the planner to hold once exhausted).
 # Needs the Go spine binary + a node-local rotate_limits.json; both are present on the Go-bearing node
@@ -345,6 +378,13 @@ rotate_apply_live() {
 	# Phase B — PERSIST via the overlay (snapshot taken), regenerate params, re-render + re-validate the
 	# AUTHORITATIVE config. Every die-capable step is SUBSHELL-wrapped so a failure is catchable and the
 	# overlay is reverted (rotate_abort_revert) — a bare `if ! write_params` cannot trap write_params' die.
+	# Phase B opens with the FIRST PERSISTED MUTATION, so the plan's NextState is written HERE — not only
+	# at the two ends. Placement is deliberate on both sides: later than function entry, so a Phase-A
+	# validation failure still touches NO persisted state (that is Phase A's whole contract); earlier
+	# than the overlay write, so every subsequent die/abort path leaves the anti-flap advance on disk.
+	# Without it, a rotation that fails after this point returned with rotate_state.json unchanged and
+	# the planner re-derived the same act plan 90 seconds later, forever.
+	persist_rotation_state_preapply "$plan"
 	persist_rotation_to_overlay "$plan"
 	if ! ( write_params ); then
 		rotate_abort_revert "$candidate" "write_params failed after the overlay update"
