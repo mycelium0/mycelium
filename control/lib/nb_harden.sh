@@ -133,6 +133,126 @@ myc_firewall_singbox_ports() {
 	esac
 }
 
+# myc_ufw_admitted_ports — PURE: read `ufw status` TEXT on STDIN, echo the `PORT/proto` tokens that text
+# says are admitted from ANYWHERE. Stdin rather than an internal `ufw` call so the parser is fixture-
+# testable offline. Rules: ALLOW and LIMIT both count (`ufw limit 22/tcp` is a normal way to provision
+# SSH, and reading it as "not admitted" is the cry-wolf failure this check exists to avoid); "ALLOW" and
+# "ALLOW IN" both, "ALLOW OUT"/"ALLOW FWD" never; a source-restricted rule is NOT public; a bare `8388`
+# admits BOTH protocols so it emits both tokens; an app-profile name (OpenSSH) is not a port and is
+# skipped; a DENY/REJECT cancels an ALLOW regardless of order (ufw is order-sensitive, this parser is
+# not — over-reporting a block on an ADVISORY line is the safe direction).
+# IPv4 ONLY: `(v6)` rows are SKIPPED, not stripped. A dual rule emits a v4 row too, so nothing is lost;
+# stripping instead would let a v6-ONLY allow read as admitted and give a false all-clear on a
+# v4-blocked port. Callers MUST invoke `ufw` under LC_ALL=C — its output is translated.
+# KNOWN BLIND SPOTS, named in the warn text rather than hidden: interface-scoped rules (`443/tcp on
+# eth0`), app-profile rows, and a blanket `Anywhere ALLOW Anywhere` all parse to nothing.
+myc_ufw_admitted_ports() {
+	LC_ALL=C awk '
+		/\(v6\)/ { next }
+		$2 != "ALLOW" && $2 != "LIMIT" && $2 != "DENY" && $2 != "REJECT" { next }
+		{
+			if ($3 == "IN")                      { from = $4 }
+			else if ($3 == "OUT" || $3 == "FWD") { next }
+			else                                 { from = $3 }
+			if (from != "Anywhere") next
+			if ($1 ~ /^[0-9]+$/)                 { t1 = $1 "/tcp"; t2 = $1 "/udp" }
+			else if ($1 ~ /^[0-9]+\/(tcp|udp)$/) { t1 = $1;        t2 = "" }
+			else next
+			if ($2 == "ALLOW" || $2 == "LIMIT") { a[t1] = 1; if (t2 != "") a[t2] = 1 }
+			else                                { b[t1] = 1; if (t2 != "") b[t2] = 1 }
+		}
+		END { for (t in a) if (!(t in b)) print t }
+	' | LC_ALL=C sort -u || true
+}
+
+# myc_ufw_listening_ports <tcp|udp> — the NON-LOOPBACK listener view, one port per line. Loopback binds
+# are excluded on purpose: under the unified node profile a non-reachable node rebinds public inbounds to
+# 127.0.0.1, and a loopback listener must not read as holding a public port open. Empty output (no ss, or
+# ss silent) is the NO-SIGNAL case the caller refuses to report on.
+myc_ufw_listening_ports() {
+	local fam="$1" out=""
+	have ss || return 0
+	case "$fam" in
+		tcp) out="$(ss -tlnH 2>/dev/null || true)" ;;
+		udp) out="$(ss -ulnH 2>/dev/null || true)" ;;
+		*)   return 0 ;;
+	esac
+	printf '%s\n' "$out" | LC_ALL=C awk '
+		{ a = $4; n = match(a, /:[0-9]+$/); if (n == 0) next
+		  addr = substr(a, 1, n - 1); port = substr(a, n + 1)
+		  if (addr ~ /^127\./ || addr == "[::1]" || addr == "::1" || addr ~ /^\[::ffff:127\./) next
+		  print port }' | LC_ALL=C sort -u || true
+}
+
+# verify_ufw_exposure SERVED_TOKENS KEEP_TOKENS — READ-ONLY, WARN-ONLY, AND IT NEVER DELETES A RULE.
+# Two questions that can only be answered on the node:
+#   (b) SERVED BUT BLOCKED. verify_post_apply is firewall-blind at every layer (is-active + an ss bind
+#       check + a loopback L7 probe), so a listener that is bound and ufw-BLOCKED reports "applied and
+#       verified" while no client can reach it. That is a phantom fallback path — the worst kind, because
+#       the planner counts it as viable.
+#   (a) OPEN BUT NOT SERVED. harden_ufw is additive-only, so a transport moved to a new port leaves the
+#       OLD port allowed forever. Reported only when NOTHING is listening on it, which is what separates
+#       an orphan rule from a port some other service legitimately owns.
+#
+# WHY IT ONLY REPORTS. Deleting a ufw rule on a node reached by SSH, from a path that re-runs unattended
+# every 15 minutes, is how all three nodes get locked out at once. Any deletion needs a trustworthy record
+# of what this tool opened, and there is none — deriving "ours" from the live config is exactly wrong,
+# since the rule to remove is by definition the one the config NO LONGER mentions. So the honest split is:
+# this tool opens ports and tells you what it cannot justify; a human removes them. The parser's blind
+# spots make that doubly right — a false "orphan" that merely prints costs nothing.
+#
+# AND WHY IT WARNS RATHER THAN FAILS. It runs inside the convergence tail; returning non-zero there would
+# reach verify_post_apply and trigger a rollback plus a restart, on every node, on a cadence. A firewall
+# observation must never be able to do that. Fail-SAFE throughout: no ufw, no ss, unreadable status, or an
+# empty parse all yield NO REPORT rather than a false accusation.
+verify_ufw_exposure() {
+	local served="$1" keep="$2" admitted listen_tcp listen_udp t p fam blocked="" orphan=""
+	have ufw || return 0
+	# NORMALISE TO SPACE-SEPARATED. myc_ufw_admitted_ports emits one token per LINE (it ends in sort -u),
+	# and the membership tests below are `case " $list " in *" $tok "*)`, which matches only a token
+	# surrounded by SPACES. Feeding the newline form to that test makes every element except the first and
+	# last silently unmatchable — every served port then reads "NOT admitted". Caught on a live node, where
+	# the report claimed all eight served ports were firewall-blocked on a node clients were reaching
+	# fine; the fixture test passed because it exercised the PARSER and not this comparison.
+	admitted="$(LC_ALL=C ufw status 2>/dev/null | myc_ufw_admitted_ports | tr '\n' ' ')" || admitted=""
+	[ -n "$admitted" ] || { log "firewall exposure: ufw status yielded no parseable public rules; nothing reported (fail-safe)."; return 0; }
+	listen_tcp="$(myc_ufw_listening_ports tcp)" || listen_tcp=""
+	listen_udp="$(myc_ufw_listening_ports udp)" || listen_udp=""
+
+	# (b) served but not admitted.
+	for t in $served; do
+		case " $admitted " in *" $t "*) ;; *) blocked="$blocked $t" ;; esac
+	done
+	# (a) admitted, not served, not kept, and nothing listening on it.
+	for t in $admitted; do
+		case " $served " in *" $t "*) continue ;; esac
+		case " $keep "   in *" $t "*) continue ;; esac
+		p="${t%%/*}"; fam="${t##*/}"
+		if [ "$fam" = tcp ]; then case " $(printf '%s ' $listen_tcp) " in *" $p "*) continue ;; esac
+		else                      case " $(printf '%s ' $listen_udp) " in *" $p "*) continue ;; esac; fi
+		orphan="$orphan $t"
+	done
+
+	if [ -n "$blocked" ]; then
+		warn "firewall exposure: served but NOT admitted by ufw:$blocked"
+		warn "  A client cannot reach these. verify_post_apply cannot see it — it checks the service, the bind and a"
+		warn "  LOOPBACK handshake, all of which pass on a firewall-blocked port, so this would otherwise read healthy."
+	fi
+	if [ -n "$orphan" ]; then
+		# log, NOT warn, and ONE line. This runs inside the convergence tail on every unattended tick, so
+		# a multi-line warn block would repeat every cadence on every node until a human acts — which is
+		# how a real signal becomes noise people filter out, the same failure this check exists to avoid.
+		# An orphan rule is a standing condition to review, not an incident: nothing is broken, one port
+		# is open wider than justified. The BLOCKED case above is the one that warns, because that is an
+		# outage nothing else can see.
+		log "firewall exposure: admitted but not served and nothing listening:$orphan — harden_ufw only ADDS rules; nothing is removed automatically (a rule deletion from an unattended path is how a node locks itself out). Review with 'ufw status numbered' and delete by hand if intended."
+	elif [ -z "$blocked" ]; then
+		log "firewall exposure: every served port is admitted, and no unexplained port is open."
+	fi
+	[ -n "$blocked" ] && warn "  (advisory — the parser does not represent interface-scoped rules, app-profile rows such as OpenSSH, or IPv6-only rules.)"
+	return 0
+}
+
 harden_ufw() {
 	log "configuring the host firewall (ufw) for the enabled canonical ports"
 	need_root
@@ -171,19 +291,32 @@ harden_ufw() {
 	enabled_tcp="$(myc_firewall_singbox_ports "$SINGBOX_CONFIG" tcp | tr '\n' ' ')"
 	enabled_udp="$(myc_firewall_singbox_ports "$SINGBOX_CONFIG" udp | tr '\n' ' ')"
 	local p
-	for p in $enabled_tcp; do run ufw allow "$p/tcp"; done
-	for p in $enabled_udp; do run ufw allow "$p/udp"; done
+	# _served accumulates the exact token set this run justifies, built from the SAME loops that open the
+	# rules, so the report can never disagree with what was actually allowed. Purely additive bookkeeping.
+	local _served=""
+	for p in $enabled_tcp; do run ufw allow "$p/tcp"; _served="$_served $p/tcp"; done
+	for p in $enabled_udp; do run ufw allow "$p/udp"; _served="$_served $p/udp"; done
 	# ADR-0032 dual-engine: the xray engine serves from a SEPARATE config (XRAY_CONFIG), so its listen
 	# ports are not in the sing-box config the loop above read. Open them too (xray inbounds key on
 	# `.port`; the xhttp-tls family is TCP). A stock node has no XRAY_CONFIG, so this opens nothing.
 	if [ -n "${XRAY_CONFIG:-}" ] && [ -f "$XRAY_CONFIG" ] && have jq; then
 		local xray_tcp
 		xray_tcp="$(jq -r '[.inbounds[]? | select(.port != null) | .port] | unique | .[]' "$XRAY_CONFIG" 2>/dev/null | tr '\n' ' ')"
-		for p in $xray_tcp; do run ufw allow "$p/tcp"; done
+		for p in $xray_tcp; do run ufw allow "$p/tcp"; _served="$_served $p/tcp"; done
 	fi
 	# AmneziaWG UDP port (its conventional canon port; the actual value is operator/runtime).
 	if [ "$DO_AMNEZIAWG" -eq 1 ] && [ -f "$STATE_DIR/awg.port" ]; then
 		run ufw allow "$(cat "$STATE_DIR/awg.port")/udp"
+		_served="$_served $(cat "$STATE_DIR/awg.port")/udp"
 	fi
 	run ufw --force enable
+	# Report-only exposure check. AFTER `ufw --force enable`, so it describes the state a client actually
+	# meets. $ssh_ports is the keep-set: the anti-lockout rules above are ours and must never be reported
+	# as unexplained. Under --dry-run nothing was opened, so a report would describe a fiction — skip it.
+	if [ "${DRY_RUN:-0}" -eq 0 ]; then
+		local _keep=""
+		for p in $ssh_ports; do _keep="$_keep $p/tcp"; done
+		[ -n "$_keep" ] || _keep=" 22/tcp"
+		verify_ufw_exposure "$_served" "$_keep"
+	fi
 }
