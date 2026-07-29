@@ -294,6 +294,7 @@ GATES=(
 	"tests/conformance/ss_l7_probe_failsafe.sh"
 	"tests/conformance/update_unit_template_shape.sh"
 	"tests/conformance/update_flap_guard.sh"
+	"tests/conformance/promote_paths_converge.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/version_changelog_sync.sh"

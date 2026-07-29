@@ -160,7 +160,7 @@ fi
 # it, without converging anything. Both promote paths now reach the bundle through the shared
 # convergence tail, so assert the tail is called on BOTH: the sing-box-byte-identical path AND the
 # apply-success path. Only --staged may return without it (nothing was promoted; flow_ack carries it).
-FU="$(fn_body flow_update)"
+FU="$(fn_body flow_update | grep -vE '^[[:space:]]*#')"
 tail_n="$(printf '%s\n' "$FU" | grep -cE '^[[:space:]]*converge_node_tail[[:space:]]*$' || true)"
 if [ "$tail_n" -ge 2 ]; then
 	okln "C25: flow_update converges on both the no-op and the apply path ($tail_n call sites)"
@@ -172,12 +172,12 @@ fi
 # then reports the whole pipeline as FAILED even though the pattern MATCHED. It fails only when grep
 # wins the race — measured at ~5 in 40 runs here, which is exactly the "re-run before believing it"
 # flake that trains people to ignore a red gate. Same class as the RP-0014 SIGPIPE finding; same remedy.
-if grep -q 'render_serve_bundle' <<<"$(fn_body converge_node_tail)"; then
+if grep -q 'render_serve_bundle' <<<"$(fn_body converge_node_tail | grep -vE '^[[:space:]]*#')"; then
 	okln "C25: converge_node_tail re-renders the served bundle (served distribution stays current)"
 else
 	badln "C25: converge_node_tail does NOT render the served bundle"
 fi
-if grep -q 'converge_node_tail' <<<"$(fn_body flow_ack)"; then
+if grep -q 'converge_node_tail' <<<"$(fn_body flow_ack | grep -vE '^[[:space:]]*#')"; then
 	okln "C25: flow_ack converges after promoting a staged candidate"
 else
 	badln "C25: flow_ack promotes a staged candidate without converging (stale xray/firewall/bundle)"
@@ -192,12 +192,23 @@ fi
 # C21 — a documented remove-two-hop path exists and re-renders both config + served bundle.
 # ---------------------------------------------------------------------------
 if grep -q -- '--disable-two-hop' "$NB" && grep -q 'flow_disable_two_hop' "$NB"; then
-	FD="$(fn_body flow_disable_two_hop)"
-	if printf '%s\n' "$FD" | grep -q 'rm -f "\$STATE_DIR/two_hop.json"' \
-	   && printf '%s\n' "$FD" | grep -q 'render_serve_bundle'; then
-		okln "C21: --disable-two-hop removes the overlay + re-renders config + refreshes the served bundle"
+	# CODE ONLY. fn_body does not strip comments, and the prose inside these functions necessarily
+	# NAMES the steps it performs — so an assertion run over the raw body is satisfied by the comment
+	# alone and keeps passing after the call is deleted. Proven: removing converge_node_tail from
+	# flow_disable_two_hop left this check green.
+	FD="$(fn_body flow_disable_two_hop | grep -vE '^[[:space:]]*#')"
+	# The bundle is now reached through the SHARED convergence tail, not by a direct call. Assert the
+	# tail, not the literal: disabling two-hop is a promote path, so it owes the whole sequence (xray,
+	# firewall, bundle) and not just the bundle — that was the gap. Accept a direct render_serve_bundle
+	# too, so this check states the REQUIREMENT (the served bundle is refreshed) rather than one spelling
+	# of it; promote_paths_converge.sh is what pins the tail specifically.
+	# here-strings, not `printf | grep -q`: under the pipefail set at the top of this gate that shape is a
+	# SIGPIPE race that reports a MATCH as a failure (~5 runs in 40 — see the C25 note above).
+	if grep -q 'rm -f "\$STATE_DIR/two_hop.json"' <<<"$FD" \
+	   && { grep -q 'converge_node_tail' <<<"$FD" || grep -q 'render_serve_bundle' <<<"$FD"; }; then
+		okln "C21: --disable-two-hop removes the overlay + re-renders config + converges (served bundle refreshed)"
 	else
-		badln "C21: flow_disable_two_hop does not fully remove + re-render (incomplete remove path)"
+		badln "C21: flow_disable_two_hop does not fully remove + re-render/converge (incomplete remove path)"
 	fi
 else
 	badln "C21: no --disable-two-hop remove path (disabling two-hop would require manual file surgery)"

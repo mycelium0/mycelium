@@ -113,9 +113,15 @@ flow_disable_two_hop() {
 	rm -f "$candidate" 2>/dev/null || true
 	install_singbox_unit
 	if apply_singbox && verify_post_apply; then
-		# Re-render the served bundle so the served distribution reflects the now-two-hop-free config.
-		render_serve_bundle
-		log "two-hop disabled; config re-rendered + sing-box reloaded + served bundle refreshed."
+		# SHARED CONVERGENCE TAIL, not a bare bundle render. This is a promote path, so it owes the same
+		# convergence as every other one: reconcile the xray engine, reconcile the firewall, then re-render
+		# the served bundle (converge_node_tail, control/lib/nb_render_params.sh). It was the bundle alone,
+		# which is the gap 978cb2d closed for the four flows in the entrypoint and missed here — disabling
+		# two-hop changes what this node serves and therefore can change its served port set, and a served
+		# port the firewall does not admit is invisible to verify_post_apply (service up, socket bound,
+		# loopback handshake fine) while no client can reach it.
+		converge_node_tail
+		log "two-hop disabled; config re-rendered + sing-box reloaded + xray/firewall converged + served bundle refreshed."
 	else
 		warn "post-apply verification failed after disabling two-hop; rolling back."
 		rollback_config

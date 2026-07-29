@@ -413,8 +413,17 @@ rotate_apply_live() {
 	if apply_singbox && verify_post_apply; then
 		persist_rotation_state "$plan"
 		update_measure_active_ref "$to"
-		render_serve_bundle
-		log "rotation: LIVE apply verified ($from -> $to). Sibling promoted; between-tick state persisted."
+		# SHARED CONVERGENCE TAIL, not a bare bundle render — and a rotation is the case that needs it most.
+		# Rotating promotes a SIBLING transport, which routinely lives on a DIFFERENT port, so this is the
+		# one path that changes the served port set without an operator present. harden_ufw only ever ADDS
+		# rules, so without this the node rotates onto a port the firewall does not admit and every check
+		# still reports success: verify_post_apply is firewall-blind at each layer (service active, socket
+		# bound, LOOPBACK handshake). The planner would then count a phantom path as the live one — the
+		# exact shape verify_ufw_exposure reports, arrived at automatically.
+		# NOT a per-tick cost: rotate_apply_live is reached only on an act=true plan (flow_rotate returns on
+		# HOLD), so the tail runs once per actual rotation, not on the 90s cadence.
+		converge_node_tail
+		log "rotation: LIVE apply verified ($from -> $to). Sibling promoted; xray/firewall converged; between-tick state persisted."
 		return 0
 	fi
 	warn "rotation: post-apply verification FAILED; rolling back config + overlay (fail-closed)."
