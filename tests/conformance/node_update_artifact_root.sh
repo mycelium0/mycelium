@@ -211,6 +211,35 @@ else
 	okln "no artifact path leaked to the re-exec tmp dir"
 fi
 
+# ---------------------------------------------------------------------------
+# Audit-0009 W1 — the --insecure-no-verify bypass must be structurally contained, not merely documented.
+# BEHAVIOURAL, not textual: the decision function is driven with real inputs and its VERDICT is asserted.
+# A grep for the flag's name would pass on a function that always returns 0, which is precisely the state
+# this closes — every "testing only / never on the timer" statement in the tree was prose, while
+# verify_signed_ref returned 0 regardless of caller or context.
+# ---------------------------------------------------------------------------
+UPD_LIB="$REPO_ROOT/control/lib/nb_update_apply.sh"
+if [ -f "$UPD_LIB" ] && grep -q '_insecure_bypass_permitted()' "$UPD_LIB"; then
+	# Extract just the decision function; sourcing the whole lib would pull in entrypoint globals.
+	fnsrc="$(awk '/^_insecure_bypass_permitted\(\)/{f=1} f{print} f&&/^\}/{exit}' "$UPD_LIB")"
+	dec() { # dec DRY_RUN INVOCATION_ID  -> echoes permitted|refused, stdin detached (non-tty)
+		env -u INVOCATION_ID DRY_RUN="$1" ${2:+INVOCATION_ID="$2"} \
+			bash -c "$fnsrc"'; _insecure_bypass_permitted' </dev/null >/dev/null 2>&1 \
+			&& printf 'permitted' || printf 'refused'
+	}
+	[ "$(dec 1 abc)" = permitted ] \
+		&& okln "W1: --dry-run under systemd still permits the bypass (nothing is fetched or applied; this gate's own path)" \
+		|| badln "W1: --dry-run is refused — the documented offline testing path is broken"
+	[ "$(dec 0 abc)" = refused ] \
+		&& okln "W1: a REAL run under systemd REFUSES the bypass (the armed timer cannot disable its own provenance gate)" \
+		|| badln "W1: a real run under systemd still permits --insecure-no-verify — the containment is prose again, and an armed unit can run unauthenticated root code every tick"
+	[ "$(dec 0 '')" = refused ] \
+		&& okln "W1: a REAL run with a non-TTY stdin REFUSES the bypass (cron, piped ssh and CI are unattended)" \
+		|| badln "W1: a real non-interactive run still permits --insecure-no-verify"
+else
+	badln "W1: control/lib/nb_update_apply.sh has no _insecure_bypass_permitted — the bypass containment is gone"
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the --update path does not resolve canonical artifacts from CHECKOUT_DIR\n' >&2

@@ -121,9 +121,27 @@ done
 # far worse — it is BLIND to a drop-in that adds --insecure-no-verify. A check that is permanently red
 # on a correct node stops being read, and a check with a hole that big is not a check.
 # Falls back to the file's ExecStart if systemctl cannot report (unit absent / systemd not answering).
-exec_eff="$(systemctl show "$SVC_NAME" -p ExecStart --value 2>/dev/null \
-	| sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p' | head -1 | sed 's/[[:space:]]*$//')"
-[ -n "$exec_eff" ] || exec_eff="$(directives "$UNIT_DIR/$SVC_NAME" 2>/dev/null | grep -E '^ExecStart=' | head -1 | sed 's/^ExecStart=//')"
+# EVERY ExecStart, not the first. `Type=oneshot` admits MULTIPLE ExecStart= lines and systemd runs them
+# all, in order, as root. This read used `head -1`, so a drop-in that APPENDS a second command — after an
+# earlier drop-in has already supplied the authenticated one, which is exactly the live posture here — was
+# invisible to all three checks below, and the drill printed "no provenance bypass" and "the effective
+# command is authenticated" while the second command ran unattended every 15 minutes. The injection test
+# that accompanied the original fix only exercised a RESETTING drop-in (one that clears and replaces), so
+# it never touched this shape (Audit-0009 C2).
+exec_all="$(systemctl show "$SVC_NAME" -p ExecStart --value 2>/dev/null \
+	| sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p' | sed 's/[[:space:]]*$//' | grep -v '^$')"
+[ -n "$exec_all" ] || exec_all="$(directives "$UNIT_DIR/$SVC_NAME" 2>/dev/null | grep -E '^ExecStart=' | sed 's/^ExecStart=//')"
+exec_n="$(printf '%s\n' "$exec_all" | grep -c . || true)"
+# The checks below reason over the CONCATENATION, so a flag in any command is seen. Count is reported
+# separately: on this unit more than one ExecStart is itself the finding, whatever the commands say.
+exec_eff="$(printf '%s' "$exec_all" | tr '\n' ' ')"
+if [ "${exec_n:-0}" -gt 1 ]; then
+	crit "the unit has $exec_n ExecStart commands; systemd runs ALL of them as root, in order."
+	crit "        On this unit that is never legitimate: the per-node flags belong in ONE resetting drop-in"
+	crit "        (\`ExecStart=\` to clear, then the single authenticated command). A second, APPENDED"
+	crit "        command is how a provenance bypass hides behind a correct-looking first one."
+	printf '%s\n' "$exec_all" | sed 's/^/          - /'
+fi
 dropins="$(systemctl show "$SVC_NAME" -p DropInPaths --value 2>/dev/null)"
 if [ -n "$dropins" ]; then
 	printf '  note  per-node flags come from drop-in(s): %s\n' "$dropins"

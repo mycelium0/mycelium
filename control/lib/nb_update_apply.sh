@@ -40,12 +40,49 @@
 # code is merged/installed/executed. The verified signature IS the real "semi-auto human
 # approval" — not merely "a commit exists on origin".
 # ---------------------------------------------------------------------------
+# _insecure_bypass_permitted — PURE decision: may --insecure-no-verify actually bypass the signature gate
+# in THIS execution context? rc 0 = permitted, rc 1 = refused. Reads only DRY_RUN and the two environment
+# facts below, so a gate can drive it directly with no side effects (Audit-0009 W1).
+#
+# THE DEFECT THIS CLOSES. The flag is documented everywhere as testing-only and "never on the timer", and
+# every one of those statements was PROSE: verify_signed_ref warned and returned 0 regardless of who
+# invoked it or from where. Prose is not containment — a drop-in on an armed node could carry the flag and
+# the code would cheerfully disable its own provenance gate every 15 minutes as root. The rule now has
+# teeth: the bypass is permitted ONLY where it cannot run unattended.
+#
+#   * --dry-run          -> PERMITTED. Nothing is fetched, promoted or executed, so there is nothing to
+#                           authenticate; this is also how the offline conformance gate exercises the
+#                           update path (tests/conformance/node_update_artifact_root.sh).
+#   * under systemd      -> REFUSED. $INVOCATION_ID is set by systemd for every unit invocation, which is
+#                           exactly the unattended case the doctrine forbids. This is the load-bearing arm.
+#   * stdin not a TTY    -> REFUSED. "Local testing" means a human at a terminal. A cron job, a pipe, a
+#                           remote non-interactive ssh command and a CI runner are all unattended.
+#   * otherwise          -> PERMITTED, with the existing loud warning.
+#
+# Deliberately NOT overridable by an env var: an escape hatch for the escape hatch is how this ends up
+# back on a timer. An operator who genuinely needs an unattended unsigned fetch must say so in the unit,
+# and there is no flag that lets them.
+_insecure_bypass_permitted() {
+	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
+	[ -n "${INVOCATION_ID:-}" ] && return 1
+	[ -t 0 ] || return 1
+	return 0
+}
+
 verify_signed_ref() {
 	# verify_signed_ref REVISION — fail-closed unless REVISION carries a valid signature from the
 	# operator's out-of-band key. Honors SSH allowedSigners (preferred) or GPG. Refuses on any
-	# failure. --insecure-no-verify (testing only) is the ONLY way to bypass this.
+	# failure. --insecure-no-verify (testing only) is the ONLY way to bypass this, and only where
+	# _insecure_bypass_permitted allows it.
 	local rev="$1"
 	if [ "$INSECURE_NO_VERIFY" -eq 1 ]; then
+		if ! _insecure_bypass_permitted; then
+			warn "--insecure-no-verify was passed, but this is an UNATTENDED context$([ -n "${INVOCATION_ID:-}" ] && printf ' (running under systemd)' || printf ' (stdin is not a terminal)')."
+			warn "The flag disables the provenance gate that stands between a fetched commit and root"
+			warn "execution on this node. It is a by-hand, at-a-terminal testing tool, and refusing it here is"
+			warn "the containment the documentation alone never provided (Audit-0009 W1)."
+			die "refusing to bypass signature verification unattended (fail-closed). Pass --allowed-signers with a real key, or run this by hand from a terminal."
+		fi
 		warn "SIGNATURE VERIFICATION DISABLED via --insecure-no-verify — fetched code is UNAUTHENTICATED."
 		warn "This is acceptable ONLY for local testing. NEVER run the network timer with this flag."
 		return 0
