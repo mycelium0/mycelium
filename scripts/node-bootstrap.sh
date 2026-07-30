@@ -728,6 +728,11 @@ flow_update() {
 		# path an operator reaches after fixing the cause out of band with --node-apply — the unit goes
 		# GREEN again by itself, with no memory of the hold and nothing to clean up by hand.
 		run rm -f "$FAILED_CONFIG" "$FAILED_SINCE"
+		# Audit-0009 X1 — stamp the successful converge. This is the ONLY fact that separates a node that
+		# is quietly up to date from one whose timer died weeks ago, and on 2026-07-28 that distinction had
+		# to be made by hand on three nodes. Written on BOTH success paths (byte-identical and applied),
+		# because "nothing to do" is a successful converge; exported by the dataplane metrics generator.
+		date +%s > "$STATE_DIR/last_converge_ok" 2>/dev/null || true
 		converge_node_tail
 		return 0
 	fi
@@ -802,6 +807,11 @@ flow_update() {
 		log "update applied and verified."
 		# This candidate is live and healthy: reset the anti-flap record.
 		run rm -f "$FAILED_CONFIG" "$FAILED_SINCE"
+		# Audit-0009 X1 — stamp the successful converge. This is the ONLY fact that separates a node that
+		# is quietly up to date from one whose timer died weeks ago, and on 2026-07-28 that distinction had
+		# to be made by hand on three nodes. Written on BOTH success paths (byte-identical and applied),
+		# because "nothing to do" is a successful converge; exported by the dataplane metrics generator.
+		date +%s > "$STATE_DIR/last_converge_ok" 2>/dev/null || true
 		# Converge the rest of the node with the primary engine: xray, firewall, then the served bundle
 		# re-rendered from the now-live identity/params (see converge_node_tail). Previously this path
 		# refreshed only the bundle, so an armed timer left the xray engine and the firewall behind.

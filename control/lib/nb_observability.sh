@@ -147,11 +147,24 @@ DIR="/var/lib/node_exporter/textfile"
 OUT="$DIR/mycelium_dataplane.prom"
 active=0
 systemctl is-active --quiet sing-box && active=1
+# Audit-0009 X1 — a node that has silently STOPPED converging looked identical to a healthy one. The
+# 2026-07-28 dead-timer incident was found by reading NextElapse by hand on three nodes; nothing on the
+# node said anything was wrong, and the update unit carries no OnFailure=. This exports the one fact that
+# distinguishes the two: WHEN the unattended updater last converged successfully. Absent stamp -> 0, which
+# reads as "never" rather than "now" — a missing file must not look fresh.
+# No PII and no new surface: a unix timestamp on the node_exporter textfile path this generator already
+# owns, loopback-only, consistent with the no-central-collector doctrine (ADR-0021).
+conv=0
+[ -r /var/lib/mycelium/last_converge_ok ] && conv="$(cat /var/lib/mycelium/last_converge_ok 2>/dev/null || echo 0)"
+case "$conv" in ''|*[!0-9]*) conv=0 ;; esac
 tmp="$(mktemp "$DIR/.mdp.XXXXXX")"
 {
 	echo '# HELP mycelium_dataplane_unit_active 1 if the data-plane systemd unit is active, else 0.'
 	echo '# TYPE mycelium_dataplane_unit_active gauge'
 	printf 'mycelium_dataplane_unit_active{engine="singbox"} %d\n' "$active"
+	echo '# HELP mycelium_update_last_success_timestamp_seconds Unix time of the last successful unattended converge; 0 = never.'
+	echo '# TYPE mycelium_update_last_success_timestamp_seconds gauge'
+	printf 'mycelium_update_last_success_timestamp_seconds %d\n' "$conv"
 } >"$tmp"
 chmod 0644 "$tmp"
 mv -f "$tmp" "$OUT"

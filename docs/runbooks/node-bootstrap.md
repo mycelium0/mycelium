@@ -188,16 +188,37 @@ sudo systemctl enable --now mycelium-update.timer
 **Set the per-node flags with a drop-in, not by editing the unit:**
 
 ```sh
-sudo systemctl edit mycelium-update.service     # [Service] / ExecStart=  (empty, to clear) / ExecStart=…
-sudo systemctl edit mycelium-update.timer       # [Timer]   / OnUnitActiveSec=15min
+sudo systemctl edit mycelium-update.service     # see the service drop-in below
+sudo systemctl edit mycelium-update.timer       # see the timer drop-in below
+```
+
+**Service drop-in** — one `ExecStart=` to clear, then exactly ONE command. Never append a second: a
+`Type=oneshot` unit runs them all, in order, as root, and a second command is how a provenance bypass
+hides behind a correct-looking first one.
+
+```ini
+[Service]
+ExecStart=
+ExecStart=/opt/mycelium/scripts/node-bootstrap.sh --update --repo-ref <signed-ref> --allowed-signers /etc/mycelium/allowed_signers
+```
+
+**Timer drop-in** — the CALENDAR form. Do not use `OnUnitActiveSec=` here, and read the trap note below
+before deciding otherwise:
+
+```ini
+[Timer]
+OnBootSec=
+OnUnitActiveSec=
+OnCalendar=*:0/15
+RandomizedDelaySec=300
+Persistent=true
 ```
 
 The signer path and the ref pin are per-node values; putting them in the unit file is precisely the
-hand-edit that produced the drift this section exists to prevent. A drop-in keeps the installed unit
-a pristine copy of the template (so `update_unit_drift_drill.sh` stays green and meaningful), and
-`systemctl revert mycelium-update.service` is a true one-command reset. Note the drill reads the
-unit **file**, so it will not show your drop-in — read `systemctl cat mycelium-update.service`
-alongside it to see the effective `ExecStart`.
+hand-edit that produced the drift this section exists to prevent. A drop-in keeps the installed unit a
+pristine copy of the template, and `systemctl revert mycelium-update.service` is a true one-command
+reset. The drill reads the **effective** command (`systemctl show -p ExecStart`), so your drop-in *is*
+covered by it — including a second appended `ExecStart`, which it fails on.
 
 The shipped cadence (`OnUnitActiveSec=5min`) is aggressive for an unattended path that can restart
 the data plane and rebuild the Go spine as root. Prefer 15 minutes or slower unless you are actively

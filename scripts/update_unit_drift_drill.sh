@@ -212,6 +212,36 @@ if [ -n "$exec_eff" ]; then
 	fi
 fi
 
+# --- 5. converge freshness (Audit-0009 X1) -----------------------------------------------------------
+# The timer can be enabled, active and scheduled and still never have converged — that is exactly what two
+# of three nodes looked like on 2026-07-28, and it took reading NextElapse by hand to see it. A schedule is
+# an intention; the stamp is the outcome. Report the outcome.
+if [ "$tmr_state" = "enabled" ] || [ "$tmr_active" = "active" ]; then
+	stamp_f="/var/lib/mycelium/last_converge_ok"
+	if [ -r "$stamp_f" ]; then
+		st="$(cat "$stamp_f" 2>/dev/null)"; now_s="$(date +%s 2>/dev/null || printf '')"
+		case "$st" in ''|*[!0-9]*) st="" ;; esac
+		if [ -n "$st" ] && [ -n "$now_s" ]; then
+			age=$(( now_s - st ))
+			if [ "$age" -lt 0 ]; then
+				warn "the converge stamp is in the FUTURE (${age}s) — the clock moved; treat the age below as unusable."
+			elif [ "$age" -gt 5400 ]; then
+				crit "the timer is armed but the last SUCCESSFUL converge was ${age}s ago (>90 min)."
+				crit "        An armed schedule is an intention; this is the outcome. A timer can be enabled,"
+				crit "        active and scheduled and still never fire — check the next elapse, not is-enabled:"
+				crit "          systemctl show mycelium-update.timer -p NextElapseUSecMonotonic   # 'infinity' = dead"
+			else
+				ok "last successful converge ${age}s ago (armed and actually converging)"
+			fi
+		else
+			warn "converge stamp present but unreadable — cannot judge freshness (no signal, not a failure)."
+		fi
+	else
+		warn "no converge stamp at $stamp_f yet — expected on a node that has not completed an unattended"
+		warn "  converge since this check shipped; it appears after the first successful tick."
+	fi
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: this node deviates from the shipped update-unit contract (see CRIT above).\n' >&2
