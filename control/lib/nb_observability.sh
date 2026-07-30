@@ -147,24 +147,11 @@ DIR="/var/lib/node_exporter/textfile"
 OUT="$DIR/mycelium_dataplane.prom"
 active=0
 systemctl is-active --quiet sing-box && active=1
-# Audit-0009 X1 — a node that has silently STOPPED converging looked identical to a healthy one. The
-# 2026-07-28 dead-timer incident was found by reading NextElapse by hand on three nodes; nothing on the
-# node said anything was wrong, and the update unit carries no OnFailure=. This exports the one fact that
-# distinguishes the two: WHEN the unattended updater last converged successfully. Absent stamp -> 0, which
-# reads as "never" rather than "now" — a missing file must not look fresh.
-# No PII and no new surface: a unix timestamp on the node_exporter textfile path this generator already
-# owns, loopback-only, consistent with the no-central-collector doctrine (ADR-0021).
-conv=0
-[ -r /var/lib/mycelium/last_converge_ok ] && conv="$(cat /var/lib/mycelium/last_converge_ok 2>/dev/null || echo 0)"
-case "$conv" in ''|*[!0-9]*) conv=0 ;; esac
 tmp="$(mktemp "$DIR/.mdp.XXXXXX")"
 {
 	echo '# HELP mycelium_dataplane_unit_active 1 if the data-plane systemd unit is active, else 0.'
 	echo '# TYPE mycelium_dataplane_unit_active gauge'
 	printf 'mycelium_dataplane_unit_active{engine="singbox"} %d\n' "$active"
-	echo '# HELP mycelium_update_last_success_timestamp_seconds Unix time of the last successful unattended converge; 0 = never.'
-	echo '# TYPE mycelium_update_last_success_timestamp_seconds gauge'
-	printf 'mycelium_update_last_success_timestamp_seconds %d\n' "$conv"
 } >"$tmp"
 chmod 0644 "$tmp"
 mv -f "$tmp" "$OUT"
@@ -187,6 +174,37 @@ AccuracySec=1s
 [Install]
 WantedBy=timers.target
 UNIT
+}
+
+# record_converge_ok — stamp a successful unattended converge and publish it, from the code that OWNS
+# the fact (Audit-0009 X1). Best-effort: never fails the caller.
+#
+# WHY NOT THE DATAPLANE GENERATOR. The first attempt put this metric in the generator heredoc, and it
+# would never have reached a single existing node: that script is written by setup_observability, which
+# runs in flow_bootstrap ONLY. Verified on the canary — the installed generator was still the copy written
+# at bootstrap on 2026-06-13. That is exactly the defect AC1 names (a control-plane artifact written once
+# by its verb and never reconciled), and the fix walked straight into it. Writing the metric where the
+# fact is produced needs no generator refresh and works on every node from the first tick.
+#
+# Same shape as record_bundle_served_age (nb_serve_bundle.sh) — a per-concern .prom owned by its producer.
+# It lands in the directory node_exporter is actually pointed at, with a fallback to STATE_DIR when that
+# directory does not exist, so a node without the exporter still keeps the stamp the on-node drill reads.
+# Loopback-only exporter, no new surface, no central collector (ADR-0021).
+record_converge_ok() {
+	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
+	local now dir out
+	now="$(date +%s 2>/dev/null)" || return 0
+	case "$now" in ''|*[!0-9]*) return 0 ;; esac
+	printf '%s\n' "$now" > "$STATE_DIR/last_converge_ok" 2>/dev/null || true
+	dir="$NODE_EXPORTER_TEXTFILE_DIR"; [ -d "$dir" ] || dir="$STATE_DIR"
+	out="$dir/mycelium_update.prom"
+	{
+		printf '# HELP mycelium_update_last_success_timestamp_seconds Unix time of the last successful unattended converge; 0 = never.\n'
+		printf '# TYPE mycelium_update_last_success_timestamp_seconds gauge\n'
+		printf 'mycelium_update_last_success_timestamp_seconds %s\n' "$now"
+	} >"$out.tmp" 2>/dev/null && { chmod 0644 "$out.tmp" 2>/dev/null || true; mv -f "$out.tmp" "$out" 2>/dev/null || true; }
+	rm -f "$out.tmp" 2>/dev/null || true
+	return 0
 }
 
 setup_observability() {

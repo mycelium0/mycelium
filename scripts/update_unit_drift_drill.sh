@@ -9,9 +9,15 @@
 # Author: mindicator & silicon bags quartet.
 #
 # WHY THIS EXISTS
-#   mycelium-update.{service,timer} are the only systemd units in this project with no owner. Every
-#   other unit is written by a heredoc in control/lib and rewritten on every apply, so drift is
-#   impossible. These two are documentation-grade templates the operator copies BY HAND
+#   mycelium-update.{service,timer} have no owner: no code path installs, reconciles or removes them.
+#
+#   PRECISELY (Audit-0009 AC1 — the earlier wording here claimed drift was impossible everywhere else,
+#   and that was false): only the two DATA-PLANE units are rewritten on every promote —
+#   install_singbox_unit and install_xray_unit run on each apply, so those genuinely cannot drift. The
+#   control-plane units (mycelium-measure, mycelium-rotate, mycelium-l7probe, node_exporter) are written
+#   ONCE by their arming verb and never reconciled afterwards, so a hand-edit to any of them persists
+#   exactly as it does here — this drill simply does not cover them yet. Do not read a green run as
+#   "no unit on this node has drifted"; read it as "the update unit has not". These two are documentation-grade templates the operator copies BY HAND
 #   (docs/runbooks/node-bootstrap.md; RP-0003 workstream W3), and NOTHING reconciles a deployed copy
 #   back to the template — not `--node-apply`, not `--update`, not any gate. A hand-edit therefore
 #   persists forever and is invisible to the offline suite, which can only see the repo.

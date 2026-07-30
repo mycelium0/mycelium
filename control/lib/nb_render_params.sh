@@ -396,6 +396,34 @@ write_params() {
 # enabling an xray-engine transport via --node-apply silently leaves the sing-box config byte-identical and
 # never serves xray.
 apply_node_xray_engine() {
+	# TEARDOWN (Audit-0009 K2). Disabling the xray family reached the RENDER and stopped there: nothing
+	# ever stopped xray.service, disabled it, or removed its config, so a "disabled" transport kept
+	# serving its last config indefinitely — and the revocation path inherited that, since a client
+	# removed from identities.json stays valid on an inbound nobody re-rendered. `transport disable` was
+	# a statement of intent that the node never carried out.
+	#
+	# Gated on node_xray_disabled, the POSITIVE determination — never on `! node_needs_xray`, which is
+	# also true when params or jq are merely unreadable. Stopping a live engine because state was briefly
+	# unavailable, unattended, every 15 minutes, would be a far worse defect than the one being fixed.
+	if node_xray_disabled; then
+		if [ "$DRY_RUN" -eq 1 ]; then
+			systemctl is-active --quiet xray 2>/dev/null && log "[dry-run] xray family disabled; WOULD stop + disable xray.service and retire its config."
+			return 0
+		fi
+		if systemctl is-active --quiet xray 2>/dev/null || systemctl is-enabled --quiet xray 2>/dev/null || [ -f "$XRAY_CONFIG" ]; then
+			need_root
+			log "xray family is disabled in params; retiring the secondary engine (stop + disable + retire config)."
+			run systemctl disable --now xray 2>/dev/null || warn "could not stop/disable xray.service; the config is retired below, so a restart would serve nothing."
+			# Keep the retired config next to the last-known-good rather than deleting it: re-enabling the
+			# family re-renders from identities anyway, and an operator investigating a revocation wants to
+			# see what the engine was last serving. 0600, same class of secrets as the live config.
+			if [ -f "$XRAY_CONFIG" ]; then
+				run install -m 0600 "$XRAY_CONFIG" "$STATE_DIR/xray.config.retired.json" 2>/dev/null || true
+				run rm -f "$XRAY_CONFIG"
+			fi
+		fi
+		return 0
+	fi
 	node_needs_xray || return 0
 	if [ "$DRY_RUN" -eq 0 ]; then install_xray; fi
 	local xray_candidate="$STATE_DIR/xray.config.candidate.json"

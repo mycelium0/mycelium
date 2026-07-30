@@ -126,6 +126,28 @@ node_needs_xray() {
 	[ "${n:-0}" -ge 1 ]
 }
 
+# node_xray_disabled — the POSITIVE inverse of node_needs_xray, and it is NOT `! node_needs_xray`
+# (Audit-0009 K2). node_needs_xray answers "does this node need xray" and returns 1 for three DIFFERENT
+# reasons: the family is disabled, OR the vocab/params are unreadable, OR jq is missing. That conflation
+# is harmless when the answer only gates whether to INSTALL something — an unreadable state means "do
+# nothing". It is destructive the moment the answer gates a TEARDOWN: a node with a briefly unreadable
+# params.json would have its live secondary engine stopped, on an unattended 15-minute timer.
+#
+# So this returns 0 ONLY on a positive determination — vocab and params both readable, jq present, and
+# the enabled xray-proto count is exactly zero. Every unknown resolves to "not disabled" (rc 1), i.e.
+# leave the engine alone. Absence of evidence must never authorise a stop.
+node_xray_disabled() {
+	local vocab; vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	[ -f "$vocab" ] && [ -f "$PARAMS_JSON" ] || return 1
+	have jq || return 1
+	local n
+	n="$(jq -r --slurpfile p "$PARAMS_JSON" \
+		'[ .protos[] | select(.engine == "xray") | select($p[0][.enable_key] == true) ] | length' \
+		"$vocab" 2>/dev/null)" || return 1
+	case "$n" in ''|*[!0-9]*) return 1 ;; esac
+	[ "$n" -eq 0 ]
+}
+
 # install_xray — install xray-core, pinned + checksum-verified (ADR-0032 dual-engine; the peer of
 # install_singbox). Called ONLY when node_needs_xray (an xray-engine transport is enabled), so a stock
 # node installs no xray. Xray ships a .zip (not a tar.gz) whose root holds the `xray` binary. Fail-closed

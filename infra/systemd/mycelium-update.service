@@ -13,9 +13,12 @@
 #   It never regenerates keys and never touches the running service unless a validated config is ready.
 #
 # OWNERSHIP (explicit, because implicit ownership is what produced the drift below): NO code path in
-# this repo installs, edits or removes this unit. Every unit the control plane owns is written by a
-# heredoc in control/lib (mycelium-measure, mycelium-rotate, mycelium-l7probe, node_exporter, …) and
-# is reconciled on every apply. This one is a DOCUMENTATION-GRADE TEMPLATE the operator copies BY
+# this repo installs, edits or removes this unit. The units written by a heredoc in control/lib fall into
+# two groups, and only one of them is drift-proof (Audit-0009 AC1 corrected the earlier claim that all of
+# them were): the DATA-PLANE units (sing-box, xray) are rewritten on EVERY promote and therefore cannot
+# drift; the control-plane units (mycelium-measure, mycelium-rotate, mycelium-l7probe, node_exporter) are
+# written ONCE by their arming verb and never reconciled, so they drift exactly like this one does —
+# they are simply not yet covered by a drill. This one is a DOCUMENTATION-GRADE TEMPLATE the operator copies BY
 # HAND, per docs/runbooks/node-bootstrap.md, and installing it is tracked as RP-0003 workstream W3.
 # Consequence an operator must know: nothing reconciles a deployed copy back to this file. A local
 # edit persists forever and drifts silently — `--node-apply` will never notice or correct it. Re-`cp`

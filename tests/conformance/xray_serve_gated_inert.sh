@@ -107,13 +107,29 @@ done
 #     on every node on the update cadence.
 XRAY_APPLY_LIB="$LIB/nb_render_params.sh"
 if [ -f "$XRAY_APPLY_LIB" ]; then
-	gfirst="$(func_body apply_node_xray_engine "$XRAY_APPLY_LIB" | sed -n '2p')"
-	case "$gfirst" in
-		*"node_needs_xray || return 0"*)
-			ok "apply_node_xray_engine bails out on a stock node before any install/render/start (the indirection is guarded)" ;;
-		*)
-			badln "apply_node_xray_engine no longer OPENS with 'node_needs_xray || return 0' (first statement: ${gfirst:-<empty>}) — an auto path reaching it via converge_node_tail could install/start xray on a stock node" ;;
-	esac
+	# ORDERING, not the first line. This asserted that the function's first statement was literally
+	# `node_needs_xray || return 0`, and it broke the moment a legitimate TEARDOWN branch was added ahead
+	# of it (Audit-0009 K2) — while the property it exists to protect still held. Asserting spelling
+	# instead of behaviour is the trap this repo has now hit four times; the property is what matters:
+	# NOTHING that installs, renders, promotes or starts xray may be reachable before the stock-node
+	# guard, and whatever runs before the guard may only stop/disable/retire.
+	xbody="$(func_body apply_node_xray_engine "$XRAY_APPLY_LIB" | grep -vE '^[[:space:]]*#')"
+	gline="$(printf '%s\n' "$xbody" | grep -nE 'node_needs_xray[[:space:]]*\|\|[[:space:]]*return 0' | head -1 | cut -d: -f1)"
+	sline="$(printf '%s\n' "$xbody" | grep -nE '(^|[^_[:alnum:]])(install_xray|install_xray_unit|render_xray_candidate|promote_xray_config|restart_xray)([^_[:alnum:]]|$)' | head -1 | cut -d: -f1)"
+	if [ -z "$gline" ]; then
+		badln "apply_node_xray_engine has no 'node_needs_xray || return 0' guard at all — an auto path reaching it via converge_node_tail could install/start xray on a stock node"
+	elif [ -n "$sline" ] && [ "$gline" -gt "$sline" ]; then
+		badln "apply_node_xray_engine can install/render/start xray (line $sline of its body) BEFORE the stock-node guard (line $gline) — a stock node reached via converge_node_tail would grow a second engine"
+	else
+		ok "apply_node_xray_engine reaches no install/render/promote/start before its stock-node guard"
+		# Whatever precedes the guard is the teardown branch; it may only stop/disable/retire.
+		pre="$(printf '%s\n' "$xbody" | sed -n "1,${gline}p")"
+		if printf '%s\n' "$pre" | grep -qE '(^|[^_[:alnum:]])(install_xray|install_xray_unit|render_xray_candidate|promote_xray_config|restart_xray)([^_[:alnum:]]|$)'; then
+			badln "the code before the stock-node guard installs/renders/starts xray — only stop/disable/retire is permitted there"
+		else
+			ok "the pre-guard teardown branch only stops/disables/retires (it never installs or starts)"
+		fi
+	fi
 	# And the tail really is the route the auto paths take, so this guard is load-bearing, not decorative.
 	if func_body converge_node_tail "$XRAY_APPLY_LIB" | grep -q 'apply_node_xray_engine'; then
 		ok "converge_node_tail reaches xray through the guarded apply_node_xray_engine"
