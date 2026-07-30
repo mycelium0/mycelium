@@ -40,6 +40,24 @@
 #      unit stops being resettable by a plain re-cp).
 #   5. Masked/absent states are reported as SAFE, not as failures: masked is a legitimate parked
 #      posture pre-W1, and a node that never installed the unit has nothing to drift.
+#   6. The TIMER's effective schedule: its drop-ins, its calendar/monotonic triggers and its next
+#      elapse. ADDITIVE to check 3, never a replacement for it (Audit-0009 C1) — `is-enabled` and
+#      `is-active` cannot tell an armed timer from one that has settled into SubState=elapsed with
+#      Trigger=n/a, which is exactly the dead state found on two nodes on 2026-07-28; but they are also
+#      what must gate the authentication check, because a dead-but-enabled timer with an unauthenticated
+#      ExecStart is one `systemctl restart` away from pulling as root. So both are read and reported
+#      separately: state ARMS the safety checks, next-elapse says whether it will actually FIRE.
+#
+# WHAT IT PRINTS (Audit-0009 S1)
+#   Everything this drill emits goes through `redact` first: the node's own hostname, IPv4/IPv6 literals
+#   and FQDNs are masked, and the OPSEC warning about an address in a root-run command line now comes
+#   BEFORE the value rather than after it. The drift branch — the one the drill exists to produce — used
+#   to print the deployed ExecStart verbatim, which on the two nodes of 2026-07-27 meant printing the node
+#   address literal it was warning about, into the artifact an operator is most likely to copy off a node
+#   during an incident. Scope is deliberately the ADDRESS class, not internal/diag.Redact wholesale: a
+#   unit directive is mostly paths and unit names, and the generic opaque-token pass would mask
+#   `/etc/systemd/system/...` and leave the diff unreadable. Unit files carry no secrets — those live in
+#   the config, which this drill never reads.
 #
 # WHY A DRILL AND NOT A GATE: it needs /etc/systemd/system and `systemctl`, which exist only on a
 # node. The repo-side counterpart (tests/conformance/update_unit_template_shape.sh) keeps the
@@ -74,11 +92,35 @@ ok()   { printf '  ok    %s\n' "$1"; }
 crit() { printf '  CRIT  %s\n' "$1"; fail=1; }
 warn() { printf '  warn  %s\n' "$1"; warn_n=$((warn_n + 1)); }
 
+# redact — mask the node-identifying ADDRESS classes from everything this drill prints (Audit-0009 S1):
+# the node's own hostname (word-anchored, and only at >=4 chars, exactly as internal/diag.RedactBundle
+# does — a 3-char hostname is a common substring and masking it would corrupt the output), then IPv6,
+# then IPv4, then FQDNs. Ordered like internal/diag's rules so the structural classes are scrubbed WHOLE
+# rather than fragmented by a broader pass.
+#
+# The dotted-name pass would also eat `mycelium-update.service`, `override.conf`, `node-bootstrap.sh` —
+# the very vocabulary the diff exists to show — so file/unit extensions are protected behind a sentinel
+# first and restored after. That is the whole compromise: mask what identifies the node, keep what
+# identifies the defect. GNU sed assumed (this drill already requires systemd).
+SELF_HOST="$(hostname 2>/dev/null || printf '')"
+redact() {
+	local h="$SELF_HOST"
+	if [ "${#h}" -lt 4 ]; then h=""; fi
+	sed -E \
+		-e 's/\.(service|timer|socket|target|mount|path|slice|conf|sh|json|pub|md|go|toml|yml|yaml|d)\b/\x01\1/g' \
+		${h:+-e "s/\\b$(printf '%s' "$h" | sed -E 's/[][\\.^$*+?(){}|/]/\\\\&/g')\\b/[redacted-host]/gI"} \
+		-e 's/(^|[^0-9a-fA-F:.])(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{0,4}::([0-9a-fA-F]{1,4}:)*([0-9]{1,3}(\.[0-9]{1,3}){3}|[0-9a-fA-F]{1,4})?)/\1[redacted-ipv6]/g' \
+		-e 's/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/[redacted-ipv4]/g' \
+		-e 's/\b([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b/[redacted-host]/g' \
+		-e 's/\x01/./g'
+}
+say() { printf '%s\n' "$1" | redact; }
+
 # directives only — the template headers necessarily NAME the forbidden flag in order to warn about it
 directives() { grep -vE '^[[:space:]]*#' "$1" 2>/dev/null | sed 's/[[:space:]]*$//' | grep -vE '^$'; }
 
 printf '== mycelium-update deployed-unit drift drill ==\n'
-printf 'node:     %s\n' "$(hostname 2>/dev/null || echo '(unknown)')"
+say "node:     ${SELF_HOST:-(unknown)}"
 printf 'checkout: %s\n\n' "$CHECKOUT"
 
 svc_state="$(systemctl is-enabled "$SVC_NAME" 2>&1 || true)"
@@ -111,8 +153,12 @@ for pair in "$SVC_NAME:$TPL_SVC" "$TMR_NAME:$TPL_TMR"; do
 		ok "$name: deployed copy matches the shipped template exactly"
 	else
 		crit "$name: DEPLOYED COPY HAS DRIFTED from $tpl"
+		# The OPSEC warning goes ABOVE the value, not after it (Audit-0009 S1): a warning printed below
+		# the thing it warns about arrives after the operator has already copied it.
+		printf '        NOTE: addresses/hostnames below are masked; a drifted unit is still a root command\n'
+		printf '              line — treat the unmasked original as sensitive before sharing it.\n'
 		printf '        --- template / +++ deployed ---\n'
-		diff -u <(directives "$tpl") <(directives "$dep") 2>/dev/null | tail -n +3 | sed 's/^/        /'
+		diff -u <(directives "$tpl") <(directives "$dep") 2>/dev/null | tail -n +3 | redact | sed 's/^/        /'
 		printf '        -> nothing reconciles this back. Reset with: cp %s %s\n' "$tpl" "$dep"
 	fi
 done
@@ -146,11 +192,11 @@ if [ "${exec_n:-0}" -gt 1 ]; then
 	crit "        On this unit that is never legitimate: the per-node flags belong in ONE resetting drop-in"
 	crit "        (\`ExecStart=\` to clear, then the single authenticated command). A second, APPENDED"
 	crit "        command is how a provenance bypass hides behind a correct-looking first one."
-	printf '%s\n' "$exec_all" | sed 's/^/          - /'
+	printf '%s\n' "$exec_all" | redact | sed 's/^/          - /'
 fi
 dropins="$(systemctl show "$SVC_NAME" -p DropInPaths --value 2>/dev/null)"
 if [ -n "$dropins" ]; then
-	printf '  note  per-node flags come from drop-in(s): %s\n' "$dropins"
+	say "  note  per-node flags come from drop-in(s): $dropins"
 	printf '        (the unit FILE stays a pristine template copy; `systemctl revert %s` resets it)\n' "$SVC_NAME"
 fi
 
@@ -182,12 +228,16 @@ if [ "$tmr_state" = "enabled" ] || [ "$tmr_active" = "active" ]; then
 	printf '%s' "$exec_eff" | grep -q -- '--allowed-signers' && has_signers=1
 	printf '%s' "$exec_eff" | grep -q -- '--repo-ref'        && has_ref=1
 	if [ "$has_signers" -eq 1 ] && [ "$has_ref" -eq 1 ] && [ "$bypass" -eq 0 ]; then
-		ok "the timer is ARMED and the effective command is authenticated (--allowed-signers + --repo-ref, no bypass)"
+		# "enabled/active", NOT "armed" (Audit-0009 C1). These two signals cannot distinguish a timer that
+		# will fire from one that has settled into SubState=elapsed with Trigger=n/a — the dead state found
+		# on two nodes on 2026-07-28. Whether it will actually fire is check 6 below; what THIS branch
+		# establishes is that the command it would run is authenticated.
+		ok "the timer is ENABLED/ACTIVE and the effective command is authenticated (--allowed-signers + --repo-ref, no bypass)"
 		ref="$(printf '%s' "$exec_eff" | sed -n 's/.*--repo-ref[= ]\{1,\}\([^ ]*\).*/\1/p')"
 		case "$ref" in
-			v[0-9]*|*[0-9].[0-9]*) ok "  pinned to '$ref' (tag-shaped: an immutable approval)" ;;
+			v[0-9]*|*[0-9].[0-9]*) say "  ok    pinned to '$ref' (tag-shaped: an immutable approval)" ;;
 			'')                    warn "  --repo-ref present but its value could not be parsed" ;;
-			*)                     warn "  pinned to the MUTABLE ref '$ref': every push to it reaches this node within one cadence, and the signature covers only the tip (intervening commits ride in on the fast-forward). Accepted posture for an operator-owned node; not for a shared one." ;;
+			*)                     warn_n=$((warn_n + 1)); say "  warn  pinned to the MUTABLE ref '$ref': every push to it reaches this node within one cadence, and the signature covers only the tip (intervening commits ride in on the fast-forward). Accepted posture for an operator-owned node; not for a shared one." ;;
 		esac
 	else
 		crit "THE TIMER IS ARMED WITHOUT AN AUTHENTICATED FETCH."
@@ -199,6 +249,56 @@ if [ "$tmr_state" = "enabled" ] || [ "$tmr_active" = "active" ]; then
 	fi
 else
 	ok "the timer is not armed (enabled=$tmr_state active=$tmr_active) — installing is not arming"
+fi
+
+# --- 3b. the TIMER's effective schedule (Audit-0009 C1) ---------------------------------------------
+# ADDITIVE to check 3, deliberately. `is-enabled`/`is-active` gate the authentication check above and must
+# keep doing so — a dead-but-enabled timer whose ExecStart is unauthenticated is one `systemctl restart`
+# away from a root-level unattended pull, and replacing the state test with a next-elapse test would let it
+# skip that check entirely and be reported "not armed". But those two signals also cannot tell an armed
+# timer from one that has settled into SubState=elapsed with Trigger=n/a. That is not hypothetical: on
+# 2026-07-28 two of three nodes reported enabled+active with NextElapseUSecMonotonic=infinity and had not
+# fired in weeks. So the schedule is read and reported on its own terms.
+#
+# The timer's own DROP-INS are read here too. The project's doctrine puts per-node cadence in a TIMER
+# drop-in, and until now the drill read DropInPaths for the SERVICE only — so a drop-in that changed
+# OnCalendar=, RandomizedDelaySec= or repointed Unit= at a different service was reported nowhere.
+if [ -f "$UNIT_DIR/$TMR_NAME" ]; then
+	tmr_dropins="$(systemctl show "$TMR_NAME" -p DropInPaths --value 2>/dev/null)"
+	tmr_unit="$(systemctl show "$TMR_NAME" -p Unit --value 2>/dev/null)"
+	tmr_cal="$(systemctl show "$TMR_NAME" -p TimersCalendar --value 2>/dev/null)"
+	tmr_mono="$(systemctl show "$TMR_NAME" -p TimersMonotonic --value 2>/dev/null)"
+	tmr_next_r="$(systemctl show "$TMR_NAME" -p NextElapseUSecRealtime --value 2>/dev/null)"
+	tmr_next_m="$(systemctl show "$TMR_NAME" -p NextElapseUSecMonotonic --value 2>/dev/null)"
+	tmr_last="$(systemctl show "$TMR_NAME" -p LastTriggerUSec --value 2>/dev/null)"
+	[ -n "$tmr_dropins" ] && say "  note  timer drop-in(s): $tmr_dropins"
+	[ -n "$tmr_cal" ]     && say "  note  calendar trigger: $tmr_cal"
+	[ -n "$tmr_mono" ]    && say "  note  monotonic trigger: $tmr_mono"
+	say "  note  last trigger: ${tmr_last:-n/a}"
+	# `Unit=` is what the timer will actually start. A drop-in that repoints it is a silent redirection of
+	# every tick to some other command, which no other check here would notice.
+	if [ -n "$tmr_unit" ] && [ "$tmr_unit" != "$SVC_NAME" ]; then
+		crit "$TMR_NAME starts '$tmr_unit', NOT $SVC_NAME — a drop-in has repointed it; every check above examined the wrong unit."
+	fi
+	# The dead state: no realtime elapse AND no monotonic elapse. systemd reports the monotonic field as 0
+	# (or the string 'infinity') and the realtime field empty/'n/a' when nothing is scheduled.
+	next_dead=1
+	case "$tmr_next_r" in ''|'n/a'|'infinity') : ;; *) next_dead=0 ;; esac
+	if [ "$next_dead" -eq 1 ]; then
+		case "$tmr_next_m" in ''|'0'|'n/a'|'infinity') : ;; *) next_dead=0 ;; esac
+	fi
+	if [ "$tmr_state" = "enabled" ] || [ "$tmr_active" = "active" ]; then
+		if [ "$next_dead" -eq 1 ]; then
+			crit "the timer reports NO NEXT ELAPSE (realtime='${tmr_next_r:-n/a}' monotonic='${tmr_next_m:-n/a}')."
+			crit "        It is enabled/active and WILL NEVER FIRE — the state this drill's own two signals cannot see."
+			crit "        A monotonic-only trigger that has already elapsed does not re-arm; give it a calendar"
+			crit "        trigger in a timer drop-in (OnCalendar=), then: systemctl daemon-reload && systemctl restart $TMR_NAME"
+		else
+			say "  ok    the timer will fire: next elapse ${tmr_next_r:-monotonic ${tmr_next_m}}"
+		fi
+	else
+		say "  note  next elapse: ${tmr_next_r:-${tmr_next_m:-n/a}} (timer not enabled/active — informational)"
+	fi
 fi
 
 # --- 4. node-specific pins (over the EFFECTIVE command) --------------------------------------------
