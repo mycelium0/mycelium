@@ -69,6 +69,56 @@ _insecure_bypass_permitted() {
 	return 0
 }
 
+# ---------------------------------------------------------------------------
+# myc_update_retry_hold ATTEMPTS FAILED_MTIME NOW — PURE anti-flap hold arithmetic for flow_update's
+# byte-identity refusal. Echoes "HOLD AGE" in seconds on stdout; the caller holds iff AGE < HOLD. No
+# stat(1), no date(1), no file access, no globals beyond the two tunables — the I/O stays at the call
+# site so this can be driven directly from a value table.
+#
+# WHY IT IS A FUNCTION AT ALL (Audit-0009 M1/O1). The arithmetic used to be inline in flow_update, and
+# its gate asserted the SPELLING of the expressions with literal greps — never executing them. Two
+# single-token mutations (flipping a `-le`, reversing a subtraction) disabled the guard outright while
+# all nine assertions stayed green, and a pure rename with no behaviour change turned the gate red. That
+# is the incentive exactly backwards. Extracted, the ladder is a table the gate can check.
+#
+# WHY AN ATTEMPT COUNT, NOT A CALENDAR DELTA (Audit-0009 P1). The hold used to be the elapsed time
+# between two file mtimes, so any gap in the timer's cadence — a node offline, a dead timer, a run of
+# ticks dying before the guard — sent the SECOND failure of the same candidate straight to the 6 h cap
+# instead of the documented 1 h → 1 h → 2 h → 4 h → 6 h ramp: the node furthest behind waited longest.
+# The ladder now counts consecutive failures of this candidate, which is what "escalate" meant all along:
+#   attempts  1     2     3     4     5+
+#   hold      1 h   1 h   2 h   4 h   6 h (capped)
+#
+# FAIL-SAFE, deliberately. Any unusable input yields "0 0" — AGE < HOLD is then false, so the caller
+# PROMOTES. This is a throttle over an already fail-closed path (validate → promote → verify → rollback);
+# the worst case of a broken calculator is today's un-throttled behaviour, which that machinery already
+# contains. It must never invent a hold out of garbage: a guard that can wedge updates is worse than the
+# flap it fixes.
+myc_update_retry_hold() {
+	local attempts="${1:-}" fmtime="${2:-}" now="${3:-}"
+	local min="${UPDATE_RETRY_HOLD_MIN_SEC:-3600}" max="${UPDATE_RETRY_HOLD_MAX_SEC:-21600}"
+	local age hold step
+	case "$fmtime" in ''|*[!0-9]*) printf '0 0\n'; return 0 ;; esac
+	case "$now"    in ''|*[!0-9]*) printf '0 0\n'; return 0 ;; esac
+	case "$min"    in ''|*[!0-9]*) min=3600 ;; esac
+	case "$max"    in ''|*[!0-9]*) max=21600 ;; esac
+	[ "$max" -ge "$min" ] || max="$min"
+	age=$(( now - fmtime ))
+	# A clock that went backwards is not evidence of a young failure — it is no evidence at all.
+	[ "$age" -ge 0 ] || { printf '0 0\n'; return 0; }
+	# An unreadable or absent count is one attempt: throttle at the FLOOR rather than not at all. The
+	# count is rewritten on every failure (flow_update), so this self-heals on the next tick.
+	case "$attempts" in ''|*[!0-9]*) attempts=1 ;; esac
+	[ "$attempts" -ge 1 ] || attempts=1
+	hold="$min"; step="$attempts"
+	# Double once per attempt past the second; the `< max` term bounds the loop for any count.
+	while [ "$step" -gt 2 ] && [ "$hold" -lt "$max" ]; do
+		hold=$(( hold * 2 )); step=$(( step - 1 ))
+	done
+	[ "$hold" -le "$max" ] || hold="$max"
+	printf '%s %s\n' "$hold" "$age"
+}
+
 verify_signed_ref() {
 	# verify_signed_ref REVISION — fail-closed unless REVISION carries a valid signature from the
 	# operator's out-of-band key. Honors SSH allowedSigners (preferred) or GPG. Refuses on any

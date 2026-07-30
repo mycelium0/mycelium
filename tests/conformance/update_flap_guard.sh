@@ -17,6 +17,14 @@
 #   the last failed one. This gate pins BOTH halves — that the refusal exists, and that it is BOUNDED,
 #   SELF-CLEARING and NARROW, because a guard that can wedge updates is worse than the flap.
 #
+# WHY IT EXECUTES THE LADDER (Audit-0009 M1/O1)
+#   This gate used to verify the arithmetic by GREPPING FOR ITS SPELLING. Mutation testing at ab39d67
+#   showed the incentive inverted: reversing a subtraction so the guard never holds, and swapping the
+#   floor for the cap so every transient blip charges six hours, both left 9/9 assertions green — while a
+#   pure rename with zero behaviour change turned two of them red. The arithmetic now lives in a PURE
+#   helper (myc_update_retry_hold, control/lib/nb_update_apply.sh) that this gate SOURCES AND RUNS over a
+#   value table, so the ladder is checked by its outputs. Both mutants above must fail that table.
+#
 # OFFLINE + INSPECT-ONLY. Exit: 0 = pinned; 1 = violation; 2 = usage/env error.
 set -u
 REPO_ROOT="${MYC_REPO_ROOT:-$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)}"
@@ -44,13 +52,14 @@ else
 	badln "no byte-identity check against \$FAILED_CONFIG before promoting (guard@${g:-none} promote@${p:-none}) — a runtime-bad candidate is re-promoted every tick"
 fi
 
-# 2. BOUNDED: the refusal is gated on an AGE vs a computed hold, and the hold is capped.
-printf '%s' "$code" | grep -qE '\[ "\$fage" -lt "\$fhold" \]' \
-	&& ok "the refusal is bounded by an age test (\$fage < \$fhold)" \
+# 2. BOUNDED: the refusal is gated on an AGE vs a computed hold, and the call site delegates the
+#    arithmetic to the pure helper rather than open-coding it again.
+printf '%s' "$code" | grep -qE '\[ "\$[a-z_]+" -lt "\$[a-z_]+" \]' \
+	&& ok "the refusal is bounded by a strict age-vs-hold test (any naming)" \
 	|| badln "the refusal has no age test — it could suppress updates PERMANENTLY (worse than the flap)"
-printf '%s' "$code" | grep -qE '\-le "\$UPDATE_RETRY_HOLD_MAX_SEC" \] \|+ fhold="\$UPDATE_RETRY_HOLD_MAX_SEC"' \
-	&& ok "the hold is clamped to \$UPDATE_RETRY_HOLD_MAX_SEC (escalation cannot run away)" \
-	|| badln "the hold is not clamped to \$UPDATE_RETRY_HOLD_MAX_SEC — an escalating hold with no cap can wedge updates"
+printf '%s' "$code" | grep -q 'myc_update_retry_hold' \
+	&& ok "flow_update delegates the hold arithmetic to myc_update_retry_hold (executable, not inline)" \
+	|| badln "flow_update computes the hold inline again — the ladder below verifies the helper, so an inline copy is unverified by construction"
 for v in UPDATE_RETRY_HOLD_MIN_SEC UPDATE_RETRY_HOLD_MAX_SEC; do
 	d="$(grep -E "^$v=" "$NB" | head -1)"
 	printf '%s' "$d" | grep -qE "^$v=\"\\\$\{$v:-[1-9][0-9]*\}\"" \
@@ -58,10 +67,83 @@ for v in UPDATE_RETRY_HOLD_MIN_SEC UPDATE_RETRY_HOLD_MAX_SEC; do
 		|| badln "$v is missing, zero, or not env-overridable: ${d:-<absent>}"
 done
 
-# 3. FAIL-SAFE: an unreadable mtime/clock must fall through to promoting, not to holding.
-printf '%s' "$code" | grep -qE 'fage=-1' && printf '%s' "$code" | grep -qE '\[ "\$fage" -ge 0 \]' \
-	&& ok "an unreadable mtime/clock yields fage=-1 and falls through to promote (fail-safe)" \
-	|| badln "no fage=-1 / -ge 0 fail-safe: a missing stat(1) or date(1) could hold instead of promote"
+# 3. THE LADDER, EXECUTED. Source the pure helper and drive it over a value table: the documented
+#    escalation, the cap, and every fail-safe input. `0 0` means "no hold" (age < hold is then false),
+#    which is the promote direction — a broken calculator must degrade to today's un-throttled path, not
+#    invent a hold. NOW-FMTIME is fixed at 4000s throughout; only the attempt count varies.
+LIB="$REPO_ROOT/control/lib/nb_update_apply.sh"
+if [ ! -f "$LIB" ]; then
+	badln "control/lib/nb_update_apply.sh is missing — cannot execute the hold ladder"
+else
+	ladder_out="$(
+		set -u
+		UPDATE_RETRY_HOLD_MIN_SEC=3600 UPDATE_RETRY_HOLD_MAX_SEC=21600
+		# shellcheck source=/dev/null
+		. "$LIB" 2>/dev/null
+		command -v myc_update_retry_hold >/dev/null 2>&1 || { printf 'MISSING\n'; exit 0; }
+		#            label            attempts fmtime now
+		for spec in  "attempt-1:1:1000:5000"   "attempt-2:2:1000:5000"   "attempt-3:3:1000:5000" \
+		             "attempt-4:4:1000:5000"   "attempt-5:5:1000:5000"   "attempt-99:99:1000:5000" \
+		             "no-mtime:3::5000"        "junk-mtime:3:abc:5000"   "no-now:3:1000:" \
+		             "clock-back:3:5000:1000"  "no-count:.:1000:5000"    "junk-count:x:1000:5000"; do
+			IFS=: read -r lbl a m n <<<"$spec"
+			[ "$a" = "." ] && a=""
+			printf '%s=%s\n' "$lbl" "$(myc_update_retry_hold "$a" "$m" "$n")"
+		done
+	)"
+	if printf '%s' "$ladder_out" | grep -q 'MISSING'; then
+		badln "myc_update_retry_hold is not defined in control/lib/nb_update_apply.sh — the hold arithmetic is unverifiable"
+	else
+		# The documented ramp: 1h, 1h, 2h, 4h, 6h, 6h… The mutation that pins the hold at the floor and the
+		# one that pins it at the cap each break a DIFFERENT row here, so neither can pass this table.
+		expect() {
+			got="$(printf '%s\n' "$ladder_out" | grep "^$1=" | head -1 | cut -d= -f2-)"
+			if [ "$got" = "$2" ]; then ok "hold ladder: $1 -> $2"
+			else badln "hold ladder: $1 gave '${got:-<none>}', expected '$2' — the escalation does not match the documented 1h/1h/2h/4h/6h ramp"; fi
+		}
+		expect attempt-1  "3600 4000"
+		expect attempt-2  "3600 4000"
+		expect attempt-3  "7200 4000"
+		expect attempt-4  "14400 4000"
+		expect attempt-5  "21600 4000"
+		expect attempt-99 "21600 4000"
+		# Fail-safe rows: no usable input may produce a hold.
+		expect no-mtime   "0 0"
+		expect junk-mtime "0 0"
+		expect no-now     "0 0"
+		expect clock-back "0 0"
+		# An unreadable count throttles at the FLOOR — the one input that degrades toward holding, and only
+		# to the minimum, because the count is rewritten on every failure and self-heals next tick.
+		expect no-count   "3600 4000"
+		expect junk-count "3600 4000"
+	fi
+fi
+
+# 3b. ESCALATION IS BY ATTEMPT, NOT CALENDAR TIME (Audit-0009 P1), and the count survives deletion of its
+#     own file (P2): the failure path rewrites it UNCONDITIONALLY, next to the snapshot it belongs to.
+if printf '%s' "$code" | grep -qE '([a-z_]+)=\$\(\( \1 \+ 1 \)\)'; then
+	ok "the failure path increments a consecutive-failure count (escalation cannot be skewed by a cadence gap)"
+else
+	badln "the failure path does not increment an attempt count — an escalation derived from calendar time sends the second failure of a candidate straight to the cap after any gap in the timer's cadence"
+fi
+depth_of() { printf '%s\n' "$code" | grep -m1 -- "$1" | sed -E 's/[^\t].*$//' | awk '{print length}'; }
+w="$(depth_of 'install -m 0600 /dev/null "$FAILED_SINCE"')"
+sn="$(depth_of 'install -m 0600 "$SINGBOX_CONFIG" "$FAILED_CONFIG"')"
+if [ -n "$w" ] && [ -n "$sn" ] && [ "$w" -le "$sn" ]; then
+	ok "the attempt count is rewritten unconditionally with the snapshot (removing it cannot strand the ladder)"
+else
+	badln "the attempt count is written only under a condition — if that file is removed externally it is never recreated and a permanently-bad candidate is retried at the floor forever (Audit-0009 P2)"
+fi
+
+# 3c. THE HOLD CONSULTS LIVENESS (Audit-0009 A1). Its justification is the live connections two restarts
+#     would drop; when the engine is down there are none, and the held candidate is the only untried
+#     config the node has left. The refusal must stand down there rather than extend the outage.
+hold_region="$(printf '%s\n' "$code" | awk '/\[ "\$fage" -lt "\$fhold" \]/{f=1} f{print} f&&/^\t\tfi$/{exit}')"
+if printf '%s' "$hold_region" | grep -q 'is-active --quiet sing-box'; then
+	ok "the hold stands down when sing-box is not active (it never extends an outage it cannot shorten)"
+else
+	badln "the hold does not consult data-plane liveness — on a node whose rollback ALSO failed to start, the refusal declines the only untried config for up to 6h while the node serves nothing"
+fi
 
 # 4. The failed candidate is snapshotted BEFORE rollback_config (after it, the bytes are gone).
 r="$(at 'install -m 0600 .*FAILED_CONFIG')"; b="$(at 'rollback_config')"

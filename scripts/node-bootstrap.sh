@@ -405,8 +405,10 @@ STAGED_CONFIG="$STATE_DIR/config.staged.json"
 ACK_MARKER="$STATE_DIR/config.staged.ack"
 # The candidate that last FAILED verify_post_apply, kept byte-for-byte for the anti-flap guard in
 # flow_update (peer of LASTGOOD_CONFIG/STAGED_CONFIG — same dir, same snapshot convention, and it inlines
-# the same secrets, so 0600). FAILED_SINCE's mtime is when this same candidate FIRST failed; the two
-# mtimes give an escalating hold with no counter to parse. Deleting either forces an immediate retry.
+# the same secrets, so 0600). FAILED_SINCE holds the CONSECUTIVE-FAILURE COUNT for that candidate — one
+# integer, rewritten with it on every failure — which is what the hold escalates on. Removing
+# FAILED_CONFIG forces an immediate retry (the byte-identity check no longer matches). Removing
+# FAILED_SINCE does NOT: it resets the ladder to the 1 h floor, and the next failure recreates it.
 FAILED_CONFIG="$STATE_DIR/config.failed.json"
 FAILED_SINCE="$STATE_DIR/config.failed.since"
 # The candidate that last failed `sing-box check` — kept byte-for-byte for the OPERATOR, not for a guard.
@@ -758,9 +760,21 @@ flow_update() {
 	# node renders would fail identically; and an unrelated doc/CI commit must not reset the hold to zero
 	# (on a branch-tracking node that would defeat the guard entirely at this repo's push cadence).
 	#
-	# THE HOLD ESCALATES WITHOUT A COUNTER: hold = clamp(MIN, MAX, mtime(FAILED_CONFIG) - mtime(FAILED_SINCE))
-	# = how long this same candidate has been failing. 1h, 1h, 2h, 4h, 6h, 6h… A transient blip costs one
-	# hour, not six; a genuinely dead candidate settles at ~4 restart-pairs/day instead of ~192.
+	# THE HOLD ESCALATES BY ATTEMPT: hold = myc_update_retry_hold(consecutive failures of THIS candidate),
+	# 1h, 1h, 2h, 4h, 6h, 6h… A transient blip costs one hour, not six; a genuinely dead candidate settles
+	# at ~4 restart-pairs/day instead of ~192. The arithmetic is a PURE helper in control/lib/nb_update_apply.sh
+	# so a gate can drive the whole ladder from a value table (Audit-0009 M1/O1); it counts attempts rather
+	# than calendar time so a gap in the timer's cadence cannot send the second failure to the cap (P1).
+	#
+	# AND ONLY WHILE THE DATA PLANE IS ACTUALLY UP (Audit-0009 A1). The hold's whole justification is that
+	# re-promoting costs two restarts that drop live client connections — which presumes there are live
+	# connections to drop. In the one state where that presumption fails, the rollback ALSO could not bring
+	# sing-box up, the node is serving nothing, and the held candidate is its only untried config: there the
+	# refusal is not protecting connections, it is the thing keeping the node down, escalating precisely as
+	# the outage lengthens. So the hold now consults liveness and stands down when the engine is inactive.
+	# (A brief inactive window from sing-box's own Restart=on-failure loop can let a known-bad candidate
+	# through early; it then fails verify and rolls back exactly as before — contained, and cheap next to a
+	# 6 h self-inflicted outage.)
 	#
 	# CLASSIFICATION — fail-SAFE, deliberately. This is a THROTTLE over an already fail-closed path, not a
 	# new provenance or promotion gate: it can only decline to re-apply something that already failed ON
@@ -771,32 +785,36 @@ flow_update() {
 	# render-changing push escapes it, --ack/--node-apply are never gated, and removing $FAILED_CONFIG
 	# forces a retry now. A guard that could wedge updates forever would be worse than the flap it fixes.
 	if [ "$DRY_RUN" -eq 0 ] && [ -f "$FAILED_CONFIG" ] && cmp -s "$candidate" "$FAILED_CONFIG"; then
-		local fmtime smtime fnow fage fhold
+		local fmtime fnow ftries fverdict fage fhold
 		# Portable GNU/BSD mtime (the bundle_served_age_seconds idiom); unusable -> no signal -> promote.
+		# FAILED_CONFIG is rewritten on every failure, so its mtime is when this candidate LAST failed.
 		fmtime="$(stat -c %Y "$FAILED_CONFIG" 2>/dev/null || stat -f %m "$FAILED_CONFIG" 2>/dev/null || printf '')"
-		smtime="$(stat -c %Y "$FAILED_SINCE"  2>/dev/null || stat -f %m "$FAILED_SINCE"  2>/dev/null || printf '')"
 		fnow="$(date +%s 2>/dev/null || printf '')"
-		case "$fmtime" in ''|*[!0-9]*) fmtime="" ;; esac
-		case "$smtime" in ''|*[!0-9]*) smtime="" ;; esac
-		case "$fnow"   in ''|*[!0-9]*) fnow=""   ;; esac
-		fage=-1
-		fhold="$UPDATE_RETRY_HOLD_MIN_SEC"
-		if [ -n "$fmtime" ] && [ -n "$fnow" ]; then fage=$(( fnow - fmtime )); fi
-		if [ -n "$fmtime" ] && [ -n "$smtime" ] && [ "$fmtime" -ge "$smtime" ]; then
-			[ $(( fmtime - smtime )) -le "$fhold" ] || fhold=$(( fmtime - smtime ))
+		ftries="$(head -n 1 "$FAILED_SINCE" 2>/dev/null | tr -dc '0-9')"
+		# The arithmetic lives in myc_update_retry_hold (control/lib/nb_update_apply.sh) — pure, and driven
+		# by a value table in tests/conformance/update_flap_guard.sh. Here we only do the I/O.
+		fverdict="$(myc_update_retry_hold "$ftries" "$fmtime" "$fnow")"
+		fhold="${fverdict%% *}"; fage="${fverdict##* }"
+		if [ "$fage" -lt "$fhold" ]; then
+			if ! systemctl is-active --quiet sing-box 2>/dev/null; then
+				# A1: the hold protects live connections. There are none — take the untried config.
+				warn "this candidate matches the one that failed post-apply verification, but sing-box is NOT"
+				warn "active: the node is serving nothing, so the retry hold has nothing left to protect."
+				warn "Standing the hold down and re-attempting it (attempt $(( ${ftries:-0} + 1 )))."
+			else
+				rm -f "$candidate" 2>/dev/null || true
+				warn "this candidate is byte-identical to the one that FAILED post-apply verification ${fage}s ago."
+				warn "NOT re-promoting it for another $(( fhold - fage ))s (hold ${fhold}s after ${ftries:-1} failed"
+				warn "attempt(s), cap ${UPDATE_RETRY_HOLD_MAX_SEC}s): re-applying a known-bad candidate every tick"
+				warn "restarts sing-box twice per tick and drops live client connections. sing-box is active on"
+				warn "its last known-good config (systemctl is-active; client reachability is not asserted here)."
+				warn "Push a rev that changes what this node renders (applied on the next tick), run '$0 --node-apply'"
+				warn "after fixing the cause out of band, or remove $FAILED_CONFIG to force a retry now."
+				die "update declined: known-bad candidate inside the retry hold (sing-box active on the last known-good)."
+			fi
+		else
+			log "retry hold elapsed (age ${fage}s, hold ${fhold}s); re-attempting the previously failed candidate once."
 		fi
-		[ "$fhold" -le "$UPDATE_RETRY_HOLD_MAX_SEC" ] || fhold="$UPDATE_RETRY_HOLD_MAX_SEC"
-		if [ "$fage" -ge 0 ] && [ "$fage" -lt "$fhold" ]; then
-			rm -f "$candidate" 2>/dev/null || true
-			warn "this candidate is byte-identical to the one that FAILED post-apply verification ${fage}s ago."
-			warn "NOT re-promoting it for another $(( fhold - fage ))s (hold ${fhold}s, cap ${UPDATE_RETRY_HOLD_MAX_SEC}s):"
-			warn "re-applying a known-bad candidate every tick restarts sing-box twice per tick and drops live"
-			warn "client connections. The node stays on its last known-good config and keeps serving."
-			warn "Push a rev that changes what this node renders (applied on the next tick), run '$0 --node-apply'"
-			warn "after fixing the cause out of band, or remove $FAILED_CONFIG to force a retry now."
-			die "update declined: known-bad candidate inside the retry hold (last known-good config still live)."
-		fi
-		log "retry hold elapsed (age ${fage}s, hold ${fhold}s); re-attempting the previously failed candidate once."
 	fi
 	# Default: apply with rollback. Applying = an explicit RESTART (sing-box Type=simple has no real
 	# reload), so we restart and then assert health BEFORE declaring success.
@@ -822,13 +840,23 @@ flow_update() {
 		# known-good. $SINGBOX_CONFIG still holds the promoted candidate byte-for-byte at this point (the
 		# candidate file itself was removed right after promote_config), so this snapshot IS the failed
 		# candidate. 0600 because it inlines the same secrets as the live config and only the guard above
-		# ever reads it. FAILED_SINCE is (re)stamped only when a DIFFERENT candidate starts failing, so
-		# its mtime marks when THIS candidate first failed and the hold escalates across repeats.
+		# ever reads it. FAILED_SINCE carries the CONSECUTIVE-FAILURE COUNT for this candidate, which is what
+		# the hold escalates on; it is rewritten unconditionally alongside FAILED_CONFIG, so the two can
+		# never drift apart. They used to: the count was a bare mtime stamped only when a DIFFERENT
+		# candidate started failing, so deleting that one file — which the source itself told the reader to
+		# do — left it never recreated, and a permanently-bad candidate retried at the 1 h floor forever
+		# instead of climbing to 6 h (Audit-0009 P2).
 		if [ "$DRY_RUN" -eq 0 ] && [ -f "$SINGBOX_CONFIG" ]; then
-			if [ ! -f "$FAILED_CONFIG" ] || ! cmp -s "$SINGBOX_CONFIG" "$FAILED_CONFIG"; then
-				run install -m 0600 /dev/null "$FAILED_SINCE" 2>/dev/null || true
+			local ftries_next=0
+			if [ -f "$FAILED_CONFIG" ] && cmp -s "$SINGBOX_CONFIG" "$FAILED_CONFIG"; then
+				ftries_next="$(head -n 1 "$FAILED_SINCE" 2>/dev/null | tr -dc '0-9')"
+				case "$ftries_next" in ''|*[!0-9]*) ftries_next=0 ;; esac
 			fi
+			ftries_next=$(( ftries_next + 1 ))
+			run install -m 0600 /dev/null "$FAILED_SINCE" 2>/dev/null || true
+			printf '%s\n' "$ftries_next" >"$FAILED_SINCE" 2>/dev/null || true
 			run install -m 0600 "$SINGBOX_CONFIG" "$FAILED_CONFIG" 2>/dev/null || true
+			warn "consecutive post-apply failures of this candidate: $ftries_next (recorded in $FAILED_SINCE)."
 		fi
 		rollback_config
 		apply_singbox || true
