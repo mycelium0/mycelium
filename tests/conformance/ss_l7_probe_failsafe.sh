@@ -210,10 +210,18 @@ if printf '%s' "$probe_fn" | grep -q 'server:"127.0.0.1"'; then
 else
 	badln "the probe no longer dials its own listener at 127.0.0.1 — the listener leg must stay loopback"
 fi
-if printf '%s' "$probe_fn" | grep -q 'SINGBOX_CONFIG' && printf '%s' "$probe_fn" | grep -q 'users\[0\]\.password'; then
-	ok "the credential is reconstructed from the LIVE config, in the multi-user server_psk:user_psk form"
+# THE COMPOSITION, not one spelling of the user lookup. This asserted the literal `users[0].password`
+# and broke the moment the probe started CHOOSING its user rather than taking the first (Audit-0009 F1
+# — the first user may be the one a two-hop overlay routes off-host). What must hold is that the
+# credential is built from the LIVE config and is the two-part multi-user form: a server-PSK-only
+# password is rejected exactly like a wrong key, so the "correct" arm would fail for the same reason as
+# a dead listener and the probe would prove nothing.
+if printf '%s' "$probe_fn" | grep -q 'SINGBOX_CONFIG' \
+	&& printf '%s' "$probe_fn" | grep -qE '\(\.password // ""\) \+ ":" \+' \
+	&& printf '%s' "$probe_fn" | grep -qE '\.users' ; then
+	ok "the credential is reconstructed from the LIVE config in the multi-user server_psk:user_psk form"
 else
-	badln "the probe does not build its credential from the live config in the multi-user form — a server-PSK-only password is REJECTED exactly like a wrong key, so the 'correct' arm would fail for the same reason as a dead listener and the probe would prove nothing"
+	badln "the probe does not build its credential from the live config as server_psk:user_psk — a server-PSK-only password is REJECTED exactly like a wrong key, so the 'correct' arm would fail for the same reason as a dead listener and the probe would prove nothing"
 fi
 
 # 9. NO OFF-HOST CONTACT.

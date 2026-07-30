@@ -297,14 +297,33 @@ _l7_probe_shadowsocks_dial() {
 	case "$addr" in *:*) tgt="[$addr]:$sshport" ;; *) tgt="$addr:$sshport" ;; esac
 
 	# (2) the probe client.
+	# WHICH USER THE PROBE AUTHENTICATES AS (Audit-0009 F1). The round trip goes through the node's OWN
+	# served config, so it is subject to the SERVED ROUTE RULES — including a two-hop overlay, which routes
+	# a designated client (`auth_user`) out to an upstream node. Authenticating as that client would send
+	# the probe's traffic OFF THIS HOST, silently voiding the ADR-0036 boundary the probe is built on
+	# ("no packet on the wire"), and would attribute synthetic traffic to a named person.
+	#
+	# So the user is CHOSEN, not assumed: the first inbound user that no route rule sends anywhere but
+	# direct. The authority is the served config's own route rules, not two_hop.json — the rules are what
+	# actually route, and a stale or hand-edited overlay would mislead. If EVERY user is routed off-host,
+	# the probe returns cannot-judge below rather than quietly breaking its own invariant: losing coverage
+	# on such a node is the correct trade against emitting traffic the ADR says we never emit.
 	local ob
 	ob="$(jq -c --arg tag "$tag" --argjson port "$port" \
-		'.inbounds[] | select(.tag==$tag)
+		'([ .route.rules[]? | select(.outbound != "direct" and .outbound != "block")
+		    | .auth_user // [] ] | flatten) as $offhost
+		 | .inbounds[] | select(.tag==$tag)
+		 | ([ (.users // [])[] | select((.name // "") as $n | ($offhost | index($n)) | not) ] | .[0]) as $u
+		 | if ((.users // []) | length) > 0 and $u == null then empty else . end
 		 | (if ((.users // []) | length) > 0
-		    then ((.password // "") + ":" + (.users[0].password // ""))
+		    then ((.password // "") + ":" + ($u.password // ""))
 		    else (.password // "") end) as $pw
 		 | [{type:"shadowsocks",tag:"probe-out",server:"127.0.0.1",server_port:$port,method:.method,password:$pw}]' \
 		"$SINGBOX_CONFIG" 2>/dev/null)" || ob=""
+	if [ -z "$ob" ]; then
+		log "SS probe: every inbound user is routed off-host by a route rule (two-hop); declining to probe rather than emit traffic the ADR-0036 boundary forbids."
+		return 2
+	fi
 	# well-formed iff the method, the port AND every secret in the composed password are present — the
 	# `^:|:$` test rejects a multi-user inbound with an empty server OR user PSK, which would otherwise
 	# dial with a valid-SHAPED but unusable credential and read DEAD on a healthy listener.
@@ -321,7 +340,7 @@ _l7_probe_shadowsocks_dial() {
 measure_l7_probe() {
 	have openssl && have jq || return 0
 	[ -f "$SINGBOX_CONFIG" ] || return 0
-	local marker="${1:-$STATE_DIR/l7_selftest.json}" dead="" tested=0 row
+	local marker="${1:-$STATE_DIR/l7_selftest.json}" dead="" unknown="" tested=0 row
 	local TO=""; command -v timeout >/dev/null 2>&1 && TO="timeout 8"
 	# RP-0015: resolve the client uTLS preset ONCE (single source: params.client_fingerprint, normalised
 	# against the closed vocab) so every mimicking probe below (the ShadowTLS reconstruction, the ephemeral
@@ -330,7 +349,7 @@ measure_l7_probe() {
 	local fp; fp="$(myc_client_fingerprint "$(jq -c . "${PARAMS_JSON:-}" 2>/dev/null || printf '{}')")"
 	while IFS= read -r row; do
 		[ -n "$row" ] || continue
-		local tag ref port reality sni dest type drc qrc ok=0 attempt
+		local tag ref port reality sni dest type drc qrc ok=0 vrc=2 attempt
 		tag="$(printf '%s'     "$row" | jq -r '.tag')"
 		type="$(printf '%s'    "$row" | jq -r '.type // ""')"
 		port="$(printf '%s'    "$row" | jq -r '.port')"
@@ -352,7 +371,7 @@ measure_l7_probe() {
 			for attempt in 1 2 3; do
 				qrc=0; _l7_probe_shadowtls_dial "$tag" "$port" "$fp" || qrc=$?
 				# 0 = alive, 2 = cannot judge (sing-box/timeout absent) -> NOT dead; 1 = dead -> retry-debounce.
-				[ "$qrc" -ne 1 ] && { ok=1; break; }
+				[ "$qrc" -ne 1 ] && { ok=1; vrc="$qrc"; break; }
 				sleep 1
 			done
 		elif [ "$type" = "shadowsocks" ]; then
@@ -365,7 +384,7 @@ measure_l7_probe() {
 				qrc=0; _l7_probe_shadowsocks_dial "$tag" "$port" || qrc=$?
 				# 0 = alive, 2 = cannot judge (no tooling / no public own-address / control silent) -> NOT
 				# dead; 1 = dead -> retry-debounce.
-				[ "$qrc" -ne 1 ] && { ok=1; break; }
+				[ "$qrc" -ne 1 ] && { ok=1; vrc="$qrc"; break; }
 				sleep 1
 			done
 		elif [ "$type" = "hysteria2" ] || [ "$type" = "tuic" ]; then
@@ -374,13 +393,16 @@ measure_l7_probe() {
 			# cert file (_l7_probe_quic_dial, loopback-only). A bound-but-client-DEAD QUIC listener (an
 			# EXPIRED served cert, wrong/rotated auth, a wedged engine) is caught here instead of passing the
 			# L4-only reach window.
-			[ -n "$sni" ] || { tested=$(( tested + 1 )); continue; }
+			# A SKIP is not a pass (Audit-0009 U1). This incremented `checked` and touched neither list, so a
+			# member with no usable SNI counted toward coverage while proving nothing — the same overclaim as
+			# the folded cannot-judge, on the sibling path.
+			[ -n "$sni" ] || { tested=$(( tested + 1 )); unknown="$unknown $ref"; continue; }
 			for attempt in 1 2 3; do
 				# `qrc=0; ... || qrc=$?` mirrors the REALITY branch: under `set -e` a bare dead-return (rc 1)
 				# would abort before the marker is written. 0 = alive, 2 = cannot judge (sing-box/timeout
 				# absent) -> NOT dead; 1 = dead -> retry-debounce (a one-off blip never writes a dead marker).
 				qrc=0; _l7_probe_quic_dial "$tag" "$type" "$port" "$sni" || qrc=$?
-				[ "$qrc" -ne 1 ] && { ok=1; break; }
+				[ "$qrc" -ne 1 ] && { ok=1; vrc="$qrc"; break; }
 				sleep 1
 			done
 		elif [ "$reality" = "true" ]; then
@@ -389,7 +411,8 @@ measure_l7_probe() {
 			# handshake rides that fallback and would MISS it. Use the authenticated ephemeral REALITY
 			# handshake against dest (donor_verify_reality — the same steal-viability the live server
 			# depends on); it contacts only the node's own cover/dest host, not a third party.
-			[ -n "$dest" ] || { tested=$(( tested + 1 )); continue; }
+			# A skip is not a pass — see the note on the sni skip above (Audit-0009 U1).
+			[ -n "$dest" ] || { tested=$(( tested + 1 )); unknown="$unknown $ref"; continue; }
 			for attempt in 1 2 3; do
 				# `drc=0; ... || drc=$?` is REQUIRED, not stylistic: on the timer/dispatch path this probe
 				# runs under `set -e` in a NON-exempt context, so a bare `donor_verify_reality; drc=$?`
@@ -397,7 +420,7 @@ measure_l7_probe() {
 				# — silently defeating the very broken-REALITY detection this probe exists for.
 				drc=0; donor_verify_reality "$dest" "$fp" || drc=$?
 				# 0 = steal-viable, 2 = cannot judge (engine/curl/port) -> NOT dead; 1 = broken -> retry.
-				[ "$drc" -ne 1 ] && { ok=1; break; }
+				[ "$drc" -ne 1 ] && { ok=1; vrc="$drc"; break; }
 				sleep 1
 			done
 		else
@@ -410,7 +433,10 @@ measure_l7_probe() {
 			# wildcard SAN (`*.parent`) matches too. Dots are literal-enough for an own-cert loopback probe
 			# (no adversary controls this cert); the trailing class anchors the DNS name so a suffix
 			# (`$sni.evil.tld`) cannot match.
-			[ -n "$sni" ] || { tested=$(( tested + 1 )); continue; }
+			# A SKIP is not a pass (Audit-0009 U1). This incremented `checked` and touched neither list, so a
+			# member with no usable SNI counted toward coverage while proving nothing — the same overclaim as
+			# the folded cannot-judge, on the sibling path.
+			[ -n "$sni" ] || { tested=$(( tested + 1 )); unknown="$unknown $ref"; continue; }
 			local parent="${sni#*.}" leaf san
 			for attempt in 1 2 3; do
 				leaf="$(echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null \
@@ -418,12 +444,21 @@ measure_l7_probe() {
 				[ -n "$leaf" ] || { sleep 1; continue; }
 				printf '%s' "$leaf" | openssl x509 -noout -checkend 0 >/dev/null 2>&1 || { sleep 1; continue; }
 				san="$(printf '%s' "$leaf" | openssl x509 -noout -ext subjectAltName 2>/dev/null)"
-				if printf '%s' "$san" | grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)"; then ok=1; break; fi
+				if printf '%s' "$san" | grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)"; then ok=1; vrc=0; break; fi
 				sleep 1
 			done
 		fi
 		tested=$(( tested + 1 ))
-		[ "$ok" -eq 1 ] || dead="$dead $ref"
+		if [ "$ok" -ne 1 ]; then
+			dead="$dead $ref"
+		elif [ "${vrc:-2}" -eq 2 ]; then
+			# CANNOT-JUDGE is its own outcome (Audit-0009 B1). It used to be folded into ALIVE here: the
+			# member left `dead` empty and incremented `checked`, so a run that PROVED nothing was byte-
+			# identical to one that proved health. The probe computes three values and the marker could
+			# only express two, so the third was silently rounded toward "fine" — the wrong direction for
+			# a signal a planner acts on.
+			unknown="$unknown $ref"
+		fi
 	# The enrolled set. The standalone `shadowsocks` clause is qualified where the others are not: the
 	# ShadowTLS inbound carries a SECOND shadowsocks inbound as its hidden inner detour, which is not a
 	# served family (it listens on 127.0.0.1 with no listen_port, and its outer layer is probed on its own
@@ -437,14 +472,24 @@ $(jq -c '.inbounds[]? | select(.tag=="vless-reality-vision-in" or .tag=="vless-r
 	   dest:(.tls.reality.handshake.server // .tls.server_name)}' "$SINGBOX_CONFIG" 2>/dev/null)
 PROBE_EOF
 	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-	printf '{"observed_at":"%s","checked":%d,"dead":[%s]}\n' "$ts" "$tested" \
-		"$(for d in $dead; do printf '"%s",' "$d"; done | sed 's/,$//')" >"$marker.tmp" 2>/dev/null \
+	# `unknown` is ADDITIVE: the daemon reads .dead and ignores keys it does not know, so the one-producer
+	# one-schema rule (ADR-0036) still holds — the schema grew, it did not fork. Rotation behaviour is
+	# unchanged: only `dead` faults a member. What changes is that "we could not tell" is now VISIBLE.
+	printf '{"observed_at":"%s","checked":%d,"dead":[%s],"unknown":[%s]}\n' "$ts" "$tested" \
+		"$(for d in $dead; do printf '"%s",' "$d"; done | sed 's/,$//')" \
+		"$(for u in $unknown; do printf '"%s",' "$u"; done | sed 's/,$//')" >"$marker.tmp" 2>/dev/null \
 		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
 	if [ -n "$dead" ]; then
 		warn "L7 measure-probe: client-DEAD transport(s):$dead (own-listener handshake failed)."
 		return 1
 	fi
-	log "L7 measure-probe: all $tested L7-covered transport(s) (REALITY + genuine-TLS + QUIC + ShadowTLS + Shadowsocks; the Xray-served xhttp-tls is covered by its own sibling probe) pass their own-listener check."
+	if [ -n "$unknown" ]; then
+		# Say what was NOT established. The old line claimed every transport "passes", counting members the
+		# run could not judge as passing — the overclaim B1 names.
+		warn "L7 measure-probe: no member read DEAD, but$unknown could not be judged this run (missing tooling, no usable probe target, or a route that would leave the host). Coverage is $(( tested - $(printf '%s' "$unknown" | wc -w) ))/$tested, not $tested/$tested."
+	else
+		log "L7 measure-probe: all $tested L7-covered transport(s) (REALITY + genuine-TLS + QUIC + ShadowTLS + Shadowsocks; the Xray-served xhttp-tls is covered by its own sibling probe) verified alive on their own listener."
+	fi
 	return 0
 }
 
