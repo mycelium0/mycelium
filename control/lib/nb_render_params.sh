@@ -423,8 +423,29 @@ apply_node_xray_engine() {
 	promote_xray_config "$xray_candidate"
 	rm -f "$xray_candidate" 2>/dev/null || true
 	install_xray_unit
+	# ACCEPT-OR-ROLL-BACK (Audit-0009 K1). The primary engine has had a verify/rollback/failure-memory
+	# triad since the beginning; the secondary engine had a promote and a restart, and rollback_xray_config
+	# sat in nb_update_apply.sh with NO caller — the safety net was written and never hung. That mattered
+	# little while xray moved only under an operator's hand; converge_node_tail put this path on the
+	# unattended 15-minute timer, and an unaccepted promote there persists until somebody looks.
+	#
+	# `restart_xray` returning 0 only means systemd accepted the start. Assert the unit is actually ACTIVE
+	# after it, since a config xray parses but refuses at runtime exits moments later and would otherwise
+	# read as applied. On failure: restore the last known-good config, restart onto it, and fail — the same
+	# shape as the sing-box path, no cleverer.
 	restart_xray
-	log "xray engine applied (ADR-0032 dual-engine): config promoted + xray.service restarted."
+	if [ "$DRY_RUN" -eq 0 ] && ! systemctl is-active --quiet xray 2>/dev/null; then
+		warn "xray did not stay active after the restart; rolling back the secondary engine (fail-closed)."
+		# Remember the rejected bytes before the rollback overwrites them — the operator-evidence peer of
+		# the primary engine's failed-candidate snapshot, and the only copy once lastgood is restored.
+		if [ -f "$XRAY_CONFIG" ]; then
+			run install -m 0600 "$XRAY_CONFIG" "$STATE_DIR/xray.config.failed.json" 2>/dev/null || true
+		fi
+		rollback_xray_config
+		restart_xray || warn "xray could not restart onto the restored config — operator attention needed."
+		die "xray engine rolled back (fail-closed): the promoted config did not stay running. The rejected bytes are kept at $STATE_DIR/xray.config.failed.json (0600)."
+	fi
+	log "xray engine applied (ADR-0032 dual-engine): config promoted + xray.service restarted + confirmed active."
 	# Advisory L7 acceptance for the xray family: verify_post_apply is skipped on an xray-ONLY --node-apply
 	# (the sing-box config is unchanged), so run the outer-TLS own-cert probe here whenever xray is (re)served.
 	# Advisory — WARN, never rolls back (ADR-0036); a distinct marker so it never clobbers the daemon/verb one.
@@ -448,12 +469,39 @@ apply_node_xray_engine() {
 # returns immediately on a node with no xray family enabled (`node_needs_xray || return 0`) and skips the
 # restart when the rendered xray config is byte-identical; harden_ufw is additive + anti-lockout;
 # render_serve_bundle is fail-closed (keeps last-known-good rather than serving an invalid bundle).
+# FAILURE CONTRACT (Audit-0009 J1): run ALL THREE steps, then report. The tail used to be three bare
+# calls, and its first step is the only one that can `die` — so on an xray-serving node an xray fault
+# aborted the process and silently took the firewall and the served bundle with it. The steps are
+# INDEPENDENT (a broken secondary engine says nothing about whether the firewall admits the primary's
+# ports), so one failing must not cancel the others; that ordering accident turned a single-engine fault
+# into a three-way non-convergence.
+#
+# Each step is SUBSHELL-wrapped so its `die` is catchable — the same idiom rotate_apply_live already uses
+# for write_params. A subshell loses variable assignments, not side effects, and no step here exports
+# state the others read, so nothing is lost by running them isolated.
+#
+# The tail then returns NON-ZERO naming what failed. Under the entrypoint's `set -e` that makes the
+# calling flow fail loudly AFTER convergence was fully attempted — which is the intended shape: a
+# half-converged node must be visible (the unit goes red), and nothing here rolls back a sing-box config
+# that already promoted and verified. Reporting the failure and undoing a good promote are different
+# things; only the first is wanted.
 converge_node_tail() {
-	apply_node_xray_engine
+	local failed=""
+	( apply_node_xray_engine ) || failed="$failed xray-engine"
 	# Respects --no-harden. The `if` form, not `[ ] && harden_ufw`: under `set -e` the && form is only
 	# safe because another statement follows it, and that is too subtle to leave as a trap for the next edit.
-	if [ "${DO_HARDEN:-1}" -eq 1 ]; then harden_ufw; fi
-	render_serve_bundle
+	if [ "${DO_HARDEN:-1}" -eq 1 ]; then
+		( harden_ufw ) || failed="$failed firewall"
+	fi
+	( render_serve_bundle ) || failed="$failed served-bundle"
+	if [ -n "$failed" ]; then
+		warn "convergence INCOMPLETE — step(s) failed:$failed"
+		warn "  The other steps still ran: one failing step no longer cancels the rest. The primary engine's"
+		warn "  config is untouched by this failure (it promoted and verified before the tail ran); what is"
+		warn "  stale is the step named above. Fix it and re-run '$0 --node-apply'."
+		return 1
+	fi
+	return 0
 }
 
 flow_node_apply() {
