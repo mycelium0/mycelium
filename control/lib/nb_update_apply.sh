@@ -195,12 +195,40 @@ promote_config() {
 	local candidate="$1"
 	need_root
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] promote $candidate -> $SINGBOX_CONFIG"; return 0; fi
-	if [ -f "$SINGBOX_CONFIG" ]; then cp -f "$SINGBOX_CONFIG" "$LASTGOOD_CONFIG"; fi
+	# SERIALISE THE MUTATION (Audit-0009 G1). Five flows render-validate-promote, and with the update
+	# timer armed a hand-run --node-apply races a tick. Candidates are already written atomically and are
+	# now per-flow, so nothing can read a torn or foreign candidate — what remained unprotected is THIS
+	# window: two promoters interleaving the lastgood snapshot and the live replace, which can leave
+	# lastgood holding the OTHER flow's config, i.e. a rollback net pointing at the wrong rev.
+	# Bounded and non-wedging, the nb_donor.sh pattern: fd 9 in a subshell (auto-released on exit),
+	# `flock -w 30` so a stuck holder DEGRADES to unserialised rather than hanging the timer, and no lock
+	# at all where flock is absent. The critical section is a copy and an install — milliseconds — so the
+	# wait is never the reason a tick is slow. Deliberately NOT wrapped around fetch/render: a lock held
+	# across an unbounded `git fetch` would disable recovery during exactly the outage it exists for.
+	(
+		if have flock; then exec 9>"$STATE_DIR/promote.lock" 2>/dev/null && flock -w 30 9 2>/dev/null || true; fi
+		# ATOMIC on both writes (Audit-0009 H1). This function documents "atomically replace", and did
+		# neither: `cp -f` truncates the destination in place, and `install` writes the target directly.
+		# A reader (sing-box reload, a concurrent validate, the rollback path) could observe a half-written
+		# live config or a half-written last-known-good — the rollback net torn exactly when it is needed.
+		# mktemp in the DESTINATION directory keeps the rename on one filesystem, which is what makes
+		# `mv -f` atomic; a rename cannot be observed half-done.
+		if [ -f "$SINGBOX_CONFIG" ]; then
+			lg_tmp="$(mktemp "$(dirname "$LASTGOOD_CONFIG")/.lastgood.XXXXXX")" \
+				&& cp -f "$SINGBOX_CONFIG" "$lg_tmp" \
+				&& chmod 0640 "$lg_tmp" 2>/dev/null \
+				&& mv -f "$lg_tmp" "$LASTGOOD_CONFIG" \
+				|| { rm -f "${lg_tmp:-}" 2>/dev/null; die "could not snapshot the last-known-good config (fail-closed; refusing to promote without a rollback target)."; }
+		fi
 	# 0640 root:<sing-box group>, NOT 0644 (Audit-0008 S1-1): the live config INLINES the REALITY private
 	# key, every transport password + client UUID, and the clash_api Bearer secret — it must not be
 	# world-readable. The service reads it via Group=$SINGBOX_RUN_GROUP; a co-resident non-group principal
 	# (e.g. node_exporter) must not. Mirrors the ansible path + how privkey/params are already held (0640/0600).
-	install -m 0640 -o root -g "$SINGBOX_RUN_GROUP" "$candidate" "$SINGBOX_CONFIG"
+		live_tmp="$(mktemp "$(dirname "$SINGBOX_CONFIG")/.live.XXXXXX")" \
+			&& install -m 0640 -o root -g "$SINGBOX_RUN_GROUP" "$candidate" "$live_tmp" \
+			&& mv -f "$live_tmp" "$SINGBOX_CONFIG" \
+			|| { rm -f "${live_tmp:-}" 2>/dev/null; die "could not promote the candidate atomically (fail-closed; the live config is unchanged)."; }
+	)
 	log "promoted candidate to live config: $SINGBOX_CONFIG"
 }
 

@@ -103,7 +103,7 @@ flow_disable_two_hop() {
 	log "removed the node-local two_hop overlay ($STATE_DIR/two_hop.json)."
 	# Regenerate params WITHOUT the overlay (write_params no longer finds two_hop.json -> no .two_hop key).
 	write_params
-	local candidate="$STATE_DIR/config.candidate.json"
+	local candidate="$STATE_DIR/config.candidate.two-hop.json"
 	render_candidate "$candidate"
 	if ! validate_config "$candidate"; then
 		rm -f "$candidate" 2>/dev/null || true

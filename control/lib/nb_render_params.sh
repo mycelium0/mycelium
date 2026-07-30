@@ -537,7 +537,7 @@ flow_node_apply() {
 	need_root
 	[ -f "$IDENTITY_SECRETS" ] || die "no local identity; cannot apply a node profile (bootstrap first)."
 	write_params
-	local candidate="$STATE_DIR/config.candidate.json"
+	local candidate="$STATE_DIR/config.candidate.node-apply.json"
 	render_candidate "$candidate"
 	if ! validate_config "$candidate"; then
 		rm -f "$candidate" 2>/dev/null || true

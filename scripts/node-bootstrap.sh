@@ -589,7 +589,7 @@ flow_bootstrap() {
 	else
 		log "no xray-engine transport enabled; skipping xray install (dual-engine opt-in, default-off)."
 	fi
-	local candidate="$STATE_DIR/config.candidate.json"
+	local candidate="$STATE_DIR/config.candidate.bootstrap.json"
 	render_candidate "$candidate"
 	if ! validate_config "$candidate"; then
 		rm -f "$candidate" 2>/dev/null || true
@@ -688,7 +688,7 @@ flow_update() {
 	# Re-render from the LOCAL identity (NEVER regenerate keys on update).
 	[ -f "$IDENTITY_SECRETS" ] || die "no local identity; run bootstrap before --update (fail-closed)."
 	write_params
-	local candidate="$STATE_DIR/config.candidate.json"
+	local candidate="$STATE_DIR/config.candidate.update.json"
 	render_candidate "$candidate"
 	if ! validate_config "$candidate"; then
 		# KEEP THE EVIDENCE, THEN STILL FAIL LOUDLY. NO HOLD, NO SUPPRESSION — read this before
@@ -872,7 +872,7 @@ flow_revoke() {
 	[ -f "$IDENTITIES_JSON" ] || die "identities.json missing — nothing to revoke (bootstrap first)."
 	run "$MYCTL" identity revoke "$REVOKE_NAME" --state "$IDENTITIES_JSON" \
 		|| die "revoke failed — is '$REVOKE_NAME' a known client? (myceliumctl identity list)"
-	local candidate="$STATE_DIR/config.candidate.json"
+	local candidate="$STATE_DIR/config.candidate.revoke.json"
 	render_candidate "$candidate"
 	if ! validate_config "$candidate"; then
 		rm -f "$candidate" 2>/dev/null || true
