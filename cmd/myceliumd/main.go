@@ -4,12 +4,29 @@
 // later. See the LICENSE file in the repository root.
 
 // Command myceliumd is the Mycelium node control-agent daemon (the Go spine,
-// ADR-0012). This Phase 0 build exposes a PII-safe health/readiness endpoint and
-// the spine version, and — when the operator supplies a config — runs the
-// node-local reachability/health monitor (ADR-0019) and serves its redacted
-// snapshot. It binds to loopback by default and logs no PII. Channel-state
-// classification, auto-rotation, and routing remain Phase 2 and are not present
-// here; this daemon is the seat they will occupy later.
+// ADR-0012). It binds to loopback by default and logs no PII. It runs:
+//
+//   - a PII-safe health/readiness endpoint and the spine version;
+//   - the node-local reachability/health monitor (ADR-0019) and its redacted
+//     snapshot, when the operator supplies a reach config;
+//   - the MEASURE plane (RP-0010), when the operator supplies a measure config:
+//     each tick folds every member's health through internal/detect, which
+//     CLASSIFIES channel state (clean / throttled / blocked / shutdown, with a
+//     reason), folds the node-local L7-liveness, passive-path-RST and shadow
+//     collapse markers through per-signal generation gates, folds the RP-0015
+//     client-fingerprint A/B plane, then atomically writes the rotate.PlanInput
+//     and serves it with freshness metadata on /rotation/plan-input;
+//   - sd_notify readiness once the listener is bound, plus the systemd watchdog
+//     ping loop.
+//
+// IT NEVER ACTUATES. Everything above is advisory: the daemon produces a plan
+// INPUT and nothing else. Deciding to rotate, and applying a rotation, is the
+// triple-gated shell loop flow_rotate (control/lib/nb_rotate_apply.sh), which
+// this daemon cannot invoke. Routing likewise stays out.
+//
+// (This header said "Phase 0 build ... channel-state classification ... not
+// present here" until 2026-07-31. Classification has run in-process since the
+// MEASURE plane landed; only the never-actuates half was still true.)
 package main
 
 import (
@@ -82,8 +99,10 @@ func main() {
 
 	// Node-local reachability monitor (ADR-0019). It runs only when the operator
 	// supplies a config; an invalid config is a fail-fast error, not a silent
-	// skip. It stays strictly local: it classifies no channel state, rotates no
-	// transport, actuates no routing, and emits nothing off the node.
+	// skip. THE MONITOR ITSELF classifies no channel state, rotates no transport,
+	// actuates no routing, and emits nothing off the node — it produces health
+	// samples. The MEASURE plane built further down consumes those samples and
+	// does classify (internal/detect); it still actuates nothing.
 	if *reachConfig != "" {
 		cfg, err := reach.LoadConfig(*reachConfig)
 		if err != nil {

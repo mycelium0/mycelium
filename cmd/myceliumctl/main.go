@@ -3,11 +3,27 @@
 // This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
 // later. See the LICENSE file in the repository root.
 
-// Command myceliumctl is the Phase 0 control CLI (the Go spine, ADR-0012) — the
-// compiled successor to control/myceliumctl (shell). During the transition it
-// implements the identity surface and reports parity gaps honestly; key material
-// still comes only from the sanctioned generators (ADR-0002). It holds no
-// network-state detector or auto-rotation logic (that is a Phase-2 deliverable).
+// Command myceliumctl is the control CLI of the Go spine (ADR-0012) — the
+// compiled successor to control/myceliumctl (shell), installed alongside it as
+// myceliumctl-go while the port proceeds. Key material still comes only from the
+// sanctioned generators (ADR-0002), and the parity gaps are reported in the help
+// text rather than papered over.
+//
+// This file is a DISPATCH AND PRESENTATION layer, deliberately: it parses argv,
+// reads stdin or a file, calls into internal/*, and prints. The logic lives in
+// internal/{spec,identity,rotate,diag}. Keep it that way — a decision that lands
+// here instead of in a package is a decision no Go test can reach.
+//
+// It holds no network-state detector: nothing here imports internal/detect or
+// internal/reach; classification runs in myceliumd. It DOES expose the rotation
+// PLANNERS — rotate-plan, fingerprint-plan and rotate-record — which are pure
+// plan-in / plan-out functions over internal/rotate. They decide nothing about
+// this host and actuate nothing: applying a plan is the triple-gated shell loop
+// flow_rotate (control/lib/nb_rotate_apply.sh).
+//
+// (The header claimed "no ... auto-rotation logic (that is a Phase-2
+// deliverable)" until 2026-07-31. Phase 2 is closed and shipped, and the three
+// planner verbs live here.)
 package main
 
 import (
@@ -1529,6 +1545,8 @@ Commands:
 
 Not yet ported to the Go spine (use the shell tool control/myceliumctl):
   reality-keys                                 (RP-0002 W7)
+  render-server --engine xray                  the xray renderer is shell-only (control/lib/render.sh)
+  subscription --engine xray                   same renderer, same gap
 
 Default state file: %s
 `, spec.Version, defaultState)
