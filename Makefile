@@ -55,7 +55,17 @@ conformance:
 # dist — produce a DETERMINISTIC source tarball (= AGPL Corresponding Source) of the committed tree at
 # DIST_REF, named by the spine version, plus a SHA256SUMS. `git archive` is reproducible and ships ONLY
 # tracked files (per-node identity/secrets/rendered configs are gitignored + never tracked, so they can
-# never leak into the artifact); `gzip -n` drops the name/mtime so two builds are byte-identical. The
+# never leak into the artifact).
+#
+# COMPRESSION IS git's, NOT the host's. This piped `git archive --format=tar` into the host `gzip -n -9`,
+# and `-n` only drops the name/mtime — it does not make two DIFFERENT gzip implementations agree. Measured
+# at 71fe0f6: the tar stream is identical on both hosts (35be7103…), but Apple gzip 457.140.3 produces
+# b74dbe18… where GNU gzip 1.14 produces ac83a4eb…. That mattered, because docs/RELEASING.md has the
+# maintainer sign a LOCALLY built SHA256SUMS while release.yml publishes CI's: from a macOS workstation the
+# signed form and the published form disagreed, and verify-release.sh fails closed on that — for every
+# downloader. `--format=tar.gz` uses git's own zlib, which yields e89a1415… on BOTH hosts. The
+# same-host double-build in release_dist_sane.sh cannot see this class; a cross-platform digest check is
+# owed alongside it. The
 # release is authenticated by a SIGNED git TAG (ADR-0015 SSH-sig, the same scheme verify_signed_ref uses)
 # and an SSH signature over SHA256SUMS — neither produced here (the maintainer signs locally; see
 # docs/RELEASING.md). Pinned by tests/conformance/release_dist_sane.sh.
@@ -64,6 +74,6 @@ dist:
 	@git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "dist: not inside a git work tree" >&2; exit 1; }
 	@mkdir -p "$(DIST_DIR)"
 	@name="mycelium-$(DIST_VERSION)"; \
-	  git archive --format=tar --prefix="$$name/" "$(DIST_REF)" | gzip -n -9 > "$(DIST_DIR)/$$name.tar.gz"; \
+	  git archive --format=tar.gz --prefix="$$name/" "$(DIST_REF)" > "$(DIST_DIR)/$$name.tar.gz"; \
 	  ( cd "$(DIST_DIR)" && $(SHA256SUM) "$$name.tar.gz" > SHA256SUMS ); \
 	  echo "dist: wrote $(DIST_DIR)/$$name.tar.gz + $(DIST_DIR)/SHA256SUMS (version $(DIST_VERSION), ref $(DIST_REF))"
