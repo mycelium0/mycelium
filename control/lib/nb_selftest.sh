@@ -479,6 +479,11 @@ PROBE_EOF
 		"$(for d in $dead; do printf '"%s",' "$d"; done | sed 's/,$//')" \
 		"$(for u in $unknown; do printf '"%s",' "$u"; done | sed 's/,$//')" >"$marker.tmp" 2>/dev/null \
 		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+	# EXPORT the verdict (Audit-0009 V3). Written here, by the producer, because the metrics generator is
+	# authored once at bootstrap and never reconciled — a metric added there would never reach an existing
+	# node. Before the caller's early return, so a DEAD verdict is exported too; that is the case that
+	# matters most.
+	command -v record_l7_verdict >/dev/null 2>&1 && record_l7_verdict "$marker"
 	if [ -n "$dead" ]; then
 		warn "L7 measure-probe: client-DEAD transport(s):$dead (own-listener handshake failed)."
 		return 1

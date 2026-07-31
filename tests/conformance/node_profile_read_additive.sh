@@ -14,6 +14,13 @@
 #   4. honour the operator_toggle_keys allowlist (only allowlisted toggles, like merge_operator_overrides);
 #   5. be FAIL-CLOSED (a present-but-malformed descriptor / unknown transport / non-allowlisted key dies);
 #   6. be READ-ONLY on the descriptor (it never writes node.config.json — operator-supplied).
+#
+# It also pins the FIREWALL POSTURE as node state rather than argv (Audit-0009 I1): converge_node_tail runs
+# unattended from the update timer, which carries no flags, so a `${DO_HARDEN:-1}` argv default there
+# silently BECAME the posture — a node deliberately bootstrapped `--no-harden` had ufw force-enabled on its
+# first tick. The tail must read node_profile_harden (descriptor field, then the remembered bootstrap
+# posture, then ON), and node_profile_harden must be fail-safe rather than fail-closed: it is consulted on
+# a cadenced root path where dying would abort the whole converge.
 # OFFLINE + INSPECT-ONLY.
 #
 # Exit: 0 = additive + fail-closed + byte-identical-when-absent, 1 = a violation, 2 = usage/env error.
@@ -66,6 +73,35 @@ if printf '%s' "$fn" | grep -qE '>[[:space:]]*"\$cfg"|(mv|cp|tee|install)[^|;&]*
 	badln "apply_node_profile writes the descriptor (must be read-only; the operator supplies it)"
 else
 	ok "apply_node_profile is read-only on the descriptor (reads node.config.json, writes only params)"
+fi
+
+# 7. FIREWALL POSTURE comes from node state, not from this invocation's argv (Audit-0009 I1).
+tail_fn="$(awk '/^converge_node_tail\(\)/{f=1} f{print} f&&/^\}/{exit}' "$NBP" | grep -vE '^[[:space:]]*#')"
+if [ -z "$tail_fn" ]; then
+	badln "converge_node_tail not found in $NBP"
+elif printf '%s' "$tail_fn" | grep -q 'node_profile_harden'; then
+	ok "converge_node_tail reads the firewall posture from node state (node_profile_harden)"
+	printf '%s' "$tail_fn" | grep -q 'DO_HARDEN' \
+		&& badln "converge_node_tail still consults DO_HARDEN — that is set only from argv, and the update timer invokes the updater with NO flags, so the default silently becomes the posture" \
+		|| ok "  and no longer consults the argv-only DO_HARDEN"
+else
+	badln "converge_node_tail decides the firewall step from argv (DO_HARDEN). It now runs unattended from the update timer, which carries no flags at all, so a node bootstrapped --no-harden has ufw force-enabled on its first tick and every non-mycelium inbound service on the host is blocked (Audit-0009 I1)."
+fi
+ph_fn="$(awk '/^node_profile_harden\(\)/{f=1} f{print} f&&/^\}/{exit}' "$NBP")"
+if [ -z "$ph_fn" ]; then
+	badln "node_profile_harden is not defined — there is no node-state source for the firewall posture"
+else
+	# FAIL-SAFE, not fail-closed: a `die` here aborts a cadenced root converge over a posture read.
+	printf '%s' "$ph_fn" | grep -vE '^[[:space:]]*#' | grep -qE '\bdie\b' \
+		&& badln "node_profile_harden can die — it is read on every unattended converge, where dying over a posture read aborts the whole tail" \
+		|| ok "node_profile_harden is fail-safe (it degrades to a posture, never aborts the converge)"
+	# Precedence must be declared-field -> remembered -> ON, and the last word must be 'on'.
+	printf '%s' "$ph_fn" | grep -q 'node.config.json' && printf '%s' "$ph_fn" | grep -q 'harden.posture' \
+		&& ok "node_profile_harden consults the declared field, then the remembered bootstrap posture" \
+		|| badln "node_profile_harden does not consult both the descriptor field and the remembered posture"
+	printf '%s' "$ph_fn" | tail -3 | grep -q "printf 'on'" \
+		&& ok "  and defaults to ON when neither is present (fail-safe for a firewall, byte-identical to today)" \
+		|| badln "node_profile_harden does not default to ON — an undeclared node would silently lose its firewall"
 fi
 
 if [ "$fail" -eq 0 ]; then

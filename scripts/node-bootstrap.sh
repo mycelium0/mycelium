@@ -170,6 +170,11 @@ AWG_ISSUE_NAME=""          # with --awg-issue: the client identity to issue/re-i
 ROTATE_APPLY=0             # with --rotate: 0 = dry-run (default), 1 = LIVE apply (also requires the node arm sentinel)
 ASSUME_YES=0
 DO_HARDEN=1
+# Was the posture stated on THIS command line, or is DO_HARDEN just its default? Only an EXPLICIT
+# statement may overwrite the node's remembered posture — otherwise a plain `--node-apply` would silently
+# flip a `--no-harden` node back on, which is the same argv-default-as-posture confusion Audit-0009 I1
+# names. Bootstrap is the exception: it ESTABLISHES the posture, so it records whatever it was given.
+HARDEN_EXPLICIT=0
 DO_AMNEZIAWG=1
 DO_OBSERVABILITY=1          # install node_exporter (loopback) + the data-plane unit-active textfile metric
 
@@ -311,7 +316,7 @@ while [ "$#" -gt 0 ]; do
 		--full-tunnel)     AWG_FULL_TUNNEL_OPTOUT=1; shift ;;
 		--node-address)    NODE_ADDRESS="${2:?--node-address needs a value}"; shift 2 ;;
 		--donor)           FORCE_DONOR="${2:?--donor needs a value}"; shift 2 ;;
-		--no-harden)       DO_HARDEN=0; shift ;;
+		--no-harden)       DO_HARDEN=0; HARDEN_EXPLICIT=1; shift ;;
 		--no-amneziawg)    DO_AMNEZIAWG=0; shift ;;
 		--no-observability) DO_OBSERVABILITY=0; shift ;;
 		--dry-run)         DRY_RUN=1; shift ;;
@@ -580,6 +585,9 @@ verify_listeners() {
 flow_bootstrap() {
 	log "=== bootstrap / converge ==="
 	install_base_deps
+	# Remember the posture this ATTENDED invocation was given, so the unattended tail honours it later
+	# instead of falling back to an argv default the timer never carries (Audit-0009 I1).
+	remember_harden_posture
 	if [ "$DO_HARDEN" -eq 1 ]; then
 		harden_journald
 		harden_sshd

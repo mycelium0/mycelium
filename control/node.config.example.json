@@ -4,6 +4,7 @@
     "vless-reality-grpc"
   ],
   "reachable": false,
+  "harden": true,
   "front": {
     "enabled": false,
     "domain": "front.your-own-domain.example",

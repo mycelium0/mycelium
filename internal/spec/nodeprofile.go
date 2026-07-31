@@ -40,6 +40,22 @@ type NodeProfile struct {
 	// at apply time (it refuses reachable=false + an Xray-only transport) pending dual-engine reachability.
 	Reachable bool `json:"reachable"`
 
+	// Harden is the HOST-FIREWALL posture. A POINTER, unlike Reachable, precisely because the three states
+	// have to stay distinguishable: absent (the operator has said nothing), true, and false.
+	//
+	// WHY IT EXISTS (Audit-0009 I1). The convergence tail decided the firewall step from an argv default,
+	// `${DO_HARDEN:-1}` — coherent while that tail ran only under an operator's hand, and not once the
+	// unattended timer began calling it with no flags at all. A node deliberately bootstrapped with
+	// --no-harden then had ufw force-enabled on the first tick, blocking every non-mycelium inbound service
+	// on the host; anti-lockout preserved only SSH. A posture is node state, not an invocation's argv, so
+	// it belongs here beside Reachable.
+	//
+	// WIRE/APPLY semantics: ABSENT means "not declared" and the reader falls back to the node's remembered
+	// bootstrap posture, then to ON — so a node that has not adopted the field behaves exactly as today
+	// (the additive guard). Present wins over both. Use HardenEnabled to read it; the nil case is ON, which
+	// is the fail-safe direction for a firewall.
+	Harden *bool `json:"harden,omitempty"`
+
 	// Front folds the ADR-0033 operator CDN/ingress front (relay-preferred, bring-your-own-domain,
 	// terminate ack-gated). Default-off; a disabled front is byte-identical to no front.
 	Front FrontConfig `json:"front"`
@@ -191,7 +207,20 @@ func (p NodeProfile) WithTransport(proto string, enable bool) NodeProfile {
 // Verbs that set a field explicitly (`reachable on|off`) overwrite it anyway; verbs that do not MUST start
 // here so an edit changes exactly what the operator asked for and nothing else.
 func NewNodeProfile() NodeProfile {
-	return NodeProfile{Reachable: true}
+	on := true
+	return NodeProfile{Reachable: true, Harden: &on}
+}
+
+// HardenEnabled reports whether the host firewall should be converged on this node. A DECLARED value
+// wins; an absent one reads as ON, which is the fail-safe direction for a firewall and keeps a descriptor
+// that predates the field behaving as it did. Callers that must distinguish "absent" from "declared true"
+// — the shell tail does, so it can fall back to the node's remembered bootstrap posture first — read the
+// pointer directly.
+func (p NodeProfile) HardenEnabled() bool {
+	if p.Harden == nil {
+		return true
+	}
+	return *p.Harden
 }
 
 func ParseNodeProfile(r io.Reader) (NodeProfile, error) {

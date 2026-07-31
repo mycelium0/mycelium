@@ -185,6 +185,52 @@ groups:
           runbook: "docs/runbooks/deploy-node.md"
 
   # ===========================================================================
+  # Node-local L7 liveness — the only signal that separates a node SERVING from a
+  # node merely BOUND. Every other signal here (blackbox probe_success, the
+  # dataplane unit gauge) succeeds against a listener no client can actually use:
+  # a broken REALITY dest, an expired own cert, a rotated key. The node computes
+  # that verdict every couple of minutes into l7_selftest.json and, until
+  # Audit-0009 V3, exported nothing — so a bad change accepted identically across
+  # the population left every node's emitted signal green.
+  # ===========================================================================
+  - name: mycelium.l7
+    rules:
+      - alert: TransportClientDead
+        expr: mycelium_l7_dead > 0
+        for: 10m
+        labels:
+          severity: critical
+          component: dataplane
+        annotations:
+          summary: "{{ $value }} served transport class(es) on {{ $labels.instance }} are client-DEAD"
+          description: >-
+            The node's own L7 probe could not complete a client handshake against
+            {{ $value }} of its served transport classes, on POSITIVE evidence (see
+            mycelium_l7_transport_dead for which). The listeners are bound and the unit
+            is active, so nothing else here will fire. Typical causes: a REALITY dest that
+            no longer serves a stealable handshake, an expired or mismatched own cert, a
+            rotated credential. `for: 10m` outlives the probe's own 3-attempt debounce.
+          runbook: "docs/runbooks/node-bootstrap.md"
+
+      - alert: TransportLivenessUnobserved
+        expr: >-
+          (time() - mycelium_l7_last_observation_timestamp_seconds > 1800)
+          or (mycelium_l7_checked > 0 and mycelium_l7_unknown / mycelium_l7_checked >= 0.5)
+        for: 15m
+        labels:
+          severity: warning
+          component: dataplane
+        annotations:
+          summary: "L7 liveness on {{ $labels.instance }} is stale or mostly unjudged"
+          description: >-
+            Either the L7 observation has not refreshed in 30 minutes (the probe timer is
+            not firing) or at least half the served classes came back CANNOT-JUDGE. Neither
+            is a fault in the data plane, and neither is an all-clear: it means the detector
+            is not currently watching. A silent probe and a healthy node look identical
+            without this.
+          runbook: "docs/runbooks/node-bootstrap.md"
+
+  # ===========================================================================
   # Collector self-health — keep the operator from trusting a blind dashboard.
   # ===========================================================================
   - name: mycelium.monitoring

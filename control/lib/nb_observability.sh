@@ -190,6 +190,59 @@ UNIT
 # It lands in the directory node_exporter is actually pointed at, with a fallback to STATE_DIR when that
 # directory does not exist, so a node without the exporter still keeps the stamp the on-node drill reads.
 # Loopback-only exporter, no new surface, no central collector (ADR-0021).
+# record_l7_verdict MARKER — export the L7 liveness verdict the probe just computed, from the code that
+# OWNS it. Best-effort; never fails the caller.
+#
+# THE GAP THIS CLOSES (Audit-0009 V3). The client-dead verdict is computed continuously — the l7probe timer
+# writes $STATE_DIR/l7_selftest.json every couple of minutes — and NOTHING read it. Observability exported
+# a single `mycelium_dataplane_unit_active` gauge, which stays 1 while the node serves a config no client
+# can use; the nearest Prometheus alert keys on blackbox OUTER-TLS probe_success, which succeeds against
+# any bound listener. So the one signal that can tell a serving node from a bound-but-dead one existed only
+# in a local JSON file nobody read, and a bad push accepted identically on every node inside one 15-minute
+# window left every node's emitted signal green.
+#
+# WRITTEN BY THE PROBE, NOT BY THE GENERATOR. The dataplane generator is written once by
+# setup_observability at bootstrap and never reconciled, so a metric added there would never reach an
+# existing node — the exact trap the X1 fix walked into and had to be moved out of. This runs wherever the
+# probe runs.
+#
+# LABELS: only closed-vocab MEASURE class refs (`vless-reality-vision`, `shadowsocks`, …) — the same
+# category as the existing engine="singbox" label, and never a client, address or peer.
+record_l7_verdict() {
+	local marker="${1:-}"
+	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
+	[ -n "$marker" ] && [ -f "$marker" ] || return 0
+	have jq || return 0
+	local dir out ts checked ndead nunknown
+	dir="${NODE_EXPORTER_TEXTFILE_DIR:-}"; [ -n "$dir" ] && [ -d "$dir" ] || dir="$STATE_DIR"
+	out="$dir/mycelium_l7.prom"
+	ts="$(date +%s 2>/dev/null)" || return 0
+	checked="$(jq -r '.checked // 0'          "$marker" 2>/dev/null || printf 0)"
+	ndead="$(jq -r '(.dead // [])    | length' "$marker" 2>/dev/null || printf 0)"
+	nunknown="$(jq -r '(.unknown // []) | length' "$marker" 2>/dev/null || printf 0)"
+	{
+		printf '# HELP mycelium_l7_last_observation_timestamp_seconds Unix time of the last L7 liveness observation.\n'
+		printf '# TYPE mycelium_l7_last_observation_timestamp_seconds gauge\n'
+		printf 'mycelium_l7_last_observation_timestamp_seconds %s\n' "$ts"
+		printf '# HELP mycelium_l7_checked Served transport classes the last L7 observation looked at.\n'
+		printf '# TYPE mycelium_l7_checked gauge\n'
+		printf 'mycelium_l7_checked %s\n' "${checked:-0}"
+		printf '# HELP mycelium_l7_dead Served transport classes a real client could NOT handshake (positive evidence).\n'
+		printf '# TYPE mycelium_l7_dead gauge\n'
+		printf 'mycelium_l7_dead %s\n' "${ndead:-0}"
+		# Unknown is exported SEPARATELY and never folded into dead: "we could not tell" must not read as
+		# either a fault or an all-clear (Audit-0009 B1). An operator watching coverage watches this.
+		printf '# HELP mycelium_l7_unknown Served transport classes the last observation could not judge.\n'
+		printf '# TYPE mycelium_l7_unknown gauge\n'
+		printf 'mycelium_l7_unknown %s\n' "${nunknown:-0}"
+		printf '# HELP mycelium_l7_transport_dead 1 for a served class the last observation found client-dead.\n'
+		printf '# TYPE mycelium_l7_transport_dead gauge\n'
+		jq -r '(.dead // [])[] | "mycelium_l7_transport_dead{ref=\"" + . + "\"} 1"' "$marker" 2>/dev/null || true
+	} >"$out.tmp" 2>/dev/null && { chmod 0644 "$out.tmp" 2>/dev/null || true; mv -f "$out.tmp" "$out" 2>/dev/null || true; }
+	rm -f "$out.tmp" 2>/dev/null || true
+	return 0
+}
+
 record_converge_ok() {
 	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
 	local now dir out

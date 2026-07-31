@@ -153,6 +153,41 @@ func TestNewNodeProfileMatchesAbsentDescriptor(t *testing.T) {
 	}
 }
 
+// TestHardenWireSemantics: the three states of the firewall posture must stay distinguishable, and the
+// undeclared one must read ON. Harden is a POINTER for exactly this reason — a plain bool would collapse
+// "the operator said nothing" into "the operator said false", and for a firewall those are opposite
+// answers. The shell tail depends on the distinction: absent means "fall back to the posture the
+// establishing bootstrap was given", which it cannot do if absent already means off (Audit-0009 I1).
+func TestHardenWireSemantics(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		js     string
+		want   bool
+		absent bool
+	}{
+		{"absent reads ON (a descriptor predating the field behaves as today)", `{"reachable":true}`, true, true},
+		{"declared true", `{"reachable":true,"harden":true}`, true, false},
+		{"declared false", `{"reachable":true,"harden":false}`, false, false},
+	} {
+		p, err := ParseNodeProfile(strings.NewReader(c.js))
+		if err != nil {
+			t.Fatalf("%s: parse: %v", c.name, err)
+		}
+		if got := p.HardenEnabled(); got != c.want {
+			t.Errorf("%s: HardenEnabled()=%v, want %v", c.name, got, c.want)
+		}
+		if (p.Harden == nil) != c.absent {
+			t.Errorf("%s: absent=%v, want %v — the three states must stay distinguishable", c.name, p.Harden == nil, c.absent)
+		}
+	}
+	if _, err := ParseNodeProfile(strings.NewReader(`{"reachable":true,"harden":"no"}`)); err == nil {
+		t.Error("a non-boolean harden must be rejected by the typed decoder, not coerced")
+	}
+	if !NewNodeProfile().HardenEnabled() {
+		t.Error("NewNodeProfile must declare the firewall ON — the constructor has to match the absent-key wire default")
+	}
+}
+
 // TestTransportEditPreservesPosture: editing the transport set on a node that had NO descriptor must not
 // change its reachability posture. This is the regression: `transport enable X` created a descriptor with
 // reachable=false and would have rebound a public node to loopback on the next apply.

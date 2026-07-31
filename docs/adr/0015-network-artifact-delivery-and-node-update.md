@@ -192,10 +192,29 @@ unvalidated candidate is never promoted, and any post-apply failure restores the
   pin a signed tag; the two-gate (signature + `sing-box check`) and re-exec machinery must be
   maintained; an unsigned/misconfigured push is refused rather than applied (intended, but it does
   require the operator to sign and pin correctly).
-- **Impact on user security (requirement №1):** strongly protective. No secret or node-specific value
-  is ever committed; only the REALITY public key and per-client subscriptions are exported. No logging
-  or correlation is introduced by the update path; deniability and per-node identity are preserved
-  because `--update` never regenerates keys.
+- **Impact on user security (requirement №1):** strongly protective on the parts it governs. No secret
+  or node-specific value is ever committed; only the REALITY public key and per-client subscriptions are
+  exported. Deniability and per-node identity are preserved because `--update` never regenerates keys.
+
+  **Corrected 2026-07-31 (Audit-0009 Y1).** This bullet used to end "No logging or correlation is
+  introduced by the update path", and that is not true of an ARMED node. Every armed node fetches the
+  same public repo from its own public address on a fixed cadence, so the FORGE — a third party subject
+  to provider pressure and legal process — holds a live, continuously refreshed list of the population's
+  public IPs, correlated by the repo they pull. The update path introduces no logging *of its own* and no
+  cross-node telemetry; what it does introduce is an observation point outside the operator's control.
+  That is a real cost of pull-based delivery and it belongs in the model, not in a denial: see the
+  update-channel rows in [THREAT-MODEL.md](../THREAT-MODEL.md). Reducing it means fetching through an
+  indirection, or moving to signed release artifacts that can be mirrored — both are open, neither is
+  done.
+
+- **Availability dependency (Audit-0009 Y1):** `myc_fetch_artifacts` clones from a SINGLE `$REPO_URL`
+  and fetches only `origin`, and a failure is fatal to the tick. While that one host is unreachable from
+  a node, no operator-pushed change reaches it — indefinitely, with no fallback source. This was never
+  recorded as a trade-off; it is one. It is bounded: the node keeps serving its last known-good config
+  and its local loops keep running, so what is lost is CHANGE DELIVERY, not availability. Closing it
+  needs at least one independent artifact source (a second remote, or a signed tarball mirror) with the
+  signature gate preserved end to end — which is the same work that would let the delivery channel move
+  off a single forge entirely.
 - **Impact on observability/measurements:** the updater asserts the service is active **and** the
   expected listen ports are bound after apply (post-apply health), giving a per-node apply/rollback
   signal; it adds no cross-node telemetry and no central reporting.

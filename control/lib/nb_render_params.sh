@@ -141,6 +141,54 @@ merge_operator_overrides() {
 	log "params: applied operator-set toggle overrides on top of regenerated defaults (C19: operator enablement preserved across --update)."
 }
 
+# node_profile_harden — echo the HOST-FIREWALL posture for this node: "on" or "off". Never dies; the
+# firewall step's own guards fail closed on their own terms.
+#
+# THREE SOURCES, IN ORDER (Audit-0009 I1):
+#   1. node.config.json `.harden` — the operator's DECLARED posture (Go: NodeProfile.Harden). Authoritative.
+#   2. $STATE_DIR/harden.posture — the posture the last ATTENDED invocation was given on argv, remembered.
+#   3. ON — today's default, and the fail-safe direction for a firewall.
+#
+# WHY NOT ARGV. converge_node_tail used to read `${DO_HARDEN:-1}`, which is set only from argv. That was
+# coherent while the tail ran only under an operator's hand; the unattended timer then began calling it
+# with no flags at all, and the default silently became the posture. A node deliberately bootstrapped
+# `--no-harden` had ufw force-enabled on its first tick — every non-mycelium inbound service on that host
+# blocked, anti-lockout preserving only SSH, and nothing recording that a posture decision had been
+# overridden. A posture is node state; an invocation's argv is not.
+node_profile_harden() {
+	local cfg="$STATE_DIR/node.config.json" v
+	if [ -f "$cfg" ] && have jq; then
+		v="$(jq -r 'if has("harden") then (if (.harden|type)=="boolean" then (.harden|tostring) else "bad" end) else "absent" end' "$cfg" 2>/dev/null || printf 'absent')"
+		case "$v" in
+			true)  printf 'on';  return 0 ;;
+			false) printf 'off'; return 0 ;;
+			bad)   warn "node.config.json: .harden must be a JSON boolean; ignoring it and using the remembered posture." ;;
+		esac
+	fi
+	if [ -f "$STATE_DIR/harden.posture" ]; then
+		v="$(head -n 1 "$STATE_DIR/harden.posture" 2>/dev/null | tr -dc 'a-z')"
+		case "$v" in on|off) printf '%s' "$v"; return 0 ;; esac
+	fi
+	printf 'on'
+}
+
+# remember_harden_posture — record the posture THIS invocation was given on argv, so an unattended tick
+# can honour it later. Written only by flows that carry a coherent argv (bootstrap and the operator's
+# --node-apply); the timer never writes it, because the timer has no posture to express.
+remember_harden_posture() {
+	[ "${DRY_RUN:-0}" -eq 0 ] || return 0
+	# Callers that are not the establishing bootstrap pass "explicit-only": record nothing unless the
+	# operator actually stated a posture on this command line.
+	if [ "${1:-}" = "explicit-only" ] && [ "${HARDEN_EXPLICIT:-0}" -ne 1 ]; then return 0; fi
+	[ -n "${STATE_DIR:-}" ] && [ -d "$STATE_DIR" ] || return 0
+	if [ "${DO_HARDEN:-1}" -eq 1 ]; then printf 'on
+'  >"$STATE_DIR/harden.posture" 2>/dev/null || true
+	else                                 printf 'off
+' >"$STATE_DIR/harden.posture" 2>/dev/null || true
+	fi
+	chmod 0644 "$STATE_DIR/harden.posture" 2>/dev/null || true
+}
+
 # apply_node_profile <params_tmp> — ADR-0034 / RP-0011 chunk B2: translate a node-local node.config.json
 # descriptor's declared transports[] into params enable-key toggles and set them ON, additively on top of
 # the defaults + operator overrides. The enable_key for each transport is looked up from the Go-owned
@@ -529,8 +577,12 @@ converge_node_tail() {
 	( apply_node_xray_engine ) || failed="$failed xray-engine"
 	# Respects --no-harden. The `if` form, not `[ ] && harden_ufw`: under `set -e` the && form is only
 	# safe because another statement follows it, and that is too subtle to leave as a trap for the next edit.
-	if [ "${DO_HARDEN:-1}" -eq 1 ]; then
+	# The posture comes from NODE STATE, not from this invocation's argv (Audit-0009 I1) — the tail runs
+	# unattended from the timer, where argv carries no posture at all.
+	if [ "$(node_profile_harden)" = "on" ]; then
 		( harden_ufw ) || failed="$failed firewall"
+	else
+		log "host firewall: posture is OFF for this node (node.config.json .harden, or the remembered --no-harden bootstrap); leaving ufw untouched."
 	fi
 	( render_serve_bundle ) || failed="$failed served-bundle"
 	if [ -n "$failed" ]; then
@@ -546,6 +598,10 @@ converge_node_tail() {
 flow_node_apply() {
 	log "=== apply node profile (local re-render -> validate -> promote -> reload) ==="
 	need_root
+	# Attended, so it may state a posture — but only if it actually did (Audit-0009 I1). A plain
+	# --node-apply must not flip a --no-harden node back on just because DO_HARDEN defaults to 1. To turn
+	# the firewall back ON for good, declare it in node.config.json (`"harden": true`), which outranks this.
+	remember_harden_posture explicit-only
 	[ -f "$IDENTITY_SECRETS" ] || die "no local identity; cannot apply a node profile (bootstrap first)."
 	write_params
 	local candidate="$STATE_DIR/config.candidate.node-apply.json"
