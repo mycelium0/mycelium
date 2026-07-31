@@ -62,7 +62,17 @@ log()  { LOGBUF="$LOGBUF
 LOG $*"; }
 warn() { LOGBUF="$LOGBUF
 WARN $*"; }
-have() { command -v "$1" >/dev/null 2>&1; }
+# AVAILABILITY IS CONTROLLED HERE, NOT THROUGH $PATH. The library asks `have ss` / `have ufw`, so that is
+# the seam to drive. Removing a stub from a private bin dir does NOT make a tool absent — the CI image has
+# a real iproute2 `ss` further down $PATH, and this gate passed on a macOS dev box (no ss at all) while
+# failing in CI for exactly that reason. Hiding a tool from `have` is unambiguous on both.
+MYC_HIDE=""
+have() {
+	case " $MYC_HIDE " in *" $1 "*) return 1 ;; esac
+	command -v "$1" >/dev/null 2>&1
+}
+hide()   { MYC_HIDE="$MYC_HIDE $1"; }
+unhide() { MYC_HIDE="$(printf '%s' "$MYC_HIDE" | sed "s/ $1//g")"; }
 # shellcheck disable=SC1090
 . "$HARDEN" || { badln "could not source nb_harden.sh"; printf 'FAIL\n' >&2; exit 1; }
 for f in myc_ufw_admitted_ports myc_ufw_listening_ports verify_ufw_exposure; do
@@ -182,7 +192,13 @@ printf '%s' "$LOGBUF" | grep -q 'served but NOT admitted.*4444/tcp' \
 	|| badln "report: a served-but-blocked port was not reported — verify_post_apply is firewall-blind, so nothing else would catch it"
 
 # --- 3. no listener view => no claim ------------------------------------------------------------------
-rmstub ss
+# Both arms of "no signal": ss absent (hidden from `have`) and ss present-but-failing (stub exits 2).
+mkstub ss 'exit 2'
+LOGBUF=""; verify_ufw_exposure ' 443/tcp 8443/tcp 51820/udp ' ' 22/tcp ' >/dev/null 2>&1
+printf '%s' "$LOGBUF" | grep -q 'nothing listening' \
+	&& badln "no-signal: a FAILING ss is treated as a listener view — a non-zero ss must read as no signal, not as an empty one" \
+	|| ok "no-signal: an ss that fails is not mistaken for an empty listener view"
+rmstub ss; hide ss
 LOGBUF=""; verify_ufw_exposure ' 443/tcp 8443/tcp 51820/udp ' ' 22/tcp ' >/dev/null 2>&1
 if printf '%s' "$LOGBUF" | grep -q 'nothing listening'; then
 	badln "no-signal: without ss, every admitted port outside served+keep is accused of being an orphan — 'I cannot see the listeners' is being read as 'nothing is listening' (Audit-0009 AG1)"
@@ -204,7 +220,7 @@ myc_ufw_listening_ports tcp >/dev/null 2>&1 \
 	|| ok "myc_ufw_listening_ports signals NO SIGNAL by return code when ss is absent"
 
 # --- 4. no ufw at all -> silent and successful --------------------------------------------------------
-rmstub ufw
+rmstub ufw; hide ufw
 LOGBUF=""; verify_ufw_exposure ' 443/tcp ' ' 22/tcp ' >/dev/null 2>&1; rc=$?
 if [ "$rc" -eq 0 ] && [ -z "$(printf '%s' "$LOGBUF" | tr -d '[:space:]')" ]; then
 	ok "no ufw: returns 0 and reports nothing (fail-safe, no false accusation)"
