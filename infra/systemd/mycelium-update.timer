@@ -26,22 +26,24 @@ Description=Run the Mycelium semi-auto node update periodically
 #     systemctl show mycelium-update.timer -p NextElapseUSecMonotonic   # `infinity` = dead
 #     systemctl status mycelium-update.timer | grep Trigger             # `n/a` = dead
 #
-# The fix, when it happens, is a calendar trigger — it derives the next elapse from the wall clock, so
-# it cannot be poisoned by a stale anchor, and it makes Persistent= below actually meaningful (that
-# setting only ever applied to OnCalendar= timers; with the monotonic pair it is a documented no-op).
-# Set it in a DROP-IN (`systemctl edit mycelium-update.timer`), which is also where per-node cadence
-# belongs — the empty assignments are required to reset the inherited monotonic triggers:
-#     [Timer]
-#     OnBootSec=
-#     OnUnitActiveSec=
-#     OnCalendar=*:0/15
-#     RandomizedDelaySec=300
-#     Persistent=true
+# THE FIX IS SHIPPED HERE NOW (Audit-0009 D1). The template used to carry the monotonic pair and leave
+# the calendar trigger to a hand-written drop-in, so a fresh install landed on the trap by default and only
+# a reader who got fourteen lines further learned to replace it. A calendar trigger derives the next elapse
+# from the wall clock, so a stale in-memory anchor cannot poison it, and it makes Persistent= below
+# actually meaningful (that setting only ever applied to OnCalendar= timers; with the monotonic pair it is
+# a documented no-op).
+#
+# The TRAP above still matters: a node that ran the OLD monotonic form keeps its poisoned anchor until the
+# new unit is copied in and the timer restarted, so re-copy this file and
+# `systemctl daemon-reload && systemctl restart mycelium-update.timer` when updating an armed node — then
+# confirm with NextElapse, not with is-enabled/is-active.
+#
+# PER-NODE CADENCE still belongs in a DROP-IN (`systemctl edit mycelium-update.timer`) — override
+# OnCalendar=/RandomizedDelaySec= there. No empty monotonic assignments are needed any more; there is
+# nothing monotonic left to reset.
 [Timer]
-# First run shortly after boot, then every few minutes. See the TRAP note above before re-arming a
-# node that has run this timer before.
-OnBootSec=2min
-OnUnitActiveSec=5min
+# Every 15 minutes on the wall clock, jittered, and catching up one missed run after downtime.
+OnCalendar=*:0/15
 RandomizedDelaySec=90
 Persistent=true
 Unit=mycelium-update.service

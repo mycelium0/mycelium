@@ -86,6 +86,15 @@ WantedBy=timers.target
 UNIT
 	run systemctl daemon-reload
 	run systemctl enable --now mycelium-rotate.timer || die "rotation: could not enable mycelium-rotate.timer (fail-closed)."
+	# SEED THE MONOTONIC ANCHOR (Audit-0009 D1). OnUnitActiveSec= schedules relative to the last time the
+	# SERVICE was active; on a timer that has never run it there is no anchor, and re-arming a timer that
+	# has one in a poisoned state is what left two nodes enabled+active with Trigger=n/a on 2026-07-28. An
+	# immediate one-shot start gives the anchor a real value now, which is the same discipline the two
+	# measure timers already use. $ROTATE_LOOP_INTERVAL is ~90s, so no clean OnCalendar= expression exists
+	# for this cadence; the seeded-anchor form is the alternative the trigger-form gate accepts.
+	# Behaviour-neutral beyond the interval: the loop stays triple-gated (armed sentinel + --apply-rotation
+	# + a plan), so this first tick can only do what the next one would have done ~90s later.
+	run systemctl start mycelium-rotate.service 2>/dev/null || true
 	warn "rotation: mycelium-rotate.timer ENABLED — this node will AUTONOMOUSLY apply rotation plans every $ROTATE_LOOP_INTERVAL."
 	warn "rotation: it actuates ONLY while armed (--rotate-arm) with a rotate_plan.json present; disable with '$0 --rotate-disable-loop'."
 }
@@ -225,11 +234,34 @@ _rotate_state_file() { printf '%s' "$STATE_DIR/rotate_state.json"; }
 # persist_rotation_state PLAN — record the plan's next_state as the node's between-tick rotation state
 # (read by the next rotate-plan). A successful promote needs no budget adjustment (Plan already advanced
 # the window); the rollback path uses record_rotation_rollback instead.
+#
+# NON-LOWERING, IN THE WRITER (Audit-0009 AA1). The refusal below used to live one level up, in
+# persist_rotation_state_preapply, and was called from exactly one of the four sites that write this file:
+# the two post-apply sites called this function bare, and flow_rotate's HOLD path did its own raw jq write.
+# So "non-lowering" was a property of ONE CALL, not an invariant of the file — and a wholesale write of a
+# stale act plan's next_state resets hold_until to the zero value and refunds rollbacks_in_window 1 -> 0.
+# The 1 h post-rollback latch then degrades to the ordinary 30 min cooldown and the rollback budget never
+# accumulates across ticks. An invariant enforced at one caller is not an invariant; it belongs where the
+# bytes are written.
+#
+# It is a WRITE-SAFETY refusal, not a policy merge: no budget arithmetic, no latch computation, nothing
+# rotate.RecordOutcome owns. An ACT plan can never carry a live hold_until (the planner turns that into a
+# HOLD), so refusing while the ON-DISK state holds a future one is monotone by construction. RFC3339 UTC
+# with a fixed Z offset is lexicographically ordered, which is what makes the string compare sound.
 persist_rotation_state() {
-	local plan="$1" tmp
+	local plan="$1" tmp state now hold
 	[ "$DRY_RUN" -eq 0 ] || return 0
 	jq -e '.next_state' "$plan" >/dev/null 2>&1 \
 		|| { warn "rotation: plan has no .next_state; between-tick state not updated."; return 0; }
+	state="$(_rotate_state_file)"
+	if [ -f "$state" ] && have jq; then
+		now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf '')"
+		hold="$(jq -r '.hold_until // ""' "$state" 2>/dev/null || printf '')"
+		if [ -n "$now" ] && [ -n "$hold" ] && [ "$hold" != "null" ] && [ "$hold" \> "$now" ]; then
+			warn "rotation: a rollback hold is live until $hold; NOT overwriting rotate_state.json (the latch is stricter than anything this would write)."
+			return 0
+		fi
+	fi
 	tmp="$(mktemp)" || return 0
 	jq '.next_state' "$plan" > "$tmp" && ( umask 077; mv -f "$tmp" "$(_rotate_state_file)" ) \
 		|| { rm -f "$tmp"; warn "rotation: could not persist between-tick state."; return 0; }
@@ -255,19 +287,10 @@ persist_rotation_state() {
 # planner's own outcome-recording owns. RFC3339 UTC with a fixed Z offset is lexicographically ordered,
 # which is what makes the string compare sound.
 persist_rotation_state_preapply() {
-	local plan="$1" state now hold
-	[ "$DRY_RUN" -eq 0 ] || return 0
-	have jq || return 0
-	state="$(_rotate_state_file)"
-	if [ -f "$state" ]; then
-		now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf '')"
-		hold="$(jq -r '.hold_until // ""' "$state" 2>/dev/null || printf '')"
-		if [ -n "$now" ] && [ -n "$hold" ] && [ "$hold" != "null" ] && [ "$hold" \> "$now" ]; then
-			warn "rotation: a rollback hold is live until $hold; NOT overwriting rotate_state.json before the apply (the latch is stricter than anything this would write)."
-			return 0
-		fi
-	fi
-	persist_rotation_state "$plan"
+	# The non-lowering refusal now lives in persist_rotation_state itself, so every writer inherits it and
+	# this is a named CALL SITE rather than a second implementation. The name stays because the call ORDER
+	# is the point here — the planner's contract is "persist NextState, apply, then record the outcome".
+	persist_rotation_state "$1"
 }
 
 # record_rotation_rollback PLAN — fold a rollback into the between-tick state via the pure Go
@@ -299,9 +322,17 @@ record_rotation_rollback() {
 	[ "$DRY_RUN" -eq 0 ] || return 0
 	[ -x "$spine" ] || { warn "rotation: spine binary absent ($spine); rollback NOT recorded (budget/latch unchanged)."; return 0; }
 	[ -n "$limits" ] || { warn "rotation: no rotate_limits.json and no measure.config .limits; rollback NOT recorded (budget/latch unchanged)."; return 0; }
-	local input next tmp
+	# THE INPUT STATE IS WHAT IS ON DISK, not the plan's next_state (Audit-0009 AA1). By the planner's own
+	# call order the pre-apply persist has already written next_state to disk, so on the normal path these
+	# are the same bytes — and where they differ, disk is the stricter one: it is what survives when the
+	# pre-apply write was REFUSED because a latch was live, or when a stale plan is being re-applied. Folding
+	# the plan's copy instead re-spent a budget from a snapshot that predates the latch, refunding
+	# rollbacks_in_window 1 -> 0 on every such tick, so the escalation to a hold never accumulated.
+	local input next tmp state_now
+	state_now="$(_rotate_state_file)"
 	input="$(jq -n --slurpfile p "$plan" --slurpfile l "$limits" \
-		'{state: ($p[0].next_state // {}), limits: $l[0], rolled_back: true}')" \
+		--argjson disk "$( [ -f "$state_now" ] && jq -c . "$state_now" 2>/dev/null || printf 'null' )" \
+		'{state: ($disk // $p[0].next_state // {}), limits: $l[0], rolled_back: true}')" \
 		|| { warn "rotation: could not assemble rollback-record input."; return 0; }
 	next="$(printf '%s' "$input" | "$spine" rotate-record - 2>/dev/null)" \
 		|| { warn "rotation: rotate-record failed; budget/latch unchanged."; return 0; }
@@ -460,13 +491,52 @@ flow_rotate() {
 		# node detects a block but never rotates. The MEASURE plane folds this rotate_state.json back into the
 		# next PlanInput, so the streak accumulates across ticks until the planner emits act=true. (The live
 		# apply path's RecordOutcome owns the post-apply state, so this HOLD-only persist cannot conflict.)
-		if jq -e '.next_state' "$plan" >/dev/null 2>&1; then
-			jq -c '.next_state' "$plan" >"$STATE_DIR/rotate_state.json.tmp" 2>/dev/null \
-				&& mv -f "$STATE_DIR/rotate_state.json.tmp" "$STATE_DIR/rotate_state.json" \
-				|| rm -f "$STATE_DIR/rotate_state.json.tmp"
-		fi
+		# Through the writer, not a raw jq redirect (Audit-0009 AA1). This was the FOURTH write of
+		# rotate_state.json and the only one nobody had counted: it bypassed the non-lowering refusal
+		# entirely, so a HOLD tick arriving while a rollback latch was live erased the latch — the exact
+		# state the latch exists to hold through.
+		persist_rotation_state "$plan"
 		log "rotation plan is a HOLD (reason=$(jq -r '.reason // "?"' "$plan"); $(jq -r '.held_because // ""' "$plan")) — nothing to apply (next_state persisted: streak=$(jq -r '.next_state.impaired_streak // 0' "$plan"))."
 		return 0
+	fi
+	# THE LATCH IS AN ACTUATION GUARD, not only a planner input (Audit-0009 AA1). Everything above decides
+	# whether we are ALLOWED to apply; nothing yet asks whether we SHOULD apply THIS plan, now. Two ways an
+	# act plan reaches here that the planner would not have produced from current state:
+	#   * A RETAINED plan. refresh_rotate_plan_from_daemon keeps the previous rotate_plan.json when the
+	#     spine is absent, the PlanInput is stale, or rotate-plan fails — so a plan whose act=true was
+	#     computed before a rollback latched can be re-applied on the 90 s timer while the latch is live.
+	#   * A HAND-PLACED plan. --apply-rotation reads a file; nothing binds that file to this node's state.
+	# The planner turns a live hold_until into a HOLD, so an act plan and a live latch cannot both be
+	# current. When they coexist, the latch is the fresher fact.
+	if [ "${ROTATE_APPLY:-0}" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && have jq; then
+		local _st _now _hold _page _pmt
+		_st="$(_rotate_state_file)"
+		if [ -f "$_st" ]; then
+			_now="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf '')"
+			_hold="$(jq -r '.hold_until // ""' "$_st" 2>/dev/null || printf '')"
+			if [ -n "$_now" ] && [ -n "$_hold" ] && [ "$_hold" != "null" ] && [ "$_hold" \> "$_now" ]; then
+				warn "rotation: an ACT plan is present but a post-rollback hold is live until $_hold — NOT applying."
+				warn "  The planner turns a live latch into a HOLD, so this plan predates the latch (a retained plan"
+				warn "  from a tick where the spine was absent or the PlanInput stale, or a hand-placed file)."
+				warn "  It will be re-evaluated once the hold expires; nothing is changed."
+				return 0
+			fi
+		fi
+		# Plan FRESHNESS, same bar the self-drive path applies to its PlanInput. A plan older than that is
+		# by definition one refresh_rotate_plan_from_daemon retained rather than regenerated.
+		_pmt="$(stat -c %Y "$plan" 2>/dev/null || stat -f %m "$plan" 2>/dev/null || printf '')"
+		_now="$(date +%s 2>/dev/null || printf '')"
+		case "$_pmt" in ''|*[!0-9]*) _pmt="" ;; esac
+		case "$_now" in ''|*[!0-9]*) _now="" ;; esac
+		if [ -n "$_pmt" ] && [ -n "$_now" ] && [ "$_now" -ge "$_pmt" ]; then
+			_page=$(( _now - _pmt ))
+			if [ "$_page" -gt "$(( ${MEASURE_PLAN_MAX_STALE_SEC:-180} * 4 ))" ]; then
+				warn "rotation: the ACT plan at $plan is ${_page}s old (> $(( ${MEASURE_PLAN_MAX_STALE_SEC:-180} * 4 ))s) — NOT applying a plan this stale."
+				warn "  A plan that has not been regenerated was RETAINED, which means it was computed from signals"
+				warn "  that no longer describe this node. Re-run with a fresh plan, or let the MEASURE daemon produce one."
+				return 0
+			fi
+		fi
 	fi
 	if [ "${ROTATE_APPLY:-0}" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
 		if rotate_live_armed; then

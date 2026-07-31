@@ -203,12 +203,24 @@ generate_measure_configs() {
 # ---------------------------------------------------------------------------
 PATHSIG_NFT_TABLE="inet mycelium_measure"
 
-# _pathsig_tcp_ports — the served client-facing TCP listener ports from the live sing-box config (reality
-# vless / ws-tls vless / shadowtls / trojan). Excludes the UDP families (hy2/tuic) and the internal loopback
-# shadowsocks detour (which listens on 127.0.0.1, not `::`/0.0.0.0).
+# PATHSIG_TCP_SELECT — the ONE jq predicate that decides which inbounds the passive observer covers:
+# served, client-facing TCP listeners (reality vless / ws-tls vless / shadowtls / trojan / standalone
+# shadowsocks), bound PUBLICLY. Excludes the UDP families (hy2/tuic) and the internal loopback shadowsocks
+# detour of a ShadowTLS inbound (which listens on 127.0.0.1, not `::`/0.0.0.0).
+#
+# ONE definition, two consumers, ON PURPOSE (Audit-0009 T1). The port list and the port→class map were
+# written separately and drifted: the list counted shadowsocks, the map did not, so every SS counter was
+# installed, read, and included in `checked` and in the all-clear line — while `reset`/`collapse` could
+# never NAME the shadowsocks tier, because the map had no entry to resolve its port to. An operator read
+# coverage the detector did not have, on the LAST-RESORT tier specifically. The map also lacked the
+# public-listen predicate, so a loopback detour port could have resolved to a class the list never counts.
+# tests/conformance/pathsig_passive_observer.sh pins that both consumers use this one string.
+PATHSIG_TCP_SELECT='(.type=="vless" or .type=="shadowtls" or .type=="trojan" or .type=="shadowsocks") and (.listen_port!=null) and ((.listen // "::")|test("^(::|0\\.0\\.0\\.0)$"))'
+
+# _pathsig_tcp_ports — the served client-facing TCP listener ports from the live sing-box config.
 _pathsig_tcp_ports() {
 	[ -f "$SINGBOX_CONFIG" ] || return 0
-	jq -r '.inbounds[]? | select((.type=="vless" or .type=="shadowtls" or .type=="trojan" or .type=="shadowsocks") and (.listen_port!=null) and ((.listen // "::")|test("^(::|0\\.0\\.0\\.0)$"))) | .listen_port' \
+	jq -r ".inbounds[]? | select($PATHSIG_TCP_SELECT) | .listen_port" \
 		"$SINGBOX_CONFIG" 2>/dev/null | sort -un
 }
 
@@ -333,8 +345,16 @@ measure_pathsig_probe() {
 	local cur; cur="$(nft -j list counters table $PATHSIG_NFT_TABLE 2>/dev/null \
 		| jq -c '[.nftables[].counter? | select(.name != null) | {(.name): .packets}] | add // {}')" || return 0
 	[ -n "$cur" ] && [ "$cur" != "null" ] && [ "$cur" != "{}" ] || return 0
-	local portmap; portmap="$(jq -c '[.inbounds[]? | select((.type=="vless" or .type=="shadowtls" or .type=="trojan") and (.listen_port!=null)) | {(.listen_port|tostring): (.tag|sub("-in$";""))}] | add // {}' "$SINGBOX_CONFIG" 2>/dev/null)" || portmap="{}"
+	local portmap; portmap="$(jq -c "[.inbounds[]? | select($PATHSIG_TCP_SELECT) | {(.listen_port|tostring): (.tag|sub(\"-in$\";\"\"))}] | add // {}" "$SINGBOX_CONFIG" 2>/dev/null)" || portmap="{}"
 	local last="{}"; [ -f "$statef" ] && last="$(cat "$statef" 2>/dev/null || echo '{}')"
+	# THE WINDOW, read BEFORE the state file is overwritten: its mtime is when the previous counters were
+	# sampled, which is what the deltas below span.
+	local wprev wnow wsec=0
+	wprev="$(stat -c %Y "$statef" 2>/dev/null || stat -f %m "$statef" 2>/dev/null || printf '')"
+	wnow="$(date +%s 2>/dev/null || printf '')"
+	case "$wprev" in ''|*[!0-9]*) wprev="" ;; esac
+	case "$wnow"  in ''|*[!0-9]*) wnow=""  ;; esac
+	if [ -n "$wprev" ] && [ -n "$wnow" ] && [ "$wnow" -ge "$wprev" ]; then wsec=$(( wnow - wprev )); fi
 	( umask 077; printf '%s\n' "$cur" >"$statef.tmp" ) 2>/dev/null && mv -f "$statef.tmp" "$statef" 2>/dev/null || true
 	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	if [ "$last" = "{}" ]; then
@@ -345,13 +365,39 @@ measure_pathsig_probe() {
 	# fail-safe ([]) on any error, so it never perturbs the ConnectReset path.
 	local collapse; collapse="$(_collapse_classes "$cur" "$last" "$portmap" 2>/dev/null)" || collapse="[]"
 	[ -n "$collapse" ] || collapse="[]"
+	# THE NODE'S OWN PROBES ARE NOT CLIENT TRAFFIC (Audit-0009 T1). The SYN counter sits in an input hook
+	# with no interface predicate — deliberately, because the AC-6 payload-free invariant forbids the
+	# observer emitting any `iif`/`saddr`/`meta` match, and that invariant is worth more than this
+	# correction. But the Go reach prober dials 127.0.0.1:<port> for every enabled member on a fixed
+	# ticker, so each counted port accrues its own synthetic SYNs with zero real clients. Those land in
+	# $sd, the DENOMINATOR of the ratio test, so a genuine low-traffic reset case that should fire is
+	# suppressed: real sd=6, rd=5 fires (10>=6); inflate sd to 14 and it does not (10<14). The bias is
+	# toward FALSE NEGATIVES, on exactly the quiet ports where a reset pattern is the earliest signal.
+	#
+	# So the consumer subtracts what the node is known to have generated itself: one dial per port per
+	# reach interval, across the window just measured. Only when the daemon that makes those dials is
+	# actually running — modelling a rate nobody is producing would over-subtract, which flips the bias to
+	# false positives.
+	#
+	# RESIDUAL, stated rather than hidden: the L7 measure-probe adds 1-3 loopback dials per port per run
+	# (MEASURE_L7_INTERVAL_SEC, default 120s) and is NOT subtracted — its per-port count varies by family
+	# and by what each run skips, and guessing high would over-subtract. A small false-negative bias
+	# therefore remains, roughly an order of magnitude below the one removed here.
+	local syn_synth=0
+	if [ "$wsec" -gt 0 ] && systemctl is-active --quiet mycelium-measure.service 2>/dev/null; then
+		local _ri="${MEASURE_REACH_PROBE_MS:-15000}"
+		case "$_ri" in ''|*[!0-9]*) _ri=15000 ;; esac
+		[ "$_ri" -gt 0 ] && syn_synth=$(( wsec * 1000 / _ri ))
+	fi
 	local reset; reset="$(jq -nc \
 		--argjson cur "$cur" --argjson last "$last" --argjson pm "$portmap" \
+		--argjson synth "${syn_synth:-0}" \
 		--argjson floor "${PATHSIG_RST_FLOOR:-5}" --argjson rnum "${PATHSIG_RST_RATIO_NUM:-1}" --argjson rden "${PATHSIG_RST_RATIO_DEN:-2}" '
 		[ $cur | keys[] | select(startswith("rst_")) | ltrimstr("rst_") ]
 		| map(. as $port
 			| (($cur["rst_"+$port] // 0) - ($last["rst_"+$port] // 0) | if . < 0 then 0 else . end) as $rd
-			| (($cur["syn_"+$port] // 0) - ($last["syn_"+$port] // 0) | if . < 0 then 0 else . end) as $sd
+			| (($cur["syn_"+$port] // 0) - ($last["syn_"+$port] // 0) | if . < 0 then 0 else . end) as $sdraw
+			| (($sdraw - $synth) | if . < 0 then 0 else . end) as $sd
 			| select($sd > 0 and $rd >= $floor and ($rd * $rden) >= ($rnum * $sd))
 			| ($pm[$port] // empty))
 		| unique')" || reset=""

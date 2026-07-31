@@ -36,14 +36,24 @@ The node provides a persistent private network; framing here is neutral and tech
   canonical artifacts to **their** repo once. Every node runs a timer that pulls, re-renders **from
   its own local identity**, validates, and applies — so the network is testable together with no
   per-node hand-work.
-- **"Semi-auto" = the human approval IS the self-hosting operator's SIGNATURE on the pushed ref.**
+- **"Semi-auto" = the operator's signature is a PROVENANCE gate; approval is a separate artifact.**
   Nodes apply automatically, but **fail-closed**: each node first verifies that the canonical ref is
   signed by **that operator's** out-of-band key (`--allowed-signers`, never committed) and refuses to
   run any fetched code otherwise; only then is the candidate config validated with `sing-box check`
-  and rolled back on any failure. So a single bad push to the repo can neither own nor brick the
-  network — an unsigned/forged push is rejected before its code ever executes. (This is an
+  and rolled back on any failure. So a single bad push *from someone else* can neither own nor brick
+  the network — an unsigned/forged push is rejected before its code ever executes. (This is an
   operator-local guarantee for one's own network; it is not, and does not imply, a single project-wide
   signer — see the note above.)
+
+  **What it does not establish.** If local commit signing is unconditional and `--repo-ref` is pinned
+  to a mutable branch, every commit on that branch is signed whether or not it was meant to ship: the
+  node cannot tell a WIP push from a release, and the real approving act — the `git push` — leaves no
+  artifact it can verify. The signature also covers only the pinned ref's **tip**, and `merge --ff-only`
+  then ingests every intervening commit. To have approval as well as provenance, pin `--repo-ref` to an
+  **immutable signed tag**, or arm `--staged` + an explicit `--ack`. A branch-tip pin is a defensible
+  posture on a node only its operator depends on, and is not one on a node anyone else does — see
+  [ADR-0015](../adr/0015-network-artifact-delivery-and-node-update.md) Decision 2 and the update-channel
+  rows in [THREAT-MODEL.md](../THREAT-MODEL.md).
 - **Secrets never leave the node.** The REALITY private key, client UUIDs, per-protocol secrets,
   and the self-signed cert key live only under `/var/lib/mycelium` (`0600`). Only the REALITY
   **public** key and per-client subscriptions are ever exported.
@@ -202,16 +212,14 @@ ExecStart=
 ExecStart=/opt/mycelium/scripts/node-bootstrap.sh --update --repo-ref <signed-ref> --allowed-signers /etc/mycelium/allowed_signers
 ```
 
-**Timer drop-in** — the CALENDAR form. Do not use `OnUnitActiveSec=` here, and read the trap note below
-before deciding otherwise:
+**Timer drop-in** — only if you want a cadence other than the shipped one. The template now ships the
+CALENDAR form (`OnCalendar=*:0/15`), so there is nothing monotonic left to reset and no empty
+assignments are needed. Do not introduce `OnUnitActiveSec=` here; read the trap note below first.
 
 ```ini
 [Timer]
-OnBootSec=
-OnUnitActiveSec=
-OnCalendar=*:0/15
+OnCalendar=*:0/30
 RandomizedDelaySec=300
-Persistent=true
 ```
 
 The signer path and the ref pin are per-node values; putting them in the unit file is precisely the
@@ -220,25 +228,31 @@ pristine copy of the template, and `systemctl revert mycelium-update.service` is
 reset. The drill reads the **effective** command (`systemctl show -p ExecStart`), so your drop-in *is*
 covered by it — including a second appended `ExecStart`, which it fails on.
 
-The shipped cadence (`OnUnitActiveSec=5min`) is aggressive for an unattended path that can restart
-the data plane and rebuild the Go spine as root. Prefer 15 minutes or slower unless you are actively
-watching a node.
+The shipped cadence is `OnCalendar=*:0/15` — every 15 minutes on the wall clock, with up to 90 s of
+jitter. Anything faster is aggressive for an unattended path that can restart the data plane and rebuild
+the Go spine as root; go slower, not faster, unless you are actively watching a node.
 
-**Verify arming by the next elapse, never by `is-enabled`.** The shipped triggers are monotonic and
-anchored on the unit's last trigger, so a node re-armed after a long parked period can settle into
-`SubState=elapsed` with `Trigger: n/a` — never firing again while still reporting `enabled` and
-`active`. Two of three nodes did exactly that on 2026-07-28 and looked correctly armed. Deleting the
-stamp file does not clear it; the anchor lives in systemd's in-memory unit state.
+**Verify arming by the next elapse, never by `is-enabled`.** A monotonic trigger
+(`OnBootSec`/`OnUnitActiveSec`) is anchored on the unit's last trigger, so a node re-armed after a long
+parked period can settle into `SubState=elapsed` with `Trigger: n/a` — never firing again while still
+reporting `enabled` and `active`. Two of three nodes did exactly that on 2026-07-28 and looked correctly
+armed. Deleting the stamp file does not clear it; the anchor lives in systemd's in-memory unit state.
+
+The shipped template no longer uses that form, but **a node that ran the old one keeps its poisoned
+anchor** until the new unit file is copied in and the timer restarted — so when updating an armed node,
+re-copy `infra/systemd/mycelium-update.timer`, `systemctl daemon-reload`, `systemctl restart
+mycelium-update.timer`, and then confirm:
 
 ```sh
 systemctl show mycelium-update.timer -p NextElapseUSecMonotonic   # "infinity" = dead
 systemctl status mycelium-update.timer | grep Trigger             # "n/a"      = dead
 ```
 
-The remedy is a calendar trigger in the drop-in (`OnBootSec=` and `OnUnitActiveSec=` emptied to reset
-the inherited monotonic ones, then `OnCalendar=`); it derives the next elapse from the wall clock and
-cannot be poisoned by a stale anchor. It also makes `Persistent=` meaningful — that setting only ever
-applied to `OnCalendar=` timers, so with the shipped monotonic pair it is a documented no-op.
+A calendar trigger derives the next elapse from the wall clock and cannot be poisoned by a stale
+anchor, which is why the template carries one. It also makes `Persistent=true` meaningful — that setting
+only ever applied to `OnCalendar=` timers, so under the old monotonic pair it was a documented no-op; it
+now catches up one missed run after downtime. `tests/conformance/timer_trigger_form.sh` refuses any timer
+this project emits that is monotonic without an anchor-seeding service start.
 
 `--insecure-no-verify` bypasses the signature gate entirely (`verify_signed_ref` returns before it
 checks anything — [control/lib/nb_update_apply.sh](../../control/lib/nb_update_apply.sh)). It is a
@@ -284,6 +298,27 @@ sudo install -m 0640 -o root -g sing-box /var/lib/mycelium/config.lastgood.json 
 sudo systemctl restart sing-box
 ```
 
+### The config snapshots the node keeps, and how long
+
+All of these live in `/var/lib/mycelium` at mode `0600` (root-only) and each inlines **every secret the
+live config does** — the REALITY private key, every transport password, every client's `users` entry.
+Treat them exactly like the live config.
+
+| file | written when | cleared when |
+|---|---|---|
+| `config.lastgood.json` | every promote | overwritten by the next promote |
+| `config.failed.json` | a promoted candidate failed post-apply verification (kept for the anti-flap guard **and** for you to diff) | the next converge that applies and verifies a config |
+| `config.failed.since` | alongside it — the consecutive-failure count that drives the retry hold | as above |
+| `config.invalid.json` | a candidate failed `sing-box check` and was never promoted (evidence only — nothing reads it) | as above |
+| `xray.config.lastgood.json`, `xray.config.failed.json` | the secondary engine's equivalents | as above |
+
+"The next converge" means any of `--update`, `--node-apply`, `--revoke`, a rotation, or
+`--disable-two-hop` — every path that promotes ends in the shared convergence tail, which retires them.
+On an armed node that is at most one cadence; on an unarmed node it is until you next run one of those.
+
+Deleting `config.failed.json` by hand forces the updater to retry the held candidate on the next tick.
+Deleting `config.failed.since` only resets the retry ladder to its 1 h floor — it does not lift a hold.
+
 ## Fail-closed guarantees (why a bad push cannot own or brick the network)
 
 - **Provenance first.** Fetched artifacts are merged/installed/executed only after the pinned ref's
@@ -310,6 +345,15 @@ sudo systemctl restart sing-box
 - sshd is only hardened **after** an authorized key is confirmed for a real account (any home dir /
   `AuthorizedKeysFile`) and the config passes `sshd -t`; ufw opens the **actual** sshd port(s)
   before enabling, never assuming 22.
+- **A served port cannot be contained with `ufw delete` while the update timer is armed.** The
+  firewall step is additive and runs on every tick: it compares the ports the live config justifies
+  against what ufw already admits and re-opens any that are missing, so a hand-deleted rule for a
+  port that is *still served* comes back within one cadence — and the exposure report then correctly
+  states that every served port is admitted. To take a port out of service, remove the transport
+  from the node profile (so the port stops being served) and let the next converge run, or disarm
+  the timer (`systemctl disable --now mycelium-update.timer`) before editing rules by hand.
+  Rules for ports that are **no longer** served are never touched — nothing is removed
+  automatically, and the exposure report lists them for a human to delete.
 - Every node-specific value (keys, donor, ports, the node address, the signing key) is a
   **local-only** / out-of-band artifact; nothing node-specific is ever committed.
 

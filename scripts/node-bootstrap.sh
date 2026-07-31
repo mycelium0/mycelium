@@ -420,6 +420,12 @@ FAILED_SINCE="$STATE_DIR/config.failed.since"
 # rewrite params.json first; the snapshot preserves the exact bytes. Rewritten ONLY when they CHANGE, so
 # its mtime means "when this exact invalid candidate first appeared".
 INVALID_CONFIG="$STATE_DIR/config.invalid.json"
+# Its SECONDARY-ENGINE twin. The xray engine had no equivalent at all (Audit-0009 AE1): a candidate
+# rejected by `xray run -test` was unlinked and the run died, on every path including the unattended one —
+# which reaches that gate through converge_node_tail AFTER sing-box is already promoted. Same directory,
+# same 0600, same "evidence only, nothing reads it" contract. Both are now written by the VALIDATORS
+# themselves (keep_invalid_candidate, control/lib/nb_update_apply.sh) rather than by one flow.
+XRAY_INVALID_CONFIG="$STATE_DIR/xray.config.invalid.json"
 # Bounded, escalating refusal to RE-promote a candidate byte-identical to the one that last failed
 # post-apply verification: hold = clamp(MIN, MAX, how long this candidate has been failing). NEVER
 # permanent — after the hold the same candidate is retried unconditionally, so a TRANSIENT failure
@@ -702,14 +708,13 @@ flow_update() {
 		# tick, and that is worth nothing: `systemctl is-failed mycelium-update.service` is the ONLY
 		# signal this node emits (the unit has no OnFailure=). Suppressing it turns a node stuck on a
 		# stale config into a node that LOOKS HEALTHY while stuck on a stale config.
-		# The `cmp -s` is load-bearing, not an optimisation: rewriting every tick would reset the mtime
-		# to "one tick ago" and destroy the only thing separating a blip from a six-hour outage.
-		if [ ! -f "$INVALID_CONFIG" ] || ! cmp -s "$candidate" "$INVALID_CONFIG"; then
-			run install -m 0600 "$candidate" "$INVALID_CONFIG" 2>/dev/null || true
-		fi
+		# The SNAPSHOT itself now belongs to validate_config, not to this flow (Audit-0009 AE1) — it is a
+		# property of "a validator rejected these bytes", not of one caller, and keeping it here left the
+		# xray engine with no equivalent at all. validate_config has already written $INVALID_CONFIG and
+		# said where it is, including the mtime contract (rewritten only when the bytes change, so it means
+		# "when this exact invalid candidate first appeared").
 		rm -f "$candidate" 2>/dev/null || true
-		warn "the rejected candidate was kept at $INVALID_CONFIG (0600); its mtime is when these exact bytes first failed."
-		warn "'$SINGBOX_BIN check -c $INVALID_CONFIG' reproduces the failure without re-rendering; diff it against $SINGBOX_CONFIG."
+		warn "diff $INVALID_CONFIG against $SINGBOX_CONFIG to see what this rev would have changed."
 		die "candidate failed 'sing-box check' — NOT applied; live config + service untouched (fail-closed)."
 	fi
 	# This rev renders a schema-valid config: drop the rejected-candidate evidence. Cleared HERE, on the

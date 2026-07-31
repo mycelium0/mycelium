@@ -267,9 +267,16 @@ for fn in pathsig_nft_apply measure_pathsig_probe; do
 	fi
 done
 [ "$guarded" -eq 2 ] && ok "the ruleset installer + the probe reader both fail-safe on a missing nft/jq (no fabricated signal)"
-actuation="$(printf '%s\n' "$region_nc" | grep -inE '\bsystemctl\b|\b(sing-?box|xray)\b|\b(render_|promote_|apply_node|flow_node_apply|nb_rotate)|\brotate\b' || true)"
+# ACTUATING VERBS, not the word `systemctl`. The invariant is ADR-0030 — this region observes and never
+# changes node state — and the check used to enforce it by banning the systemctl BINARY outright. That is
+# not the same property: `systemctl is-active/is-enabled/show/list-*` are reads, and the region needs one
+# (the SYN-denominator correction must know whether the prober generating those SYNs is running, check 8).
+# Banning reads bought nothing and blocked a correct fix; what must stay banned is anything that starts,
+# stops, reconfigures or reloads a unit — plus the engine binaries, the renderers and the rotate path.
+actuation="$(printf '%s\n' "$region_nc" \
+	| grep -inE 'systemctl[^|]*\b(start|stop|restart|reload|try-restart|reload-or-restart|enable|disable|mask|unmask|kill|set-property|daemon-reload|isolate|edit|revert|link|preset)\b|\b(sing-?box|xray)\b|\b(render_|promote_|apply_node|flow_node_apply|nb_rotate)|\brotate\b' || true)"
 if [ -n "$actuation" ]; then
-	badln "the observer region contains an actuation surface (systemctl / engine / render / promote / rotate):"
+	badln "the observer region contains an actuation surface (a state-changing systemctl verb / engine / render / promote / rotate):"
 	printf '%s\n' "$actuation" | sed 's/^/        /'
 else
 	ok "the observer region actuates nothing (no systemctl / engine / render / promote / rotate) — advisory only"
@@ -295,6 +302,46 @@ if [ -z "$missing_daemon" ]; then
 	ok "cmd/myceliumd marker tests present (readPathMarker + gateToResetMap + marker->PlanInput reset + collapse e2e folds)"
 else
 	badln "cmd/myceliumd/measure_test.go is missing chunk-B marker/e2e test(s):$missing_daemon"
+fi
+
+# --- 7. THE TWO PORT VIEWS CANNOT DRIFT (Audit-0009 T1) -----------------------------------------------
+# The observer decides twice which inbounds it covers: once to INSTALL a counter per port, once to map a
+# port back to the class a verdict names. Those were written separately and diverged — the installer
+# counted standalone shadowsocks, the map did not — so every SS counter was installed, read, and folded
+# into `checked` and the all-clear line, while `reset`/`collapse` could never name the shadowsocks tier
+# because its port resolved to nothing. That is coverage claimed and not held, on the LAST-RESORT tier.
+# The remedy is one predicate used twice, which is what this pins: a single PATHSIG_TCP_SELECT, referenced
+# by both, and no inline type list left anywhere in the region.
+if printf '%s' "$region" | grep -q '^PATHSIG_TCP_SELECT='; then
+	ok "one shared selector (PATHSIG_TCP_SELECT) defines which inbounds the observer covers"
+	users="$(printf '%s\n' "$region" | grep -c 'PATHSIG_TCP_SELECT' || true)"
+	[ "${users:-0}" -ge 3 ] \
+		&& ok "both the counter installer and the port->class map consume it ($users references)" \
+		|| badln "PATHSIG_TCP_SELECT is defined but used $((users - 1)) time(s) — the port list and the port->class map must BOTH derive from it, or a family gets counters with no class to name"
+	# An inline `.type=="..."` chain in the region means someone re-derived the set by hand.
+	inline="$(printf '%s\n' "$region" | grep -vE '^[[:space:]]*#' | grep -v 'PATHSIG_TCP_SELECT=' | grep -nE '\.type=="(vless|shadowtls|trojan|shadowsocks)"' || true)"
+	if [ -n "$inline" ]; then
+		badln "an inline inbound-type list survives outside PATHSIG_TCP_SELECT — this is exactly how the two views drifted:"
+		printf '%s\n' "$inline" | sed 's/^/        /'
+	else
+		ok "no inline inbound-type list remains in the region (the selector is the only definition)"
+	fi
+else
+	badln "PATHSIG_TCP_SELECT is not defined — the counter installer and the port->class map each carry their own inbound-type list and can silently disagree (Audit-0009 T1)"
+fi
+
+# --- 8. THE NODE'S OWN PROBES ARE NOT COUNTED AS CLIENT TRAFFIC ---------------------------------------
+# The SYN counter cannot exclude loopback at the nft layer — check 3 above forbids the `iif` match that
+# would do it, deliberately. The correction therefore has to live in the CONSUMER, and it has to be gated
+# on the prober actually running: subtracting a rate nobody is producing flips the bias from false
+# negatives to false positives.
+if printf '%s' "$region" | grep -q 'synth' && printf '%s' "$region" | grep -q 'MEASURE_REACH_PROBE_MS'; then
+	ok "the reset selector discounts the node's own reach-prober dials from the SYN denominator"
+	printf '%s' "$region" | grep -q 'is-active --quiet mycelium-measure' \
+		&& ok "  and only when mycelium-measure.service is actually running (no over-subtraction)" \
+		|| badln "  but unconditionally — if the prober is not running there are no synthetic SYNs to remove, and subtracting anyway manufactures false positives"
+else
+	badln "the SYN denominator counts the node's own loopback probes as client traffic — ~8-11 synthetic SYNs per window per port suppress genuine low-traffic reset cases (Audit-0009 T1)"
 fi
 
 printf '\n-- Result --\n'

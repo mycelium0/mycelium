@@ -143,6 +143,17 @@
 #                               D): myc_firewall_singbox_ports opens public ("::") ports only and NEVER a
 #                               loopback-bound (reachable=false / shadowtls-detour) port; a missing listen
 #                               defaults public (no jq null-abort); harden_ufw delegates to it. OFFLINE
+#   * timer_trigger_form.sh — every systemd TIMER the project emits must be provably able to fire again:
+#                               a calendar trigger, or the monotonic pair PLUS an anchor-seeding
+#                               `systemctl start <unit>.service` at the enable site. Nothing constrained
+#                               this before, and two live nodes sat enabled+active with Trigger=n/a for
+#                               weeks on the update timer (Audit-0009 D1). OFFLINE
+#   * ufw_exposure_report.sh — the firewall EXPOSURE REPORT subsystem (myc_ufw_admitted_ports,
+#                               myc_ufw_listening_ports, verify_ufw_exposure) says only what it can
+#                               establish: the parser on nine ufw-status fixtures, the space-normalised
+#                               membership comparison that once reported every served port blocked on a
+#                               live node, and the rule that no listener view means NO orphan claim and no
+#                               all-clear (Audit-0009 L1/AG1). Stubs ufw/ss. OFFLINE
 #   * release_dist_sane.sh — the release artifact (`make dist`, RP-0011 REL-1) is the AGPL Corresponding
 #                               Source: version-named (== spec.Version == CHANGELOG top), carries the
 #                               bootstrap+build source, is SECRET-FREE (no identity/params/keys/configs),
@@ -276,6 +287,8 @@ GATES=(
 	"tests/conformance/node_profile_read_additive.sh"
 	"tests/conformance/node_apply_failclosed.sh"
 	"tests/conformance/reachable_firewall_loopback.sh"
+	"tests/conformance/ufw_exposure_report.sh"
+	"tests/conformance/timer_trigger_form.sh"
 	"tests/conformance/release_dist_sane.sh"
 	"tests/conformance/release_workflow_sane.sh"
 	"tests/conformance/release_verify_failclosed.sh"

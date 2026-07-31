@@ -37,8 +37,16 @@
 # to a PUBLIC repo would otherwise be applied network-wide by a root timer, and "sing-box check"
 # only validates config SCHEMA, never PROVENANCE. So we require the canonical ref to carry a
 # signature from an OUT-OF-BAND operator key (never committed) and verify it BEFORE any fetched
-# code is merged/installed/executed. The verified signature IS the real "semi-auto human
-# approval" — not merely "a commit exists on origin".
+# code is merged/installed/executed.
+#
+# WHAT THE SIGNATURE ESTABLISHES (amended, Audit-0009 V1). This header used to say the verified signature
+# IS the "semi-auto human approval". It is not, and saying so misled every reader of the armed path: local
+# signing is unconditional, so every commit on a mutable branch pin is signed whether or not it was meant
+# to ship. What verify_signed_ref establishes is PROVENANCE — this came from the operator's key, not from
+# a forged or third-party push — which is the property the armed fetch actually depends on. APPROVAL is a
+# separate artifact and a branch-tip pin has none: the approving act is the `git push`, which leaves the
+# node nothing to verify. Pin --repo-ref to an immutable signed TAG, or arm --staged/--ack, to have both.
+# See ADR-0015 Decision 2.
 # ---------------------------------------------------------------------------
 # _insecure_bypass_permitted — PURE decision: may --insecure-no-verify actually bypass the signature gate
 # in THIS execution context? rc 0 = permitted, rc 1 = refused. Reads only DRY_RUN and the two environment
@@ -67,6 +75,40 @@ _insecure_bypass_permitted() {
 	[ -n "${INVOCATION_ID:-}" ] && return 1
 	[ -t 0 ] || return 1
 	return 0
+}
+
+# ---------------------------------------------------------------------------
+# clear_retired_config_snapshots — drop the secret-bearing failure snapshots once a config is live and
+# verified. Called at the TOP of converge_node_tail, so it runs on EVERY promote path rather than one.
+#
+# WHAT THESE FILES ARE (Audit-0009 R1). config.failed.json and config.invalid.json each hold a
+# byte-for-byte rendered sing-box server config: the REALITY private key, every transport password, and
+# every client's `users` entry. config.lastgood.json, their pre-existing peer, is bounded by construction —
+# the next promote overwrites it. These two were not: they were cleared only inside flow_update, and
+# flow_revoke / flow_node_apply / rotate / disable-two-hop all end in converge_node_tail, which cleared
+# nothing. So on a node in the posture the runbook documents as valid — installed but NOT armed, where
+# flow_update runs only when an operator invokes it — a credential the operator had deliberately RETIRED
+# (a revoked client's UUID and PSK, a secret superseded by a rotation) survived at rest, unbounded in time,
+# past the very operation whose purpose was to retire it, while the revoke line reported the UUID "gone
+# from every inbound on BOTH engines".
+#
+# WHY AT THE TOP OF THE TAIL, not the bottom: apply_node_xray_engine — the tail's first step — writes
+# xray.config.failed.json when it rejects a candidate. Clearing afterwards would delete the evidence the
+# same run just produced. Clearing first retires only what predates this converge, which is exactly the
+# set that is now stale.
+#
+# NOT a security boundary, a RETENTION bound. All three files are 0600 in the state dir, inside the secret
+# boundary the threat model already documents; nothing here widens or narrows that. What changes is how
+# long a retired credential lingers there.
+clear_retired_config_snapshots() {
+	[ "${DRY_RUN:-0}" -eq 0 ] || return 0
+	local f
+	for f in "${FAILED_CONFIG:-}" "${FAILED_SINCE:-}" "${INVALID_CONFIG:-}" "${XRAY_INVALID_CONFIG:-}" \
+	         "${STATE_DIR:+$STATE_DIR/xray.config.failed.json}"; do
+		[ -n "$f" ] || continue
+		[ -e "$f" ] || continue
+		rm -f "$f" 2>/dev/null || true
+	done
 }
 
 # ---------------------------------------------------------------------------
@@ -232,12 +274,41 @@ render_candidate() {
 }
 
 # sing-box check is the fail-closed GATE the renderer does NOT run itself.
+# keep_invalid_candidate SRC DEST LABEL REPRO_CMD — preserve the bytes a validator just rejected, for the
+# operator to diff. 0600: a rejected candidate inlines the same secrets as the live config.
+#
+# AT THE VALIDATE SEAM, not in one flow (Audit-0009 AE1). This lived inside flow_update, which made it a
+# special case of one caller rather than a property of validation — and the engine it did not cover is the
+# one that needed it most. An xray candidate rejected by `xray run -test` was unlinked and the run died on
+# EVERY path including the unattended one, which reaches that gate through converge_node_tail AFTER the
+# sing-box config is already promoted: a red unit, a half-converged node (new sing-box config live, stale
+# xray config) and no bytes to diff — because the same tick's fetch had already replaced the template and
+# the renderer that produced them.
+#
+# Written only when the bytes CHANGE, so the mtime means "when this exact invalid candidate first appeared"
+# rather than "one tick ago". Never fatal, never blocking: failing to keep evidence must not turn a
+# validation failure into a different failure.
+keep_invalid_candidate() {
+	local src="$1" dest="$2" label="$3" repro="$4"
+	[ "${DRY_RUN:-0}" -eq 0 ] || return 0
+	[ -n "$dest" ] && [ -f "$src" ] || return 0
+	if [ ! -f "$dest" ] || ! cmp -s "$src" "$dest"; then
+		install -m 0600 "$src" "$dest" 2>/dev/null || return 0
+	fi
+	warn "the rejected $label candidate was kept at $dest (0600); its mtime is when these exact bytes first failed."
+	warn "'$repro' reproduces the failure without re-rendering."
+	return 0
+}
+
 validate_config() {
 	local cfg="$1"
 	log "validating candidate with 'sing-box check' (fail-closed gate)"
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] sing-box check -c $cfg"; return 0; fi
 	have "$SINGBOX_BIN" || die "sing-box binary missing; cannot validate."
-	"$SINGBOX_BIN" check -c "$cfg" || return 1
+	"$SINGBOX_BIN" check -c "$cfg" && return 0
+	keep_invalid_candidate "$cfg" "${INVALID_CONFIG:-}" "sing-box" \
+		"$SINGBOX_BIN check -c ${INVALID_CONFIG:-}"
+	return 1
 }
 
 promote_config() {
@@ -321,7 +392,10 @@ validate_xray_config() {
 	log "validating xray candidate with 'xray run -test' (fail-closed gate)"
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] xray run -test -c $cfg"; return 0; fi
 	have "$XRAY_BIN" || die "xray binary missing; cannot validate."
-	"$XRAY_BIN" run -test -c "$cfg" || return 1
+	"$XRAY_BIN" run -test -c "$cfg" && return 0
+	keep_invalid_candidate "$cfg" "${XRAY_INVALID_CONFIG:-}" "xray" \
+		"$XRAY_BIN run -test -c ${XRAY_INVALID_CONFIG:-}"
+	return 1
 }
 
 promote_xray_config() {

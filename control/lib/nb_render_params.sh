@@ -493,10 +493,14 @@ apply_node_xray_engine() {
 # a newly-served port ufw-blocked. Firewall SECOND. Bundle LAST, so the served distribution only ever
 # describes a node that is already live and already reachable.
 #
-# Every step is idempotent and self-no-ops, which is what makes it safe on a cadence: apply_node_xray_engine
-# returns immediately on a node with no xray family enabled (`node_needs_xray || return 0`) and skips the
-# restart when the rendered xray config is byte-identical; harden_ufw is additive + anti-lockout;
-# render_serve_bundle is fail-closed (keeps last-known-good rather than serving an invalid bundle).
+# Every step no-ops when there is nothing to do, which is what makes it safe on a cadence:
+# apply_node_xray_engine returns immediately on a node with no xray family enabled (`node_needs_xray ||
+# return 0`) and skips the restart when the rendered xray config is byte-identical; harden_ufw computes a
+# delta against the rules ufw already admits and issues only that (it is additive + anti-lockout, and never
+# removes a rule); render_serve_bundle is fail-closed (keeps last-known-good rather than serving an invalid
+# bundle). The firewall step's claim was previously "idempotent", which was true of the OUTCOME and not of
+# the ACTIONS — it re-issued its whole sequence every tick, so a transient failure in any of them could
+# fail a tick with nothing to converge (Audit-0009 N1).
 # FAILURE CONTRACT (Audit-0009 J1): run ALL THREE steps, then report. The tail used to be three bare
 # calls, and its first step is the only one that can `die` — so on an xray-serving node an xray fault
 # aborted the process and silently took the firewall and the served bundle with it. The steps are
@@ -515,6 +519,13 @@ apply_node_xray_engine() {
 # things; only the first is wanted.
 converge_node_tail() {
 	local failed=""
+	# Every caller reaches here only after a promote was applied AND verified (or after establishing there
+	# was nothing to promote), so the previous run's failure snapshots are stale by definition. Retiring
+	# them here rather than in flow_update alone is what bounds their lifetime on the operator-driven paths
+	# — revoke, node-apply, rotate, disable-two-hop — which is where a deliberately retired credential used
+	# to survive indefinitely (Audit-0009 R1). Runs FIRST: the xray step below writes its own failure
+	# snapshot, and that one belongs to this run.
+	clear_retired_config_snapshots
 	( apply_node_xray_engine ) || failed="$failed xray-engine"
 	# Respects --no-harden. The `if` form, not `[ ] && harden_ufw`: under `set -e` the && form is only
 	# safe because another statement follows it, and that is too subtle to leave as a trap for the next edit.

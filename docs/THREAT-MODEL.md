@@ -69,11 +69,13 @@ What the adversary does not currently do at scale, but could: full allowlist-onl
 | IP-level / AS-level blocking | node | IP/AS diversity, fast rotation, CDN-front, ephemeral ingress nodes |
 | UDP excision | transport | TCP/TLS paths are primary; UDP is a bonus |
 | Block of the config distribution domain | control plane | Domain-fronting, anycast, P2P fallback, out-of-band bootstrap configs |
+| **Tampering with the node update/delivery channel** (forged push to the pinned ref, or a compromised maintainer key) | control plane / node | `--update` is a periodic **root** fetch→merge→install→promote on every armed node, so this is the highest-value single target in the project. Layered: the pinned ref's signature is verified against an **out-of-band** `allowed_signers` file before any fetched code merges, installs or runs (ADR-0015; `--insecure-no-verify` now refuses to bypass under systemd or a non-TTY); `git merge --ff-only` refuses a rewritten history, so a force-push is never taken silently; the fetched tree still has to render a config that passes `sing-box check` and then survive post-apply verification, or the node rolls back to its last known-good and holds. **Not yet in place:** a tag pin or `--staged`/`--ack` (see the approval gap below), and a canary/stagger so one bad push cannot reach every node in the same cadence |
+| Maintainer-key compromise or coercion of the *signing* key specifically | people / control plane | The signing key is the sole provenance gate on the armed update path, so compromising the machine that holds it is equivalent to root on every armed node. Kept out-of-band and never committed; the corresponding `allowed_signers` is distributed by hand per node, so revocation is a per-node file edit and does not depend on any online service. Residual: it is a single key on a single workstation, and rotating it means touching every node |
 | Sybil / ingress enumeration | discovery | Invitation trees, social-graph/history trust, PoW, graduated knowledge |
 | Eclipse / route poisoning | discovery / routing | Reputation scoring, peer diversity, verifiability |
 | Traffic-timing correlation | routing | Multi-hop, padding, mixing (at latency cost) |
 | Node compromise | full stack | Minimal node knowledge; forward secrecy; ingress/egress separation (Phase 3–4 — in Phases 0–2 ingress and egress coincide on one node, see ARCHITECTURE.md Layer 3) |
-| Operator coercion | people | Minimal logging, plausible deniability, jurisdictional distribution |
+| Operator coercion | people | Minimal logging, plausible deniability, jurisdictional distribution. **Scope note:** coercion of the operator who holds the *update signing key* is strictly worse than coercion of a node operator — it yields root on every armed node rather than one node's traffic — and is tracked as its own row above |
 
 ## Attack surface: TLS-in-TLS detection and the two-family mitigation
 
@@ -152,6 +154,61 @@ identity and location). It is treated as follows:
   responsible for a final eyeball before publishing a bundle. This residual is recorded in the
   `internal/diag` package doc and the CHANGELOG; it carries no structured identity/location linkage, so
   it does not by itself constitute a `USER_DEANON`.
+
+## Attack surface: the update channel's approval gap (armed nodes)
+
+The row above records what the update channel is defended against. This records what it is **not**, because
+the gap is a posture choice and has to be visible rather than inferred (Audit-0009 V1/V2).
+
+`verify_signed_ref` establishes **provenance** — the pinned ref carries a signature from the operator's
+out-of-band key, so a forged or third-party push is refused before anything executes. It does **not**
+establish **approval**. Local commit signing is unconditional, so on a node pinned to a mutable branch tip
+every commit is signed whether or not it was meant to ship: a WIP push and a release are indistinguishable
+at the node, and the actual approving act — the `git push` — leaves no artifact the node can verify. The
+signature covers the pinned ref's TIP; `merge --ff-only` then ingests every intervening commit, so a
+branch pin is a real provenance gate but never a per-commit one.
+
+ADR-0015 names the two controls that close this — an **immutable signed tag** in `--repo-ref`, or
+`--staged` + an explicit `--ack` — and neither is armed today. The current posture is therefore:
+
+- **Operator-owned development nodes: accepted.** The operator is the only pusher, and the same key
+  already grants them root over those nodes, so the gap grants no capability an adversary did not
+  already have with that key. The mutable pin is reported explicitly by the on-node drill, not assumed.
+- **Any node someone else depends on: not acceptable.** Arming there owes a tag pin or staged-ack, plus
+  a canary/stagger so a single push cannot reach the whole population within one cadence.
+
+If the signature is ever to carry approval meaning again, unconditional local signing has to stop first —
+otherwise the artifact that would express approval is produced automatically by every commit.
+
+## Attack surface: the node's at-rest config snapshots
+
+The node keeps a small set of **byte-for-byte copies of rendered server configs** in its state dir
+(`/var/lib/mycelium`, mode 0600, root-only). Each one inlines every secret the live config does: the
+REALITY private key, every transport password/PSK, and every client's `users` entry. They exist so a
+promote can be undone and so a failure leaves evidence:
+
+| file | written when | cleared when |
+|---|---|---|
+| `config.lastgood.json` | every promote | overwritten by the next promote |
+| `config.failed.json` (+ `config.failed.since`) | a promoted candidate fails post-apply verification | the next converge that applies and verifies a config |
+| `config.invalid.json` | a candidate fails `sing-box check` (never promoted) | the next converge that applies and verifies a config |
+| `xray.config.lastgood.json` / `xray.config.failed.json` | the secondary engine's promote / rejected candidate | as above |
+
+- **Bounded retention is the property that matters, not the location.** All of them sit inside the
+  secret boundary this model already assumes for the live config — same directory, same mode, same
+  reader (root). What they must not do is outlive the operation that retired a credential. The two
+  failure snapshots previously did: they were cleared only by the unattended `--update` flow, so on a
+  node that is installed but **not armed** — a posture the node-bootstrap runbook documents as valid — a
+  revoked client's UUID and PSK, or a secret superseded by a rotation, could persist indefinitely after
+  the revoke reported it "gone from every inbound on both engines". They are now cleared by the shared
+  convergence tail, which every promote path ends in (Audit-0009 R1).
+- **They are not a new collection surface.** Nothing transmits, aggregates or serves them; the
+  diagnostics bundle above does not read them. An operator who wants them gone sooner can delete them —
+  the anti-flap guard treats a missing `config.failed.json` as "retry now", which is the fail-safe
+  direction.
+- **Residual.** Between a failed apply and the next successful converge, a retired credential can still
+  be present in `config.failed.json`. On an armed node that window is one cadence (15 min). On an unarmed
+  node it lasts until the operator's next `--node-apply`, `--revoke`, rotate or `--update`.
 
 ## Attack surface: download-direction throughput degradation and the out-of-region path
 

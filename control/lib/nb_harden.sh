@@ -167,16 +167,25 @@ myc_ufw_admitted_ports() {
 
 # myc_ufw_listening_ports <tcp|udp> — the NON-LOOPBACK listener view, one port per line. Loopback binds
 # are excluded on purpose: under the unified node profile a non-reachable node rebinds public inbounds to
-# 127.0.0.1, and a loopback listener must not read as holding a public port open. Empty output (no ss, or
-# ss silent) is the NO-SIGNAL case the caller refuses to report on.
+# 127.0.0.1, and a loopback listener must not read as holding a public port open.
+#
+# RC IS THE SIGNAL, NOT THE OUTPUT (Audit-0009 AG1). This used to return 0 with empty output whenever `ss`
+# was absent or failed, so "I cannot see the listeners" was indistinguishable from "nothing is listening" —
+# and the caller's orphan advisory reads that emptiness as proof a port is unused. On a node without `ss`,
+# EVERY admitted port outside this invocation's served/keep sets would then be reported as an orphan to
+# delete by hand, including ports held by live third-party services. That defeats the exact distinction the
+# listener check exists to make, so:
+#   rc 0 = a real listener view (possibly legitimately empty)
+#   rc 2 = NO SIGNAL — ss missing, ss failed, or an unknown family. The caller must not report orphans.
 myc_ufw_listening_ports() {
-	local fam="$1" out=""
-	have ss || return 0
+	local fam="$1" out="" rc=0
+	have ss || return 2
 	case "$fam" in
-		tcp) out="$(ss -tlnH 2>/dev/null || true)" ;;
-		udp) out="$(ss -ulnH 2>/dev/null || true)" ;;
-		*)   return 0 ;;
+		tcp) out="$(ss -tlnH 2>/dev/null)" || rc=$? ;;
+		udp) out="$(ss -ulnH 2>/dev/null)" || rc=$? ;;
+		*)   return 2 ;;
 	esac
+	[ "$rc" -eq 0 ] || return 2
 	printf '%s\n' "$out" | LC_ALL=C awk '
 		{ a = $4; n = match(a, /:[0-9]+$/); if (n == 0) next
 		  addr = substr(a, 1, n - 1); port = substr(a, n + 1)
@@ -206,18 +215,24 @@ myc_ufw_listening_ports() {
 # observation must never be able to do that. Fail-SAFE throughout: no ufw, no ss, unreadable status, or an
 # empty parse all yield NO REPORT rather than a false accusation.
 verify_ufw_exposure() {
-	local served="$1" keep="$2" admitted listen_tcp listen_udp t p fam blocked="" orphan=""
+	local served="$1" keep="$2" admitted listen_tcp listen_udp t p fam blocked="" orphan="" unseen=""
 	have ufw || return 0
 	# NORMALISE TO SPACE-SEPARATED. myc_ufw_admitted_ports emits one token per LINE (it ends in sort -u),
 	# and the membership tests below are `case " $list " in *" $tok "*)`, which matches only a token
 	# surrounded by SPACES. Feeding the newline form to that test makes every element except the first and
 	# last silently unmatchable — every served port then reads "NOT admitted". Caught on a live node, where
-	# the report claimed all eight served ports were firewall-blocked on a node clients were reaching
-	# fine; the fixture test passed because it exercised the PARSER and not this comparison.
+	# the report claimed all eight served ports were firewall-blocked on a node clients were reaching fine.
+	# At the time nothing covered it: the change set that introduced this subsystem shipped no test for any
+	# of its three functions, and the comment here pointed the next maintainer at a fixture that did not
+	# exist (Audit-0009 L1). tests/conformance/ufw_exposure_report.sh now drives the parser AND this
+	# comparison, with stubbed ufw/ss, and fails if the normalisation is removed.
 	admitted="$(LC_ALL=C ufw status 2>/dev/null | myc_ufw_admitted_ports | tr '\n' ' ')" || admitted=""
 	[ -n "$admitted" ] || { log "firewall exposure: ufw status yielded no parseable public rules; nothing reported (fail-safe)."; return 0; }
-	listen_tcp="$(myc_ufw_listening_ports tcp)" || listen_tcp=""
-	listen_udp="$(myc_ufw_listening_ports udp)" || listen_udp=""
+	# Per FAMILY, because they fail independently and suppressing both on one failure would throw away a
+	# view we actually have.
+	local seen_tcp=1 seen_udp=1
+	listen_tcp="$(myc_ufw_listening_ports tcp)" || { seen_tcp=0; listen_tcp=""; }
+	listen_udp="$(myc_ufw_listening_ports udp)" || { seen_udp=0; listen_udp=""; }
 
 	# (b) served but not admitted.
 	for t in $served; do
@@ -228,8 +243,15 @@ verify_ufw_exposure() {
 		case " $served " in *" $t "*) continue ;; esac
 		case " $keep "   in *" $t "*) continue ;; esac
 		p="${t%%/*}"; fam="${t##*/}"
-		if [ "$fam" = tcp ]; then case " $(printf '%s ' $listen_tcp) " in *" $p "*) continue ;; esac
-		else                      case " $(printf '%s ' $listen_udp) " in *" $p "*) continue ;; esac; fi
+		# NO LISTENER VIEW -> NO ACCUSATION (Audit-0009 AG1). "Nothing is listening" is the whole basis of
+		# the orphan claim; without the view there is no basis, only an absence.
+		if [ "$fam" = tcp ]; then
+			[ "$seen_tcp" -eq 1 ] || { unseen="$unseen $t"; continue; }
+			case " $(printf '%s ' $listen_tcp) " in *" $p "*) continue ;; esac
+		else
+			[ "$seen_udp" -eq 1 ] || { unseen="$unseen $t"; continue; }
+			case " $(printf '%s ' $listen_udp) " in *" $p "*) continue ;; esac
+		fi
 		orphan="$orphan $t"
 	done
 
@@ -246,20 +268,67 @@ verify_ufw_exposure() {
 		# is open wider than justified. The BLOCKED case above is the one that warns, because that is an
 		# outage nothing else can see.
 		log "firewall exposure: admitted but not served and nothing listening:$orphan — harden_ufw only ADDS rules; nothing is removed automatically (a rule deletion from an unattended path is how a node locks itself out). Review with 'ufw status numbered' and delete by hand if intended."
-	elif [ -z "$blocked" ]; then
+	elif [ -z "$blocked" ] && [ -z "$unseen" ]; then
 		log "firewall exposure: every served port is admitted, and no unexplained port is open."
+	fi
+	if [ -n "$unseen" ]; then
+		# Say what was not established, rather than converting it into an accusation or an all-clear.
+		log "firewall exposure: no listener view available (ss missing or failed), so nothing is claimed about:$unseen — these are admitted and outside this run's served/keep sets, but whether anything is listening on them could not be determined."
 	fi
 	[ -n "$blocked" ] && warn "  (advisory — the parser does not represent interface-scoped rules, app-profile rows such as OpenSSH, or IPv6-only rules.)"
 	return 0
 }
 
+# harden_ufw — converge the host firewall onto the enabled canonical ports. ADDITIVE ONLY: it opens what
+# the live config justifies and never removes anything (verify_ufw_exposure explains why deletion from an
+# unattended path is off the table).
+#
+# IT ACTS ON A DELTA (Audit-0009 N1). This runs as root on the armed timer's 15-minute cadence, and it used
+# to re-issue its entire sequence on every tick with no way to say whether anything had changed. Two
+# consequences went unargued. First, a tick with nothing to converge was indistinguishable in the log from
+# one that opened a port — the operator had no signal at all. Second, under `set -euo pipefail` a transient
+# non-zero from ANY of those unconditional `ufw` calls aborted flow_update after an otherwise successful
+# apply, turning a no-op tick into a red unit. Now the desired token set is compared against what ufw
+# already admits, only the delta is issued, and an individual rule that fails to add is reported and
+# survived rather than fatal — the tail's failure contract keeps its teeth for the one thing that really is
+# a convergence failure, `ufw enable` itself.
+#
+# WHAT THIS MEANS FOR THE OPERATOR, stated because nothing else states it: while the update timer is armed,
+# a served port CANNOT be contained with `ufw delete`. The rule is re-added within one cadence and
+# verify_ufw_exposure then reports every served port admitted. To take a port out of service, remove the
+# transport from the node profile (so it stops being served) or disarm the timer first — see
+# docs/runbooks/node-bootstrap.md.
 harden_ufw() {
 	log "configuring the host firewall (ufw) for the enabled canonical ports"
 	need_root
 	have ufw || { warn "ufw not installed; skipping firewall step (install ufw to enable)."; return 0; }
-	# Default deny inbound; allow SSH first (anti-lockout) then ONLY the enabled protocols' ports.
-	run ufw --force default deny incoming
-	run ufw --force default allow outgoing
+	# What ufw admits from anywhere RIGHT NOW — the baseline the delta is computed against. The parser's
+	# blind spots (interface-scoped, app-profile, v6-only) can only make a token look NOT-admitted, so the
+	# worst case is re-issuing a rule ufw then skips as existing: the old behaviour, for that token only.
+	local _now="" _added="" _softfail=""
+	_now="$(LC_ALL=C ufw status 2>/dev/null | myc_ufw_admitted_ports | tr '\n' ' ')" || _now=""
+	# ufw_allow TOKEN — issue `ufw allow` only if TOKEN is not already admitted; never fatal.
+	# Nested on purpose: it reads harden_ufw's locals ($_now/$_added/$_softfail) by dynamic scope and has
+	# no meaning outside this converge. Prefixed so it cannot be mistaken for a general helper.
+	_harden_ufw_allow() {
+		local tok="$1"
+		case " $_now " in *" $tok "*) return 0 ;; esac
+		if run ufw allow "$tok"; then _added="$_added $tok"; _now="$_now $tok"; return 0; fi
+		warn "ufw allow $tok failed; leaving it to the next tick (not aborting an otherwise successful converge)."
+		_softfail="$_softfail $tok"
+		return 0
+	}
+	# Default deny inbound; allow SSH first (anti-lockout) then ONLY the enabled protocols' ports. The
+	# defaults are read back rather than re-asserted: `ufw default` rewrites /etc/default/ufw and reloads.
+	local _defaults; _defaults="$(LC_ALL=C ufw status verbose 2>/dev/null | sed -n 's/^Default: //p')"
+	case "$_defaults" in
+		*"deny (incoming)"*) : ;;
+		*) run ufw --force default deny incoming || warn "could not set the inbound default to deny." ;;
+	esac
+	case "$_defaults" in
+		*"allow (outgoing)"*) : ;;
+		*) run ufw --force default allow outgoing || warn "could not set the outbound default to allow." ;;
+	esac
 	# ANTI-LOCKOUT: never assume port 22. Open EXACTLY the port(s) the running sshd actually listens
 	# on (parsed from the effective config), so enabling ufw cannot cut the live session even when
 	# the operator runs sshd on a non-standard port.
@@ -268,8 +337,11 @@ harden_ufw() {
 	if [ -n "$ssh_ports" ]; then
 		for sp in $ssh_ports; do
 			[ -n "$sp" ] || continue
-			run ufw allow "$sp/tcp" && opened_ssh=1
-			log "allowed the live sshd port $sp/tcp before enabling the firewall (anti-lockout)."
+			# ANTI-LOCKOUT keeps its own accounting: opened_ssh must mean "this port is admitted", which is
+			# true both when we just added it and when it was already there.
+			_harden_ufw_allow "$sp/tcp"
+			case " $_softfail " in *" $sp/tcp "*) ;; *) opened_ssh=1 ;; esac
+			log "the live sshd port $sp/tcp is admitted before enabling the firewall (anti-lockout)."
 		done
 	fi
 	if [ "$opened_ssh" -ne 1 ]; then
@@ -277,7 +349,7 @@ harden_ufw() {
 		# but warn loudly — a non-standard live port could be cut.
 		warn "could not detect the live sshd port; falling back to OpenSSH/22. If sshd runs on a"
 		warn "non-standard port, allow it manually BEFORE 'ufw enable' to avoid a lockout."
-		run ufw allow OpenSSH 2>/dev/null || run ufw allow 22/tcp
+		run ufw allow OpenSSH 2>/dev/null || _harden_ufw_allow 22/tcp
 	fi
 	# Canonical ports come from the rendered config (the single source of truth at runtime). We
 	# read the live config's listen_port set so the firewall opens EXACTLY what is enabled.
@@ -294,22 +366,36 @@ harden_ufw() {
 	# _served accumulates the exact token set this run justifies, built from the SAME loops that open the
 	# rules, so the report can never disagree with what was actually allowed. Purely additive bookkeeping.
 	local _served=""
-	for p in $enabled_tcp; do run ufw allow "$p/tcp"; _served="$_served $p/tcp"; done
-	for p in $enabled_udp; do run ufw allow "$p/udp"; _served="$_served $p/udp"; done
+	for p in $enabled_tcp; do _harden_ufw_allow "$p/tcp"; _served="$_served $p/tcp"; done
+	for p in $enabled_udp; do _harden_ufw_allow "$p/udp"; _served="$_served $p/udp"; done
 	# ADR-0032 dual-engine: the xray engine serves from a SEPARATE config (XRAY_CONFIG), so its listen
 	# ports are not in the sing-box config the loop above read. Open them too (xray inbounds key on
 	# `.port`; the xhttp-tls family is TCP). A stock node has no XRAY_CONFIG, so this opens nothing.
 	if [ -n "${XRAY_CONFIG:-}" ] && [ -f "$XRAY_CONFIG" ] && have jq; then
 		local xray_tcp
 		xray_tcp="$(jq -r '[.inbounds[]? | select(.port != null) | .port] | unique | .[]' "$XRAY_CONFIG" 2>/dev/null | tr '\n' ' ')"
-		for p in $xray_tcp; do run ufw allow "$p/tcp"; _served="$_served $p/tcp"; done
+		for p in $xray_tcp; do _harden_ufw_allow "$p/tcp"; _served="$_served $p/tcp"; done
 	fi
 	# AmneziaWG UDP port (its conventional canon port; the actual value is operator/runtime).
 	if [ "$DO_AMNEZIAWG" -eq 1 ] && [ -f "$STATE_DIR/awg.port" ]; then
-		run ufw allow "$(cat "$STATE_DIR/awg.port")/udp"
-		_served="$_served $(cat "$STATE_DIR/awg.port")/udp"
+		local awgp; awgp="$(cat "$STATE_DIR/awg.port")"
+		_harden_ufw_allow "$awgp/udp"
+		_served="$_served $awgp/udp"
 	fi
-	run ufw --force enable
+	# `ufw enable` is the one step that stays unconditional-and-fatal: everything above is a rule that can
+	# wait a cadence, this is whether the firewall is running at all. Already-active is a no-op in ufw.
+	if ! run ufw --force enable; then
+		warn "'ufw --force enable' FAILED — the host firewall is not converged."
+		return 1
+	fi
+	# SAY WHETHER ANYTHING CHANGED. A cadenced root step that logs the same lines on a no-op tick as on a
+	# real one gives the operator nothing to notice.
+	if [ -n "$_added" ]; then
+		log "firewall: opened$_added (delta against the rules ufw already admitted)."
+	else
+		log "firewall: no rule changes needed (every justified port was already admitted)."
+	fi
+	[ -z "$_softfail" ] || warn "firewall: these rules could not be added this tick and will be retried on the next one:$_softfail"
 	# Report-only exposure check. AFTER `ufw --force enable`, so it describes the state a client actually
 	# meets. $ssh_ports is the keep-set: the anti-lockout rules above are ours and must never be reported
 	# as unexplained. Under --dry-run nothing was opened, so a report would describe a fiction — skip it.

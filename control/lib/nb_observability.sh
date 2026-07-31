@@ -222,5 +222,11 @@ setup_observability() {
 	run /usr/local/bin/mycelium-dataplane-metrics.sh || warn "first metric write failed (will retry on the timer)."
 	run systemctl enable --now node_exporter 2>/dev/null || run systemctl restart node_exporter
 	run systemctl enable --now mycelium-dataplane-metrics.timer 2>/dev/null || warn "could not enable the metrics timer."
+	# SEED THE MONOTONIC ANCHOR (Audit-0009 D1) — see the note on mycelium-rotate.timer. OnUnitActiveSec=
+	# schedules relative to the last time the SERVICE was active, and this 15s cadence has no OnCalendar=
+	# expression, so the seeded-anchor form is the one available here. Without it the timer carries the
+	# same never-fires exposure the update timer actually landed in — and a frozen exporter gauge is
+	# indistinguishable from a healthy one. After the enable, so the unit is loaded.
+	run systemctl start mycelium-dataplane-metrics.service 2>/dev/null || true
 	log "node_exporter on $NODE_EXPORTER_LISTEN (loopback) + mycelium_dataplane_unit_active active."
 }

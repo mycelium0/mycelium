@@ -120,7 +120,8 @@ change out without per-node hand-work. The forces in tension are:
    re-renders, validates, and applies. A push updates the whole network with **no per-node hand-work**;
    nodes converge on re-run (idempotent). Delivery is **pull-based**, never a central push.
 
-2. **Semi-auto = the operator's signature IS the approval.** Nodes apply automatically but
+2. **Semi-auto: the operator's signature is a PROVENANCE gate. Approval is a separate artifact — and
+   under a branch-tip pin there is not one.** Nodes apply automatically but
    **fail-closed**. The updater fetches (which touches only remote-tracking refs/tags, not the working
    tree), then **verifies the operator's signature** on the pinned ref against an **out-of-band**
    `allowedSigners` file (SSH signatures, preferred) or a GPG keyring — and only **after** that
@@ -131,6 +132,23 @@ change out without per-node hand-work. The forces in tension are:
    itself is immutable; a bare branch HEAD is advanceable by any push and is only verified per-commit
    as a less-preferred fallback. An optional `--staged` cadence stages a *validated* candidate and
    waits for an explicit operator `--ack` before promoting.
+
+   **What the signature does and does not establish (amended 2026-07-31, Audit-0009 V1).** This decision
+   was written as "the signature IS the approval", and that sentence stopped being true the moment a node
+   was armed against a mutable branch tip. Local `commit.gpgsign=true` with a passphrase-less key signs
+   *every* commit unconditionally, so the tip of `main` carries a valid signature whether or not it was
+   meant to ship. `verify_signed_ref` therefore establishes **who wrote this** — it refuses a forged or
+   third-party push, which is the property the armed path actually depends on — and establishes **nothing
+   about whether it was meant to ship**. Under a branch-tip pin the real approval act is the `git push`,
+   which leaves no artifact a node can verify: a WIP push and a release are indistinguishable at the node.
+
+   The approval artifact is restored by either of the two controls already named above — an immutable
+   signed **tag** in `--repo-ref`, or `--staged` + an explicit `--ack`. A node arming against a branch tip
+   is choosing to have provenance without approval; that is a defensible posture for an
+   **operator-owned development node**, where the operator is the only pusher and the same key already
+   grants them root, and it is not defensible for a node anyone else depends on. Whichever is chosen must
+   be stated per node, not assumed — and if the signature is ever to carry approval meaning again,
+   unconditional local signing has to stop first.
 
 3. **Per-node identity is local and pinned; `--update` never regenerates it.** Identity (REALITY
    keypair, client UUIDs, per-protocol secrets, the self-signed cert) is generated **locally** on

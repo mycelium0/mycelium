@@ -36,6 +36,8 @@ config.staged.ack
 config.failed.json
 config.failed.since
 config.invalid.json
+xray.config.invalid.json
+xray.config.failed.json
 cert.sha256.txt
 awg.port
 # Node-local reachability monitor config (ADR-0019): real anchors are operator state, never
