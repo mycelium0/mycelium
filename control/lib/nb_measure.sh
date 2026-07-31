@@ -485,8 +485,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# The `-` prefix (Audit-0008 S2-1) makes systemd IGNORE a non-zero exit: measure_l7_probe intentionally
-# `return 1`s when a member is client-DEAD (a valid signal — the verdict is in the marker, not the exit code),
+# The leading '-' (Audit-0008 S2-1) makes systemd IGNORE a non-zero exit: measure_l7_probe intentionally
+# returns 1 when a member is client-DEAD (a valid signal — the verdict is in the marker, not the exit code),
 # and under Type=oneshot a failing ExecStart would (a) mark the unit failed and (b) SKIP the chained --fp-probe
 # below — so the RP-0015 fingerprint A/B would never run in exactly the DEAD scenario it exists to diagnose.
 ExecStart=-$NB_SELF --l7-probe --checkout $CHECKOUT_DIR --state-dir $STATE_DIR --tooling-dir $TOOLING_DIR
