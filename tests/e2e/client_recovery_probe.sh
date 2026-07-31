@@ -87,7 +87,9 @@ curl_ok() {
 	local code
 	code="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 8 \
 		--proxy "socks5h://127.0.0.1:$proxy_port" "$url" 2>/dev/null || true)"
-	case "$code" in 2*|204) return 0 ;; *) return 1 ;; esac
+	# `204` was listed beside `2*`, which already covers it — an unreachable duplicate branch, not a
+	# second condition (shellcheck SC2221/SC2222).
+	case "$code" in 2*) return 0 ;; *) return 1 ;; esac
 }
 # active_tag — the outbound tag urltest currently selects, via the loopback Clash API (empty if off).
 active_tag() {

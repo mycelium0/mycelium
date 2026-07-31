@@ -125,10 +125,14 @@ fi
 # RP-0008 P2), which reads the Go-owned control/vocab.json. Source the same dependency chain the
 # myceliumctl entrypoint does (common.sh for myc_die, vocab.sh for myc_vocab_class_of) with MYC_ROOT
 # pointing at the real control/ so the vocab file resolves.
-# shellcheck source=/dev/null
+# The directive applies to the NEXT source only, so each of the three needs its own — with one it covered
+# common.sh and left the other two reporting SC1090.
 MYC_ROOT="$REPO_ROOT/control"
+# shellcheck source=/dev/null
 . "$REPO_ROOT/control/lib/common.sh"
+# shellcheck source=/dev/null
 . "$REPO_ROOT/control/lib/vocab.sh"
+# shellcheck source=/dev/null
 . "$BUNDLE_LIB"
 
 if ! command -v myc_bundle_class_of >/dev/null 2>&1 && ! type myc_bundle_class_of >/dev/null 2>&1; then

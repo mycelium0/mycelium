@@ -61,25 +61,49 @@ jobs:
       - run: make race
 
   lint:
-    name: stack linters (advisory)
+    name: stack linters (shellcheck + terraform strict; yaml/ansible advisory)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: shellcheck
+      # BLOCKING. This ran with `|| true` for the project's whole life, and the cost was concrete: a
+      # backtick pair inside an unquoted heredoc in control/lib/nb_measure.sh executed on every
+      # --measure-enable and mangled the rendered unit, on all three live nodes, for months. shellcheck
+      # reports it; nothing read the report.
+      #
+      # THE FLAGS ARE CALIBRATION, NOT SUPPRESSION. Measured at 71fe0f6: 61 findings raw, 2 after these
+      # two flags, and no source file needed a behavioural edit to get there.
+      #   -s bash    the control/lib/*.sh fragments are SOURCED and must not carry a shebang, so
+      #              shellcheck cannot infer their dialect and reports SC2148 on each. Naming the dialect
+      #              is the documented fix; adding shebangs to sourced fragments would be the wrong one.
+      #   -e SC2034  a variable assigned in a sourced fragment and read by its caller looks unused when
+      #              the fragment is linted alone. 41 of the 61 findings were this, all false.
+      # -S warning keeps style/info out. Widening either flag needs a reason in the commit message;
+      # tests/conformance/ci_lint_strict.sh pins that they are not quietly loosened.
+      #
+      # scripts/fungi is listed explicitly: it is the documented deploy entrypoint, a tracked bash script
+      # with no .sh suffix, so `git ls-files '*.sh'` never saw it.
+      - name: shellcheck (blocking)
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          files="$(git ls-files '*.sh') control/myceliumctl"
+          shellcheck --version
+          files="$(git ls-files '*.sh') control/myceliumctl scripts/fungi"
           echo "linting: $files"
-          shellcheck -S warning $files || true
-      - name: yamllint
+          shellcheck -s bash -e SC2034 -S warning $files
+      # STILL ADVISORY, deliberately. All 752 findings are `line-length` against an 80-column default the
+      # repo does not follow; making it blocking needs a .yamllint config first, not a reflow.
+      - name: yamllint (advisory)
         run: |
           pip install --user yamllint
           python3 -m yamllint -d relaxed . || true
       - name: setup terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
-      - name: terraform fmt -check
-        run: terraform -chdir=infra/terraform fmt -check -recursive || true
-      - name: ansible-lint
+      # BLOCKING: already clean at 71fe0f6, so this costs nothing today and stops it drifting.
+      - name: terraform fmt -check (blocking)
+        run: terraform -chdir=infra/terraform fmt -check -recursive
+      # STILL ADVISORY: three of its findings are environmental — this job never runs
+      # `ansible-galaxy collection install -r`, so the roles it wants are absent. Fix the environment
+      # before making the linter blocking, or it fails for a reason that is not the code's.
+      - name: ansible-lint (advisory)
         run: |
           pip install --user ansible-lint
           ~/.local/bin/ansible-lint infra/ansible || true
