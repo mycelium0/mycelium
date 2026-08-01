@@ -12,6 +12,17 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
+
+## [0.2.46] — 2026-08-01
+
+> **Version resynchronisation.** The version sat at 0.2.29 for 27 days and 97 commits (67 of them
+> `feat`/`fix`) because the bump is a manual step in the release procedure and no release was cut. The
+> gate that exists checks that `spec.Version` and the newest CHANGELOG heading AGREE — which is
+> trivially satisfied while both are frozen — so nothing noticed. This entry folds the whole backlog
+> under one version rather than reconstructing seventeen bumps that never happened; the number comes
+> from this repository's own demonstrated rate (~4 `feat`/`fix` commits per patch across 0.2.17→0.2.29).
+> `version_changelog_sync.sh` now also refuses a non-empty `[Unreleased]`, which is the condition that
+> would have failed on every one of those 27 days.
 ### Changed
 - **`fungi deploy` no longer arms unattended config promotion.** Rotation is protected by a triple gate —
   dry-run by default, `--apply-rotation` required, and a node-local `rotate-live.enabled` sentinel — and

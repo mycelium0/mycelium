@@ -140,5 +140,14 @@ adaptivity-core blocker:
   of Phase 2, and the advisory/fungi boundary — built inert here — goes live in Phase 3, per Decision B.
 - **Engineering plane:** the offline conformance suite (65 gates) is green; the Go spine builds and passes
   `go vet` / unit tests / `-race`; every Audit-0007 S1 + S2 remediation commit is CI-green on `main`. The
-  Phase-2-closing first release ships as **v0.2.29** — the repository's first signed release tag, cut from
-  `internal/spec.Version` = 0.2.29 (CHANGELOG `[0.2.29]`).
+  Phase-2-closing first release ships as **v0.2.46** — the repository's first signed release tag, cut from
+  `internal/spec.Version` = 0.2.46 (CHANGELOG `[0.2.46]`).
+
+  *Amended 2026-08-01.* This said v0.2.29, and that version was reached on 2026-07-04 and then never
+  moved again: 97 further commits landed, 67 of them `feat`/`fix`, with the const frozen because the bump
+  is a manual release step and no release was cut. Tagging v0.2.29 now would name a version whose
+  CHANGELOG entry describes a tree four weeks stale. The number is resynchronised to the repository's own
+  demonstrated rate (~4 `feat`/`fix` per patch across 0.2.17→0.2.29), and `version_changelog_sync.sh`
+  gained the check that makes the freeze visible — a non-empty `[Unreleased]`, which is precisely the
+  state the release-notes extractor drops on the floor. The MINOR digit stays 2: it tracks the lifecycle
+  phase, this release is what CLOSES Phase 2, and 0.3.0 belongs to whatever opens Phase 3.

@@ -13,13 +13,26 @@
 #   §1.2). The project bumps it per landed phase increment (0.<phase>.<patch>) AND records that
 #   increment in CHANGELOG.md in the SAME commit. This gate makes the coupling enforceable: it
 #   FAILS if the const and the newest CHANGELOG version disagree — catching "bumped the const but
-#   forgot the changelog" and "added a changelog entry but forgot the const". (It cannot, offline,
-#   prove a chunk SHOULD have bumped — that stays the documented per-chunk discipline + review.)
+#   forgot the changelog" and "added a changelog entry but forgot the const".
+#
+#   IT USED TO STOP THERE, and said so: it "cannot, offline, prove a chunk SHOULD have bumped — that
+#   stays the documented per-chunk discipline + review". The discipline is what failed. The version sat
+#   at 0.2.29 for 27 days and 97 commits, 67 of them feat/fix, and this gate was GREEN the whole time —
+#   a frozen const and a frozen CHANGELOG agree perfectly. A consistency check is satisfied by changing
+#   nothing.
+#
+#   Part of it IS checkable offline, and it is the part that bites. release.yml (:53) extracts the notes
+#   for the block whose heading matches spec.Version; `[Unreleased]` sits ABOVE that anchor and is
+#   silently dropped. So a non-empty `[Unreleased]` means the notes the release publishes OMIT real
+#   changes — on 2026-08-01 that block was 225 lines, and the release would have described the tree as
+#   of 2026-07-04. Requiring it empty forces every entry under a real version heading, which forces the
+#   bump.
 #   OFFLINE + INSPECT-ONLY.
 #
 # WHAT THIS CHECKS
 #   1. internal/spec/version.go declares `const Version = "X.Y.Z"` (SemVer).
 #   2. CHANGELOG.md's newest `## [X.Y.Z]` heading exists and matches that version exactly.
+#   3. `## [Unreleased]`, if present, is EMPTY.
 #
 # Exit: 0 = in sync, 1 = drift, 2 = usage/env error.
 
@@ -68,8 +81,17 @@ if [ -n "$ver" ] && [ -n "$top" ]; then
 	fi
 fi
 
+# 3. [Unreleased] must be empty — see the header. This is the half that fails on a frozen version.
+unrel="$(awk '/^## \[Unreleased\]/{f=1;next} f&&/^## \[/{exit} f{print}' "$CHANGELOG" | tr -d '[:space:]')"
+if [ -z "$unrel" ]; then
+	ok "[Unreleased] is empty — every recorded change sits under a version the release will publish"
+else
+	nl="$(awk '/^## \[Unreleased\]/{f=1;next} f&&/^## \[/{exit} f{n++} END{print n+0}' "$CHANGELOG")"
+	badln "[Unreleased] holds $nl lines of real changes. release.yml extracts ONLY the block matching spec.Version, and [Unreleased] sits above it, so those changes would be silently absent from the published notes. Move them under a version heading — which means bumping spec.Version. This is the check that would have caught the version frozen for 27 days and 97 commits while this gate stayed green."
+fi
+
 if [ "$fail" -eq 0 ]; then
-	printf 'PASS: the spine version and the newest CHANGELOG entry are in sync.\n'
+	printf 'PASS: the spine version and the newest CHANGELOG entry are in sync, and nothing is parked in [Unreleased].\n'
 	exit 0
 fi
 printf 'FAIL: version <-> CHANGELOG drift (or a malformed version/heading).\n' >&2
