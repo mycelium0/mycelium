@@ -12,6 +12,24 @@ Notable changes to the Go control-plane spine (`cmd/myceliumctl`, `cmd/myceliumd
 truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
+### Changed
+- **`fungi deploy` no longer arms unattended config promotion.** Rotation is protected by a triple gate —
+  dry-run by default, `--apply-rotation` required, and a node-local `rotate-live.enabled` sentinel — and
+  the doctrine around it said a deploy could never actuate a node. That was true of the auto-pull path and
+  false of the documented deploy command: `fungi deploy` placed the sentinel, and the rotation loop's own
+  unit hardcodes `--rotate --apply-rotation` in its `ExecStart`, so one command satisfied all three legs,
+  with no prompt and no `--yes`, and the first tick fired during the deploy itself. Every leg was present
+  and correctly nested; one caller simply supplied all of them.
+
+  The default now brings up **detection** — the measure plane, the L7 liveness probe, and the rotation
+  loop — which plans and reports and **refuses to promote**. Unattended promotion is `--auto-rotate`.
+  `--no-arm` is unchanged (none of the three). Existing armed nodes are unaffected: the sentinel is
+  node-local state that no push can add or remove.
+
+  `tests/conformance/fungi_scoped.sh` now drives the real script against a recording stub and asserts the
+  resulting argv for all three invocations, instead of grepping that an arm chain exists — existence was
+  what it checked, and existence is not posture.
+
 ### Fixed
 - **An unattended updater had no memory of what had already failed, so it could flap forever.**
   `sing-box check` validates schema; `verify_post_apply` is what catches a candidate that fails at

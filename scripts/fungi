@@ -13,7 +13,8 @@
 # (--singbox-*/--xray-*) are filled from control/engines.manifest.json by node-bootstrap itself
 # (RP-0011 C-2), so the operator passes none.
 #
-#   fungi deploy [opts]   converge + self-arm auto-rotation         (-> node-bootstrap.sh; --no-arm = serve only)
+#   fungi deploy [opts]   converge + bring up detection             (-> node-bootstrap.sh)
+#                         --auto-rotate = also let it PROMOTE unattended; --no-arm = serve only
 #   fungi update [opts]   fetch + re-render + validate + rollback  (-> node-bootstrap.sh --update)
 #   fungi apply  [opts]   apply the node descriptor to the node    (-> node-bootstrap.sh --node-apply)
 #   fungi plan   [args]   preview the deploy (resolve pins, print)  (-> myceliumctl deploy-plan; read-only)
@@ -32,8 +33,12 @@ FUNGI_SELF="$(cd -P "$(dirname "$src")" && pwd)/$(basename "$src")"
 REPO_ROOT="$(cd -P "$(dirname "$FUNGI_SELF")/.." && pwd)"
 NODE_BOOTSTRAP="$REPO_ROOT/scripts/node-bootstrap.sh"
 
+# usage — print the header block as help. DELIMITED, not line-numbered: this used to be `sed -n '7,24p'`,
+# so adding one line to the header silently truncated the help text (and the very first edit after this
+# comment was written did exactly that). Anchored on the two markers instead, which move with the content.
 usage() {
-	sed -n '7,24p' "$FUNGI_SELF" | sed 's/^# \{0,1\}//; s/^#$//'
+	awk '/^# fungi — the one-command/{f=1} f&&/^# Exit:/{print; exit} f' "$FUNGI_SELF" \
+		| sed 's/^# \{0,1\}//; s/^#$//'
 }
 
 # Resolve the Go spine binary that speaks `deploy-plan` (install_spine builds it at
@@ -73,24 +78,51 @@ fungi_status() {
 
 case "${1:-}" in
 	deploy) shift
-		# Deploy converges the node, then (unless --no-arm) SELF-ARMS the single-node adaptivity loop, so
-		# ONE command yields a serving, self-driving node: the MEASURE detection plane + L7 liveness probe,
-		# the rotate-live sentinel, and the auto-rotation loop. Each arm step is the SAME explicit
-		# node-bootstrap dispatch an operator would run by hand (--measure-enable / --rotate-arm /
-		# --rotate-enable-loop), so the ships-disabled contract still holds: only the explicit flag arms,
-		# and the timer-driven `fungi update` NEVER arms — an auto-pull still cannot self-arm a node.
-		# Idempotent (re-running converges). --no-arm (a fungi-level flag, not forwarded) converges the
-		# node serve-only; arm it later with the three flags or a re-deploy.
-		arm=1; deploy_args=()
+		# Deploy converges the node and then, by default, brings up DETECTION: the MEASURE plane + L7
+		# liveness probe, and the rotation loop that consumes them. It does NOT place the rotate-live
+		# sentinel. Without that sentinel the loop runs, plans, and reports — and refuses to promote
+		# anything (nb_rotate_apply.sh, the armed check before rotate_apply_live). Unattended PROMOTION is
+		# a separate, deliberate act: --auto-rotate.
+		#
+		# WHY THE SPLIT (2026-07-31). Rotation is protected by a triple gate — dry-run by default,
+		# --apply-rotation required, and a node-local sentinel — and the doctrine around it said "a deploy
+		# can never actuate a node". That was true of node-bootstrap's own flows and false here: this verb
+		# placed the sentinel, and the loop's own unit hardcodes `--rotate --apply-rotation` in its
+		# ExecStart, so a bare `fungi deploy` satisfied ALL THREE legs in one command, with no prompt and
+		# no --yes, and the first tick fired during the deploy itself. Every leg was still present and
+		# correctly nested; what was wrong was that one command supplied all of them. The gate held and
+		# the claim about it did not.
+		#
+		# The three arm steps remain the SAME explicit node-bootstrap dispatches an operator would run by
+		# hand, and the timer-driven `fungi update` still NEVER arms — an auto-pull cannot self-arm a node.
+		# Idempotent. Both flags are fungi-level and are NOT forwarded (node-bootstrap dies on an unknown
+		# flag, which would abort the whole deploy):
+		#   default        measure + L7 probe + the rotation loop, planning only
+		#   --auto-rotate  the above PLUS the sentinel: the loop may promote unattended
+		#   --no-arm       none of the three: serve only
+		arm=1; autorotate=0; deploy_args=()
 		for a in "$@"; do
-			if [ "$a" = "--no-arm" ]; then arm=0; else deploy_args+=("$a"); fi
+			case "$a" in
+				--no-arm)      arm=0 ;;
+				--auto-rotate) autorotate=1 ;;
+				*)             deploy_args+=("$a") ;;
+			esac
 		done
 		"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"}
 		if [ "$arm" -eq 1 ]; then
-			echo "fungi deploy: self-arming single-node adaptivity (measure + L7 probe + auto-rotation; --no-arm to skip)..." >&2
+			echo "fungi deploy: bringing up detection (MEASURE plane + L7 liveness probe + rotation loop)..." >&2
 			"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --measure-enable
-			"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --rotate-arm
+			if [ "$autorotate" -eq 1 ]; then
+				echo "fungi deploy: --auto-rotate given — placing the rotate-live sentinel. This node MAY PROMOTE A" >&2
+				echo "              CONFIG UNATTENDED when the planner decides a served transport is impaired." >&2
+				"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --rotate-arm
+			fi
 			"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --rotate-enable-loop
+			if [ "$autorotate" -eq 0 ]; then
+				echo "fungi deploy: the rotation loop is running but NOT armed — it will plan and report, and will" >&2
+				echo "              refuse to promote. Re-deploy with --auto-rotate to let it act, or run" >&2
+				echo "              '$NODE_BOOTSTRAP --rotate-arm' when you want that." >&2
+			fi
 		fi
 		;;
 	update) shift; exec "$NODE_BOOTSTRAP" --update "$@" ;;

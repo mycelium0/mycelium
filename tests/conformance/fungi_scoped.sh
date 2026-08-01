@@ -73,16 +73,77 @@ badref="$(grep -E '"\$NODE_BOOTSTRAP"' "$F" \
 	&& ok "every node-bootstrap reference is a delegating invocation or the guard (deploy may sequence arm dispatches)" \
 	|| badln "a node-bootstrap reference is neither a delegating invocation nor the guard: $(printf '%s' "$badref" | tr '\n' '|')"
 
-# the deploy verb's self-arm goes through the EXPLICIT node-bootstrap arm dispatches (never a systemctl or
-# service mutation inside fungi) — pins that self-arming still flows through the governed spine + the
-# ships-disabled flags, so the ONE-command deploy cannot become an ungoverned arm path.
-if grep -qE '"\$NODE_BOOTSTRAP".*--measure-enable' "$F"; then
-	grep -qE '"\$NODE_BOOTSTRAP".*--rotate-enable-loop' "$F" \
-		&& ok "deploy self-arms via node-bootstrap dispatches (--measure-enable + --rotate-arm + --rotate-enable-loop)" \
-		|| badln "deploy references --measure-enable but not --rotate-enable-loop (incomplete arm chain)"
-else
-	ok "deploy does not self-arm here (serve-only wrapper) — no arm dispatch to pin"
-fi
+# ---------------------------------------------------------------------------
+# THE DEPLOY VERB'S RESULTING POSTURE — driven, not grepped.
+#
+# This was two text greps asserting that the arm chain EXISTS. It therefore ratified whatever the chain
+# happened to do, and what it happened to do was satisfy all three legs of the rotation triple gate in one
+# command: --rotate-arm placed the node-local sentinel, and the loop unit's own ExecStart carries
+# `--rotate --apply-rotation`, so a bare `fungi deploy` left a node that could promote a config unattended,
+# with no prompt and no --yes. The greps could not see that, because existence is not posture.
+#
+# So: run the real script with a RECORDING STUB in place of node-bootstrap and assert the argv it produces.
+# This works because fungi derives NODE_BOOTSTRAP from its own resolved path, so a copy in a temp dir finds
+# the stub beside it. Offline, no root, nothing installed.
+#
+# THE INVARIANT, in three rows:
+#   deploy                 -> detection comes up (--measure-enable, --rotate-enable-loop) and the sentinel
+#                             (--rotate-arm) is NOT placed. The loop plans and refuses to promote.
+#   deploy --auto-rotate   -> the sentinel IS placed. Unattended promotion is a deliberate act.
+#   deploy --no-arm        -> none of the three.
+# Plus: neither fungi-level flag may reach node-bootstrap, which dies on an unknown flag — forwarding one
+# would abort the entire deploy, and that is the most likely way this breaks.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/myc.fungi.XXXXXX")" || { printf 'FAIL: mktemp\n' >&2; exit 2; }
+trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$WORK/scripts"
+cp "$F" "$WORK/scripts/fungi"
+cat >"$WORK/scripts/node-bootstrap.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${MYC_ARGV_LOG:?}"
+exit 0
+STUB
+chmod +x "$WORK/scripts/node-bootstrap.sh" "$WORK/scripts/fungi"
+
+drive() { # drive <label> <args...>  -> echoes the recorded argv lines, one invocation per line
+	local lbl="$1"; shift
+	: >"$WORK/argv.$lbl"
+	MYC_ARGV_LOG="$WORK/argv.$lbl" bash "$WORK/scripts/fungi" deploy "$@" >/dev/null 2>&1
+	cat "$WORK/argv.$lbl"
+}
+# saw PATTERN HAYSTACK. The `--` guard belongs INSIDE, next to grep — passing it at the call site
+# makes it the pattern and every row silently tests the wrong thing.
+saw() { printf '%s\n' "$2" | grep -qF -- "$1"; }
+
+for row in "default::0" "auto:--auto-rotate:1" "noarm:--no-arm:2"; do
+	lbl="${row%%:*}"; rest="${row#*:}"; flag="${rest%%:*}"; want="${rest##*:}"
+	out="$(drive "$lbl" ${flag:+$flag})"
+	case "$want" in
+		0) # detection up, sentinel NOT placed
+			if saw '--measure-enable' "$out" && saw '--rotate-enable-loop' "$out" && ! saw '--rotate-arm' "$out"; then
+				ok "deploy (default): detection comes up and the rotate-live sentinel is NOT placed"
+			else
+				badln "deploy (default) produced the wrong posture. Expected --measure-enable and --rotate-enable-loop WITHOUT --rotate-arm; got: $(printf '%s' "$out" | tr '\n' '|'). A default that places the sentinel means one command yields a node that promotes configs unattended — the loop's unit already carries --apply-rotation, so the sentinel is the only thing standing between an enabled loop and live promotion."
+			fi ;;
+		1) # sentinel placed on explicit opt-in
+			if saw '--rotate-arm' "$out" && saw '--measure-enable' "$out" && saw '--rotate-enable-loop' "$out"; then
+				ok "deploy --auto-rotate: the sentinel IS placed (unattended promotion is an explicit act)"
+			else
+				badln "deploy --auto-rotate did not place the sentinel; got: $(printf '%s' "$out" | tr '\n' '|')"
+			fi ;;
+		2) # nothing armed
+			if ! saw '--measure-enable' "$out" && ! saw '--rotate-arm' "$out" && ! saw '--rotate-enable-loop' "$out"; then
+				ok "deploy --no-arm: none of the three (serve only)"
+			else
+				badln "deploy --no-arm still armed something; got: $(printf '%s' "$out" | tr '\n' '|')"
+			fi ;;
+	esac
+	# The fungi-level flags must be CONSUMED. node-bootstrap dies on an unknown flag.
+	if [ -n "$flag" ] && saw "$flag" "$out"; then
+		badln "deploy forwarded the fungi-level flag '$flag' to node-bootstrap, which dies on an unrecognised flag — the whole deploy aborts"
+	fi
+done
+[ -n "$(drive base)" ] && ok "the recording stub is reached at all (the harness is not vacuous)" \
+	|| badln "the stub recorded nothing — fungi did not invoke node-bootstrap, so every row above is vacuous"
 
 # plan delegates to the Go deploy-plan verb (pure preview), not to a live read
 grep -qE 'deploy-plan' "$F" \

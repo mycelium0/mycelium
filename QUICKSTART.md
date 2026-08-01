@@ -52,10 +52,20 @@ The engine versions + checksums — and the Go toolchain that builds the control
 `control/engines.manifest.json` and fetched + checksum-verified automatically; you do **not** hand-enter
 `--singbox-sha256`, and the node needs **no distro Go**. `fungi deploy` hardens the host, installs the
 pinned engine, generates this node's identity locally, renders + validates the config, starts the service,
-and then **self-arms single-node adaptivity** (the measure + L7 liveness detection plane and the
-auto-rotation loop) so the node comes up self-driving. It is idempotent — re-running converges. Pass
-`--no-arm` to converge serve-only (arm later with `--measure-enable` + `--rotate-arm` + `--rotate-enable-loop`,
-or a re-deploy).
+and then brings up **detection**: the measure + L7 liveness plane and the rotation loop that consumes it.
+It is idempotent — re-running converges.
+
+The loop **plans and reports; it does not promote.** Letting a node change its own served config
+unattended is a separate, deliberate act:
+
+| you run | what the node does |
+|---|---|
+| `fungi deploy` | serves, measures, and reports when a transport looks impaired |
+| `fungi deploy --auto-rotate` | the above, **and may promote a new config on its own** when the planner decides a served transport is impaired |
+| `fungi deploy --no-arm` | serves only — no detection plane, no loop |
+
+Arming later is `--rotate-arm` (or a re-deploy with `--auto-rotate`); disarming is removing
+`/var/lib/mycelium/rotate-live.enabled`.
 
 ## 3. Check it is serving
 
@@ -110,7 +120,10 @@ fungi apply
 # a non-public participant (in-region relay, not a public entry):
 fungi reachable off && fungi apply
 
-# serve without self-arming the adaptivity loop (a plain, hand-driven node):
+# let the node promote a new config on its own when a transport looks impaired:
+fungi deploy --auto-rotate ...
+
+# serve only — no detection plane and no loop at all (a plain, hand-driven node):
 fungi deploy --no-arm ...
 ```
 

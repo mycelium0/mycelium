@@ -19,10 +19,27 @@
 #     REVERTS the overlay (so a rolled-back rotation cannot re-apply on the next tick) and, on a post-apply
 #     rollback, records the outcome (rollback budget + hold latch).
 #
-# The triple gate (dry-run default + --apply-rotation required + node-armed sentinel) is why a deploy can
-# never actuate a node: nodes auto-pull main, but the arm sentinel is node-local state git can never
-# carry, and flow_rotate is reached ONLY by the explicit --rotate dispatch (never flow_bootstrap /
-# flow_update). The unattended timer (C4c-2) ships DISABLED. rotate_apply_gated.sh pins all of this.
+# WHAT THE TRIPLE GATE ACTUALLY BUYS — corrected 2026-07-31, it was overstated here for months.
+#
+# The gate (dry-run default + --apply-rotation required + node-armed sentinel) is why an AUTO-PULL can
+# never actuate a node. That part is solid and load-bearing: the arm sentinel is node-local state git can
+# never carry, flow_rotate is reached ONLY by the explicit --rotate dispatch (never flow_bootstrap /
+# flow_update / install_tooling / cron), and rotate_apply_gated.sh pins that scoping. A push to main
+# cannot arm a node, and that is the property the 15-minute unattended updater depends on.
+#
+# What this comment used to claim, and what is NOT true: that "a deploy can never actuate a node", and
+# that "the unattended timer ships DISABLED". Both were true of node-bootstrap's own flows and false of
+# `fungi deploy`, the documented deploy command. That verb ran --rotate-arm (leg 3), and the loop unit
+# this file installs hardcodes `--rotate --apply-rotation` in its ExecStart (see rotate_enable_loop
+# below), which pre-satisfies legs 1 and 2 on every 90s tick. So one command supplied all three legs, with
+# no prompt and no --yes, and the loop's first tick fired during the deploy itself. Every leg was present
+# and correctly nested the whole time — the gate did not fail. One caller simply handed it everything.
+#
+# Since the split, `fungi deploy` brings up DETECTION only (measure plane + L7 probe + the loop) and
+# leaves the sentinel to an explicit `--auto-rotate`. The loop therefore runs, plans and reports, and
+# refuses to promote, until an operator deliberately arms it. tests/conformance/fungi_scoped.sh drives
+# that posture through a recording stub and asserts the resulting argv, rather than grepping for the
+# arm chain's existence — existence is what the old assertion checked, and existence is not posture.
 #
 # CATCHABILITY: write_params + render_candidate signal failure by `die` (= exit 1), which a bare
 # `if ! cmd` / `cmd || true` CANNOT trap — the whole sourced script would terminate, skipping the overlay
