@@ -143,6 +143,13 @@
 #                               D): myc_firewall_singbox_ports opens public ("::") ports only and NEVER a
 #                               loopback-bound (reachable=false / shadowtls-detour) port; a missing listen
 #                               defaults public (no jq null-abort); harden_ufw delegates to it. OFFLINE
+#   * promote_transaction_atomic.sh — the live-config promote, EXECUTED against a throwaway node root
+#                               (tests/lab/fakenode.sh) rather than grepped: no reader can observe a torn
+#                               live config or a torn rollback target at ANY intermediate step; a promote
+#                               with no snapshottable rollback target REFUSES; two concurrent promoters
+#                               cannot leave the rollback net a generation behind (Audit-0009 G1/H1, which
+#                               had no executable coverage at all). SKIPs the concurrency row where flock
+#                               is absent. OFFLINE, no root.
 #   * ci_lint_strict.sh — the linters declared BLOCKING in .github/workflows/ci.yml stay blocking (no
 #                               `|| true` / continue-on-error on a step named blocking), keep the
 #                               calibrated shellcheck flags they were measured against, and cover EVERY tracked
@@ -296,6 +303,7 @@ GATES=(
 	"tests/conformance/ufw_exposure_report.sh"
 	"tests/conformance/timer_trigger_form.sh"
 	"tests/conformance/ci_lint_strict.sh"
+	"tests/conformance/promote_transaction_atomic.sh"
 	"tests/conformance/release_dist_sane.sh"
 	"tests/conformance/release_workflow_sane.sh"
 	"tests/conformance/release_verify_failclosed.sh"
