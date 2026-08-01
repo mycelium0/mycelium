@@ -145,7 +145,7 @@
 #                               defaults public (no jq null-abort); harden_ufw delegates to it. OFFLINE
 #   * ci_lint_strict.sh — the linters declared BLOCKING in .github/workflows/ci.yml stay blocking (no
 #                               `|| true` / continue-on-error on a step named blocking), keep the
-#                               shellcheck calibration they were measured against, and cover EVERY tracked
+#                               calibrated shellcheck flags they were measured against, and cover EVERY tracked
 #                               bash/sh script — the file set is enumerated from shebangs, which is what
 #                               would have caught scripts/fungi going unlinted for the project's life.
 #                               Fails closed if the enumeration finds nothing. OFFLINE

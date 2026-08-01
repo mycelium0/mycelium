@@ -9,10 +9,11 @@
 # Author: mindicator & silicon bags quartet.
 #
 # WHY THIS GATE
-#   shellcheck ran on every push for the life of the project and ended in `|| true` every time. The cost
+#   The shellcheck step ran on every push for the project's whole life and ended in `|| true` every time.
+#   The cost
 #   was concrete and long-lived: a backtick pair inside an unquoted heredoc in control/lib/nb_measure.sh
 #   executed on every `--measure-enable`, mangling the rendered systemd unit on all three live nodes for
-#   months. shellcheck reported it on every run. Nothing read the report.
+#   months. It was reported on every run. Nothing read the report.
 #
 #   Turning it blocking is one line. KEEPING it blocking is the hard part, because the pressure to append
 #   `|| true` arrives exactly when someone is trying to land something else and the linter is in the way.
