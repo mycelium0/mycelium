@@ -143,6 +143,12 @@
 #                               D): myc_firewall_singbox_ports opens public ("::") ports only and NEVER a
 #                               loopback-bound (reachable=false / shadowtls-detour) port; a missing listen
 #                               defaults public (no jq null-abort); harden_ufw delegates to it. OFFLINE
+#   * ci_lint_strict.sh — the linters declared BLOCKING in .github/workflows/ci.yml stay blocking (no
+#                               `|| true` / continue-on-error on a step named blocking), keep the
+#                               shellcheck calibration they were measured against, and cover EVERY tracked
+#                               bash/sh script — the file set is enumerated from shebangs, which is what
+#                               would have caught scripts/fungi going unlinted for the project's life.
+#                               Fails closed if the enumeration finds nothing. OFFLINE
 #   * timer_trigger_form.sh — every systemd TIMER the project emits must be provably able to fire again:
 #                               a calendar trigger, or the monotonic pair PLUS an anchor-seeding
 #                               `systemctl start <unit>.service` at the enable site. Nothing constrained
@@ -289,6 +295,7 @@ GATES=(
 	"tests/conformance/reachable_firewall_loopback.sh"
 	"tests/conformance/ufw_exposure_report.sh"
 	"tests/conformance/timer_trigger_form.sh"
+	"tests/conformance/ci_lint_strict.sh"
 	"tests/conformance/release_dist_sane.sh"
 	"tests/conformance/release_workflow_sane.sh"
 	"tests/conformance/release_verify_failclosed.sh"
