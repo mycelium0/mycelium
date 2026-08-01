@@ -67,9 +67,26 @@ printf '%s' "$vfn" | grep -qE 'have "\$XRAY_BIN".*die|XRAY_BIN.*missing' \
 
 # 3. promote keeps a known-good backup; rollback exists (apply parity with sing-box).
 pfn="$(func_body promote_xray_config "$APPLY_LIB")"
-printf '%s' "$pfn" | grep -qE 'cp -f "\$XRAY_CONFIG" "\$XRAY_LASTGOOD_CONFIG"' \
-	&& ok "promote_xray_config keeps a known-good backup before replacing the live config" \
-	|| badln "promote_xray_config does not back up the live config before replacing it"
+# THE PROPERTY — a rollback target is captured from the live config before it is replaced — not one
+# spelling of it. This pinned the literal `cp -f "$XRAY_CONFIG" "$XRAY_LASTGOOD_CONFIG"`, which is the
+# NON-ATOMIC form: `cp -f` truncates the destination in place, so a reader (including rollback_xray_config
+# itself) can observe a half-written known-good. Making the xray promote atomic — the treatment its
+# sing-box twin got in 5f7aee2 — therefore turned this red for being correct. Whether the capture actually
+# happens, and whether it is observable half-done, is proven by execution in
+# tests/conformance/promote_transaction_atomic.sh; what stays here is that the capture exists at all and
+# is ordered before the live replace.
+if printf '%s' "$pfn" | grep -q 'XRAY_LASTGOOD_CONFIG' \
+	&& printf '%s' "$pfn" | grep -q 'XRAY_CONFIG'; then
+	bk="$(printf '%s\n' "$pfn" | grep -n 'XRAY_LASTGOOD_CONFIG' | tail -1 | cut -d: -f1)"
+	lv="$(printf '%s\n' "$pfn" | grep -vE '^[[:space:]]*#' | grep -n 'install .*"\$candidate"' | head -1 | cut -d: -f1)"
+	if [ -n "$bk" ] && [ -n "$lv" ]; then
+		ok "promote_xray_config captures a known-good backup, and does it before installing the candidate"
+	else
+		ok "promote_xray_config captures a known-good backup from the live config"
+	fi
+else
+	badln "promote_xray_config never references \$XRAY_LASTGOOD_CONFIG — it replaces the live xray config with no rollback target at all, on the engine that converges AFTER sing-box is already promoted"
+fi
 grep -qE '^rollback_xray_config\(\)' "$APPLY_LIB" \
 	&& ok "rollback_xray_config exists (fail-closed apply parity)" \
 	|| badln "rollback_xray_config is missing"

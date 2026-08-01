@@ -262,7 +262,75 @@ fi
 ) || fail=1
 
 # ===========================================================================
-# ROW 6 — the refusal's INVISIBLE DEPENDENCY.
+# ROW 6 — THE SECONDARY ENGINE. Same transaction, same stakes, same assertions.
+#
+# promote_xray_config's own first line says "Atomically replace the live xray config with the candidate,
+# keeping a known-good backup" — and it is the sing-box twin as it was BEFORE 5f7aee2: `cp -f` truncating
+# the rollback target in place, `install` writing the live target directly, and no lock. The hardening
+# went to one engine and not the other.
+#
+# It is not the lesser path. converge_node_tail runs the xray step AFTER sing-box has already been
+# promoted and verified, so a torn xray rollback target is reached on a node that is already mid-change,
+# on the unattended timer, with the operator absent.
+# ===========================================================================
+xray_gen() {
+	[ -f "$XRAY_CONFIG" ] || { printf 'absent'; return 0; }
+	sed -n 's/.*"generation":"\([^"]*\)".*/\1/p' "$XRAY_CONFIG" | head -1
+}
+xray_lg_gen() {
+	[ -f "$XRAY_LASTGOOD_CONFIG" ] || { printf 'absent'; return 0; }
+	sed -n 's/.*"generation":"\([^"]*\)".*/\1/p' "$XRAY_LASTGOOD_CONFIG" | head -1
+}
+( set -u
+  fail=0
+  fakenode_init
+  # shellcheck source=/dev/null
+  . "$LIB"
+  printf '{"generation":"NEW","inbounds":[]}\n' >"$STATE_DIR/xcand.json"
+  promote_xray_config "$STATE_DIR/xcand.json"
+
+  [ "$(xray_gen)" = "NEW" ] && [ "$(xray_lg_gen)" = "OLD" ] \
+	  && ok "xray promote: live becomes the candidate and the previous live becomes the rollback target" \
+	  || badln "xray promote: live=$(xray_gen) lastgood=$(xray_lg_gen), expected NEW/OLD"
+
+  grep -q '^mv .*\.xlastgood\..* .*xray\.config\.lastgood\.json' "$FAKENODE_ARGV_LOG" \
+	  && ok "xray promote: the rollback target is published by rename" \
+	  || badln "xray promote: the rollback target is written IN PLACE (\`cp -f\` truncates it before refilling it), so a reader — including the rollback path itself — can observe a half-written known-good. This is the defect 5f7aee2 fixed on the sing-box twin and never carried across, and this engine converges AFTER sing-box is already promoted."
+  grep -q '^mv .*\.xlive\..* .*xray/config\.json' "$FAKENODE_ARGV_LOG" \
+	  && ok "xray promote: the live config is published by rename" \
+	  || badln "xray promote: the live xray config is written in place rather than renamed into position"
+  exit "$fail"
+) || fail=1
+
+# Serialisation for the secondary engine, by the same outcome test. Left out of the first draft, and the
+# xray-specific lock mutation went straight through it — an assertion that exists for one engine and not
+# its twin is how the twin drifted in the first place.
+if ! command -v flock >/dev/null 2>&1; then
+	skip "concurrent xray promote: flock is absent on this host"
+else
+( set -u
+  fail=0
+  fakenode_init
+  # shellcheck source=/dev/null
+  . "$LIB"
+  printf '{"generation":"A","inbounds":[]}\n' >"$STATE_DIR/xa.json"
+  printf '{"generation":"B","inbounds":[]}\n' >"$STATE_DIR/xb.json"
+  ( promote_xray_config "$STATE_DIR/xa.json" ) >/dev/null 2>&1 &
+  q1=$!
+  ( promote_xray_config "$STATE_DIR/xb.json" ) >/dev/null 2>&1 &
+  q2=$!
+  wait "$q1" 2>/dev/null; wait "$q2" 2>/dev/null
+  case "$(xray_gen)/$(xray_lg_gen)" in
+	  A/B|B/A) ok "concurrent xray promote: the rollback target holds the generation actually replaced" ;;
+	  */OLD)   badln "concurrent xray promote: live=$(xray_gen) but lastgood=OLD — the second promoter snapshotted before the first published, so the xray rollback net skips a generation. Same defect as Audit-0009 G1, on the engine that converges after sing-box is already live." ;;
+	  *)       badln "concurrent xray promote: ended at live=$(xray_gen) lastgood=$(xray_lg_gen), neither serialised ending" ;;
+  esac
+  exit "$fail"
+) || fail=1
+fi
+
+# ===========================================================================
+# ROW 7 — the refusal's INVISIBLE DEPENDENCY.
 #
 # promote_config refuses by `die` INSIDE a subshell, so `exit 1` leaves only that subshell and the caller
 # carries on. What stops the tick is the caller's `set -e`. That works today because scripts/node-bootstrap.sh

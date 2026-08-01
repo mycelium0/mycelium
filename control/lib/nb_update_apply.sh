@@ -404,10 +404,37 @@ promote_xray_config() {
 	need_root
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] promote $candidate -> $XRAY_CONFIG"; return 0; fi
 	install -d -m 0750 -o root -g "$XRAY_RUN_GROUP" "$XRAY_ETC"
-	if [ -f "$XRAY_CONFIG" ]; then cp -f "$XRAY_CONFIG" "$XRAY_LASTGOOD_CONFIG"; fi
-	# 0640 root:<xray group>, NOT 0644 (Audit-0008 S1-1): the xray config inlines the same class of secrets;
-	# xray reads it via Group=$XRAY_RUN_GROUP. Not world-readable.
-	install -m 0640 -o root -g "$XRAY_RUN_GROUP" "$candidate" "$XRAY_CONFIG"
+	# THE SAME TREATMENT AS THE PRIMARY ENGINE, which this path went without. Its first line has always
+	# claimed "atomically replace ... keeping a known-good backup" and it did neither: `cp -f` truncates the
+	# rollback target in place before refilling it, `install` wrote the live target directly, and nothing
+	# serialised two promoters. That is exactly what Audit-0009 H1/G1 found on the sing-box twin and
+	# 5f7aee2 fixed — on one engine. The hardening was never carried across.
+	#
+	# This is not the lesser path. converge_node_tail runs the xray step AFTER sing-box is already promoted
+	# and verified, so a torn xray known-good is reached on a node that is already mid-change, on the
+	# unattended timer, with nobody watching — and the reader most likely to meet it is rollback_xray_config,
+	# i.e. the net failing at the one moment it is needed.
+	#
+	# Its OWN lock, not the sing-box one: the two engines promote independently and inside the same tail, so
+	# sharing a lock would have the xray step wait on a sing-box promote for no reason. Same bounded
+	# `flock -w 30` shape — a stuck holder degrades to unserialised rather than wedging the timer — and the
+	# mktemp lives in the DESTINATION directory so `mv -f` stays a same-filesystem rename.
+	(
+		if have flock; then exec 9>"$STATE_DIR/promote.xray.lock" 2>/dev/null && flock -w 30 9 2>/dev/null || true; fi
+		if [ -f "$XRAY_CONFIG" ]; then
+			xlg_tmp="$(mktemp "$(dirname "$XRAY_LASTGOOD_CONFIG")/.xlastgood.XXXXXX")" \
+				&& cp -f "$XRAY_CONFIG" "$xlg_tmp" \
+				&& chmod 0640 "$xlg_tmp" 2>/dev/null \
+				&& mv -f "$xlg_tmp" "$XRAY_LASTGOOD_CONFIG" \
+				|| { rm -f "${xlg_tmp:-}" 2>/dev/null; die "could not snapshot the last-known-good xray config (fail-closed; refusing to promote without a rollback target)."; }
+		fi
+		# 0640 root:<xray group>, NOT 0644 (Audit-0008 S1-1): the xray config inlines the same class of secrets;
+		# xray reads it via Group=$XRAY_RUN_GROUP. Not world-readable.
+		xlive_tmp="$(mktemp "$(dirname "$XRAY_CONFIG")/.xlive.XXXXXX")" \
+			&& install -m 0640 -o root -g "$XRAY_RUN_GROUP" "$candidate" "$xlive_tmp" \
+			&& mv -f "$xlive_tmp" "$XRAY_CONFIG" \
+			|| { rm -f "${xlive_tmp:-}" 2>/dev/null; die "could not promote the xray candidate atomically (fail-closed; the live xray config is unchanged)."; }
+	)
 	log "promoted xray candidate to live config: $XRAY_CONFIG"
 }
 
