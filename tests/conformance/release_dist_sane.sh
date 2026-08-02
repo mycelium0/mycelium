@@ -9,6 +9,8 @@
 # reproducibly, and carrying ONLY tracked source (never per-node identity/secrets/rendered configs).
 # It asserts:
 #   1. `make dist` builds a tarball + SHA256SUMS, and SHA256SUMS verifies;
+#   6. the artifact is reproducible ACROSS HOSTS, not merely twice on this one — verified by rebuilding
+#      with a deliberately different gzip first on PATH and requiring the digest not to move.
 #   2. the tarball prefix dir is mycelium-<X.Y.Z> where X.Y.Z == internal/spec.Version == the CHANGELOG
 #      top heading (the artifact name can never drift from the spine version);
 #   3. it CONTAINS the source needed to bootstrap+build a node (LICENSE, go.mod, Makefile,
@@ -102,8 +104,46 @@ if [ -f "$tarball" ]; then
 	a="$(SUM "$tarball" | awk '{print $1}')"
 	b="$(SUM "$WORK/d2/mycelium-$ver.tar.gz" 2>/dev/null | awk '{print $1}')"
 	[ -n "$a" ] && [ "$a" = "$b" ] \
-		&& ok "two builds are byte-identical (deterministic / reproducible)" \
+		&& ok "two builds are byte-identical on this host (deterministic)" \
 		|| badln "make dist is NOT deterministic (sha $a != $b)"
+fi
+
+# 6. REPRODUCIBLE ACROSS HOSTS, which check 5 cannot see.
+#
+# Check 5 builds twice on ONE machine, so anything that depends on the HOST's tooling rather than on the
+# repository is invisible to it — it agrees with itself by construction. That blind spot was real: the
+# target piped `git archive --format=tar` into the host `gzip -n -9`, and `-n` only drops the name and
+# mtime, it does not make two different gzip implementations agree. Measured at 71fe0f6, the tar stream was
+# identical on both hosts (35be7103…) while Apple gzip 457.140.3 produced b74dbe18… and GNU gzip 1.14
+# produced ac83a4eb…. docs/RELEASING.md has the maintainer sign a LOCALLY built SHA256SUMS while
+# release.yml publishes CI's, so from a macOS workstation the signed sums and the published sums
+# disagreed — and verify-release.sh fails closed on exactly that, for every downloader.
+#
+# We cannot run a second OS here, so we test the PROPERTY instead: the artifact must not depend on the
+# host's gzip at all. Put a deliberately different gzip first on PATH and rebuild. Piped through the host
+# tool, the digest moves; compressed by git's own zlib (`--format=tar.gz`), it does not.
+if [ -f "$tarball" ] && command -v gzip >/dev/null 2>&1; then
+	realgzip="$(command -v gzip)"
+	mkdir -p "$WORK/sabotage"
+	# STRIP any level the caller passes before forcing our own. `gzip -1 -n -9` takes the LAST level, so a
+	# stub that merely prepends -1 is cancelled by the Makefile's own -9 and the sabotage silently does
+	# nothing — which is how the first draft of this check passed against the piped form it exists to catch.
+	{
+		echo '#!/bin/sh'
+		echo 'args=""'
+		echo 'for a in "$@"; do case "$a" in -[1-9]) ;; *) args="$args $a" ;; esac; done'
+		echo "exec $realgzip -1 \$args"
+	} >"$WORK/sabotage/gzip"
+	chmod +x "$WORK/sabotage/gzip"
+	( PATH="$WORK/sabotage:$PATH"; make -C "$REPO_ROOT" dist DIST_DIR="$WORK/d3" >/dev/null 2>&1 )
+	c="$(SUM "$WORK/d3/mycelium-$ver.tar.gz" 2>/dev/null | awk '{print $1}')"
+	if [ -z "$c" ]; then
+		badln "the sabotaged-gzip rebuild produced no tarball — cannot judge host independence; re-confirm this check"
+	elif [ "$a" = "$c" ]; then
+		ok "the artifact does not depend on the host's gzip (compression is git's own — reproducible across platforms)"
+	else
+		badln "make dist produces a DIFFERENT tarball when the host's gzip changes ($a vs $c). It is therefore not reproducible across machines, and docs/RELEASING.md signs a locally built SHA256SUMS while release.yml publishes CI's — so the signed sums and the published sums disagree and verify-release.sh fails closed for every downloader. Compress with \`git archive --format=tar.gz\` (git's own zlib) rather than piping into the host gzip."
+	fi
 fi
 
 if [ "$fail" -eq 0 ]; then

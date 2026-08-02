@@ -13,8 +13,15 @@
 #   5. hold NO signing secret — CI builds + publishes only; the tag + SHA256SUMS are signed LOCALLY by
 #      the maintainer (ADR-0015 SSH-sig), so a CI compromise cannot forge a release. The workflow must
 #      not run any signing tool (ssh-keygen -Y sign / gpg --sign / minisign / cosign sign) and must use
-#      only the built-in github.token, never a custom signing secret.
-# OFFLINE + INSPECT-ONLY (static lint of the YAML).
+#      only the built-in github.token, never a custom signing secret;
+#   6. publish NOTES THAT EXIST — the workflow's own extractor, run here over the real CHANGELOG for the
+#      current spec.Version, must produce a non-empty block that is not its own fallback stub;
+#   7. keep the SIGNED bytes and the PUBLISHED bytes the same object — the maintainer signs a LOCALLY
+#      built dist/SHA256SUMS while the workflow publishes CI's copy, so the signature only means anything
+#      if the two files are identical, which rests on the artifact being reproducible ACROSS hosts.
+# OFFLINE + INSPECT-ONLY (static lint of the YAML), except check 6, which EXECUTES the workflow's own
+# extraction command rather than reimplementing it — a reimplementation can agree with itself while
+# disagreeing with what CI actually runs.
 #
 # Exit: 0 = honest+safe release workflow, 1 = a violation, 2 = usage/env error.
 
@@ -69,6 +76,57 @@ if [ -z "$othersecret" ]; then
 else
 	badln "release.yml references a non-default secret (possible signing key in CI): $(printf '%s' "$othersecret" | tr '\n' ' ')"
 fi
+
+# --- 6. THE NOTES THE RELEASE WOULD ACTUALLY PUBLISH ------------------------------------------------
+# Lifted verbatim from the workflow rather than rewritten: this gate must fail when CI's extraction
+# produces nothing, not when a private copy of the logic does. The fallback exists so a release never
+# publishes an empty body — but silently shipping "See CHANGELOG.md." in place of the notes is the
+# failure, not the safety net.
+ver="$(grep -E '^[[:space:]]*const[[:space:]]+Version' "$REPO_ROOT/internal/spec/version.go" 2>/dev/null | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+awkcmd="$(grep -m1 -E "^[[:space:]]*awk -v v=" "$WF" | sed -E 's/^[[:space:]]*//; s/ > RELEASE_NOTES\.md$//')"
+if [ -z "$ver" ]; then
+	badln "could not read spec.Version — cannot check the notes the release would publish"
+elif [ -z "$awkcmd" ]; then
+	badln "could not find the release-notes extraction command in $WF — re-confirm this gate against the new shape"
+else
+	# The version is INLINED into the lifted command by the expansion below, so no `ver` needs to exist at
+	# eval time — the `ver="$ver"` prefix this used to carry was seen only by the forked process and could
+	# never have affected the expansion (shellcheck SC2097/SC2098, and it was right).
+	notes="$(cd "$REPO_ROOT" && eval "${awkcmd/\$ver/$ver}" 2>/dev/null || true)"
+	body="$(printf '%s\n' "$notes" | grep -vE '^## \[' | tr -d '[:space:]')"
+	if [ -z "$body" ]; then
+		badln "the workflow's own extractor finds NO notes for spec.Version=$ver in CHANGELOG.md, so the release would publish its fallback stub ('See CHANGELOG.md.') as the entire body. Add a '## [$ver]' section with content, or bump the version to one that has one."
+	else
+		lines="$(printf '%s\n' "$notes" | grep -c . || true)"
+		ok "the release would publish real notes for $ver ($lines lines from CHANGELOG.md, extracted by the workflow's own command)"
+	fi
+fi
+
+# --- 7. THE SIGNED BYTES ARE THE PUBLISHED BYTES ----------------------------------------------------
+# docs/RELEASING.md has the maintainer sign dist/SHA256SUMS on their own machine; this workflow publishes
+# the copy CI built. Nothing reconciles them — they are simply expected to be identical, which is true
+# only while `make dist` is reproducible across MACHINES (release_dist_sane check 6, added after a
+# host-gzip dependency made them differ in practice). This check pins the three links in that chain that
+# live here: same producer, same filename published as is signed, same filename the verifier reads.
+sums_built=0; sums_pub=0
+grep -qE '^[[:space:]]*run:[[:space:]]*make dist' "$WF" && sums_built=1
+grep -qE 'dist/SHA256SUMS' "$WF" && sums_pub=1
+if [ "$sums_built" -eq 1 ] && [ "$sums_pub" -eq 1 ]; then
+	ok "the published SHA256SUMS is the one 'make dist' produced (same producer as the maintainer signs)"
+else
+	badln "the workflow does not both build via 'make dist' and publish dist/SHA256SUMS (build=$sums_built publish=$sums_pub). If CI computes the checksums by some other means, the maintainer's locally signed SHA256SUMS is a signature over a different file and verify-release.sh fails closed for every downloader."
+fi
+for f in docs/RELEASING.md scripts/verify-release.sh; do
+	[ -f "$REPO_ROOT/$f" ] || { badln "$f is missing — the sign/verify chain cannot be checked"; continue; }
+	grep -q 'SHA256SUMS' "$REPO_ROOT/$f" \
+		&& ok "$f operates on SHA256SUMS (the same object the workflow publishes)" \
+		|| badln "$f does not name SHA256SUMS — the signed payload and the published payload have drifted apart"
+done
+# -F, because the dot is a WILDCARD: `grep 'SHA256SUMS.sig'` matched the prose line "SHA256SUMS signature
+# did NOT verify" and reported success for a file that never mentioned the detached signature at all.
+grep -qF 'SHA256SUMS.sig' "$REPO_ROOT/scripts/verify-release.sh" 2>/dev/null \
+	&& ok "verify-release.sh checks the detached signature over that exact file" \
+	|| badln "verify-release.sh does not verify SHA256SUMS.sig — integrity would be checked but authenticity never would"
 
 if [ "$fail" -eq 0 ]; then
 	printf 'PASS: the release workflow builds + verifies + publishes honestly, with no signing material in CI.\n'
