@@ -338,6 +338,25 @@ write_params() {
 	tls_san="$(openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -ext subjectAltName 2>/dev/null || true)"
 	tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:\*\.[A-Za-z0-9.-]+' | head -1 | sed 's/^DNS:\*\./m./' || true)"
 	[ -n "$tls_domain" ] || tls_domain="$(printf '%s' "$tls_san" | grep -oE 'DNS:[A-Za-z0-9.-]+' | grep -vE 'DNS:\*' | head -1 | sed 's/^DNS://' || true)"
+	# SWEEP FIRST, THEN WRITE RESTRICTIVELY. Both halves are needed and both were missing.
+	#
+	# The leftover: this function has no trap, and three of the helpers it hands $tmp to (merge_operator_
+	# overrides, apply_node_profile, the two_hop merge) `die` on malformed input. Any such death left the
+	# temp behind — a complete params file, every transport password, every client UUID and the REALITY
+	# private key. Found on ALL THREE live nodes dated 26-27 July, still there weeks later.
+	#
+	# The mode: mktemp creates 0600, but those helpers rewrite the file as `jq ... > "$tmp.np"` followed by
+	# `mv -f`, and a shell redirection creates its file under the UMASK — 0644 on these nodes. The final
+	# params.json is chmod 0600 at the end of this function, so the live file was always right; the
+	# abandoned temp inherited 0644 and kept it. `node_exporter` is a real unprivileged local account on
+	# these hosts, so that was a genuine local exposure, not a theoretical one.
+	#
+	# umask 077 for the whole body makes every intermediate 0600 whoever writes it, and the sweep bounds
+	# the lifetime of anything that still escapes to one converge — 15 minutes on an armed node. Saved and
+	# restored because write_params is not the last thing a flow does.
+	rm -f "$STATE_DIR"/.params.* 2>/dev/null || true
+	local _params_umask; _params_umask="$(umask)"
+	umask 077
 	local tmp
 	tmp="$(mktemp "${STATE_DIR}/.params.XXXXXX")"
 	jq -n \
@@ -418,6 +437,7 @@ write_params() {
 		fi
 	fi
 	mv -f "$tmp" "$PARAMS_JSON"; chmod 0600 "$PARAMS_JSON"
+	umask "$_params_umask"
 	# Mirror the clash secret to a 0600 file so the loopback data-plane stats exporter can authenticate
 	# to clash_api (--clash-secret-file). Empty on legacy nodes: leave no file (the exporter then reads
 	# the still-open loopback clash_api exactly as today).

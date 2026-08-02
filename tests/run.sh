@@ -143,6 +143,12 @@
 #                               D): myc_firewall_singbox_ports opens public ("::") ports only and NEVER a
 #                               loopback-bound (reachable=false / shadowtls-detour) port; a missing listen
 #                               defaults public (no jq null-abort); harden_ufw delegates to it. OFFLINE
+#   * state_secrets_not_world_readable.sh — write_params EXECUTED over tests/lab/fakenode.sh: no temp is
+#                               left behind, every .params.* intermediate is 0600 WHILE IT EXISTS (watched
+#                               through a recording `mv`), and a stale one from an earlier dead run is
+#                               swept. Found live on all three nodes: a 0644 abandoned params copy with
+#                               the REALITY private key and every transport password, weeks old, readable
+#                               by the unprivileged node_exporter account. OFFLINE, no root.
 #   * unit_execstart_flags_parse.sh — every flag the project writes into a generated unit's ExecStart is
 #                               one the entrypoint can actually parse, and the mode dispatcher and the
 #                               argument parser cover the same set. `--fp-probe` was dispatched and never
@@ -311,6 +317,7 @@ GATES=(
 	"tests/conformance/ci_lint_strict.sh"
 	"tests/conformance/promote_transaction_atomic.sh"
 	"tests/conformance/unit_execstart_flags_parse.sh"
+	"tests/conformance/state_secrets_not_world_readable.sh"
 	"tests/conformance/release_dist_sane.sh"
 	"tests/conformance/release_workflow_sane.sh"
 	"tests/conformance/release_verify_failclosed.sh"

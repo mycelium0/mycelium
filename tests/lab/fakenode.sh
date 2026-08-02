@@ -96,8 +96,13 @@ fakenode_init() {
 	mkdir -p "$STATE_DIR" "$SINGBOX_ETC" "$XRAY_ETC" "$STUBDIR" || fakenode_die "mkdir failed"
 	: >"$FAKENODE_ARGV_LOG"; : >"$FAKENODE_WATCH_LOG"
 
-	printf '{"donor_sni":"example.invalid","node_bind":"::"}\n'      >"$PARAMS_JSON"
-	printf '{"clients":[{"name":"alice","uuid":"u-1"}]}\n'           >"$IDENTITIES_JSON"
+	# 0600, because that is what a real node has — verified on all three live nodes: params.json,
+	# identities.json, operator-overrides.json and clash.secret are 0600 there. Seeding them under the
+	# ambient umask made the fixture LOOSER than production, and a gate checking for world-readable
+	# secrets then reported the fixture's own file as a finding.
+	( umask 077
+	  printf '{"donor_sni":"example.invalid","node_bind":"::"}\n' >"$PARAMS_JSON"
+	  printf '{"clients":[{"name":"alice","uuid":"u-1"}]}\n'      >"$IDENTITIES_JSON" )
 	if [ "$want_live" -eq 1 ]; then
 		printf '{"generation":"OLD","inbounds":[]}\n' >"$SINGBOX_CONFIG"
 		printf '{"generation":"OLD","inbounds":[]}\n' >"$XRAY_CONFIG"
