@@ -251,6 +251,35 @@ myc_fetch_artifacts() {
 	# successful signature check does the verified revision touch the working tree.
 	run git -C "$CHECKOUT_DIR" merge --ff-only "$target" \
 		|| die "fast-forward update failed (history diverged or force-pushed) — refusing (fail-closed)."
+
+	# THE MERGE SUCCEEDING IS NOT THE CHECKOUT BEING AT THE PIN.
+	#
+	# `merge --ff-only` is a NO-OP that exits 0 when the checkout is already at or AHEAD of the target.
+	# Pin a node that has been tracking main to a freshly cut tag and that is exactly the state: HEAD stays
+	# on main's tip, the signature verifies, the converge runs, last_converge_ok stays fresh, the unit
+	# reports success — and the node never moves to the tag again, on any subsequent tick, silently, for as
+	# long as main stays ahead. Everything an operator would look at says the pin took.
+	#
+	# The project pushes operators toward a tag pin in six places and, until v0.2.46, there had never been
+	# a tag to try it against. So: assert what we asked for actually happened. A tag pin either lands the
+	# checkout on that commit or fails loudly with the reason — never quietly leaves it somewhere else.
+	local want have_
+	want="$(git -C "$CHECKOUT_DIR" rev-parse -q --verify "${target}^{commit}" 2>/dev/null || true)"
+	have_="$(git -C "$CHECKOUT_DIR" rev-parse -q --verify HEAD 2>/dev/null || true)"
+	if [ -n "$want" ] && [ -n "$have_" ] && [ "$want" != "$have_" ]; then
+		warn "the fast-forward reported success but the checkout is NOT at '$target'."
+		warn "  wanted: $want"
+		warn "  HEAD:   $have_"
+		case "$target" in
+			refs/tags/*)
+				warn "A tag pin cannot move a checkout BACKWARDS: this node is already at or past the tag, so"
+				warn "'merge --ff-only' did nothing and exited 0. Left alone it would keep doing nothing on every"
+				warn "tick while every signal reported success. Re-point deliberately, e.g."
+				warn "  git -C $CHECKOUT_DIR checkout --detach $target"
+				warn "and re-run; or pin --repo-ref to a tag at or ahead of this checkout." ;;
+		esac
+		die "refusing to converge from a checkout that is not at the pinned ref (fail-closed)."
+	fi
 }
 
 # ---------------------------------------------------------------------------

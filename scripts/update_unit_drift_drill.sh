@@ -235,7 +235,29 @@ if [ "$tmr_state" = "enabled" ] || [ "$tmr_active" = "active" ]; then
 		ok "the timer is ENABLED/ACTIVE and the effective command is authenticated (--allowed-signers + --repo-ref, no bypass)"
 		ref="$(printf '%s' "$exec_eff" | sed -n 's/.*--repo-ref[= ]\{1,\}\([^ ]*\).*/\1/p')"
 		case "$ref" in
-			v[0-9]*|*[0-9].[0-9]*) say "  ok    pinned to '$ref' (tag-shaped: an immutable approval)" ;;
+			v[0-9]*|*[0-9].[0-9]*)
+				# LOOK AT THE CHECKOUT, not at the shape of the flag. A tag-shaped --repo-ref proves the
+				# operator asked for an immutable pin; it does not prove the node took it. `merge --ff-only`
+				# is a NO-OP exiting 0 when the checkout is already at or ahead of the tag, which is exactly
+				# what happens when a node that has been tracking main is pinned to a freshly cut tag: HEAD
+				# stays on main's tip and never moves again, while the signature verifies, the converge runs
+				# and the unit reports success. This line used to print "an immutable approval" over precisely
+				# that state, replacing the one warning that would otherwise have appeared.
+				pin_want="$(git -C "$CHECKOUT" rev-parse -q --verify "refs/tags/${ref}^{commit}" 2>/dev/null || true)"
+				pin_head="$(git -C "$CHECKOUT" rev-parse -q --verify HEAD 2>/dev/null || true)"
+				if [ -z "$pin_want" ]; then
+					warn "  --repo-ref '$ref' is tag-shaped but no such tag exists in $CHECKOUT — the updater would fall back to treating it as a branch"
+				elif [ "$pin_want" = "$pin_head" ]; then
+					say "  ok    pinned to '$ref' and the checkout IS at that tag (an immutable approval)"
+				else
+					crit "--repo-ref is '$ref' but the checkout is NOT at that tag."
+					crit "        tag:  $pin_want"
+					crit "        HEAD: $pin_head"
+					crit "        'merge --ff-only' cannot move a checkout backwards, so if HEAD is at or past the"
+					crit "        tag it exits 0 having done nothing — on every tick, silently, while every other"
+					crit "        signal here reports success. Re-point deliberately:"
+					crit "          git -C $CHECKOUT checkout --detach refs/tags/$ref"
+				fi ;;
 			'')                    warn "  --repo-ref present but its value could not be parsed" ;;
 			*)                     warn_n=$((warn_n + 1)); say "  warn  pinned to the MUTABLE ref '$ref': every push to it reaches this node within one cadence, and the signature covers only the tip (intervening commits ride in on the fast-forward). Accepted posture for an operator-owned node; not for a shared one." ;;
 		esac
