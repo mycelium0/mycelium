@@ -21,11 +21,11 @@
   },
   "toolchains": {
     "go": {
-      "version": "go1.24.13",
+      "version": "go1.26.5",
       "dl_base": "https://go.dev/dl",
       "sha256": {
-        "amd64": "1fc94b57134d51669c72173ad5d49fd62afb0f1db9bf3f798fd98ee423f8d730",
-        "arm64": "74d97be1cc3a474129590c67ebf748a96e72d9f3a2b6fef3ed3275de591d49b3"
+        "amd64": "5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053",
+        "arm64": "fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49"
       }
     }
   }

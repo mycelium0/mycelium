@@ -59,6 +59,16 @@ jobs:
       - run: make fmt-check
       - run: make test
       - run: make race
+      # BLOCKING. The toolchain the NODES build with is pinned in control/engines.manifest.json, and that
+      # pin sat at go1.24.13 for weeks after upstream stopped supporting it — govulncheck reported ten
+      # CALLED standard-library vulnerabilities against it, and nothing in CI could see that, because
+      # engine_manifest_shape only asserts the pin is >= the go.mod floor and the floor was stale too.
+      # A vulnerability check is the one thing that notices a pin going out of support without needing
+      # a network call at gate time.
+      - name: govulncheck (blocking)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
   lint:
     name: stack linters (shellcheck + terraform strict; yaml/ansible advisory)
