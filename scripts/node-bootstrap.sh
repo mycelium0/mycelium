@@ -162,7 +162,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | awg-regen | awg-rotate | awg-issue | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg | l7-probe-xhttp | pathsig-probe
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | awg-regen | awg-rotate | awg-issue | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg | l7-probe-xhttp | pathsig-probe | fp-probe
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
@@ -299,6 +299,14 @@ while [ "$#" -gt 0 ]; do
 		--l7-probe-awg)      MODE="l7-probe-awg"; shift ;;
 		--l7-probe-xhttp)    MODE="l7-probe-xhttp"; shift ;;
 		--pathsig-probe)     MODE="pathsig-probe"; shift ;;
+		# The dispatcher has had `fp-probe)` since RP-0015 B landed and the parser never did, so the second
+		# ExecStart of every node's mycelium-l7probe.service died at arg-parse on every tick — on all three
+		# live nodes, for the life of the feature. `ExecStart=-` (Audit-0008 S2-1) makes systemd ignore the
+		# non-zero exit, so the unit stayed green, `systemctl --failed` stayed clean, and the drill passed:
+		# the RP-0015 fingerprint A/B probe has never once run and no fp_probe.json has ever existed.
+		# tests/conformance/unit_execstart_flags_parse.sh now refuses any flag a generated unit passes that
+		# the entrypoint cannot accept.
+		--fp-probe)          MODE="fp-probe"; shift ;;
 		--staged)          STAGED=1; shift ;;
 		--repo-url)        REPO_URL="${2:?--repo-url needs a value}"; shift 2 ;;
 		--repo-ref)        REPO_REF="${2:?--repo-ref needs a value}"; shift 2 ;;

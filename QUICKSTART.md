@@ -64,8 +64,15 @@ unattended is a separate, deliberate act:
 | `fungi deploy --auto-rotate` | the above, **and may promote a new config on its own** when the planner decides a served transport is impaired |
 | `fungi deploy --no-arm` | serves only — no detection plane, no loop |
 
-Arming later is `--rotate-arm` (or a re-deploy with `--auto-rotate`); disarming is removing
-`/var/lib/mycelium/rotate-live.enabled`.
+To arm a node you already deployed, run the node-bootstrap flag directly — **not** `fungi deploy
+--rotate-arm`, which would hand `--rotate-arm` to node-bootstrap as a *mode* and skip the converge:
+
+```sh
+sudo /opt/mycelium/scripts/node-bootstrap.sh --rotate-arm
+```
+
+Or simply re-deploy with `--auto-rotate`. Disarming is removing
+`/var/lib/mycelium/rotate-live.enabled`; nothing else is needed, and no push can recreate it.
 
 ## 3. Check it is serving
 

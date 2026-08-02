@@ -143,6 +143,12 @@
 #                               D): myc_firewall_singbox_ports opens public ("::") ports only and NEVER a
 #                               loopback-bound (reachable=false / shadowtls-detour) port; a missing listen
 #                               defaults public (no jq null-abort); harden_ufw delegates to it. OFFLINE
+#   * unit_execstart_flags_parse.sh — every flag the project writes into a generated unit's ExecStart is
+#                               one the entrypoint can actually parse, and the mode dispatcher and the
+#                               argument parser cover the same set. `--fp-probe` was dispatched and never
+#                               parsed, so the l7probe unit's second command died at arg-parse on every
+#                               node every ~2.5 min for the life of the feature — invisible because the
+#                               deliberate `ExecStart=-` prefix keeps systemd reporting success. OFFLINE
 #   * promote_transaction_atomic.sh — the live-config promote, EXECUTED against a throwaway node root
 #                               (tests/lab/fakenode.sh) rather than grepped: no reader can observe a torn
 #                               live config or a torn rollback target at ANY intermediate step; a promote
@@ -304,6 +310,7 @@ GATES=(
 	"tests/conformance/timer_trigger_form.sh"
 	"tests/conformance/ci_lint_strict.sh"
 	"tests/conformance/promote_transaction_atomic.sh"
+	"tests/conformance/unit_execstart_flags_parse.sh"
 	"tests/conformance/release_dist_sane.sh"
 	"tests/conformance/release_workflow_sane.sh"
 	"tests/conformance/release_verify_failclosed.sh"

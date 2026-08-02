@@ -65,6 +65,34 @@ cp "$WORK/sig.bak" "$R/SHA256SUMS.sig"   # restore good sig
 # 5. no --allowed-signers → integrity-only PASS (exit 0), authenticity intentionally unverified
 if run; then ok "integrity-only mode passes when no key is supplied (authenticity warned, not silently OK'd)"; else badln "integrity-only mode failed on a clean artifact"; fi
 
+# 6. A DEGENERATE SHA256SUMS MUST NOT READ AS VERIFIED.
+#
+# `sha256sum -c` over a checksum file with no well-formed lines is NOT a failure to every implementation:
+# Apple's /sbin/sha256sum exits 0 on an empty file, and exits 0 with a warning on a malformed one — and
+# the verifier discards that warning. So on stock macOS an empty or truncated SHA256SUMS produced
+# "ok integrity: artifacts match SHA256SUMS" and "verify-release: OK", exit 0, from a tool whose entire
+# contract is to fail closed. GNU coreutils rejects it, which is exactly why it survived: invisible on
+# Linux and in CI, and this gate's earlier rows only ever fed it WELL-FORMED sums.
+#
+# No attacker is needed to reach it. `curl -f` rejects only HTTP >= 400, so a captive portal or a proxy
+# answering 200 with an HTML body lands here, and QUICKSTART recommends integrity-only while a signature
+# is pending. Both modes are checked: with a key the signature would also catch it, without one this is
+# the only thing standing between a downloader and an unchecked tarball.
+cp "$R/SHA256SUMS" "$WORK/sums.good"
+for degenerate in "empty::" "html:<html>404 Not Found</html>:" "truncated:a1b2c3:" "header-only:# SHA256 checksums:"; do
+	lbl="${degenerate%%:*}"; body="$(printf '%s' "$degenerate" | cut -d: -f2-)"; body="${body%:}"
+	printf '%s' "$body" > "$R/SHA256SUMS"; [ -n "$body" ] && printf '\n' >> "$R/SHA256SUMS"
+	if run; then
+		badln "a $lbl SHA256SUMS verified successfully with no key — the verifier reported OK for a download it never checked. Apple's sha256sum exits 0 on such a file; count the well-formed lines before trusting -c."
+	else
+		ok "a $lbl SHA256SUMS is rejected (integrity-only mode fails closed)"
+	fi
+	if run --allowed-signers "$WORK/allowed" --signer tester; then
+		badln "a $lbl SHA256SUMS verified successfully even WITH a key"
+	fi
+done
+cp "$WORK/sums.good" "$R/SHA256SUMS"
+
 if [ "$fail" -eq 0 ]; then
 	printf 'PASS: verify-release.sh enforces integrity always and authenticity when a key is supplied (fail-closed).\n'
 	exit 0

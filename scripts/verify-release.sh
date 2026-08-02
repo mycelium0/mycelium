@@ -43,9 +43,26 @@ fail() { echo "verify-release: FAIL: $*" >&2; exit 1; }
 cd "$DIR" || fail "cannot enter directory: $DIR"
 
 # 1. integrity (always)
+#
+# COUNT THE LINES BEFORE TRUSTING THE CHECK. `-c` over a checksum file with no well-formed lines is not a
+# failure to every implementation: Apple's /sbin/sha256sum exits 0 on an empty file and exits 0 with only a
+# warning on a malformed one, and that warning is discarded by the redirect below. So on stock macOS an
+# empty or truncated SHA256SUMS produced "ok integrity: artifacts match SHA256SUMS" and "verify-release:
+# OK", exit 0 — a verifier whose entire contract is to fail closed, reporting success for a download it
+# had not checked at all. GNU coreutils gets this right ("no properly formatted checksum lines found",
+# exit 1), which is why it survived: it is invisible on Linux and on CI.
+#
+# No attacker is needed. `curl -f` rejects only HTTP >= 400, so a captive portal or a proxy answering 200
+# with an HTML body is enough, and QUICKSTART recommends exactly this integrity-only mode while a
+# signature is pending. Requiring at least one well-formed line makes the check independent of which
+# implementation is installed, and the count is printed so a human can see WHAT was verified.
 [ -f SHA256SUMS ] || fail "SHA256SUMS not found in $(pwd)"
+sums_n="$(grep -cE '^[0-9a-fA-F]{64}[[:space:]]+[*]?[^[:space:]]' SHA256SUMS 2>/dev/null || true)"
+case "${sums_n:-0}" in
+	0) fail "SHA256SUMS contains no well-formed checksum lines — the download is empty, truncated, or is not a checksum file at all (a proxy or captive portal answering 200 with an HTML body looks exactly like this). Nothing was verified." ;;
+esac
 sumc SHA256SUMS >/dev/null 2>&1 || fail "an artifact does NOT match SHA256SUMS (integrity)"
-echo "ok    integrity: artifacts match SHA256SUMS"
+echo "ok    integrity: $sums_n artifact(s) match SHA256SUMS"
 
 # 2. authenticity (when an allowed-signers key is supplied)
 if [ -n "$ALLOWED" ]; then

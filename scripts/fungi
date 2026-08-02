@@ -119,9 +119,27 @@ case "${1:-}" in
 			fi
 			"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"} --rotate-enable-loop
 			if [ "$autorotate" -eq 0 ]; then
-				echo "fungi deploy: the rotation loop is running but NOT armed — it will plan and report, and will" >&2
-				echo "              refuse to promote. Re-deploy with --auto-rotate to let it act, or run" >&2
-				echo "              '$NODE_BOOTSTRAP --rotate-arm' when you want that." >&2
+				# REPORT THE NODE'S STATE, not this invocation's variable. Saying "NOT armed" because THIS
+				# deploy did not arm is false on a node armed earlier — and it was reachable the obvious way:
+				# QUICKSTART said "arming later is --rotate-arm", an operator writes `fungi deploy
+				# --rotate-arm`, fungi forwards the unknown flag, node-bootstrap takes it as a MODE, the node
+				# arms (skipping the converge entirely), and fungi then prints that it is not armed. A safety
+				# statement that can be wrong is worse than no statement.
+				_sd="/var/lib/mycelium"
+				_prev=""
+				for _a in ${deploy_args[@]+"${deploy_args[@]}"}; do
+					[ "$_prev" = "--state-dir" ] && _sd="$_a"
+					_prev="$_a"
+				done
+				if [ -e "$_sd/rotate-live.enabled" ]; then
+					echo "fungi deploy: this deploy did not place the rotate-live sentinel, but one is ALREADY present" >&2
+					echo "              at $_sd/rotate-live.enabled — the loop may promote unattended. Remove that file" >&2
+					echo "              to disarm." >&2
+				else
+					echo "fungi deploy: the rotation loop is running but NOT armed — it will plan and report, and will" >&2
+					echo "              refuse to promote. Re-deploy with --auto-rotate to let it act, or run" >&2
+					echo "              '$NODE_BOOTSTRAP --rotate-arm' when you want that." >&2
+				fi
 			fi
 		fi
 		;;
