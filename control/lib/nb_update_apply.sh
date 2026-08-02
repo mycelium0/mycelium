@@ -220,7 +220,18 @@ myc_fetch_artifacts() {
 	# optional extra. The rest of the updater is unchanged.
 	have git || die "git required for the default fetch implementation (or swap myc_fetch_artifacts)."
 	if [ ! -d "$CHECKOUT_DIR/.git" ]; then
-		[ -n "$REPO_URL" ] || die "no checkout at $CHECKOUT_DIR and no --repo-url given (fail-closed)."
+		# NAME THE WAY OUT. This said only "fail-closed", and the operator most likely to hit it is one who
+		# followed QUICKSTART: a tarball install is not a git checkout, and this function is a git fetch.
+		if [ -z "$REPO_URL" ]; then
+			warn "there is no git checkout at $CHECKOUT_DIR, and this updater fetches over git."
+			warn "  If you installed from a release tarball, either RE-DEPLOY from a newer verified tarball"
+			warn "  (no git needed, and the verification chain stays end to end), or adopt a checkout of the"
+			warn "  same signed tag — 'git clone --branch <tag> <url> $CHECKOUT_DIR' — which is what an"
+			warn "  unattended update timer needs anyway."
+			warn "  To have this command do the clone for you, pass --repo-url <url>. It will NOT clone over a"
+			warn "  directory that already has files in it, so move or remove an extracted tarball first."
+			die "no checkout at $CHECKOUT_DIR and no --repo-url given (fail-closed)."
+		fi
 		log "cloning canonical artifacts: $REPO_URL -> $CHECKOUT_DIR"
 		run git clone ${REPO_REF:+--branch "$REPO_REF"} "$REPO_URL" "$CHECKOUT_DIR" \
 			|| die "git clone failed."

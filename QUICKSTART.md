@@ -31,6 +31,9 @@ curl -fsSLO "$base/SHA256SUMS.sig" || echo "note: SHA256SUMS.sig not attached ye
 # verify integrity + authenticity, fail-closed (REL-3)
 tar -xzf "mycelium-${ver#v}.tar.gz" && cd "mycelium-${ver#v}"
 scripts/verify-release.sh .. --allowed-signers /path/to/allowed_signers --signer <signer-id> --tag "$ver"
+
+# put the VERIFIED tree where the node will keep it, so every later command means the same directory
+sudo mkdir -p /opt && sudo cp -a "../mycelium-${ver#v}" /opt/mycelium && cd /opt/mycelium
 ```
 
 Without `--allowed-signers` the helper checks **integrity only** and warns that authenticity is
@@ -84,11 +87,41 @@ scripts/fungi plan          # preview what this node will deploy (read-only)
 ## Later
 
 ```sh
-# `update` VERIFIES the signed ref before it runs anything it fetched, so it needs the key
-# (the first deploy does not: it runs from the tarball you already verified above).
-scripts/fungi update --repo-ref vX.Y.Z --allowed-signers /path/to/allowed_signers
-scripts/fungi apply         # apply node-descriptor changes (transports / reachability) to the node
+sudo /opt/mycelium/scripts/fungi apply    # apply node-descriptor changes (transports / reachability)
 ```
+
+### Updating a node
+
+**A tarball install is not a git checkout, and `fungi update` is a git fetch.** Run it against the tree
+you extracted above and it will refuse — correctly — because there is nothing to fetch into. Two supported
+ways forward; pick one deliberately, because only the second can ever run unattended.
+
+**Re-deploy from a newer release.** No git, and the verification chain stays end to end: every byte the
+node runs came out of a tarball you checked.
+
+```sh
+# repeat step 1 with the new tag, then, from the new /opt/mycelium:
+sudo /opt/mycelium/scripts/fungi deploy --clients alice --node-address your.host.example
+```
+
+**Or adopt a git checkout, which is what `fungi update` and the unattended timer need.** Clone the
+repository at the signed tag; `--repo-ref` then verifies that tag's signature on every subsequent update
+before a single fetched byte is executed.
+
+```sh
+sudo rm -rf /opt/mycelium                        # replaced by a checkout of the same verified tag
+sudo git clone --branch vX.Y.Z https://github.com/mycelium0/mycelium /opt/mycelium
+sudo /opt/mycelium/scripts/fungi update --repo-ref vX.Y.Z --allowed-signers /path/to/allowed_signers
+```
+
+`update` VERIFIES the signed ref before running anything it fetched, so it needs the key — the first
+deploy does not, because it runs from the tarball you already verified. If `/opt/mycelium` does not exist
+at all, `--repo-url <url>` makes `update` clone it for you; it will not clone over a directory that
+already has files in it.
+
+A tag pin is also checked for real now: if the fast-forward cannot reach the tag — which is what happens
+when a checkout is already ahead of it — the update **fails loudly** instead of doing nothing and
+reporting success.
 
 Choose what the node serves with the profile verbs — a single `fungi` surface. Each edits the node-local
 descriptor / front config (write-only intent); nothing mutates a live node until `fungi apply` converges it:
