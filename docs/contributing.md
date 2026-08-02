@@ -357,10 +357,15 @@ ENV — loaded at runtime and rotated without rebuilding.
   need, tokens via ENV — **not** in the file; what/why is recorded in the commit; removal is an
   ordinary commit; "just in case" is not justification.
 
-> **If you find a vulnerability** (in Mycelium's code or in the way it exposes users) — do not
-> open a public issue with exploitation details. Report it privately through GitHub private
-> vulnerability reporting (see [SECURITY.md](../SECURITY.md)) and open an event audit if needed.
-> A public 0-day in deployed connectivity software is a direct risk to its users.
+> **If you find a vulnerability**, the class decides the route and
+> [SECURITY.md §6.1](../SECURITY.md#61-not-every-finding-wants-a-window) is the authority — this file
+> deliberately does not restate the rule, because it used to and then contradicted the policy it
+> cites. Briefly: exploitation details for the **control-plane** class (node takeover, getting past
+> the provenance gate on a node that armed it, key-material leak), and anything touching a **user's
+> identity, a secret, or the supply chain**, go through private vulnerability reporting — a 0-day in
+> deployed connectivity software is a direct risk to its users. A finding that a **deployed transport
+> shape is detectable** is asked to be published immediately, with no window; open an event audit
+> either way if the finding warrants one.
 
 ---
 

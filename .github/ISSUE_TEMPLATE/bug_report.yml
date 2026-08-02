@@ -17,10 +17,13 @@ body:
 
         > ⚠️ **Privacy — read before posting.** A public issue is world-readable. **Do not paste raw
         > logs, IP addresses, hostnames, domains, keys, UUIDs, or `journalctl` output.** Attach a
-        > **sanitized diagnostics bundle** instead (a redacted-by-construction bundle is being added
-        > to the CLI; until then, hand-redact). Anything that could expose an **operator, a node, or
-        > a user** is a security matter — report it through a private
+        > **sanitized diagnostics bundle** instead — `myceliumctl diag collect` produces one,
+        > redacted by construction. Anything that could expose an **operator, a node, or a user** is a
+        > security matter — report it through a private
         > [Security Advisory](https://github.com/mycelium0/mycelium/security/advisories/new), not here.
+        > **One exception:** a finding that a *deployed transport shape is detectable or
+        > fingerprintable* belongs in public — see SECURITY.md §6.1 — and a public issue is the right
+        > place for it.
   - type: checkboxes
     id: privacy
     attributes:
@@ -28,7 +31,7 @@ body:
       options:
         - label: I have removed all IPs, hostnames, domains, keys, UUIDs, and raw logs from this report.
           required: true
-        - label: This bug does not, by itself, expose an operator, a node, or a user (if it does, I will use a private Security Advisory instead).
+        - label: "This bug does not, by itself, expose an operator, a node, or a user — OR it is a transport-distinguishability finding, which SECURITY.md §6.1 asks to be published immediately rather than embargoed. Anything else that exposes an operator, a node, or a user goes to a private Security Advisory."
           required: true
   - type: textarea
     id: what-happened

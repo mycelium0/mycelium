@@ -9,7 +9,10 @@ blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability (private)
     url: https://github.com/mycelium0/mycelium/security/advisories/new
-    about: Report anything that could expose an operator, a node, or a user — privately, never as a public issue.
+    about: Node takeover, provenance-gate bypass, key/secret leak, user identity or traffic linkability, supply chain — privately. See SECURITY.md §6.1.
+  - name: Transport is detectable / fingerprintable (public is fine)
+    url: https://github.com/mycelium0/mycelium/issues/new?labels=distinguishability&title=%5Bdistinguishability%5D+
+    about: A deployed transport shape is recognisable. SECURITY.md §6.1 asks you to publish this immediately — no embargo, no window. Open it here.
   - name: Questions & discussion
     url: https://github.com/mycelium0/mycelium/discussions
     about: Design questions, usage help, and general discussion.

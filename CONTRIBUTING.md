@@ -38,9 +38,14 @@ works, and which contributions are disqualified on security grounds. The enginee
 
 Open an issue with the **Bug report** template. **Do not paste raw logs, IP addresses, hostnames,
 domains, or keys** into a public issue — attach a sanitized bundle instead (see the template's
-privacy notice). Anything that could expose an operator, a node, or a user belongs in a **private
-[GitHub Security Advisory](https://github.com/mycelium0/mycelium/security/advisories/new)**, per
-[SECURITY.md](SECURITY.md).
+privacy notice).
+
+Where a security finding goes depends on its class, and [SECURITY.md §6.1](SECURITY.md#61-not-every-finding-wants-a-window)
+is the authority — this file does not restate the rule. In short: node takeover, provenance-gate
+bypass, key or secret leak, user identity or traffic linkability, and supply chain go to a **private
+[GitHub Security Advisory](https://github.com/mycelium0/mycelium/security/advisories/new)**; a finding
+that a *deployed transport shape is detectable or fingerprintable* is asked to be **published
+immediately**, and a public issue is the right place for it.
 
 ## Licensing & authorship
 
