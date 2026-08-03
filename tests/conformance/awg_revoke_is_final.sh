@@ -447,6 +447,10 @@ seed_client() { # NAME
 	install -d -m 0700 "$STATE_DIR/legacy"
 	printf 'PRIV-alice\n' >"$STATE_DIR/legacy/whatever.private"
 	printf '{"clients":{"someoneelse":{"private_key":"PRIV-alice"}}}\n' >"$STATE_DIR/legacy/identity.json"
+	# A name no glob would guess. The first sweep matched *.private and *.json, and the very first
+	# operational use of it created exactly this shape — a timestamped backup of a key file — which it
+	# could not see. Deciding what to inspect from the FILENAME is guessing.
+	printf '{"clients":{"x":{"private_key":"PRIV-alice"}}}\n' >"$STATE_DIR/legacy/identity.json.pre-revoke-1785784245"
 	# shellcheck source=/dev/null
 	. "$LIB"
 	need_root() { :; }

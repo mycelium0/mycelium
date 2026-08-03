@@ -740,26 +740,33 @@ _awg_keys_matching() {
 	local want="$*" root f k p
 	[ -n "$want" ] || return 0
 	have awg || return 0
+	# EVERY regular file, not a name pattern. The first version matched `*.private` and `*.json`, and the
+	# very first thing done with it created `identity.json.pre-revoke-<ts>` — a backup holding the revoked
+	# private key, invisible to both globs. A sweep that decides what to inspect from the FILENAME is
+	# guessing; these state roots are small, so read them all and let the content decide.
 	for root in "${STATE_DIR:-/var/lib/mycelium}" /var/lib/mycelium/amneziawg; do
 		[ -d "$root" ] || continue
 		while IFS= read -r f; do
 			[ -f "$f" ] || continue
+			# a bare key file: hand the content to `awg pubkey` and let IT decide. A character pre-screen
+			# here would be one more guess about what a key looks like, and every guess in this function
+			# has already been wrong once.
 			k="$(head -c 200 "$f" 2>/dev/null | tr -d '\r\n')"
-			[ -n "$k" ] || continue
-			p="$(awg pubkey <<<"$k" 2>/dev/null || true)"
-			[ -n "$p" ] || continue
-			case " $want " in *" $p "*) printf '%s\n' "$f" ;; esac
-		done < <(find "$root" -type f -name '*.private' 2>/dev/null)
-		command -v jq >/dev/null 2>&1 || continue
-		while IFS= read -r f; do
-			[ -f "$f" ] || continue
+			if [ -n "$k" ]; then
+				p="$(awg pubkey <<<"$k" 2>/dev/null || true)"
+				if [ -n "$p" ]; then
+					case " $want " in *" $p "*) printf '%s\n' "$f"; continue ;; esac
+				fi
+			fi
+			# any private_key field at any depth, in anything jq can parse
+			command -v jq >/dev/null 2>&1 || continue
 			while IFS= read -r k; do
 				[ -n "$k" ] || continue
 				p="$(awg pubkey <<<"$k" 2>/dev/null || true)"
 				[ -n "$p" ] || continue
-				case " $want " in *" $p "*) printf '%s\n' "$f" ;; esac
+				case " $want " in *" $p "*) printf '%s\n' "$f"; break ;; esac
 			done < <(jq -r '.. | objects | .private_key? // empty' "$f" 2>/dev/null)
-		done < <(find "$root" -type f -name '*.json' 2>/dev/null)
+		done < <(find "$root" -type f -size -64k 2>/dev/null)
 	done
 }
 
