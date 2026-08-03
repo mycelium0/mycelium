@@ -832,8 +832,8 @@ _awg_strip_checked() {
 	_db="$(_awg_dialect_lines "$conf")"; _dl="$(_awg_dialect_lines "$out")"
 	[ "$_dl" = "$_db" ] || { ok=0; why="$why dialect=$_dl(was $_db)"; }
 	for _k in ${remove_csv//,/ }; do
-		grep -qE "^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*${_k}[[:space:]]*$" "$conf" && _present=$(( _present + 1 ))
-		grep -qE "^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*${_k}[[:space:]]*$" "$out" && { ok=0; why="$why key-survived"; }
+		_awg_conf_has_peer "$conf" "$_k" && _present=$(( _present + 1 ))
+		_awg_conf_has_peer "$out"  "$_k" && { ok=0; why="$why key-survived"; }
 	done
 	_pb="$(grep -c '^\[Peer\]' "$conf" 2>/dev/null)"; _pb="${_pb:-0}"
 	_pa="$(grep -c '^\[Peer\]' "$out" 2>/dev/null)"; _pa="${_pa:-0}"
@@ -1068,6 +1068,21 @@ revoke_awg_client() {
 	log "awg-revoke: the client's own copy of the config is NOT recallable — treat the address ${AWG_PEER_BASE_V4:-10.13.13}.x it held as reusable only after you are content the holder is retired."
 }
 
+# _awg_conf_has_peer FILE PUBKEY — is PUBKEY a [Peer] PublicKey in FILE?
+#
+# NOT a regex. A base64 key contains '+' and '/', and '+' is an ERE metacharacter: matching
+# "^PublicKey = ${pub}$" against a key containing '+' silently fails, so a by-key revoke reported "not a
+# peer — already clean" while the peer sat in the file. Found on a live node, and the gate could not see
+# it because its fixture keys were hyphen-and-letters. Compare the FIELD VALUE literally instead.
+_awg_conf_has_peer() {
+	awk -v want="$2" '
+		/^[[:space:]]*PublicKey[[:space:]]*=/ {
+			v=$0; sub(/^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*/, "", v); sub(/[[:space:]]*$/, "", v)
+			if (v == want) { found=1; exit }
+		}
+		END { exit(found ? 0 : 1) }' "$1" 2>/dev/null
+}
+
 # revoke_awg_peer PUBKEY — revoke ONE peer by its public key, whatever it is called.
 #
 # This is the only way to reach a [Peer] with no "# name =" marker, and such blocks exist on real nodes:
@@ -1086,7 +1101,7 @@ revoke_awg_peer() {
 	[ -f "$awg_conf" ] || die "awg-revoke-peer: no live awg0.conf at $awg_conf."
 
 	local in_conf=0
-	grep -qE "^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*${pub}[[:space:]]*$" "$awg_conf" && in_conf=1
+	_awg_conf_has_peer "$awg_conf" "$pub" && in_conf=1
 	if [ "$in_conf" -eq 0 ]; then
 		log "awg-revoke-peer: $pub is not a peer in $awg_conf — nothing to revoke (already clean)."
 		return 0

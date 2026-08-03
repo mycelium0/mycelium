@@ -47,6 +47,14 @@ truth for the version is `internal/spec.Version`.
   both change what a client must DIAL, and unlike a demote the client cannot discover the new value from
   a set it already holds.
 
+### Fixed
+- **`--awg-revoke-peer` reported "already clean" for a peer that was in the config.** It matched the
+  PublicKey line with an ERE built from the key itself, and a base64 key contains `+` — an ERE
+  metacharacter — so the pattern silently failed and the operator was told the credential had never been
+  there. Found on a live node while VERIFYING a cleanup rather than trusting its message; the gate could
+  not see it because every fixture key was letters and hyphens. Keys are compared as field VALUES now,
+  and a fixture key carries `+` and `/`.
+
 ### Measured
 - A real client on one node, through another node's `urltest` group, with the active member's port
   DROPped: dead at once, recovered **276 s later with the port still blocked** — one full urltest

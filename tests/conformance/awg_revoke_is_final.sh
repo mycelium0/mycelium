@@ -569,6 +569,44 @@ if command -v "${GO:-go}" >/dev/null 2>&1; then
 	) || fail=1
 fi
 
+
+# --- 14. a REAL base64 key: '+' and '/' are not regex ------------------------------------------------
+# The by-key revoke matched the PublicKey line with an ERE built from the key itself. A base64 key
+# contains '+', which in ERE means "one or more of the preceding", so the pattern silently failed to
+# match and the verb reported "not a peer — already clean" while the peer sat in the config. Found on a
+# live node; invisible here until a fixture key looked like a real one.
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	REALKEY='lmtNQogmJODfa2yfL6ydyYY1Fq1Q+5E/rSq/eFyf6UI='
+	{
+		printf '[Interface]\nPrivateKey = PRIVserver\nAddress = 10.13.13.1/24\nListenPort = 443\n'
+		printf '\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.13.13.2/32\n' "$REALKEY"
+		printf '\n[Peer]\n# name = alice\nPublicKey = PUBalice\nAllowedIPs = 10.13.13.3/32\n'
+	} >"$MYC_AWG_CONF"
+	chmod 0600 "$MYC_AWG_CONF"
+	grep -E '^[[:space:]]*PublicKey' "$MYC_AWG_CONF" | sed -E 's/^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*//' >"$FAKENODE_ROOT/awg.livepeers"
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+
+	out="$( ( revoke_awg_peer "$REALKEY" ) 2>&1 )"
+	printf '%s' "$out" | grep -q 'nothing to revoke' \
+		&& badln "the verb reported 'nothing to revoke' for a peer that IS in the config. A base64 key carries '+' and '/', and matching it as a REGEX makes the pattern fail silently — the operator is told the credential was never there." \
+		|| ok "a real base64 key (with + and /) is recognised in the config"
+	grep -qF "$REALKEY" "$MYC_AWG_CONF" \
+		&& badln "the peer with a real base64 key survived the revoke" \
+		|| ok "and it is removed"
+	grep -q 'PUBalice' "$MYC_AWG_CONF" \
+		&& ok "the bystander survives a key containing regex metacharacters" \
+		|| badln "matching a key with '+' removed an unrelated peer — the pattern matched too much instead of too little"
+	exit "$fail"
+) || fail=1
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: a revoked AmneziaWG credential survives somewhere that still honours it.\n' >&2
