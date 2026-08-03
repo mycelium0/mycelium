@@ -13,6 +13,34 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.51] — 2026-08-03
+
+> **The rotation apply path had never executed.** Not "was not covered by a test" — had never run, on
+> any node, ever. The loop fires every 90 seconds and had returned HOLD every time for months, and a
+> live fault-injection drill walked the planner through `active-clean → streak-too-short →
+> no-better-candidate` without ever reaching an act plan. This is the code that would run for the first
+> time during a real outage.
+
+### Added
+- `tests/conformance/rotate_apply_executes.sh` — RUNS `apply_rotation_to_params` over a value table
+  instead of reading it: promote-sibling onto an already-enabled proto (a no-op, which is exactly why
+  the live path short-circuits), onto a disabled one (the enable key flips and nothing else), a plan
+  carrying `to_port` (the port really moves — the executor half that existed and had never run), a port
+  key outside the operator toggle surface (not moved: an unattended loop may not reach past the
+  operator's own switches), and a plan with no target (fails closed, params byte-unchanged).
+  Mutation-verified against four reintroductions.
+- The same gate refuses a **phantom move**: every member of the `RotationAction` closed set must either
+  be assigned somewhere in production Go or be named in a RESERVED list with the reason it is held back.
+
+### Documented, not changed
+- Three of the five declared rotation moves — `rotate-port`, `regen-reality`, `demote-active` — appear
+  in production code exactly once each, inside the validity switch. Nothing assigns them. They are now
+  RESERVED with their reasons rather than looking like capability the project has.
+- `rotate-port` is deliberately still unrequestable. The executor half is complete and now proven by
+  test, but emitting it unattended would change a served port while every subscription already in a
+  client's hands names the old one, and the rendered bundle is served on loopback only — there is no
+  live channel for a client to learn the new port. That channel is the prerequisite, not the planner.
+
 ## [0.2.50] — 2026-08-03
 
 > **The node could issue AmneziaWG clients and had no way to un-issue one.** Every peer ever enrolled
