@@ -85,6 +85,10 @@ func run(args []string) error {
 		return cmdAWGRoutes(rest)
 	case "awg-client-conf":
 		return cmdAWGClientConf(rest)
+	case "awg-revoke-plan":
+		return cmdAWGRevokePlan(rest)
+	case "awg-strip-peers":
+		return cmdAWGStripPeers(rest)
 	case "rotate-plan":
 		return cmdRotatePlan(rest)
 	case "fingerprint-plan":
@@ -1623,4 +1627,76 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+
+// cmdAWGRevokePlan answers, from a config alone, which peers a by-name revoke targets and which it
+// cannot reach. The shell then performs the effects. Keeping the decision here is the point: every one
+// of these judgements was wrong in bash at least once, in ways a value table finds at once.
+func cmdAWGRevokePlan(args []string) error {
+	fs := flag.NewFlagSet("awg-revoke-plan", flag.ContinueOnError)
+	conf := fs.String("conf", "", "path to awg0.conf (required)")
+	name := fs.String("name", "", "client name to revoke")
+	storedPub := fs.String("stored-pub", "", "public key derived from the stored client private key, when there is one")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *conf == "" {
+		return fmt.Errorf("awg-revoke-plan: --conf is required")
+	}
+	raw, err := os.ReadFile(*conf)
+	if err != nil {
+		return fmt.Errorf("awg-revoke-plan: %w", err)
+	}
+	targets, unnamed := spec.AWGRevokeTargets(string(raw), *name, *storedPub)
+	_, peers := spec.ParseAWGConf(string(raw))
+	out := struct {
+		Targets   []string `json:"targets"`
+		Unnamed   []string `json:"unnamed"`
+		PeerCount int      `json:"peer_count"`
+	}{Targets: targets, Unnamed: unnamed, PeerCount: len(peers)}
+	if out.Targets == nil {
+		out.Targets = []string{}
+	}
+	if out.Unnamed == nil {
+		out.Unnamed = []string{}
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(b))
+	return nil
+}
+
+// cmdAWGStripPeers rewrites a config without the named peers AND verifies its own output before letting
+// a single byte reach stdout. Strip and check are one call deliberately: a caller that can obtain the
+// rewrite without the arithmetic is a caller that will eventually promote an unverified one.
+func cmdAWGStripPeers(args []string) error {
+	fs := flag.NewFlagSet("awg-strip-peers", flag.ContinueOnError)
+	conf := fs.String("conf", "", "path to the config to rewrite (required)")
+	remove := fs.String("remove", "", "comma-separated public keys to remove")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *conf == "" {
+		return fmt.Errorf("awg-strip-peers: --conf is required")
+	}
+	raw, err := os.ReadFile(*conf)
+	if err != nil {
+		return fmt.Errorf("awg-strip-peers: %w", err)
+	}
+	var pubs []string
+	for _, k := range strings.Split(*remove, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			pubs = append(pubs, k)
+		}
+	}
+	before := string(raw)
+	after := spec.StripAWGPeers(before, pubs)
+	if err := spec.VerifyAWGStrip(before, after, pubs); err != nil {
+		return fmt.Errorf("awg-strip-peers: refusing to emit an unsound rewrite: %w", err)
+	}
+	fmt.Print(after)
+	return nil
 }

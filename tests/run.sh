@@ -349,6 +349,7 @@ GATES=(
 	"tests/conformance/architecture_matrix_currency.sh"
 	"tests/conformance/awg_regen_failsafe.sh"
 	"tests/conformance/awg_revoke_is_final.sh"
+	"tests/conformance/awg_revoke_go_equiv.sh"
 	"tests/conformance/awg_dialect_go_equiv.sh"
 	"tests/conformance/awg_routes_go_equiv.sh"
 	"tests/conformance/awg_client_conf_go_equiv.sh"

@@ -13,6 +13,31 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.53] — 2026-08-03
+
+> The AmneziaWG revoke DECISIONS move out of bash. Not tidiness: every one of them was wrong in bash at
+> least once, in ways a value table finds instantly and an awk rewrite hides.
+
+### Added
+- `internal/spec/awg_revoke.go` — `ParseAWGConf`, `AWGRevokeTargets`, `StripAWGPeers`, `VerifyAWGStrip`,
+  `CountAWGDialectLines`, `AWGRevokeNeeded`. Pure, table-tested. The shell keeps only the EFFECTS:
+  removing a peer from the running interface, writing files, restarting units.
+- `myceliumctl awg-revoke-plan` and `awg-strip-peers`. The strip VERIFIES its own output before a byte
+  reaches stdout — strip and check are one call deliberately, because a caller that can obtain the
+  rewrite without the arithmetic will eventually promote an unverified one.
+- `tests/conformance/awg_revoke_go_equiv.sh` — byte-equivalence across a matrix built from the shapes
+  that produced each real bug: a key that is a prefix of another, `PublicKey=K` with no spaces, a name
+  marker that FOLLOWS the key, an unnamed peer, and a config already carrying the blank-line bloat the
+  old stripper produced.
+- The revoke gate now also asserts the Go producer and the shell fallback yield the same config byte for
+  byte. Otherwise a machine with Go never exercises the fallback and a machine without it never
+  exercises Go — whichever this host lacks would go untested forever.
+
+### Fixed
+- `VerifyAWGStrip` derives "how many peers should have gone" from the peers actually PRESENT in the
+  before-config, not from the length of the removal request. Naming a key the config does not carry is a
+  no-op, not an error — and the request may legitimately name one twice.
+
 ## [0.2.52] — 2026-08-03
 
 > **Correcting v0.2.50.** An independent review of the revoke verb shipped hours earlier found three real

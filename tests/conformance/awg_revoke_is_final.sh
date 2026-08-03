@@ -525,6 +525,50 @@ seed_client() { # NAME
 	exit "$fail"
 ) || fail=1
 
+
+# --- 13. the Go producer and the shell fallback must agree, byte for byte --------------------------
+# The strip and its arithmetic now live in Go; the awk path remains only for a node whose spine has not
+# been built. That fallback is not meant to be a second opinion — it is the same answer computed where a
+# table-driven test cannot reach it. On a box with Go, only the Go path would otherwise ever run here,
+# and on a box without it, only the shell path: whichever this machine lacks would go untested forever.
+if command -v "${GO:-go}" >/dev/null 2>&1; then
+	(
+		set -u
+		fail=0
+		fakenode_init
+		install_awg_stub
+		spine="$FAKENODE_ROOT/spine"
+		if ! ( cd "$REPO_ROOT" && GOCACHE="$FAKENODE_ROOT/gocache" GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off \
+			CGO_ENABLED=0 "${GO:-go}" build -o "$spine" ./cmd/myceliumctl ) >/dev/null 2>&1; then
+			printf '  skip  could not build the spine; the both-producers comparison needs it\n'
+			exit 0
+		fi
+		run_one() { # SPINE_OR_EMPTY -> prints the resulting config
+			local sb="$1" d="$FAKENODE_ROOT/run.$2"
+			mkdir -p "$d"
+			MYC_AWG_CONF="$d/awg0.conf" ; export MYC_AWG_CONF
+			seed_conf "$MYC_AWG_CONF" 1
+			install -d -m 0700 "$STATE_DIR/awg/clients"
+			printf 'PRIV-alice\n' >"$STATE_DIR/awg/clients/alice.private"
+			printf 'PSK-alice\n'  >"$STATE_DIR/awg/clients/alice.psk"
+			printf 'x\n'          >"$STATE_DIR/awg/clients/alice.conf"
+			( SPINE_BIN="$sb" revoke_awg_client alice ) >/dev/null 2>&1 || true
+			cat "$MYC_AWG_CONF"
+		}
+		# shellcheck source=/dev/null
+		. "$LIB"
+		need_root() { :; }
+		have() { command -v "$1" >/dev/null 2>&1; }
+
+		go_out="$(run_one "$spine" go)"
+		sh_out="$(run_one "/nonexistent/spine" sh)"
+		[ "$go_out" = "$sh_out" ] \
+			&& ok "the Go producer and the shell fallback yield the SAME config, byte for byte" \
+			|| badln "the Go path and the shell fallback produced DIFFERENT configs. The fallback exists so a node without a built spine still works; if it computes a different answer then which config a node ends up with depends on whether its spine happened to build."
+		exit "$fail"
+	) || fail=1
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: a revoked AmneziaWG credential survives somewhere that still honours it.\n' >&2

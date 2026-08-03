@@ -770,6 +770,54 @@ _awg_keys_matching() {
 	done
 }
 
+# _awg_strip_checked CONF REMOVE_CSV OUT — produce the rewritten config in OUT, verified.
+#
+# The strip and the arithmetic that checks it are CONTROL DECISIONS and now live in Go
+# (internal/spec/awg_revoke.go), pinned byte-for-byte against the shell producer by
+# awg_revoke_go_equiv. `myceliumctl-go awg-strip-peers` performs both and refuses to emit an unsound
+# rewrite, so a caller cannot obtain the new config without the check having passed.
+#
+# The awk path is kept as a FALLBACK for a node whose spine has not been built (strangler doctrine:
+# degrade to the shell, never brick). It is the same producer the equivalence gate compares, so the
+# fallback is not a second opinion — it is the same answer, computed where a table-driven test cannot
+# reach it. Prefer Go.
+#
+# Returns 0 on a verified rewrite in OUT, non-zero otherwise (OUT is then meaningless and unused).
+_awg_strip_checked() {
+	local conf="$1" remove_csv="$2" out="$3"
+	local spine="${SPINE_BIN:-${TOOLING_DIR:-/usr/local/lib/mycelium}/bin/myceliumctl-go}"
+	if [ -x "$spine" ]; then
+		if "$spine" awg-strip-peers --conf "$conf" --remove "$remove_csv" >"$out" 2>"$out.err"; then
+			rm -f "$out.err"; return 0
+		fi
+		warn "awg-revoke: the rewrite was REFUSED by its own arithmetic: $(head -1 "$out.err" 2>/dev/null)"
+		rm -f "$out" "$out.err"; return 1
+	fi
+	# --- fallback: the shell producer + the same checks, for a node with no spine ---------------------
+	local -a _pubs=(); IFS=',' read -r -a _pubs <<<"$remove_csv"
+	_awg_strip_peers "$conf" "${_pubs[@]}" >"$out" 2>/dev/null || { rm -f "$out"; return 1; }
+	local ok=1 why="" _dl _db _pb _pa _lb _la _present=0 _k
+	grep -q '^\[Interface\]' "$out" || { ok=0; why="$why no-[Interface]"; }
+	grep -q '^PrivateKey = ' "$out" || { ok=0; why="$why no-PrivateKey"; }
+	_db="$(_awg_dialect_lines "$conf")"; _dl="$(_awg_dialect_lines "$out")"
+	[ "$_dl" = "$_db" ] || { ok=0; why="$why dialect=$_dl(was $_db)"; }
+	for _k in ${remove_csv//,/ }; do
+		grep -qE "^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*${_k}[[:space:]]*$" "$conf" && _present=$(( _present + 1 ))
+		grep -qE "^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*${_k}[[:space:]]*$" "$out" && { ok=0; why="$why key-survived"; }
+	done
+	_pb="$(grep -c '^\[Peer\]' "$conf" 2>/dev/null)"; _pb="${_pb:-0}"
+	_pa="$(grep -c '^\[Peer\]' "$out" 2>/dev/null)"; _pa="${_pa:-0}"
+	[ "$_pa" = "$(( _pb - _present ))" ] || { ok=0; why="$why peers=$_pa(want $(( _pb - _present )))"; }
+	if [ "$_present" -gt 0 ]; then
+		_lb="$(grep -vc '^[[:space:]]*$' "$conf" 2>/dev/null)"; _lb="${_lb:-0}"
+		_la="$(grep -vc '^[[:space:]]*$' "$out" 2>/dev/null)"; _la="${_la:-0}"
+		[ "$_la" -lt "$_lb" ] || { ok=0; why="$why non-blank-lines did not fall"; }
+	fi
+	[ "$ok" -eq 1 ] && return 0
+	warn "awg-revoke: the shell-fallback rewrite failed its arithmetic ($why)."
+	rm -f "$out"; return 1
+}
+
 # revoke_awg_client NAME — REVOKE an AmneziaWG client: the credential stops working immediately and does
 # not come back.
 #
@@ -909,43 +957,8 @@ revoke_awg_client() {
 		install -d -m 0700 "$awg_state" 2>/dev/null || true
 		local bak="$awg_state/awg0.pre-revoke.conf" tmp="$awg_conf.revoke.$$"
 		cp -a "$awg_conf" "$bak" || die "awg-revoke: could not back up $awg_conf before editing."
-		_awg_strip_peers "$awg_conf" $pubs > "$tmp" || { rm -f "$tmp"; die "awg-revoke: could not rewrite $awg_conf."; }
-		# Fail-closed sanity: the result must still be a usable server config, and must no longer name the
-		# revoked keys. A truncated or mangled file here means no AmneziaWG at all after the next restart.
-		local ok=1 why=""
-		grep -q '^\[Interface\]'  "$tmp" || { ok=0; why="$why no-[Interface]"; }
-		grep -q '^PrivateKey = '  "$tmp" || { ok=0; why="$why no-PrivateKey"; }
-		grep -q '^ListenPort = '  "$tmp" || { ok=0; why="$why no-ListenPort"; }
-		# TEETH. The three checks above only prove the file is not empty. These prove the rewrite removed
-		# exactly what it meant to and nothing else:
-		#   * the obfuscation lines must survive UNCHANGED IN COUNT — _awg_swap_dialect hard-dies on any
-		#     count but 9, so a dialect mangled here bricks the NEXT --awg-regen/--awg-rotate rather than
-		#     failing now. Compared before-to-after rather than against the literal 9: a revoke is a
-		#     SECURITY action and must not refuse to run on a config that is unusual for other reasons;
-		#   * peer arithmetic: after == before - removed, so removing one peer too many is caught;
-		#   * the non-blank line count must drop by exactly the lines the removed blocks held — the
-		#     backstop that turns any parse miss into a fail-closed abort instead of a reported success.
-		local _dl _db _pb _pa _lb _la
-		_db="$(_awg_dialect_lines "$awg_conf")"
-		_dl="$(_awg_dialect_lines "$tmp")"
-		[ "$_dl" = "$_db" ] || { ok=0; why="$why dialect-lines=$_dl(was $_db)"; }
-		# `grep -c` prints 0 AND exits 1 on no match, so a `|| printf '0'` fallback appends a SECOND zero
-		# and every comparison below silently reads "0\n0". Capture plainly; default only the empty case.
-		_pb="$(grep -c '^\[Peer\]' "$awg_conf" 2>/dev/null)"; _pb="${_pb:-0}"
-		_pa="$(grep -c '^\[Peer\]' "$tmp" 2>/dev/null)"; _pa="${_pa:-0}"
-		[ "$_pa" = "$(( _pb - n_peers ))" ] || { ok=0; why="$why peers=$_pa(want $(( _pb - n_peers )))"; }
-		_lb="$(grep -vc '^[[:space:]]*$' "$awg_conf" 2>/dev/null)"; _lb="${_lb:-0}"
-		_la="$(grep -vc '^[[:space:]]*$' "$tmp" 2>/dev/null)"; _la="${_la:-0}"
-		[ "$_la" -lt "$_lb" ] || { ok=0; why="$why non-blank-lines did not decrease"; }
-		# ANCHORED, not a substring search: one key can contain another as a prefix, and a substring
-		# match then reports a key as "still present" when it is not — aborting a revoke that in fact
-		# succeeded. (Caught by mutation-testing the gate: the duplicate-peer fixture has keys where one
-		# is a prefix of the other, and the revoke died on its own sanity check.)
-		for p in $pubs; do grep -qE "^PublicKey = ${p}[[:space:]]*$" "$tmp" && ok=0; done
-		if [ "$ok" -ne 1 ]; then
-			rm -f "$tmp"
-			die "awg-revoke: the rewritten $awg_conf failed its sanity check ($why) — NOTHING was changed on disk (the peer is already off the running interface). Backup kept at $bak."
-		fi
+		_awg_strip_checked "$awg_conf" "$(printf '%s' "$pubs" | tr ' ' ',')" "$tmp" \
+			|| die "awg-revoke: the rewritten $awg_conf failed its arithmetic — NOTHING was changed on disk (the peer is already off the running interface). Backup kept at $bak."
 		chmod 0600 "$tmp"; mv -f "$tmp" "$awg_conf" || die "awg-revoke: could not promote the rewritten $awg_conf (backup at $bak)."
 		log "awg-revoke: removed $n_peers [Peer] block(s) for '$name' from $awg_conf (backup: $bak)."
 	fi
@@ -1063,13 +1076,8 @@ revoke_awg_peer() {
 	install -d -m 0700 "$awg_state" 2>/dev/null || true
 	local bak="$awg_state/awg0.pre-revoke.conf" tmp="$awg_conf.revoke.$$"
 	cp -a "$awg_conf" "$bak" || die "awg-revoke-peer: could not back up $awg_conf."
-	_awg_strip_peers "$awg_conf" "$pub" > "$tmp" || { rm -f "$tmp"; die "awg-revoke-peer: could not rewrite $awg_conf."; }
-	local ok=1
-	grep -q '^\[Interface\]' "$tmp" || ok=0
-	grep -q '^PrivateKey = ' "$tmp" || ok=0
-	grep -q '^ListenPort = ' "$tmp" || ok=0
-	grep -qE "^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*${pub}[[:space:]]*$" "$tmp" && ok=0
-	[ "$ok" -eq 1 ] || { rm -f "$tmp"; die "awg-revoke-peer: the rewritten $awg_conf failed its sanity check — nothing promoted (the peer is already off the running interface, but it WILL be re-admitted on the next start until this is resolved). Backup: $bak"; }
+	_awg_strip_checked "$awg_conf" "$pub" "$tmp" \
+		|| die "awg-revoke-peer: the rewritten $awg_conf failed its arithmetic — nothing promoted (the peer is already off the running interface, but it WILL be re-admitted on the next start until this is resolved). Backup: $bak"
 	chmod 0600 "$tmp"; mv -f "$tmp" "$awg_conf" || die "awg-revoke-peer: could not promote the rewritten $awg_conf (backup: $bak)."
 	log "awg-revoke-peer: removed the [Peer] block from $awg_conf."
 
