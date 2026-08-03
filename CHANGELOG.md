@@ -13,6 +13,35 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.48] — 2026-08-03
+
+> **A client could reach the node's own loopback services from the internet.** Measured, not theorised:
+> from a second host, through a `vless-xhttp-tls` subscription, `http://127.0.0.1:9100/metrics` on the
+> TARGET node returned HTTP 200 and 59868 bytes of real node_exporter output; `127.0.0.1:9551`
+> (`myceliumd`) answered 404 and `127.0.0.1:9090` (the sing-box Clash API) answered 401. All three are
+> bound to loopback precisely so that cannot happen. `169.254.169.254` was reachable by the same path.
+
+### Fixed
+- **The xray engine forwarded everywhere.** `nodes/dataplane/vless-xhttp-tls/xray.server.template.json`
+  had no `routing` key at all and a single untagged `freedom` outbound, and the live config on every
+  node matched it exactly. It now blocks private, loopback, link-local, CGNAT and reserved destinations
+  and bittorrent, through a tagged `blackhole`. The sing-box engine was never affected — it has carried
+  `{"ip_is_private":true,"outbound":"block"}` all along. Two engines serve the same clients from the
+  same node and only one had the guard.
+- **`geoip:private` is no longer used.** The REALITY template expressed the same control through a geo
+  asset that no node carries, so xray refused to load that config (`failed to open file: geoip.dat`) —
+  which is exactly how a security control becomes invisible. Both templates now use literal CIDRs and
+  need no asset. This is also why `validate_configs` failed on every node; it now passes because the
+  control is present and loadable, not because the check was relaxed.
+
+### Added
+- `tests/conformance/private_destinations_blocked.sh` — per engine, from a rendered server config:
+  a destination-IP rule exists, its outbound TAG actually resolves (a rule aimed at an undefined tag
+  forwards while reading like a block), the rule needs no external geo asset, and — computed with
+  `ipaddress`, not asserted as text — every address in a value table of internal destinations falls
+  inside the blocked set while ordinary public addresses do not. Mutation-tested against six
+  reintroductions, including dropping only `169.254.0.0/16` and blocking `0.0.0.0/0`.
+
 ## [0.2.47] — 2026-08-03
 
 > **Four of six served protocols carried no traffic for any client, while every node reported them

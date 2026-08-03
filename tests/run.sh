@@ -267,6 +267,7 @@ GATES=(
 	"tests/conformance/no_contact_leak.sh"
 	"tests/conformance/no_custom_crypto.sh"
 	"tests/conformance/validate_configs.sh"
+	"tests/conformance/private_destinations_blocked.sh"
 	"tests/conformance/no_legacy_transport.sh"
 	"tests/conformance/no_insecure_tls.sh"
 	"tests/conformance/no_operated_network_claim.sh"
