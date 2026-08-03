@@ -44,6 +44,26 @@ truth for the version is `internal/spec.Version`.
 - The DRY-RUN discloses unreachable peers too. Withholding "there is a peer I cannot reach" until after
   the operator commits defeats the only purpose a dry run has.
 - The verb no longer claims to "shred" what it `rm -f`s.
+- **The remaining review items, all of which I had left undone.** An evidence sweep that derives
+  `awg pubkey` from every `*.private` and every nested `private_key` in every `*.json`, under BOTH state
+  roots — `$STATE_DIR` and `/var/lib/mycelium/amneziawg`, the Ansible role's `awg_state_dir`, which is
+  where a live node held the private half of a peer the bash path could not see. The guarantee is now
+  withheld while any such key survives. A cross-family warning, because `--revoke` and `--awg-revoke`
+  are separate namespaces and both hold a `phone` on the live nodes. Serialisation against the L7 AWG
+  probe, which mutates the running interface every ~120s. A sanity check with teeth: peer arithmetic,
+  a non-blank line count that must fall, and a dialect-line count that must not change. And an early
+  return that consults the backups, since a peer surviving only inside one is exactly what a failed
+  dialect rollback restores.
+
+### Fixed elsewhere
+- **`exec 200>file 2>/dev/null` silences stderr for the rest of the process.** `exec` applies every
+  redirection on its line to the shell itself, so the L7 AmneziaWG probe — which `verify_post_apply`
+  calls on the converge path — was discarding every `warn` and every `die` that followed it. Proven by
+  writing to stderr either side of the line: the first appears, the second does not. Both sites now
+  pre-test that the lock file is openable and redirect only the lock fd.
+- **`grep -c` prints `0` AND exits 1 on no match**, so the `|| printf '0'` fallback in
+  `_awg_dialect_lines` appended a SECOND zero and every arithmetic comparison was reading `"0\n0"`.
+  This is what made the new sanity check reject a correct rewrite.
 
 ### Added
 - Five gate sections for the above, including a stateful `awg` stub that models a removal which reports

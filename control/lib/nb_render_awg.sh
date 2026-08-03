@@ -417,7 +417,9 @@ setup_amneziawg() {
 
 # _awg_dialect_lines FILE — count the [Interface] obfuscation lines (Jc/Jmin/Jmax/S1/S2/H1..H4) present in
 # FILE. A standard rendered awg config carries exactly 9. Pure read.
-_awg_dialect_lines() { grep -cE '^(Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4) = ' "$1" 2>/dev/null || printf '0'; }
+# NB: `grep -c` prints 0 and exits 1 on no match, so a `|| printf '0'` fallback would emit "0\n0" and
+# every arithmetic comparison on the result would be reading a two-line string.
+_awg_dialect_lines() { local n; n="$(grep -cE '^(Jc|Jmin|Jmax|S1|S2|H1|H2|H3|H4) = ' "$1" 2>/dev/null)"; printf '%s' "${n:-0}"; }
 
 # _awg_swap_dialect FILE — rewrite ONLY the 9 [Interface] obfuscation lines of FILE to the derived AWG_*
 # values, leaving every [Peer], key, address and route untouched. Verifies the 9 lines exist BEFORE (a
@@ -726,6 +728,41 @@ _awg_strip_peers() {
 	' "$file"
 }
 
+# _awg_keys_matching PUBKEYS... — print every path under the node's state that still holds a PRIVATE key
+# deriving to one of PUBKEYS. Covers both loose *.private files and `private_key` fields inside *.json,
+# and BOTH state roots: $STATE_DIR (the bash path) and /var/lib/mycelium/amneziawg (the Ansible role's
+# awg_state_dir — a second deploy path with its own state, which is where a live node was found holding
+# the private half of a peer the bash path knew nothing about).
+#
+# This is what turns "purge by glob" into "purge by proof". A revoke that deletes the files it can name
+# and then asserts success is asserting something it never measured.
+_awg_keys_matching() {
+	local want="$*" root f k p
+	[ -n "$want" ] || return 0
+	have awg || return 0
+	for root in "${STATE_DIR:-/var/lib/mycelium}" /var/lib/mycelium/amneziawg; do
+		[ -d "$root" ] || continue
+		while IFS= read -r f; do
+			[ -f "$f" ] || continue
+			k="$(head -c 200 "$f" 2>/dev/null | tr -d '\r\n')"
+			[ -n "$k" ] || continue
+			p="$(awg pubkey <<<"$k" 2>/dev/null || true)"
+			[ -n "$p" ] || continue
+			case " $want " in *" $p "*) printf '%s\n' "$f" ;; esac
+		done < <(find "$root" -type f -name '*.private' 2>/dev/null)
+		command -v jq >/dev/null 2>&1 || continue
+		while IFS= read -r f; do
+			[ -f "$f" ] || continue
+			while IFS= read -r k; do
+				[ -n "$k" ] || continue
+				p="$(awg pubkey <<<"$k" 2>/dev/null || true)"
+				[ -n "$p" ] || continue
+				case " $want " in *" $p "*) printf '%s\n' "$f" ;; esac
+			done < <(jq -r '.. | objects | .private_key? // empty' "$f" 2>/dev/null)
+		done < <(find "$root" -type f -name '*.json' 2>/dev/null)
+	done
+}
+
 # revoke_awg_client NAME — REVOKE an AmneziaWG client: the credential stops working immediately and does
 # not come back.
 #
@@ -765,6 +802,20 @@ revoke_awg_client() {
 	local awg_conf="${MYC_AWG_CONF:-/etc/amnezia/amneziawg/awg0.conf}" awg_state="$STATE_DIR/awg"
 	local clients_dir="$awg_state/clients"
 	[ -f "$awg_conf" ] || die "awg-revoke: no live awg0.conf at $awg_conf (bootstrap the node first)."
+	# SERIALISE against the L7 AWG probe, which adds and removes a peer on the LIVE interface every ~120s
+	# (nb_selftest.sh takes this same lock). Without it a revoke can interleave with a probe cycle: the
+	# probe's teardown and this removal both edit peer state, and the loser writes a config that
+	# disagrees with the interface.
+	# NOT `exec 200>file 2>/dev/null`: `exec` applies EVERY redirection on its line to the shell itself,
+	# so the 2>/dev/null silences stderr for the rest of the process — after which `die` exits without
+	# printing and a fail-closed abort is indistinguishable from success. Pre-test that the lock file is
+	# openable instead, so the exec cannot fail (a failed redirection on `exec` is fatal and no `|| true`
+	# can catch it).
+	local _awg_lock="${STATE_DIR:-/tmp}/l7_awg_probe.lock"
+	if command -v flock >/dev/null 2>&1 && : >>"$_awg_lock" 2>/dev/null; then
+		exec 200>>"$_awg_lock"
+		flock -w 30 200 || warn "awg-revoke: could not take the AWG probe lock within 30s — proceeding, but a concurrent L7 probe cycle may interleave."
+	fi
 
 	# --- resolve every peer this name owns -----------------------------------------------------------
 	local pubs="" p
@@ -789,7 +840,15 @@ revoke_awg_client() {
 	local n_peers=0
 	for p in $pubs; do n_peers=$(( n_peers + 1 )); done
 
-	if [ "$n_peers" -eq 0 ] && [ ! -f "$clients_dir/$name.private" ] && [ ! -f "$clients_dir/$name.conf" ]; then
+	# "Already clean" must be a statement about every place the credential is honoured, not just the live
+	# ones. A peer that survives ONLY inside a dialect backup is exactly what _awg_rollback restores.
+	local in_backups=0 _b
+	for _b in "$awg_state"/backup-*; do
+		[ -d "$_b" ] || continue
+		[ -e "$_b/clients/$name.private" ] || [ -e "$_b/clients/$name.conf" ] && in_backups=1
+		[ -f "$_b/awg0.conf" ] && grep -qE "^[[:space:]]*#[[:space:]]*name[[:space:]]*=[[:space:]]*${name}[[:space:]]*$" "$_b/awg0.conf" && in_backups=1
+	done
+	if [ "$n_peers" -eq 0 ] && [ "$in_backups" -eq 0 ] && [ ! -f "$clients_dir/$name.private" ] && [ ! -f "$clients_dir/$name.conf" ]; then
 		log "awg-revoke: '$name' has no peer in $awg_conf and no stored material — nothing to revoke (already clean)."
 		return 0
 	fi
@@ -846,10 +905,31 @@ revoke_awg_client() {
 		_awg_strip_peers "$awg_conf" $pubs > "$tmp" || { rm -f "$tmp"; die "awg-revoke: could not rewrite $awg_conf."; }
 		# Fail-closed sanity: the result must still be a usable server config, and must no longer name the
 		# revoked keys. A truncated or mangled file here means no AmneziaWG at all after the next restart.
-		local ok=1
-		grep -q '^\[Interface\]'  "$tmp" || ok=0
-		grep -q '^PrivateKey = '  "$tmp" || ok=0
-		grep -q '^ListenPort = '  "$tmp" || ok=0
+		local ok=1 why=""
+		grep -q '^\[Interface\]'  "$tmp" || { ok=0; why="$why no-[Interface]"; }
+		grep -q '^PrivateKey = '  "$tmp" || { ok=0; why="$why no-PrivateKey"; }
+		grep -q '^ListenPort = '  "$tmp" || { ok=0; why="$why no-ListenPort"; }
+		# TEETH. The three checks above only prove the file is not empty. These prove the rewrite removed
+		# exactly what it meant to and nothing else:
+		#   * the obfuscation lines must survive UNCHANGED IN COUNT — _awg_swap_dialect hard-dies on any
+		#     count but 9, so a dialect mangled here bricks the NEXT --awg-regen/--awg-rotate rather than
+		#     failing now. Compared before-to-after rather than against the literal 9: a revoke is a
+		#     SECURITY action and must not refuse to run on a config that is unusual for other reasons;
+		#   * peer arithmetic: after == before - removed, so removing one peer too many is caught;
+		#   * the non-blank line count must drop by exactly the lines the removed blocks held — the
+		#     backstop that turns any parse miss into a fail-closed abort instead of a reported success.
+		local _dl _db _pb _pa _lb _la
+		_db="$(_awg_dialect_lines "$awg_conf")"
+		_dl="$(_awg_dialect_lines "$tmp")"
+		[ "$_dl" = "$_db" ] || { ok=0; why="$why dialect-lines=$_dl(was $_db)"; }
+		# `grep -c` prints 0 AND exits 1 on no match, so a `|| printf '0'` fallback appends a SECOND zero
+		# and every comparison below silently reads "0\n0". Capture plainly; default only the empty case.
+		_pb="$(grep -c '^\[Peer\]' "$awg_conf" 2>/dev/null)"; _pb="${_pb:-0}"
+		_pa="$(grep -c '^\[Peer\]' "$tmp" 2>/dev/null)"; _pa="${_pa:-0}"
+		[ "$_pa" = "$(( _pb - n_peers ))" ] || { ok=0; why="$why peers=$_pa(want $(( _pb - n_peers )))"; }
+		_lb="$(grep -vc '^[[:space:]]*$' "$awg_conf" 2>/dev/null)"; _lb="${_lb:-0}"
+		_la="$(grep -vc '^[[:space:]]*$' "$tmp" 2>/dev/null)"; _la="${_la:-0}"
+		[ "$_la" -lt "$_lb" ] || { ok=0; why="$why non-blank-lines did not decrease"; }
 		# ANCHORED, not a substring search: one key can contain another as a prefix, and a substring
 		# match then reports a key as "still present" when it is not — aborting a revoke that in fact
 		# succeeded. (Caught by mutation-testing the gate: the duplicate-peer fixture has keys where one
@@ -857,7 +937,7 @@ revoke_awg_client() {
 		for p in $pubs; do grep -qE "^PublicKey = ${p}[[:space:]]*$" "$tmp" && ok=0; done
 		if [ "$ok" -ne 1 ]; then
 			rm -f "$tmp"
-			die "awg-revoke: the rewritten $awg_conf failed its sanity check — NOTHING was changed on disk (the peer is already off the running interface). Backup kept at $bak."
+			die "awg-revoke: the rewritten $awg_conf failed its sanity check ($why) — NOTHING was changed on disk (the peer is already off the running interface). Backup kept at $bak."
 		fi
 		chmod 0600 "$tmp"; mv -f "$tmp" "$awg_conf" || die "awg-revoke: could not promote the rewritten $awg_conf (backup at $bak)."
 		log "awg-revoke: removed $n_peers [Peer] block(s) for '$name' from $awg_conf (backup: $bak)."
@@ -878,7 +958,7 @@ revoke_awg_client() {
 		for f in "$b/clients/$name.private" "$b/clients/$name.psk" "$b/clients/$name.conf"; do
 			[ -e "$f" ] && { rm -f "$f"; purged=$(( purged + 1 )); }
 		done
-		if [ -f "$b/awg0.conf" ] && [ "$n_peers" -gt 0 ]; then
+		if [ -f "$b/awg0.conf" ] && [ -n "$pubs" ]; then
 			local btmp="$b/awg0.conf.revoke.$$"
 			if _awg_strip_peers "$b/awg0.conf" $pubs > "$btmp" 2>/dev/null && grep -q '^\[Interface\]' "$btmp"; then
 				# Only promote a backup that actually CHANGED. Rewriting an untouched restore source
@@ -898,6 +978,26 @@ revoke_awg_client() {
 	# promoted and verified.
 	rm -f "$awg_state/awg0.pre-revoke.conf" 2>/dev/null || true
 
+	# EVIDENCE SWEEP. Before claiming the credential is retired, look for its PRIVATE half anywhere the
+	# node keeps state — including the other deploy path's state dir. On a live node exactly this turned
+	# up the private key of a peer that a by-name revoke could not even see.
+	local leftover
+	leftover="$(_awg_keys_matching $pubs | sort -u)"
+	if [ -n "$leftover" ]; then
+		warn "awg-revoke: the peer(s) are removed, but a PRIVATE key deriving to a revoked public key is still stored on this node:"
+		printf '%s\n' "$leftover" | while IFS= read -r f; do warn "awg-revoke:   $f"; done
+		warn "awg-revoke: the credential cannot handshake, but the key material remains — remove these by hand, or the next operator re-issues from them."
+	fi
+
+	# CROSS-FAMILY. `--revoke` (identities) and `--awg-revoke` (AmneziaWG) are separate namespaces, and on
+	# the live nodes both hold an identity literally called `phone`. Retiring one and reporting a clean
+	# result invites the belief that the person is off the node entirely.
+	if [ -f "${IDENTITIES_JSON:-$STATE_DIR/identities.json}" ] && command -v jq >/dev/null 2>&1; then
+		if jq -e --arg n "$name" '[.clients[]?|select(.name==$n)]|length > 0' "${IDENTITIES_JSON:-$STATE_DIR/identities.json}" >/dev/null 2>&1; then
+			warn "awg-revoke: an identity named '$name' ALSO exists in the sing-box/xray identity set, and this verb does not touch it. To retire that one too:  $0 --revoke $name"
+		fi
+	fi
+
 	# THE GUARANTEE IS EARNED, NOT PRINTED. An unnamed [Peer] cannot be reached by name, so on a config
 	# that has one, "revoked" would be a claim about peers this call never even saw. Say what is true and
 	# hand over the command that finishes the job.
@@ -906,6 +1006,11 @@ revoke_awg_client() {
 		for p in $unnamed; do warn "awg-revoke:   $p"; done
 		warn "awg-revoke: finish with:  $0 --awg-revoke-peer <PUBKEY>   (per peer)"
 		printf '%s\n' $unnamed > "$STATE_DIR/awg/REVOKE_INCOMPLETE" 2>/dev/null || true
+		return 1
+	fi
+	if [ -n "$leftover" ]; then
+		printf '%s\n' "$leftover" > "$STATE_DIR/awg/REVOKE_INCOMPLETE" 2>/dev/null || true
+		warn "awg-revoke: '$name' can no longer handshake, but stored key material remains (listed above) — not calling this fully revoked."
 		return 1
 	fi
 	rm -f "$STATE_DIR/awg/REVOKE_INCOMPLETE" 2>/dev/null || true

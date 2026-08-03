@@ -622,9 +622,16 @@ measure_l7_probe_amneziawg() {
 	# probe — deleting its iface + removing its just-enrolled peer, which would read as a spurious dead
 	# verdict. Best-effort: no flock -> no lock (the probe is not cadenced, so real overlap needs two
 	# deliberate concurrent runs); the fixed fd 200 is released when this process exits.
-	if have flock; then
-		exec 200>"${STATE_DIR:-/tmp}/l7_awg_probe.lock" 2>/dev/null || true
-		flock -n 200 2>/dev/null || return 0
+	# NOT `exec 200>file 2>/dev/null`: `exec` applies EVERY redirection on its line to the shell itself,
+	# so that 2>/dev/null silences stderr for the REST OF THE PROCESS — every warn and every die after
+	# this point, in a probe that verify_post_apply calls on the converge path. Demonstrated: a line
+	# written to stderr before the exec appears, the identical line after it does not. Pre-test that the
+	# lock file is openable instead, so the exec itself cannot fail (a failed redirection on `exec` is
+	# fatal to a non-interactive shell and no `|| true` can catch it).
+	local _awg_probe_lock="${STATE_DIR:-/tmp}/l7_awg_probe.lock"
+	if have flock && : >>"$_awg_probe_lock" 2>/dev/null; then
+		exec 200>>"$_awg_probe_lock"
+		flock -n 200 || return 0
 	fi
 	local show spub port stunip jc jmin jmax s1 s2 h1 h2 h3 h4
 	show="$(awg show awg0 2>/dev/null)"                 || return 0

@@ -111,7 +111,7 @@ seed_conf() { # PATH  [with_duplicate]
 		printf 'PrivateKey = PRIV-server\n'
 		printf 'Address = 10.13.13.1/24\n'
 		printf 'ListenPort = 443\n'
-		printf 'Jc = 9\nJmin = 49\nJmax = 103\nS1 = 86\nS2 = 232\n'
+		printf 'Jc = 9\nJmin = 49\nJmax = 103\nS1 = 86\nS2 = 232\nH1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\n'
 		printf '\n[Peer]\n# name = alice\nPublicKey = PUB-alice\nPresharedKey = PSK-alice\nAllowedIPs = 10.13.13.2/32\n'
 		[ "$dup" -eq 1 ] && printf '\n[Peer]\n# name = alice\nPublicKey = PUB-alice-2\nPresharedKey = PSK-alice2\nAllowedIPs = 10.13.13.4/32\n'
 		printf '\n[Peer]\n# name = bob\nPublicKey = PUB-bob\nPresharedKey = PSK-bob\nAllowedIPs = 10.13.13.3/32\n'
@@ -316,7 +316,7 @@ seed_client() { # NAME
 	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
 	{
 		printf '[Interface]\nPrivateKey = PRIV-server\nAddress = 10.13.13.1/24\nListenPort = 443\n'
-		printf 'Jc = 9\nJmin = 49\nJmax = 103\nS1 = 86\nS2 = 232\n'
+		printf 'Jc = 9\nJmin = 49\nJmax = 103\nS1 = 86\nS2 = 232\nH1 = 1\nH2 = 2\nH3 = 3\nH4 = 4\n'
 		printf '\n[Peer]\nPublicKey = PUBorphan\nAllowedIPs = 10.13.13.2/32\n'
 		printf '\n[Peer]\n# name = alice\nPublicKey = PUB-alice\nAllowedIPs = 10.13.13.3/32\n'
 	} >"$MYC_AWG_CONF"
@@ -427,6 +427,97 @@ seed_client() { # NAME
 	[ "$before" = "$(cat "$MYC_AWG_CONF")" ] \
 		&& ok "and nothing on disk was touched (a rewritten config plus a live peer is the worst of both)" \
 		|| badln "it rewrote awg0.conf even though the peer is still live — the config now disagrees with the interface and nothing cadenced repairs that"
+	exit "$fail"
+) || fail=1
+
+
+# --- 10. a private key that survives ANYWHERE must break the guarantee ------------------------------
+# Deleting the files a revoke can NAME and then asserting success is asserting something never measured.
+# On a live node the private half of a peer sat in the OTHER deploy path's state dir
+# (/var/lib/mycelium/amneziawg, the Ansible role's awg_state_dir) where no glob in this verb looked.
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	seed_conf "$MYC_AWG_CONF"
+	seed_client alice
+	# a second copy of alice's private key, under a name and path the revoke never enumerates
+	install -d -m 0700 "$STATE_DIR/legacy"
+	printf 'PRIV-alice\n' >"$STATE_DIR/legacy/whatever.private"
+	printf '{"clients":{"someoneelse":{"private_key":"PRIV-alice"}}}\n' >"$STATE_DIR/legacy/identity.json"
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+
+	out="$( ( revoke_awg_client alice ) 2>&1 )"; rc=$?
+	[ "$rc" -ne 0 ] \
+		&& ok "a surviving private key elsewhere on the node makes the revoke report INCOMPLETE" \
+		|| badln "the revoke claimed success while a private key deriving to the revoked public key was still stored on the node. It deleted the files it could name and asserted a fact about the ones it could not."
+	printf '%s' "$out" | grep -q 'whatever.private' \
+		&& ok "it names the loose *.private file it found" \
+		|| badln "it did not report the surviving *.private file, so the operator cannot act on it"
+	printf '%s' "$out" | grep -q 'identity.json' \
+		&& ok "it also finds a private_key nested inside a *.json" \
+		|| badln "a private_key inside a JSON file was missed — that is exactly the shape found on the live node"
+	printf '%s' "$out" | grep -q "is revoked" \
+		&& badln "it still printed the 'is revoked' guarantee" \
+		|| ok "and it withholds the guarantee"
+	exit "$fail"
+) || fail=1
+
+# --- 11. the same NAME in the other identity namespace must be surfaced -----------------------------
+# `--revoke` and `--awg-revoke` are separate namespaces; on the live nodes both hold a `phone`. Retiring
+# one and reporting a clean result invites the belief that the person is off the node entirely.
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	seed_conf "$MYC_AWG_CONF"
+	seed_client alice
+	printf '{"version":1,"clients":[{"name":"alice","id":"x"}]}\n' >"$STATE_DIR/identities.json"
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	out="$( ( revoke_awg_client alice ) 2>&1 )"
+	printf '%s' "$out" | grep -q -- '--revoke alice' \
+		&& ok "a namesake in the sing-box/xray identity set is surfaced with the command to retire it too" \
+		|| badln "an identity of the same name in the OTHER namespace was not mentioned — the operator is left believing one revoke covered both"
+	exit "$fail"
+) || fail=1
+
+# --- 12. the rewrite must be arithmetically right, not merely non-empty -----------------------------
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	seed_conf "$MYC_AWG_CONF" 1
+	seed_client alice
+	before_peers="$(grep -c '^\[Peer\]' "$MYC_AWG_CONF")"
+	before_lines="$(grep -vc '^[[:space:]]*$' "$MYC_AWG_CONF")"
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	( revoke_awg_client alice ) >/dev/null 2>&1 || true
+	after_peers="$(grep -c '^\[Peer\]' "$MYC_AWG_CONF")"
+	after_lines="$(grep -vc '^[[:space:]]*$' "$MYC_AWG_CONF")"
+	[ "$after_peers" = "$(( before_peers - 2 ))" ] \
+		&& ok "peer arithmetic holds: $before_peers - 2 = $after_peers" \
+		|| badln "peer count went $before_peers -> $after_peers when exactly 2 were removed"
+	[ "$after_lines" -lt "$before_lines" ] \
+		&& ok "the non-blank line count dropped (the backstop against a parse miss reported as success)" \
+		|| badln "the rewrite removed peers without removing any non-blank lines — a parse miss would look exactly like this"
+	[ "$(grep -c '^Jc = ' "$MYC_AWG_CONF")" = "1" ] \
+		&& ok "the dialect lines survive the rewrite (a mangled dialect bricks the NEXT --awg-regen, not this call)" \
+		|| badln "the dialect lines did not survive — --awg-swap-dialect hard-dies on any count but 9, so this breaks a later rotate rather than failing now"
 	exit "$fail"
 ) || fail=1
 
