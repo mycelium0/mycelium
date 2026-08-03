@@ -13,6 +13,40 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.52] — 2026-08-03
+
+> **Correcting v0.2.50.** An independent review of the revoke verb shipped hours earlier found three real
+> defects, all confirmed on live nodes. The worst is the one this project has spent the day hunting: the
+> verb printed a guarantee it had not established.
+
+### Fixed
+- **`--awg-revoke` could report success while a peer it never saw stayed valid.** A `[Peer]` block with
+  no `# name =` marker is reachable by neither resolution path, and one exists on a live node — holding
+  a key whose private half is still stored on that same host. The closing "is revoked" line printed
+  unconditionally. It is now gated: an unreachable peer means a non-zero exit, no guarantee, the peer's
+  public key printed, a `REVOKE_INCOMPLETE` marker written, and the exact command to finish the job.
+- **`--awg-revoke-peer PUBKEY`** — the only way to retire a peer no name can address.
+- **The strip was not idempotent.** It captured the blank line between sections into the preceding block
+  and re-added one when emitting, so every pass grew the file by one blank per surviving peer, without
+  bound: five no-op passes over a live 31-line config produced 41 lines. The v0.2.50 gate could not see
+  it, because after the first revoke the name owns nothing and the second call short-circuits before the
+  stripper runs. A no-op strip is now byte-identical to its input.
+- **The live removal was assumed, not verified.** Failures were downgraded to a warning whose own text
+  pre-excused them, and the guarantee printed regardless — including when nothing had been removed. The
+  interface is now read back; a surviving peer fails closed with nothing written to disk.
+- **The verb's own snapshot outlived it.** `awg0.pre-revoke.conf` holds the server private key and every
+  peer block; `--awg-issue` deletes its equivalent on success and this one kept it forever (found on a
+  live node). Removed on the success path.
+- Public keys are matched with the separator normalised: `PublicKey=KEY` is legal syntax that a rule
+  anchored on `PublicKey = ` cannot see — which here means failing to revoke while reporting success.
+- Backup copies are only rewritten when they actually change, so an untouched restore source keeps its
+  mtime and it stays visible which backups a revoke really reached.
+
+### Added
+- Five gate sections for the above, including a stateful `awg` stub that models a removal which reports
+  success and does not take. The v0.2.50 gate also ran without the library's `log`/`warn`/`die`, so
+  `die` was a command-not-found that RETURNED — every fail-closed path under test silently continued.
+
 ## [0.2.51] — 2026-08-03
 
 > **The rotation apply path had never executed.** Not "was not covered by a test" — had never run, on

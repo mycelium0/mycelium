@@ -63,24 +63,44 @@ printf '== AmneziaWG revoke: is a revoked credential retired everywhere that hon
 # shellcheck source=/dev/null
 . "$FIXTURE" || { printf 'FAIL: could not source the fakenode fixture\n' >&2; exit 2; }
 
+# The library's own reporting + fail-closed primitives. Without these, `log`/`warn` produce nothing (so
+# a gate row grepping for a message can never see it) and — far worse — `die` is merely a
+# command-not-found that RETURNS, so every fail-closed path under test silently continues. A gate that
+# does not supply them is testing a different program from the one that ships.
+log()  { printf 'log: %s\n' "$*"; }
+warn() { printf 'warn: %s\n' "$*" >&2; }
+die()  { printf 'die: %s\n' "$*" >&2; exit 1; }
+run()  { "$@"; }
+
 # A recording `awg` stub. pubkey is a deterministic transform of the private material so the gate can
 # predict the key a name resolves to; `set ... remove` is logged with a timestamped sequence number so
 # ORDER against the config rewrite is observable.
 install_awg_stub() {
 	cat >"$STUBDIR/awg" <<'STUB'
 #!/usr/bin/env bash
-log="${FAKENODE_ROOT:?}/awg.calls"
+root="${FAKENODE_ROOT:?}"; log="$root/awg.calls"; live="$root/awg.livepeers"
 case "${1:-}" in
 	pubkey)  read -r k; printf 'PUB-%s\n' "${k#PRIV-}" ;;
 	genkey)  printf 'PRIV-generated\n' ;;
 	genpsk)  printf 'PSK-generated\n' ;;
-	set)     printf 'set %s\n' "$*" >>"$log" ;;
-	show)    : ;;
+	set)     printf 'set %s\n' "$*" >>"$log"
+	         # "$3 peer $4 remove" — drop it from the live list UNLESS the sticky marker says the
+	         # kernel refused, which is how a removal that reports success but does not take is modelled.
+	         if [ "${4:-}" != "" ] && [ ! -e "$root/awg.sticky" ] && [ -f "$live" ]; then
+	             grep -vxF "${4}" "$live" >"$live.n" 2>/dev/null && mv "$live.n" "$live"
+	         fi ;;
+	show)    case "${3:-}" in peers) [ -f "$live" ] && cat "$live" ;; *) : ;; esac ;;
 	*)       : ;;
 esac
 exit 0
 STUB
 	chmod +x "$STUBDIR/awg"
+	cat >"$STUBDIR/systemctl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do [ "$a" = "is-active" ] && exit 0; done
+exit 0
+STUB
+	chmod +x "$STUBDIR/systemctl"
 }
 
 # A node conf with three peers: the target, a second peer for the SAME name, and a bystander.
@@ -97,6 +117,8 @@ seed_conf() { # PATH  [with_duplicate]
 		printf '\n[Peer]\n# name = bob\nPublicKey = PUB-bob\nPresharedKey = PSK-bob\nAllowedIPs = 10.13.13.3/32\n'
 	} >"$f"
 	chmod 0600 "$f"
+	# the peers the stubbed interface currently honours
+	grep -E '^[[:space:]]*PublicKey' "$f" | sed -E 's/^[[:space:]]*PublicKey[[:space:]]*=[[:space:]]*//' >"$FAKENODE_ROOT/awg.livepeers"
 }
 
 seed_client() { # NAME
@@ -245,6 +267,166 @@ seed_client() { # NAME
 	else
 		badln "revoking an unknown name FAILED — 'already absent' is the desired end state, so it must not be an error"
 	fi
+	exit "$fail"
+) || fail=1
+
+
+# --- 5. a no-op strip must be BYTE-IDENTICAL --------------------------------------------------------
+# The shipped stripper captured the blank line between sections into the PRECEDING block and re-added one
+# when emitting, so every pass grew the file by one blank per surviving peer. Five no-op passes over a
+# live 31-line conf produced 41 lines. Section 4's idempotency row could not see it: after the first
+# revoke the name owns nothing, so the second call short-circuits and the stripper never runs again.
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	seed_conf "$MYC_AWG_CONF" 1
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+
+	cp "$MYC_AWG_CONF" "$FAKENODE_ROOT/grow.conf"
+	base="$(wc -l <"$FAKENODE_ROOT/grow.conf")"
+	for _ in 1 2 3 4 5; do
+		_awg_strip_peers "$FAKENODE_ROOT/grow.conf" "PUB-not-present" >"$FAKENODE_ROOT/grow.next" \
+			&& mv "$FAKENODE_ROOT/grow.next" "$FAKENODE_ROOT/grow.conf"
+	done
+	after="$(wc -l <"$FAKENODE_ROOT/grow.conf")"
+	[ "$base" = "$after" ] \
+		&& ok "five no-op strips leave the config byte-stable ($base lines in, $base out)" \
+		|| badln "a strip that removes NOTHING still changed the file: $base lines became $after. Each pass adds a blank per surviving peer, without bound — the live config of a node this shipped on already carried the extra lines. 'Idempotent' has to mean byte-identical or it means nothing."
+	cmp -s "$MYC_AWG_CONF" "$FAKENODE_ROOT/grow.conf" \
+		&& ok "and the content is unchanged, not merely the same length" \
+		|| badln "a no-op strip altered the file's content"
+	exit "$fail"
+) || fail=1
+
+# --- 6. an UNNAMED peer must break the guarantee, not be silently missed -----------------------------
+# Found on a live node: a [Peer] with no "# name =" marker, holding a key whose private half was still
+# stored on that same host. A by-name revoke resolves neither by stored key nor by marker, removes the
+# OTHER peer, and — as shipped — printed "is revoked" anyway.
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	{
+		printf '[Interface]\nPrivateKey = PRIV-server\nAddress = 10.13.13.1/24\nListenPort = 443\n'
+		printf 'Jc = 9\nJmin = 49\nJmax = 103\nS1 = 86\nS2 = 232\n'
+		printf '\n[Peer]\nPublicKey = PUBorphan\nAllowedIPs = 10.13.13.2/32\n'
+		printf '\n[Peer]\n# name = alice\nPublicKey = PUB-alice\nAllowedIPs = 10.13.13.3/32\n'
+	} >"$MYC_AWG_CONF"
+	chmod 0600 "$MYC_AWG_CONF"
+	seed_client alice
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+
+	out="$( ( revoke_awg_client alice ) 2>&1 )"; rc=$?
+	[ "$rc" -ne 0 ] \
+		&& ok "a revoke that cannot reach every peer exits NON-ZERO" \
+		|| badln "the revoke reported SUCCESS while an unreachable [Peer] remained. On the node where this was found, that peer's private key was sitting in the state dir — the operator would have been told the credential was retired while it still worked."
+	printf '%s' "$out" | grep -q "is revoked" \
+		&& badln "it printed the 'is revoked' guarantee despite an unreachable peer — the guarantee must be earned, not printed" \
+		|| ok "it does NOT print the 'is revoked' guarantee it cannot honour"
+	printf '%s' "$out" | grep -q 'awg-revoke-peer' \
+		&& ok "it hands over the exact command that finishes the job" \
+		|| badln "it reports the problem without naming the verb that resolves it"
+	[ -s "$STATE_DIR/awg/REVOKE_INCOMPLETE" ] \
+		&& ok "it leaves a REVOKE_INCOMPLETE marker naming the peer(s)" \
+		|| badln "nothing durable records that the revoke was incomplete — the warning scrolls away and the node looks clean"
+
+	# and the by-key verb must actually reach it
+	( revoke_awg_peer PUBorphan ) >/dev/null 2>&1 || true
+	grep -q 'PUBorphan' "$MYC_AWG_CONF" \
+		&& badln "--awg-revoke-peer did not remove the unnamed peer — there is then NO sanctioned way to retire it" \
+		|| ok "--awg-revoke-peer reaches a peer no name can address"
+	exit "$fail"
+) || fail=1
+
+# --- 7. the verb's own snapshot must not outlive it --------------------------------------------------
+# awg0.pre-revoke.conf holds the server PrivateKey and every peer block. --awg-issue deletes its
+# equivalent on success; as shipped, this one kept it forever (found on a live node, mode 0600, dated).
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	seed_conf "$MYC_AWG_CONF"
+	seed_client alice
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	( revoke_awg_client alice ) >/dev/null 2>&1 || true
+	[ -e "$STATE_DIR/awg/awg0.pre-revoke.conf" ] \
+		&& badln "the pre-revoke snapshot survives a SUCCESSFUL revoke. It contains the server PrivateKey and every peer block; --awg-issue deletes its own equivalent on success and this must too." \
+		|| ok "the pre-revoke snapshot is removed once the rewrite is promoted"
+	exit "$fail"
+) || fail=1
+
+# --- 8. a key written without spaces is still found --------------------------------------------------
+# `PublicKey=KEY` is legal config syntax. A rule anchored on "PublicKey = " does not see such a peer,
+# which here means failing to revoke it while reporting success.
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	{
+		printf '[Interface]\nPrivateKey = PRIV-server\nAddress = 10.13.13.1/24\nListenPort = 443\n'
+		printf '\n[Peer]\n# name = alice\nPublicKey=PUB-alice\nAllowedIPs = 10.13.13.2/32\n'
+	} >"$MYC_AWG_CONF"
+	chmod 0600 "$MYC_AWG_CONF"
+	seed_client alice
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	( revoke_awg_client alice ) >/dev/null 2>&1 || true
+	grep -q 'PUB-alice' "$MYC_AWG_CONF" \
+		&& badln "a peer written as 'PublicKey=KEY' (no spaces — legal syntax) survived the revoke" \
+		|| ok "a peer written without spaces around '=' is still found and removed"
+	exit "$fail"
+) || fail=1
+
+
+# --- 9. a live removal that does NOT take must fail closed ------------------------------------------
+# The shipped verb counted successful `awg set` calls and downgraded every failure to a warning whose own
+# text pre-excused it ("it may already be absent"); the closing guarantee then printed regardless. Read
+# the interface BACK instead. Modelled with a sticky stub: the remove call reports success, the peer
+# stays. Nothing on disk may be touched, because a rewritten config plus a live peer is the worst of
+# both — the operator is told it is gone while it still works.
+(
+	set -u
+	fail=0
+	fakenode_init
+	install_awg_stub
+	export MYC_AWG_CONF="$FAKENODE_ROOT/awg0.conf"
+	seed_conf "$MYC_AWG_CONF"
+	seed_client alice
+	: >"$FAKENODE_ROOT/awg.sticky"
+	before="$(cat "$MYC_AWG_CONF")"
+	# shellcheck source=/dev/null
+	. "$LIB"
+	need_root() { :; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+
+	if ( revoke_awg_client alice ) >/dev/null 2>&1; then
+		badln "the revoke reported SUCCESS while the peer was still on the running interface — the credential works RIGHT NOW and the operator has been told otherwise"
+	else
+		ok "a removal that does not take fails closed"
+	fi
+	[ "$before" = "$(cat "$MYC_AWG_CONF")" ] \
+		&& ok "and nothing on disk was touched (a rewritten config plus a live peer is the worst of both)" \
+		|| badln "it rewrote awg0.conf even though the peer is still live — the config now disagrees with the interface and nothing cadenced repairs that"
 	exit "$fail"
 ) || fail=1
 
