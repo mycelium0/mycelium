@@ -806,7 +806,15 @@ revoke_awg_client() {
 	[ "$n_peers" -le 1 ] || warn "awg-revoke: '$name' owns $n_peers peers — removing ALL of them. (--awg-issue enrols a second peer under the same name when the stored key material is missing; this is that state.)"
 
 	if [ "${DRY_RUN:-0}" -eq 1 ]; then
-		log "[dry-run] awg-revoke would remove $n_peers peer(s) for '$name' from the live interface and $awg_conf, and shred $clients_dir/$name.{private,psk,conf}"
+		log "[dry-run] awg-revoke would remove $n_peers peer(s) for '$name' from the live interface and $awg_conf, and delete $clients_dir/$name.{private,psk,conf}"
+		# The dry-run exists so the operator can see what WILL happen. Withholding "there is a peer I
+		# cannot reach" until after they commit defeats its purpose — this is precisely the moment to say
+		# so, while it still costs nothing.
+		if [ -n "$unnamed" ]; then
+			warn "[dry-run] and would NOT reach these unnamed [Peer] block(s), which may belong to '$name':"
+			for p in $unnamed; do warn "[dry-run]   $p"; done
+			warn "[dry-run] finish those with:  $0 --awg-revoke-peer <PUBKEY>"
+		fi
 		return 0
 	fi
 

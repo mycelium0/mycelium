@@ -41,6 +41,9 @@ truth for the version is `internal/spec.Version`.
   anchored on `PublicKey = ` cannot see — which here means failing to revoke while reporting success.
 - Backup copies are only rewritten when they actually change, so an untouched restore source keeps its
   mtime and it stays visible which backups a revoke really reached.
+- The DRY-RUN discloses unreachable peers too. Withholding "there is a peer I cannot reach" until after
+  the operator commits defeats the only purpose a dry run has.
+- The verb no longer claims to "shred" what it `rm -f`s.
 
 ### Added
 - Five gate sections for the above, including a stateful `awg` stub that models a removal which reports

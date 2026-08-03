@@ -68,7 +68,7 @@
 #                        keys + address, re-renders only) — this is how clients are refreshed after an
 #                        --awg-regen / --awg-rotate. Honours Selective Growth (never a silent full tunnel).
 #     --awg-revoke NAME REVOKE an AmneziaWG client: remove its peer(s) from the RUNNING interface first (the
-#                        key stops handshaking immediately), then from awg0.conf, then shred its stored
+#                        key stops handshaking immediately), then from awg0.conf, then delete its stored
 #                        key material, then purge it from the dialect backups so a failed --awg-rotate
 #                        rollback cannot resurrect it. Idempotent; other peers' sessions are NOT dropped
 #                        (no interface restart). Removes EVERY peer carrying the name — --awg-issue can
