@@ -81,6 +81,11 @@ rotate_disarm() {
 # operator decision taken AFTER the RP-0012 §6 go/no-go.
 ROTATE_LOOP_INTERVAL="${ROTATE_LOOP_INTERVAL:-90s}"
 
+# rotate_loop_running — is the rotation loop actually running? The unit name belongs to this module.
+rotate_loop_running() {
+	systemctl is-active --quiet mycelium-rotate.timer 2>/dev/null
+}
+
 rotate_enable_loop() {
 	need_root
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would install + enable mycelium-rotate.timer (every $ROTATE_LOOP_INTERVAL)"; return 0; fi

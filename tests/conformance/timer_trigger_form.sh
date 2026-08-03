@@ -91,7 +91,12 @@ for f in "${emitters[@]}"; do
 		# file using that idiom is not silently skipped — which is exactly what an earlier draft of this
 		# gate did, checking three timers and reporting PASS while two went unexamined.
 		wr="$u.timer"
-		fn="$(grep -oE "^[A-Za-z0-9_]+\(\).*$u\.timer" "$f" | head -1 | sed -E 's/\(\).*//')"
+		# A path helper is one whose definition PRINTS the unit path — not merely any one-line function
+		# that happens to mention the unit. Matching on the mention alone identified helpers by
+		# coincidence: adding `rotate_loop_running() { systemctl is-active --quiet mycelium-rotate.timer; }`
+		# was enough to make this gate hunt for a heredoc written by a predicate that writes nothing, and
+		# report the emitter as unexaminable. Require the printf of a systemd path on the same line.
+		fn="$(grep -oE "^[A-Za-z0-9_]+\(\).*printf.*/etc/systemd/system/[A-Za-z0-9@._-]*$u\.timer" "$f" | head -1 | sed -E 's/\(\).*//')"
 		[ -n "$fn" ] && wr="$fn"
 		found=$((found + 1))
 		# the heredoc body for THIS unit: from its cat line to the terminator

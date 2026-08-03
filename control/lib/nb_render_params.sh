@@ -585,8 +585,41 @@ apply_node_xray_engine() {
 # half-converged node must be visible (the unit goes red), and nothing here rolls back a sing-box config
 # that already promoted and verified. Reporting the failure and undoing a good promote are different
 # things; only the first is wanted.
+# _report_loop_drift — reconcile what node.config.json DECLARES against what the node actually runs.
+#
+# The profile's loops field is a request that nothing consumes: arming is a node-local sentinel, never a
+# committable file (the RP-0012 triple gate). Correct — and it lets the file drift into saying something
+# untrue. All three live nodes declared every loop false while all three were running, and nothing
+# anywhere noticed, because nothing reads the field at all.
+#
+# Advisory, never fatal (ADR-0030). The point is that an operator reading the file is not misled; it must
+# not become a reason a converge fails.
+_report_loop_drift() {
+	local spine="${SPINE_BIN:-${TOOLING_DIR:-/usr/local/lib/mycelium}/bin/myceliumctl-go}"
+	local cfg="$STATE_DIR/node.config.json"
+	[ -x "$spine" ] && [ -f "$cfg" ] || return 0
+	# Ask each loop's OWNING module; do not name a unit here. Two gates enforce that and both are right —
+	# a second file naming a unit is a second thing that could arm or stop it.
+	#
+	# The update loop is deliberately NOT probed: its unit has no in-tree owner today, and
+	# update_unit_template_shape refuses any tracked reference to it precisely so that nothing claims one
+	# by accident. Its declared value is passed straight through, so it can never register as drift here.
+	# When that unit gains a real owner, give it a predicate too and this line becomes a probe.
+	local u r=false m=false
+	u="$(jq -r '.loops.update // false' "$cfg" 2>/dev/null)"; [ "$u" = "true" ] || u=false
+	command -v rotate_loop_running  >/dev/null 2>&1 && rotate_loop_running  && r=true
+	command -v measure_loop_running >/dev/null 2>&1 && measure_loop_running && m=true
+	local out
+	out="$("$spine" loop-drift --profile "$cfg" --update="$u" --rotate="$r" --measure="$m" 2>/dev/null)" && return 0
+	[ -n "$out" ] || return 0
+	warn "node.config.json disagrees with what this node is running:"
+	printf '%s\n' "$out" | while IFS= read -r _l; do [ -n "$_l" ] && warn "  $_l"; done
+	return 0
+}
+
 converge_node_tail() {
 	local failed=""
+	_report_loop_drift
 	# Every caller reaches here only after a promote was applied AND verified (or after establishing there
 	# was nothing to promote), so the previous run's failure snapshots are stale by definition. Retiring
 	# them here rather than in flow_update alone is what bounds their lifetime on the operator-driven paths

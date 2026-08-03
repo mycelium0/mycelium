@@ -235,3 +235,34 @@ func ParseNodeProfile(r io.Reader) (NodeProfile, error) {
 	}
 	return p, nil
 }
+
+// LoopDrift names every divergence between the loops a node profile REQUESTS and the loops that are
+// actually running.
+//
+// The profile's Loops field is a request, not a switch: arming a live-actuating loop happens only
+// through the node-local sentinels, never from a committable file (the RP-0012 triple gate). That design
+// is right, and it has a consequence nobody stated — the field can say one thing while the node does
+// another, and nothing anywhere notices.
+//
+// Measured on all three live nodes: node.config.json declared {"update":false,"rotate":false,
+// "measure":false} while all three timers were active. Nothing consumes the field, so it had drifted
+// into a decorative statement that an operator reads as fact. A declaration that cannot be enforced must
+// at least be RECONCILED against reality and reported, or it is worse than absent: absent says nothing,
+// stale says something false.
+//
+// Advisory by construction. It returns text; it actuates nothing (ADR-0030).
+func LoopDrift(requested, actual LoopsConfig) []string {
+	var out []string
+	check := func(name string, want, have bool) {
+		switch {
+		case want && !have:
+			out = append(out, name+": the node profile REQUESTS this loop, but it is not running (arming is a node-local sentinel, never the profile — so this request has no effect until an operator arms it)")
+		case !want && have:
+			out = append(out, name+": this loop IS running, but the node profile does not request it. The profile is what an operator reads to learn what this node does; leaving it false while the loop runs makes the file state something untrue.")
+		}
+	}
+	check("update", requested.Update, actual.Update)
+	check("rotate", requested.Rotate, actual.Rotate)
+	check("measure", requested.Measure, actual.Measure)
+	return out
+}

@@ -29,9 +29,27 @@ truth for the version is `internal/spec.Version`.
   corrected on every resolution; `harden_ufw` no longer requires it to exist.
 
 ### Added
+- **`LoopDrift` + `myceliumctl loop-drift`** — reconciles the loops a node profile REQUESTS against the
+  loops actually running. The profile's `loops` field is a request that nothing consumes (arming is a
+  node-local sentinel, never a committable file — the RP-0012 triple gate, and that is right). The
+  consequence nobody stated: the field can say one thing while the node does another and nothing
+  notices. All three live nodes declared every loop `false` while all three were running. A declaration
+  that cannot be enforced must at least be reconciled and reported, or it is worse than absent — absent
+  says nothing, stale says something false. Advisory, never fatal.
+- Each loop's owning module now exposes a `*_loop_running` predicate, so the converge asks rather than
+  naming a unit. Two gates enforce that and both are right: a second file naming a unit is a second
+  thing that could arm or stop it. The update loop is deliberately NOT probed — its unit has no in-tree
+  owner and `update_unit_template_shape` refuses any tracked reference precisely so nothing claims one
+  by accident.
 - `tests/conformance/awg_served_port_is_real.sh` — a value table over (config port, marker) including
   both live states verbatim, asserting the config wins, the marker is corrected, a malformed value never
   propagates, and repeated resolution is stable. Mutation-verified.
+
+### Fixed
+- `timer_trigger_form` identified a unit's path-helper by any one-line function that MENTIONED the unit.
+  Adding a `rotate_loop_running` predicate was enough to make it hunt for a heredoc written by a
+  function that writes nothing, and report the real emitter as unexaminable. It now requires the helper
+  to actually print a systemd path. Still checks all five emitted timers.
 
 ## [0.2.53] — 2026-08-03
 

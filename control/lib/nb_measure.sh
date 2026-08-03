@@ -96,6 +96,14 @@ _measure_fp_marker()   { printf '%s' "$STATE_DIR/fp_probe.json"; }
 _fp_rotate_arm_sentinel() { printf '%s' "$STATE_DIR/fp-rotate-live.enabled"; }
 _measure_vocab()       { printf '%s' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"; }
 
+# measure_loop_running — is the MEASURE plane actually running right now? The unit name lives here,
+# because this module owns it; callers elsewhere ask rather than naming it (measure_daemon_ships_disabled
+# enforces exactly that, and it is right to: a second file naming the unit is a second thing that can arm
+# it).
+measure_loop_running() {
+	systemctl is-active --quiet mycelium-measure.service 2>/dev/null
+}
+
 # measure_reload_running_daemon — put an ALREADY-RUNNING MEASURE daemon onto the binary that was just
 # rebuilt underneath it. Called by install_tooling after it replaces myceliumd.
 #

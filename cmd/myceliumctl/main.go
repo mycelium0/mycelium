@@ -89,6 +89,8 @@ func run(args []string) error {
 		return cmdAWGRevokePlan(rest)
 	case "awg-strip-peers":
 		return cmdAWGStripPeers(rest)
+	case "loop-drift":
+		return cmdLoopDrift(rest)
 	case "rotate-plan":
 		return cmdRotatePlan(rest)
 	case "fingerprint-plan":
@@ -1080,7 +1082,10 @@ func cmdNodePlan(args []string) error {
 		fmt.Fprintln(w, "front:\tdisabled")
 	}
 	fmt.Fprintf(w, "ingress(two-hop):\t%t\n", p.Ingress != nil)
-	fmt.Fprintf(w, "loops:\tupdate=%t rotate=%t measure=%t\n", p.Loops.Update, p.Loops.Rotate, p.Loops.Measure)
+	// "requested", not a bare "loops": the field is a REQUEST that nothing consumes — arming happens only
+	// through the node-local sentinels — so printing it unqualified invites reading it as the node's
+	// actual state. It was false on three live nodes whose loops were all running.
+	fmt.Fprintf(w, "loops (requested):\tupdate=%t rotate=%t measure=%t\n", p.Loops.Update, p.Loops.Rotate, p.Loops.Measure)
 	return w.Flush()
 }
 
@@ -1698,5 +1703,38 @@ func cmdAWGStripPeers(args []string) error {
 		return fmt.Errorf("awg-strip-peers: refusing to emit an unsound rewrite: %w", err)
 	}
 	fmt.Print(after)
+	return nil
+}
+
+
+// cmdLoopDrift reconciles the loops a node profile REQUESTS against the loops actually running, which
+// only the caller can observe. Advisory: it reports, it actuates nothing.
+func cmdLoopDrift(args []string) error {
+	fs := flag.NewFlagSet("loop-drift", flag.ContinueOnError)
+	profile := fs.String("profile", "", "path to node.config.json (required)")
+	update := fs.Bool("update", false, "the update loop is actually running")
+	rotate := fs.Bool("rotate", false, "the rotate loop is actually running")
+	measure := fs.Bool("measure", false, "the measure loop is actually running")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *profile == "" {
+		return fmt.Errorf("loop-drift: --profile is required")
+	}
+	raw, err := os.ReadFile(*profile)
+	if err != nil {
+		return fmt.Errorf("loop-drift: %w", err)
+	}
+	var p spec.NodeProfile
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("loop-drift: %s is not a valid node profile: %w", *profile, err)
+	}
+	drift := spec.LoopDrift(p.Loops, spec.LoopsConfig{Update: *update, Rotate: *rotate, Measure: *measure})
+	for _, d := range drift {
+		fmt.Println(d)
+	}
+	if len(drift) > 0 {
+		return fmt.Errorf("loop-drift: %d divergence(s) between the declared profile and the running node", len(drift))
+	}
 	return nil
 }
