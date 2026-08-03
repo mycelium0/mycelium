@@ -64,13 +64,34 @@ const (
 	// matches the anchor's certificate). A MethodTCP/MethodTLS pair on the same
 	// address distinguishes "TCP reached but TLS cut" from "TCP refused".
 	MethodTLS Method = "tls"
+	// MethodQUIC probes a UDP-only QUIC listener (hysteria2, tuic).
+	//
+	// It exists because MethodTCP is not merely unhelpful against a UDP listener —
+	// it is CONFIRMABLY WRONG. Measured on all three live nodes: hysteria2 and
+	// tuic reported 0 successes against 8 failures, permanently, because a TCP
+	// connect to a UDP-only port is refused every time. That is not "no signal",
+	// it is a loud false negative, so the assembler's zero-sample guard (which
+	// deliberately refuses to read silence as a black-hole) never fires, the
+	// tuner floors both weights, and the rotation planner marks the pair
+	// ineligible. The two families most likely to survive a block became the two
+	// the failover mechanism could never select — while a real client carried
+	// HTTP 204 through both.
+	//
+	// The probe does NOT merely open a UDP socket: net.Dial on UDP is
+	// connectionless and would succeed against a dead port, which is the same
+	// defect mirrored. Instead it sends a QUIC long-header packet carrying a
+	// version no implementation supports. RFC 9000 §6 requires a server to answer
+	// that with Version Negotiation, so ALIVE is a datagram arriving — loud —
+	// rather than an absence. A closed port yields ICMP port-unreachable, which a
+	// connected UDP socket surfaces as ECONNREFUSED: DEAD is loud too.
+	MethodQUIC Method = "quic"
 )
 
 // IsValid reports whether the method is one of the canonical members (the unset
 // zero value is not valid).
 func (m Method) IsValid() bool {
 	switch m {
-	case MethodTCP, MethodTLS:
+	case MethodTCP, MethodTLS, MethodQUIC:
 		return true
 	default:
 		return false

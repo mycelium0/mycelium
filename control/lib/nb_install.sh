@@ -556,6 +556,25 @@ install_spine() {
 				"$MYC_GO_BIN" build -trimpath -ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$rev" \
 				-o "$bin" "$pkg" ); then
 			log "built + installed $name -> $bin (rev $rev; inert until enabled, shell tool stays authoritative)"
+			# REPLACING A BINARY DOES NOT RELOAD A RUNNING DAEMON.
+			#
+			# The note above says myceliumd is inert because it runs only once an operator arms the MEASURE
+			# plane. That is true of a STOCK node and stops being true the moment it IS armed — after which
+			# this loop overwrites the binary on every 15-minute converge while the long-lived process keeps
+			# executing the now-unlinked inode. Nothing reported it: the unit stays active, the update
+			# reports success, and the on-disk version is current.
+			#
+			# Measured on all three live nodes: every /proc/<pid>/exe read "myceliumd (deleted)", and one
+			# node served /version 0.2.29 — 27 days and 97 commits behind its own disk. Worse than merely
+			# stale: the rotate loop re-execs myceliumctl-go FRESH every 90s, so PlanInput was assembled by
+			# old code while the plan was computed by new code, on the same tick.
+			#
+			# The reload itself lives in nb_measure.sh, which owns that unit; it is a no-op unless the plane
+			# is ALREADY running, so this can never arm anything. Delegating rather than naming the unit here
+			# also keeps the single-owner rule the measure gates enforce.
+			if [ "$name" = "myceliumd" ] && command -v measure_reload_running_daemon >/dev/null 2>&1; then
+				measure_reload_running_daemon
+			fi
 		else
 			warn "$name build failed (rev $rev); the node continues on the shell control tool (the binary is inert)."
 		fi

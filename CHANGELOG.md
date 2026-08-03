@@ -13,6 +13,42 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.49] — 2026-08-03
+
+> **The two transports most likely to survive a block were the two the failover mechanism could never
+> choose.** hysteria2 and tuic reported 0 successes against 8 failures on every node, permanently,
+> since the measurement plane was enabled — because their reachability anchor probed a UDP-only
+> listener with a TCP connect. A real off-host client carried HTTP 204 through both the whole time, and
+> the node's own L7 probe (which does speak QUIC) reported both alive. Three signals; the wrong one won.
+
+### Fixed
+- **`generate_measure_configs` emitted `method: "tcp"` for every member.** The method is now derived
+  from the transport CLASS, and a UDP class with no method that can express it fails the generator
+  closed instead of silently receiving one that cannot. A confidently wrong measurement is worse than
+  none: eight real failures are not an empty window, so the assembler's zero-sample guard — which
+  exists precisely so silence is never read as a black-hole — could not help. The tuner floored both
+  weights and the planner marked the pair `promoted:false`.
+- **`myceliumd` was replaced on every converge and never restarted.** `install_tooling` overwrites the
+  binary each 15 minutes while an enabled `mycelium-measure` keeps executing the unlinked inode: every
+  `/proc/<pid>/exe` on all three nodes read `(deleted)`, and one node served version 0.2.29 — 27 days
+  and 97 commits behind its own disk. The rotate loop re-execs `myceliumctl-go` fresh every 90s, so
+  PlanInput was assembled by old code and the plan computed by new code on the same tick. `measure_enable`
+  already restarted for exactly this reason; the reasoning was right and applied at only one of the two
+  sites that replace the binary.
+
+### Added
+- `internal/reach.MethodQUIC` — a UDP liveness probe that sends a QUIC long-header packet carrying a
+  version no implementation supports, so RFC 9000 §6 obliges a server to answer with Version
+  Negotiation. ALIVE is a datagram arriving, DEAD is the ICMP port-unreachable a connected UDP socket
+  surfaces as ECONNREFUSED: both verdicts are observations. `net.Dial` on UDP is connectionless and
+  would succeed against a dead port, which is the same lie inverted — the closed-port test forbids it.
+- `tests/conformance/reach_method_matches_transport.sh` and `internal/reach` QUIC probe tests, both
+  mutation-verified, including the one-sided "fix" that switches every family to the QUIC probe.
+
+### Verified live
+- hysteria2 and tuic went from 0/8 failures to 2/0 successes on a live node and now rank
+  `promoted:true` at the top of the rotation candidate list.
+
 ## [0.2.48] — 2026-08-03
 
 > **A client could reach the node's own loopback services from the internet.** Measured, not theorised:

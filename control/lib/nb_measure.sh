@@ -96,6 +96,27 @@ _measure_fp_marker()   { printf '%s' "$STATE_DIR/fp_probe.json"; }
 _fp_rotate_arm_sentinel() { printf '%s' "$STATE_DIR/fp-rotate-live.enabled"; }
 _measure_vocab()       { printf '%s' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"; }
 
+# measure_reload_running_daemon — put an ALREADY-RUNNING MEASURE daemon onto the binary that was just
+# rebuilt underneath it. Called by install_tooling after it replaces myceliumd.
+#
+# Deliberately a NO-OP unless the unit is already active: on a stock node the plane is never running, and
+# starting it here would arm it behind the operator's back — the explicit operator verb owns that
+# decision and nothing else may take it.
+#
+# It exists because replacing a file does not reload a process. install_tooling rewrites the binary on
+# every 15-minute converge, so on an armed node the daemon kept executing the unlinked inode: measured on
+# all three live nodes, /proc/<pid>/exe read "(deleted)" everywhere and one served a version 27 days and
+# 97 commits behind its own disk, while the 90-second rotate loop re-exec'd the NEW binary each tick —
+# input assembled by old code, decision computed by new.
+#
+# WARNs rather than dies: the strangler doctrine is to degrade, never to brick the update path.
+measure_reload_running_daemon() {
+	systemctl is-active --quiet mycelium-measure.service 2>/dev/null || return 0
+	log "measure: the running daemon predates the binary just built — restarting it onto the current code."
+	run systemctl restart mycelium-measure.service \
+		|| warn "measure: could not restart the daemon onto the new binary — it CONTINUES to execute the previous, now-unlinked code, so every fix in this revision stays inert on this node."
+}
+
 # generate_measure_configs (--measure-configure) — write the node-local reach + measure configs from
 # params.json + the closed registry (control/vocab.json), 1:1 REF-MATCHED. Each ENABLED sing-box
 # transport member becomes (a) a reach target that probes its OWN listener (127.0.0.1:<port>) and (b) a
@@ -116,7 +137,7 @@ generate_measure_configs() {
 		[ $v[0].protos[]
 		  | select(.engine == "sing-box")
 		  | select($params[.enable_key] == true)
-		  | { ref: .proto, proto: .proto, port: ($params[.port_key] // .default_port) } ]' 2>/dev/null)" \
+		  | { ref: .proto, proto: .proto, class: .class, port: ($params[.port_key] // .default_port) } ]' 2>/dev/null)" \
 		|| die "measure: failed to enumerate enabled members from params/vocab."
 	n="$(printf '%s' "$members" | jq 'length' 2>/dev/null || echo 0)"
 	[ "$n" -ge 1 ] || die "measure: no enabled sing-box transports in params — nothing to measure (enable at least one <proto>_enabled)."
@@ -131,11 +152,30 @@ generate_measure_configs() {
 	fi
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] would write $reach_cfg + $measure_cfg ($n member(s), active=$active)"; return 0; fi
 	run install -d -m 0755 "$STATE_DIR"
-	# reach: own-listener TCP probe per member (window 2m, probe 15s, timeout 3s — tuned defaults, env-overridable).
+	# THE PROBE METHOD IS A PROPERTY OF THE TRANSPORT, NOT A CONSTANT.
+	#
+	# This emitted method: "tcp" for every member. For the QUIC families that is not a weak signal, it is
+	# a confidently WRONG one: a TCP connect to a UDP-only port is refused every single time, so hysteria2
+	# and tuic sat at 0 successes / 8 failures on all three live nodes, forever. Because those are real
+	# FAILURES rather than an empty window, the assembler's zero-sample guard — which exists precisely so
+	# silence is never read as a black-hole — never fired; the tuner floored both weights and the planner
+	# marked the pair ineligible. The two families most likely to survive a block became the two the
+	# failover mechanism could never choose, while a real off-host client carried HTTP 204 through both.
+	#
+	# So: derive the method from the transport CLASS. Any other -udp class fails the generator closed
+	# rather than silently inheriting a TCP probe — emitting a measurement known to be wrong is worse than
+	# emitting none, because a wrong one is indistinguishable from a real outage downstream.
+	local _bad_udp
+	_bad_udp="$(printf '%s' "$members" | jq -r '[ .[] | select((.class|tostring) | endswith("-udp")) | select(.class != "quic-udp") | .ref ] | join(", ")')"
+	[ -z "$_bad_udp" ] || die "measure: member(s) [$_bad_udp] are a UDP transport class with no reach probe method that can express them. A TCP anchor against a UDP listener reports a permanent, confident false negative (this is exactly what hid hysteria2/tuic). Add a probe method for that class before enabling it as a measured member."
 	printf '%s' "$members" | jq \
 		--argjson win "$MEASURE_REACH_WINDOW_MS" --argjson probe "$MEASURE_REACH_PROBE_MS" --argjson tmo "$MEASURE_REACH_TIMEOUT_MS" '{
 		version: 1, window_ms: $win,
-		targets: [ .[] | { ref: .ref, method: "tcp", address: ("127.0.0.1:" + (.port|tostring)), interval_ms: $probe, timeout_ms: $tmo } ]
+		targets: [ .[] | {
+			ref: .ref,
+			method: (if .class == "quic-udp" then "quic" else "tcp" end),
+			address: ("127.0.0.1:" + (.port|tostring)),
+			interval_ms: $probe, timeout_ms: $tmo } ]
 	}' >"$reach_cfg.tmp" && mv -f "$reach_cfg.tmp" "$reach_cfg"
 	# measure: members + active incumbent + the rotation policy (reuse rotate_limits.json if present so
 	# the daemon's PlanInput limits match the rotate loop's; else the documented defaults). tick 30s >=
