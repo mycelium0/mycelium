@@ -13,6 +13,26 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.54] — 2026-08-03
+
+> **Two of three nodes held a UDP port open with nothing behind it, and it was the WireGuard default.**
+> `$STATE_DIR/awg.port` exists so the firewall knows which port to admit. It was written once at
+> bootstrap with the canonical default and never with the port the node ended up using.
+
+### Fixed
+- **The AmneziaWG port is resolved from the LIVE config, not from a remembered default.** Measured:
+  m1 had no marker at all, so the firewall's AWG branch never fired; m2 and m4 held `51820` while
+  `awg0.conf` listened on `443`, so ufw admitted a silent port and never admitted the real one on this
+  transport's account. Worse than a wasted rule: 51820 is the WireGuard default, so a host with it open
+  and SILENT while the tunnel runs elsewhere announces "there is WireGuard here" without serving it — a
+  distinguishing mark on a node designed to carry none. The marker is now a CACHE of the config and is
+  corrected on every resolution; `harden_ufw` no longer requires it to exist.
+
+### Added
+- `tests/conformance/awg_served_port_is_real.sh` — a value table over (config port, marker) including
+  both live states verbatim, asserting the config wins, the marker is corrected, a malformed value never
+  propagates, and repeated resolution is stable. Mutation-verified.
+
 ## [0.2.53] — 2026-08-03
 
 > The AmneziaWG revoke DECISIONS move out of bash. Not tidiness: every one of them was wrong in bash at

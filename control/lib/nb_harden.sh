@@ -377,8 +377,12 @@ harden_ufw() {
 		for p in $xray_tcp; do _harden_ufw_allow "$p/tcp"; _served="$_served $p/tcp"; done
 	fi
 	# AmneziaWG UDP port (its conventional canon port; the actual value is operator/runtime).
-	if [ "$DO_AMNEZIAWG" -eq 1 ] && [ -f "$STATE_DIR/awg.port" ]; then
-		local awgp; awgp="$(cat "$STATE_DIR/awg.port")"
+	# Resolve the port from the LIVE config rather than trusting the marker, and do not require the marker
+	# to exist: it was absent on one live node (so this branch never fired at all) and WRONG on two (it
+	# held the canonical default while the tunnel ran elsewhere, so the firewall admitted a silent port
+	# and not the real one).
+	if [ "$DO_AMNEZIAWG" -eq 1 ] && command -v _awg_resolve_port >/dev/null 2>&1; then
+		local awgp; awgp="$(_awg_resolve_port)"
 		_harden_ufw_allow "$awgp/udp"
 		_served="$_served $awgp/udp"
 	fi

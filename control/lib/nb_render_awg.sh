@@ -239,7 +239,7 @@ render_awg0() {
 	# Per-node dialect at this node's CURRENT rotation epoch (0 on a fresh node) — so a re-render after an
 	# --awg-rotate keeps the rotated dialect instead of reverting to the epoch-0 one.
 	derive_awg_dialect "$spriv" "$(_awg_read_epoch)"
-	port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || echo 51820)"
+	port="$(_awg_resolve_port)"
 	wan="$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 	[ -n "$wan" ] || { warn "could not detect the WAN interface; using 'eth0' in awg0.conf — verify it."; wan="eth0"; }
 	has_v6=0; ip -6 addr show scope global 2>/dev/null | grep -q 'inet6' && has_v6=1
@@ -392,7 +392,9 @@ setup_amneziawg() {
 	fi
 	# The actual listen port is an operator/runtime value (PORTS.md canon is 51820/udp). We record it
 	# locally so the firewall step can open it; we do not hardcode a port into any committed file.
-	[ -f "$STATE_DIR/awg.port" ] || { [ "$DRY_RUN" -eq 0 ] && printf '51820\n' >"$STATE_DIR/awg.port"; }
+	# Record the port the node is ACTUALLY served on, not the canonical default: the marker is a cache of
+	# awg0.conf, and a cache that records a guess is worse than no cache (see _awg_resolve_port).
+	_awg_resolve_port >/dev/null
 	# Render awg0.conf ONLY if absent — a live/hand-tuned config is never clobbered. The timer-driven
 	# --update path (flow_update) NEVER calls setup_amneziawg (only flow_bootstrap does), so this render
 	# cannot fire on an auto-pull; it runs only on an explicit bootstrap of a node whose awg0.conf does
@@ -597,7 +599,7 @@ issue_awg_client() {
 	# here-string, never a pipe: a pipeline into awg can SIGPIPE under set -o pipefail (RP-0014 lesson).
 	srv_pub="$(awg pubkey <<<"$srv_key")" || die "awg-issue: could not derive the server public key."
 	port="$(grep -E '^ListenPort = ' "$awg_conf" | head -1 | sed -E 's/^ListenPort = //; s/[[:space:]]*$//')"
-	[ -n "$port" ] || port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || echo 51820)"
+	[ -n "$port" ] || port="$(_awg_resolve_port)"
 	node_addr="$(resolve_node_address 2>/dev/null || printf '%s' "$NODE_ADDRESS_PLACEHOLDER")"
 	has_v6=0; grep -qE '^Address = .*,' "$awg_conf" && has_v6=1
 
@@ -689,6 +691,34 @@ issue_awg_client() {
 	log "awg-issue: client '$name' ready (dialect epoch $epoch, routes: $route_mode): $clients_dir/$name.conf"
 	log "awg-issue:   AllowedIPs = $client_allowed"
 	log "awg-issue: hand it over out-of-band; it is a complete ready-to-import config (0600, node-local)."
+}
+
+# _awg_resolve_port — the port AmneziaWG is ACTUALLY served on, and refresh the marker to match.
+#
+# $STATE_DIR/awg.port exists so harden_ufw knows which UDP port to admit. It was written ONCE, at
+# bootstrap, with the canonical DEFAULT — never with the port the node ended up using. Measured on the
+# live nodes: the marker said 51820 while awg0.conf listened on 443, so the firewall admitted 51820/udp,
+# where nothing answers, and never admitted the real port on AmneziaWG's account.
+#
+# That is worse than a wasted rule. 51820 is the WireGuard default: a host with it open and SILENT, while
+# the tunnel runs elsewhere, announces "there is WireGuard here" without serving it — a distinguishing
+# mark on a node whose whole design is to have none.
+#
+# The live config is the authority; the marker is a cache of it. Order: awg0.conf, then the marker, then
+# the canonical default for a node that has neither yet.
+_awg_resolve_port() {
+	local conf="${MYC_AWG_CONF:-/etc/amnezia/amneziawg/awg0.conf}" port=""
+	if [ -f "$conf" ]; then
+		port="$(awk -F= '/^[[:space:]]*ListenPort[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' "$conf" 2>/dev/null)"
+	fi
+	case "$port" in ''|*[!0-9]*) port="" ;; esac
+	[ -n "$port" ] || port="$(cat "$STATE_DIR/awg.port" 2>/dev/null)"
+	case "$port" in ''|*[!0-9]*) port="51820" ;; esac
+	# Keep the cache honest, so the NEXT firewall pass admits the right port even if the conf is gone.
+	if [ "${DRY_RUN:-0}" -eq 0 ] && [ "$(cat "$STATE_DIR/awg.port" 2>/dev/null)" != "$port" ]; then
+		printf '%s\n' "$port" > "$STATE_DIR/awg.port" 2>/dev/null || true
+	fi
+	printf '%s' "$port"
 }
 
 # _awg_strip_peers FILE PUBKEYS... — rewrite FILE without the [Peer] blocks whose PublicKey is listed.
