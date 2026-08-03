@@ -625,6 +625,7 @@ myc_sb_render_subscription() {
 				--arg sid "$short_first" \
 				--arg tsni "$tls_sni" \
 				--arg sspw "$ss_pw" \
+				--arg sssrv "$ss_password" \
 				--arg hy2pw "$hy2_pw" \
 				--arg trpw "$trojan_pw" \
 				--arg stlspw "$stls_pw" \
@@ -642,6 +643,10 @@ myc_sb_render_subscription() {
 				'
 				def reality_tls: { enabled: true, server_name: $dsni, utls: { enabled: true, fingerprint: $fp }, reality: { enabled: true, public_key: $pub, short_id: $sid } };
 				def plain_tls($alpn): { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: $fp }, alpn: $alpn };
+				# QUIC (hysteria2/tuic): identical to plain_tls MINUS utls. uTLS rewrites a TCP TLS
+				# ClientHello and has no QUIC path, so sing-box REFUSES an outbound carrying it
+				# ("unsupported usage for uTLS") instead of ignoring the key.
+				def quic_tls($alpn): { enabled: true, server_name: $tsni, alpn: $alpn };
 				# tag -> candidate outbound
 				{
 					"vless-reality-vision": { type: "vless", tag: "vless-reality-vision", server: $server, server_port: $ports["vless-reality-vision"], uuid: $uuid, flow: "xtls-rprx-vision", packet_encoding: "xudp", tls: reality_tls },
@@ -654,10 +659,10 @@ myc_sb_render_subscription() {
 					# donor). transport.type "ws" matches the server template; sing-box CAN dial it (native ws),
 					# so unlike xhttp-tls this outbound is emitted on the sing-box engine, not refused.
 					"vless-ws-tls":         { type: "vless", tag: "vless-ws-tls",         server: $server, server_port: $ports["vless-ws-tls"],         uuid: $uuid, flow: "", packet_encoding: "xudp", tls: plain_tls(["http/1.1"]), transport: { type: "ws", path: $wspath, headers: { Host: $tsni } } },
-					"hysteria2":            { type: "hysteria2", tag: "hysteria2",        server: $server, server_port: $ports["hysteria2"], password: $hy2pw, tls: plain_tls(["h3"]) },
-					"tuic":                 { type: "tuic", tag: "tuic",                  server: $server, server_port: $ports["tuic"], uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: plain_tls(["h3"]) },
-					"shadowsocks":          { type: "shadowsocks", tag: "shadowsocks",    server: $server, server_port: $ports["shadowsocks"], method: "2022-blake3-aes-256-gcm", password: $sspw },
-					"shadowtls":            { type: "shadowsocks", tag: "shadowtls",        method: "2022-blake3-aes-256-gcm", password: $sspw, detour: "shadowtls-handshake" },
+					"hysteria2":            { type: "hysteria2", tag: "hysteria2",        server: $server, server_port: $ports["hysteria2"], password: $hy2pw, tls: quic_tls(["h3"]) },
+					"tuic":                 { type: "tuic", tag: "tuic",                  server: $server, server_port: $ports["tuic"], uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: quic_tls(["h3"]) },
+					"shadowsocks":          { type: "shadowsocks", tag: "shadowsocks",    server: $server, server_port: $ports["shadowsocks"], method: "2022-blake3-aes-256-gcm", password: ($sssrv + ":" + $sspw) },
+					"shadowtls":            { type: "shadowsocks", tag: "shadowtls",        method: "2022-blake3-aes-256-gcm", password: $sssrv, detour: "shadowtls-handshake" },
 					"trojan":               { type: "trojan", tag: "trojan",              server: $server, server_port: $ports["trojan"], password: $trpw, tls: plain_tls(["h2","http/1.1"]) }
 				} as $cand
 				| ($enabled | map($cand[.])) as $proxies
@@ -665,7 +670,7 @@ myc_sb_render_subscription() {
 				# outbound (tag "shadowtls") is Shadowsocks with a detour to the
 				# hidden "shadowtls-handshake" outbound that performs the v3 handshake.
 				| (if ($enabled | index("shadowtls")) then
-						[ { type: "shadowtls", tag: "shadowtls-handshake", server: $server, server_port: $ports["shadowtls"], version: 3, password: $stlspw, tls: { enabled: true, server_name: $tsni, utls: { enabled: true, fingerprint: $fp } } } ]
+						[ { type: "shadowtls", tag: "shadowtls-handshake", server: $server, server_port: $ports["shadowtls"], version: 3, password: $stlspw, tls: { enabled: true, server_name: $dsni, utls: { enabled: true, fingerprint: $fp } } } ]
 					else [] end) as $detours
 				| ($enabled | map($cand[.].tag)) as $tags
 				| {
@@ -687,23 +692,26 @@ myc_sb_render_subscription() {
 			myc_sb_emit_clash \
 				"$clash_path" "$name" "$node_addr" "$id" \
 				"$donor_sni" "$pub" "$short_first" "$tls_sni" \
-				"$ss_pw" "$hy2_pw" "$trojan_pw" "$grpc_service" "$xhttp_path" \
-				"$ports_json" "$enabled"
+				"${ss_password}:${ss_pw}" "$hy2_pw" "$trojan_pw" "$grpc_service" "$xhttp_path" \
+				"$ports_json" "$enabled" "$tuic_pw"
 
 			myc_log "wrote sing-box subscription for '$name': $sb_path, $clash_path"
 		done
 }
 
-# myc_sb_emit_clash PATH NAME SERVER UUID DSNI PUB SID TSNI SSPW HY2PW TRPW GRPC XPATH PORTS_JSON ENABLED
+# myc_sb_emit_clash PATH NAME SERVER UUID DSNI PUB SID TSNI SSPAIR HY2PW TRPW GRPC XPATH PORTS_JSON ENABLED TUICPW
+#   SSPAIR is the SS-2022 "<serverPSK>:<userPSK>" pair the multi-user inbound requires, not a bare PSK.
+#   TUICPW is this client's TUIC password, which is NOT always its uuid (a per-identity password wins).
 # Hand-emit a Clash-Meta YAML doc: a `proxies:` list (one entry per Clash-supported
 # enabled protocol) plus a `proxy-groups:` block with a `select` and a `url-test`
 # group. jq has no YAML output, so we emit by printf; every value is quoted so any
 # special characters are inert. Clash-Meta does NOT support ShadowTLS or XHTTP, so
 # those protocols are intentionally skipped here (they remain in the sing-box file).
 myc_sb_emit_clash() {
-	local path name server uuid dsni pub sid tsni sspw hy2pw trpw grpc xpath ports enabled
+	local path name server uuid dsni pub sid tsni sspair hy2pw trpw grpc xpath ports enabled tuicpw
 	path="$1"; name="$2"; server="$3"; uuid="$4"; dsni="$5"; pub="$6"; sid="$7"; tsni="$8"
-	sspw="$9"; hy2pw="${10}"; trpw="${11}"; grpc="${12}"; xpath="${13}"; ports="${14}"; enabled="${15}"
+	sspair="$9"; hy2pw="${10}"; trpw="${11}"; grpc="${12}"; xpath="${13}"; ports="${14}"; enabled="${15}"
+	tuicpw="${16}"
 
 	local port_of names p
 	port_of() { printf '%s' "$ports" | jq -r --arg t "$1" '.[$t]'; }
@@ -774,7 +782,8 @@ myc_sb_emit_clash() {
 					printf '    server: "%s"\n' "$server"
 					printf '    port: %s\n' "$(port_of tuic)"
 					printf '    uuid: "%s"\n' "$uuid"
-					printf '    password: "%s"\n' "$uuid"
+					# NOT the uuid: an identity carrying its own password overrides it server-side too.
+					printf '    password: "%s"\n' "$tuicpw"
 					printf '    sni: "%s"\n' "$tsni"
 					printf '    congestion-controller: bbr\n'
 					printf '    alpn:\n'
@@ -787,7 +796,8 @@ myc_sb_emit_clash() {
 					printf '    server: "%s"\n' "$server"
 					printf '    port: %s\n' "$(port_of shadowsocks)"
 					printf '    cipher: 2022-blake3-aes-256-gcm\n'
-					printf '    password: "%s"\n' "$sspw"
+					# SS-2022 multi-user inbound: the pair "<serverPSK>:<userPSK>", never a bare PSK.
+					printf '    password: "%s"\n' "$sspair"
 					printf '    udp: true\n'
 					names="${names}, \"mycelium-$name-ss2022\""
 					;;

@@ -50,10 +50,15 @@ type subReality struct {
 // subTLS covers both reality_tls ({enabled, server_name, utls, reality}) and plain_tls ({enabled,
 // server_name, utls, alpn}) and the ShadowTLS-handshake tls ({enabled, server_name, utls}). alpn is
 // listed before reality so the two non-empty cases each preserve the shell's key order.
+//
+// UTLS is a POINTER because the QUIC families must omit the key entirely, not send it disabled: uTLS
+// mimics a TCP TLS ClientHello, and sing-box rejects a QUIC outbound that carries one outright
+// ("unsupported usage for uTLS"). Emitting it there does not merely weaken the fingerprint — it makes
+// the outbound unusable. See quicTLS in subscription.go.
 type subTLS struct {
 	Enabled    bool        `json:"enabled"`
 	ServerName string      `json:"server_name"`
-	UTLS       subUTLS     `json:"utls"`
+	UTLS       *subUTLS    `json:"utls,omitempty"`
 	ALPN       []string    `json:"alpn,omitempty"`
 	Reality    *subReality `json:"reality,omitempty"`
 }

@@ -114,11 +114,21 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 		return 0, fmt.Errorf("subscription: unknown proto %q", proto)
 	}
 
+	utls := func() *subUTLS { return &subUTLS{Enabled: true, Fingerprint: fp} }
 	realityTLS := func() subTLS {
-		return subTLS{Enabled: true, ServerName: donorSNI, UTLS: subUTLS{Enabled: true, Fingerprint: fp}, Reality: &subReality{Enabled: true, PublicKey: pub, ShortID: shortFirst}}
+		return subTLS{Enabled: true, ServerName: donorSNI, UTLS: utls(), Reality: &subReality{Enabled: true, PublicKey: pub, ShortID: shortFirst}}
 	}
+	// TCP TLS. uTLS belongs here and only here.
 	plainTLS := func(alpn []string) subTLS {
-		return subTLS{Enabled: true, ServerName: tlsSNI, UTLS: subUTLS{Enabled: true, Fingerprint: fp}, ALPN: alpn}
+		return subTLS{Enabled: true, ServerName: tlsSNI, UTLS: utls(), ALPN: alpn}
+	}
+	// QUIC TLS — hysteria2 and tuic. Identical to plainTLS EXCEPT that it must not carry uTLS: that
+	// library rewrites a TCP TLS ClientHello, has no QUIC path, and sing-box refuses the outbound with
+	// "unsupported usage for uTLS" rather than ignoring the key. A single shared plainTLS across both
+	// families is what shipped hysteria2 and tuic dead in every issued subscription while the node's own
+	// L7 probe reported both listeners alive — the probe dials the listener, never the emitted config.
+	quicTLS := func(alpn []string) subTLS {
+		return subTLS{Enabled: true, ServerName: tlsSNI, ALPN: alpn}
 	}
 	or := func(a, b string) string {
 		if a != "" {
@@ -141,7 +151,11 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 		}
 		ipw := c.Password
 		hy2pw := or(ipw, hysteria2Password)
+		// sspw is this client's SS-2022 user PSK — it must mirror render_server.go's pwOr(c, ssPassword)
+		// exactly, or the server derives a different key. ssUserPSK is the pair form the multi-user public
+		// inbound requires; the loopback inbound behind ShadowTLS takes ssPassword alone.
 		sspw := or(ipw, ssPassword)
+		ssUserPSK := ssPassword + ":" + sspw
 		stlspw := or(ipw, shadowtlsPassword)
 		trpw := or(ipw, trojanPassword)
 		tuicpw := or(ipw, c.ID)
@@ -164,15 +178,27 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 			case "vless-ws-tls":
 				proxies = append(proxies, subVLESS{Type: "vless", Tag: d.Proto, Server: nodeAddr, ServerPort: port, UUID: c.ID, Flow: "", PacketEncoding: "xudp", TLS: plainTLS([]string{"http/1.1"}), Transport: &subTransport{Type: "ws", Path: wsPath, Headers: &subHeaders{Host: tlsSNI}}})
 			case "hysteria2":
-				proxies = append(proxies, subHysteria2{Type: "hysteria2", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Password: hy2pw, TLS: plainTLS([]string{"h3"})})
+				proxies = append(proxies, subHysteria2{Type: "hysteria2", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Password: hy2pw, TLS: quicTLS([]string{"h3"})})
 			case "tuic":
-				proxies = append(proxies, subTUIC{Type: "tuic", Tag: d.Proto, Server: nodeAddr, ServerPort: port, UUID: c.ID, Password: tuicpw, CongestionControl: "bbr", TLS: plainTLS([]string{"h3"})})
+				proxies = append(proxies, subTUIC{Type: "tuic", Tag: d.Proto, Server: nodeAddr, ServerPort: port, UUID: c.ID, Password: tuicpw, CongestionControl: "bbr", TLS: quicTLS([]string{"h3"})})
 			case "shadowsocks":
-				proxies = append(proxies, subShadowsocks{Type: "shadowsocks", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Method: "2022-blake3-aes-256-gcm", Password: sspw})
+				// SS-2022 MULTI-USER form. render_server.go gives the public inbound both a server PSK and a
+				// per-client `users` list, and sing-box then derives the session key from BOTH halves, so the
+				// client password is the pair "<serverPSK>:<userPSK>". A bare PSK is not rejected — the server
+				// simply cannot derive the key and drops the connection with no error on either side, which is
+				// why this survived: every listener check passes and the client log shows only a connection
+				// that never answers.
+				proxies = append(proxies, subShadowsocks{Type: "shadowsocks", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Method: "2022-blake3-aes-256-gcm", Password: ssUserPSK})
 			case "shadowtls":
 				// Routable outbound: Shadowsocks detoured through the hidden ShadowTLS-handshake outbound.
-				proxies = append(proxies, subShadowTLSRoute{Type: "shadowsocks", Tag: d.Proto, Method: "2022-blake3-aes-256-gcm", Password: sspw, Detour: "shadowtls-handshake"})
-				detours = append(detours, subShadowTLSHandshake{Type: "shadowtls", Tag: "shadowtls-handshake", Server: nodeAddr, ServerPort: port, Version: 3, Password: stlspw, TLS: subTLS{Enabled: true, ServerName: tlsSNI, UTLS: subUTLS{Enabled: true, Fingerprint: fp}}})
+				// The inner SS inbound (shadowtls-ss-in, loopback) is SINGLE-user — a bare server PSK and no
+				// `users` — so unlike the public inbound above it takes the server PSK alone, never the pair
+				// and never the per-client PSK.
+				proxies = append(proxies, subShadowTLSRoute{Type: "shadowsocks", Tag: d.Proto, Method: "2022-blake3-aes-256-gcm", Password: ssPassword, Detour: "shadowtls-handshake"})
+				// server_name is the DONOR's, not the node's: ShadowTLS presents the donor's real certificate,
+				// obtained by the node handshaking to donorHost. Verifying it against the node's own tls_sni
+				// fails x509 every time ("certificate is valid for <donor names>, ... not <the node's sni>").
+				detours = append(detours, subShadowTLSHandshake{Type: "shadowtls", Tag: "shadowtls-handshake", Server: nodeAddr, ServerPort: port, Version: 3, Password: stlspw, TLS: subTLS{Enabled: true, ServerName: donorSNI, UTLS: utls()}})
 			case "trojan":
 				proxies = append(proxies, subTrojan{Type: "trojan", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Password: trpw, TLS: plainTLS([]string{"h2", "http/1.1"})})
 			default:
@@ -191,7 +217,7 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 			subSimple{Type: "block", Tag: "block"},
 		)
 
-		clash := renderClash(c.Name, nodeAddr, c.ID, donorSNI, pub, shortFirst, tlsSNI, sspw, hy2pw, trpw, grpcService, fp, enabled, portOf)
+		clash := renderClash(c.Name, nodeAddr, c.ID, donorSNI, pub, shortFirst, tlsSNI, ssUserPSK, hy2pw, tuicpw, trpw, grpcService, fp, enabled, portOf)
 
 		out = append(out, ClientSubscription{
 			Name:    c.Name,
@@ -206,7 +232,10 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 // renderClash hand-emits the Clash-Meta YAML byte-identically to the shell `myc_sb_emit_clash`.
 // jq has no YAML output, so the shell emits by printf; every value is quoted so special characters are
 // inert. Clash-Meta supports neither ShadowTLS nor the XHTTP/WS transports, so those are skipped.
-func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, grpc, fp string, enabled []ProtoDescriptor, portOf func(string) (int, error)) string {
+// sspair is the SS-2022 "<serverPSK>:<userPSK>" pair, not a bare PSK — see the shadowsocks case in
+// BuildSubscriptions. tuicpw is this client's TUIC password, which is NOT always its UUID: an identity
+// carrying its own password overrides it on the server side too.
+func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspair, hy2pw, tuicpw, trpw, grpc, fp string, enabled []ProtoDescriptor, portOf func(string) (int, error)) string {
 	var b strings.Builder
 	b.WriteString("# Copyright © 2026 mindicator & silicon bags quartet.\n")
 	b.WriteString("# SPDX-License-Identifier: AGPL-3.0-or-later\n")
@@ -271,7 +300,7 @@ func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, gr
 			fmt.Fprintf(&b, "    server: \"%s\"\n", server)
 			fmt.Fprintf(&b, "    port: %s\n", port("tuic"))
 			fmt.Fprintf(&b, "    uuid: \"%s\"\n", uuid)
-			fmt.Fprintf(&b, "    password: \"%s\"\n", uuid)
+			fmt.Fprintf(&b, "    password: \"%s\"\n", tuicpw)
 			fmt.Fprintf(&b, "    sni: \"%s\"\n", tsni)
 			b.WriteString("    congestion-controller: bbr\n")
 			b.WriteString("    alpn:\n")
@@ -283,7 +312,7 @@ func renderClash(name, server, uuid, dsni, pub, sid, tsni, sspw, hy2pw, trpw, gr
 			fmt.Fprintf(&b, "    server: \"%s\"\n", server)
 			fmt.Fprintf(&b, "    port: %s\n", port("shadowsocks"))
 			b.WriteString("    cipher: 2022-blake3-aes-256-gcm\n")
-			fmt.Fprintf(&b, "    password: \"%s\"\n", sspw)
+			fmt.Fprintf(&b, "    password: \"%s\"\n", sspair)
 			b.WriteString("    udp: true\n")
 			names += fmt.Sprintf(", \"mycelium-%s-ss2022\"", name)
 		case "trojan":

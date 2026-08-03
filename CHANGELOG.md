@@ -13,6 +13,41 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.47] — 2026-08-03
+
+> **Four of six served protocols carried no traffic for any client, while every node reported them
+> alive.** Found by running a real sing-box client from a second host against one protocol at a time
+> (`tests/e2e/protocol_matrix_probe.sh`) instead of asking each node about its own listeners. The
+> listeners were never the problem — the config the node HANDS OUT was, and nothing compared the two
+> halves the node emits. Verified fixed end to end on all three nodes: 6/6 in both directions.
+
+### Fixed
+- **hysteria2 and tuic were undialable in every subscription ever issued.** One shared `plainTLS`
+  helper served both the TCP and the QUIC families, so both QUIC outbounds carried `tls.utls`. uTLS
+  rewrites a TCP TLS ClientHello and has no QUIC path; sing-box refuses such an outbound outright
+  (`unsupported usage for uTLS`) rather than ignoring the key. Split out a QUIC TLS helper in both
+  renderers. `sing-box check` passes on the broken form, which is part of why it survived.
+- **ShadowTLS failed x509 on every connection.** The handshake outbound verified the donor's
+  certificate against the node's own `tls_sni`; ShadowTLS relays the DONOR's real certificate. Now
+  emits `donor_sni`.
+- **Shadowsocks was silently dropped.** The public inbound is SS-2022 multi-user (a server PSK *and* a
+  users list), so the client owes the pair `<serverPSK>:<userPSK>`; a bare PSK is not rejected — the
+  server cannot derive the session key and drops the connection with no error on either side.
+- **The Shadowsocks inbound behind ShadowTLS is single-user** and takes the bare server PSK, not the
+  per-client one. Both forms are live on every node at once; the emitted credential now follows the
+  inbound's shape.
+- **Clash output**: TUIC sent the client's UUID as its password (wrong whenever an identity carries its
+  own password), and Shadowsocks sent a bare PSK. Both corrected in the Go and shell renderers.
+
+### Added
+- `tests/conformance/client_server_credential_agreement.sh` — renders the server config and the client
+  subscription from the SAME params and asserts they agree: every credential, every verified SNI, and
+  no TLS option a transport cannot use. Expectations are DERIVED FROM the rendered server config rather
+  than hardcoded, because the correct Shadowsocks credential form depends on the inbound's shape and
+  both shapes ship at once. Mutation-tested: reintroducing any of the four defects above fails it.
+- `tests/e2e/protocol_matrix_probe.sh` — a real client, off-host, one protocol at a time, no `urltest`
+  group. The failover group that makes a subscription resilient is exactly what hides a dead member.
+
 ## [0.2.46] — 2026-08-01
 
 > **Version resynchronisation.** The version sat at 0.2.29 for 27 days and 97 commits (67 of them
