@@ -26,6 +26,11 @@ type ClientSubscription struct {
 	Safe    string
 	Singbox SubDoc
 	Clash   string
+	// Protos is the sing-box-dialable transport set this subscription was built from — what the holder of
+	// this file can actually reach. It is not serialised into any client artifact; it exists so the caller
+	// can record an ISSUED BASELINE, which is what lets the rotation planner tell "enabling something a
+	// client cannot see" from "ceasing to serve something a client depends on".
+	Protos []string
 }
 
 // SubDoc is the sing-box client config: a single "outbounds" array (heterogeneous — one struct per

@@ -174,13 +174,33 @@ _rotation_port_key_if_moving() {
 	printf '%s' "$port_key"
 }
 
-# _rotation_set_delta FILE ENABLE_KEY PORT_KEY TO_PORT — set enable_key=true (+ optional port) in FILE,
-# ATOMICALLY (single jq -> tmp -> mv); a failure leaves FILE byte-unchanged. PORT_KEY="" skips the port.
+# _rotation_enable_value ACTION — does this rotation action ENABLE its target, or stop serving it?
+#
+# The executor used to answer this by not asking: _rotation_set_delta hardcoded `.[$ek] = true`, and
+# nothing anywhere read .to.action — zero occurrences in this whole file. That was survivable only while
+# the planner could emit exactly one acting move. The moment demote-active became emittable, an
+# action-blind executor would have ENABLED the transport the planner had just decided to stop serving:
+# the loudest possible way to do the opposite of what was asked, unattended, every 90 seconds.
+#
+# Unknown actions fail closed rather than defaulting to either value. A move this function does not
+# recognise is a move whose intent it cannot honour.
+_rotation_enable_value() {
+	case "${1:-}" in
+		promote-sibling) printf 'true' ;;
+		demote-active)   printf 'false' ;;
+		*)               printf '' ;;
+	esac
+}
+
+# _rotation_set_delta FILE ENABLE_KEY ENABLE_VALUE PORT_KEY TO_PORT — set enable_key to ENABLE_VALUE
+# (+ optional port) in FILE, ATOMICALLY (single jq -> tmp -> mv); a failure leaves FILE byte-unchanged.
+# PORT_KEY="" skips the port.
 _rotation_set_delta() {
-	local file="$1" ek="$2" pk="$3" pv="$4" tmp
+	local file="$1" ek="$2" ev="$3" pk="$4" pv="$5" tmp
+	case "$ev" in true|false) ;; *) die "rotation: refusing to write an enable value of '$ev' — the action was not recognised." ;; esac
 	tmp="$(mktemp)" || die "rotation: mktemp failed."
-	jq --arg ek "$ek" --arg pk "$pk" --argjson pv "${pv:-0}" \
-		'.[$ek] = true | (if $pk != "" then .[$pk] = $pv else . end)' "$file" > "$tmp" && mv -f "$tmp" "$file" \
+	jq --arg ek "$ek" --argjson ev "$ev" --arg pk "$pk" --argjson pv "${pv:-0}" \
+		'.[$ek] = $ev | (if $pk != "" then .[$pk] = $pv else . end)' "$file" > "$tmp" && mv -f "$tmp" "$file" \
 		|| { rm -f "$tmp"; die "rotation: could not write the rotation delta to $file (fail-closed)."; }
 }
 
@@ -191,10 +211,19 @@ apply_rotation_to_params() {
 	proto="$(jq -r '.to.proto // empty' "$plan")"
 	[ -n "$proto" ] || die "rotation: plan has no .to.proto (cannot apply)."
 	enable_key="$(_rotation_enable_key "$proto")"
+	# A `die` inside $( ) kills only the SUBSTITUTION, not this function: _rotation_enable_key refuses a
+	# proto whose enable key is outside OPERATOR_TOGGLE_KEYS, and that refusal arrived here as an empty
+	# string. Unguarded, the delta then wrote a key literally named "" into params — a fail-closed that
+	# does not close, and quietly corrupts the file it was protecting.
+	[ -n "$enable_key" ] || die "rotation: no operator-toggleable enable key resolved for '$proto' — refusing to write a delta (fail-closed)."
 	to_port="$(jq -r '.to.to_port // 0' "$plan")"
 	pk="$(_rotation_port_key_if_moving "$plan" "$proto")"
-	_rotation_set_delta "$params" "$enable_key" "$pk" "$to_port"
-	log "rotation: params delta applied to the dry-run copy — enabled '$enable_key' for $proto."
+	local action ev
+	action="$(jq -r '.to.action // empty' "$plan")"
+	ev="$(_rotation_enable_value "$action")"
+	[ -n "$ev" ] || die "rotation: plan action '${action:-<none>}' is not one this executor knows how to apply (fail-closed)."
+	_rotation_set_delta "$params" "$enable_key" "$ev" "$pk" "$to_port"
+	log "rotation: params delta applied to the dry-run copy — set '$enable_key'=$ev for $proto (action: $action)."
 }
 
 # --- live persistence through the operator-overrides overlay -----------------------------------------
@@ -211,6 +240,11 @@ persist_rotation_to_overlay() {
 	proto="$(jq -r '.to.proto // empty' "$plan")"
 	[ -n "$proto" ] || die "rotation: plan has no .to.proto (cannot persist)."
 	enable_key="$(_rotation_enable_key "$proto")"
+	# A `die` inside $( ) kills only the SUBSTITUTION, not this function: _rotation_enable_key refuses a
+	# proto whose enable key is outside OPERATOR_TOGGLE_KEYS, and that refusal arrived here as an empty
+	# string. Unguarded, the delta then wrote a key literally named "" into params — a fail-closed that
+	# does not close, and quietly corrupts the file it was protecting.
+	[ -n "$enable_key" ] || die "rotation: no operator-toggleable enable key resolved for '$proto' — refusing to write a delta (fail-closed)."
 	to_port="$(jq -r '.to.to_port // 0' "$plan")"
 	pk="$(_rotation_port_key_if_moving "$plan" "$proto")"
 	[ -f "$OPERATOR_OVERRIDES" ] || ( umask 077; printf '{}\n' >"$OPERATOR_OVERRIDES" ) \
@@ -219,7 +253,11 @@ persist_rotation_to_overlay() {
 		|| die "rotation: overlay $OPERATOR_OVERRIDES is not a JSON object (fail-closed; fix or remove it)."
 	bak="$(_rotate_overlay_bak)"
 	cp -f "$OPERATOR_OVERRIDES" "$bak" || die "rotation: could not snapshot the overlay (fail-closed; refusing to mutate without a revert path)."
-	_rotation_set_delta "$OPERATOR_OVERRIDES" "$enable_key" "$pk" "$to_port"
+	local action ev
+	action="$(jq -r '.to.action // empty' "$plan")"
+	ev="$(_rotation_enable_value "$action")"
+	[ -n "$ev" ] || die "rotation: plan action '${action:-<none>}' is not one this executor knows how to apply (fail-closed)."
+	_rotation_set_delta "$OPERATOR_OVERRIDES" "$enable_key" "$ev" "$pk" "$to_port"
 	chmod 0600 "$OPERATOR_OVERRIDES" 2>/dev/null || true
 	log "rotation: persisted enable of '$enable_key' into the operator-overrides overlay (survives --update; snapshot at $bak)."
 }

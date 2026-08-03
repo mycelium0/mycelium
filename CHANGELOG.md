@@ -13,6 +13,46 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.55] — 2026-08-04
+
+> **Rotation can finally do something.** The move that works is the one that was dismissed as having no
+> successor semantics: stop serving the broken member and let the client — which already holds every
+> endpoint and health-checks them itself — move to one of its own accord.
+
+### Fixed
+- **The executor was ACTION-BLIND.** `nb_rotate_apply.sh` never read `.to.action` — zero occurrences —
+  and `_rotation_set_delta` hardcoded `.[$ek] = true`. The first `demote-active` a planner emitted would
+  have ENABLED the transport it had just decided to stop serving, unattended, every 90 seconds. The
+  action is now load-bearing and an unrecognised one fails closed rather than being guessed at.
+- **A `die` inside `$( )` kills only the substitution.** `_rotation_enable_key` refuses a proto whose
+  enable key is outside `OPERATOR_TOGGLE_KEYS`, and that refusal arrived at the caller as an empty
+  string — which the delta then wrote into params as a key literally named `""`. A fail-closed that did
+  not close, quietly corrupting the file it was protecting. Found by a leaking test fixture, which is
+  now also fixed: a narrowed toggle surface no longer escapes the row that narrowed it.
+
+### Added
+- **`demote-active` is unreserved**, gated on `DemoteKeepsIndependentFallback`: after ceasing to serve a
+  member, the INTERSECTION of what the node serves and what issued clients hold must still span >= 2
+  independent block families. The floor is over the intersection, never the served set — see the test
+  for the config that satisfies a served-set floor while stranding every client already holding one.
+  Unknown baseline fails closed: not knowing what was issued is not permission to remove something.
+- **The issued baseline is stamped** at every subscription render, by BOTH renderers. A Go half that did
+  not would make the move go silently mute the moment the strangler cuts over.
+- Value-table tests for the floor, the executor's action handling, and the empty-key refusal.
+
+### Changed
+- The `e2e_recovery` invariant — "a rotation can never reduce the served family set" — moves out of a
+  doc comment and into an executable precondition. Prose cannot fail a build.
+- `rotate-port` and `regen-reality` stay reserved, now for a stated reason rather than an assumption:
+  both change what a client must DIAL, and unlike a demote the client cannot discover the new value from
+  a set it already holds.
+
+### Measured
+- A real client on one node, through another node's `urltest` group, with the active member's port
+  DROPped: dead at once, recovered **276 s later with the port still blocked** — one full urltest
+  interval. Failover works and costs up to one interval of total blackout; an outage shorter than the
+  interval produces no failover at all.
+
 ## [0.2.54] — 2026-08-03
 
 > **Two of three nodes held a UDP port open with nothing behind it, and it was the WireGuard default.**

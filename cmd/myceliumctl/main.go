@@ -586,6 +586,28 @@ func cmdSubscription(args []string) error {
 			return fmt.Errorf("subscription: write %s: %w", clashPath, err)
 		}
 	}
+
+
+	// STAMP WHAT WAS ISSUED — the same record the shell renderer writes, for the same reason. The
+	// rotation space is the INTERSECTION of what this node serves and what clients hold: enabling a
+	// transport cannot reach a client that already has a config, ceasing to serve one always can, and
+	// DemoteKeepsIndependentFallback fails closed without this. The shell half writes it today; a Go half
+	// that did not would make demote-active go silently mute the moment the strangler cuts over — the
+	// kind of regression that shows up only as "rotation stopped doing anything", months later.
+	//
+	// Beside the identity file, because that is the node's state directory on every issuing path.
+	if len(subs) > 0 {
+		protos := make([]string, 0, len(subs[0].Protos))
+		protos = append(protos, subs[0].Protos...)
+		if b, err := json.Marshal(struct {
+			Protos []string `json:"protos"`
+		}{Protos: protos}); err == nil {
+			bl := filepath.Join(filepath.Dir(*statePath), "issued_baseline.json")
+			if err := os.WriteFile(bl, append(b, '\n'), 0o600); err == nil {
+				fmt.Fprintf(os.Stderr, "myceliumctl: recorded the issued transport baseline: %s\n", bl)
+			}
+		}
+	}
 	return nil
 }
 

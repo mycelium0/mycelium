@@ -697,6 +697,29 @@ myc_sb_render_subscription() {
 
 			myc_log "wrote sing-box subscription for '$name': $sb_path, $clash_path"
 		done
+	# STAMP WHAT WAS ISSUED. The rotation space is the INTERSECTION of what this node serves and what
+	# clients actually hold: enabling a transport cannot reach a client already holding a config, but
+	# ceasing to serve one always can. Without this record the planner cannot tell the two apart and
+	# DemoteKeepsIndependentFallback fails closed — correct, but permanently mute.
+	#
+	# Written beside the IDENTITY file, because that is the node's state directory on every path that
+	# issues a subscription ($STATE_DIR/identities.json) and this renderer is handed paths, not a state
+	# dir. Stated rather than assumed: if identities live somewhere else, the stamp lands there and the
+	# planner simply never sees it — mute, not wrong.
+	#
+	# Written LAST, after every client file is on disk, so the record can never claim more than was
+	# actually handed out.
+	local _bl_dir _bl
+	_bl_dir="$(dirname "$state")"
+	if [ -d "$_bl_dir" ] && [ -w "$_bl_dir" ]; then
+		_bl="$_bl_dir/issued_baseline.json"
+		if printf '%s' "$enabled_json" | jq -c '{protos: .}' > "$_bl.tmp" 2>/dev/null; then
+			mv -f "$_bl.tmp" "$_bl" && chmod 0600 "$_bl" 2>/dev/null || true
+			myc_log "recorded the issued transport baseline: $_bl"
+		else
+			rm -f "$_bl.tmp" 2>/dev/null || true
+		fi
+	fi
 }
 
 # myc_sb_emit_clash PATH NAME SERVER UUID DSNI PUB SID TSNI SSPAIR HY2PW TRPW GRPC XPATH PORTS_JSON ENABLED TUICPW

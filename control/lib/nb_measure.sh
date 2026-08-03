@@ -622,11 +622,26 @@ refresh_rotate_plan_from_daemon() {
 		warn "rotation: the MEASURE PlanInput at $pi is STALE or unparseable (now='$pi_now', age=${age}s > ${MEASURE_PLAN_MAX_STALE_SEC}s) — REFUSING to self-drive off it (is mycelium-measure.service healthy?)."
 		return 0
 	fi
-	if ( "$spine" rotate-plan "$pi" >"$plan.tmp" 2>/dev/null ) && jq -e . "$plan.tmp" >/dev/null 2>&1; then
+	# Fold in what issued clients actually hold. The planner needs it to decide whether it may STOP
+	# serving something: the floor is over the intersection of served and issued, never the served set
+	# alone. Absent record -> the field stays absent -> the planner fails closed, which is the right
+	# behaviour for "nobody has told me what was handed out".
+	local pi_eff="$pi"
+	if [ -f "$STATE_DIR/issued_baseline.json" ]; then
+		if jq -c --slurpfile b "$STATE_DIR/issued_baseline.json" \
+			'. + {issued_baseline: ($b[0].protos // [])}' "$pi" > "$pi.eff" 2>/dev/null; then
+			pi_eff="$pi.eff"
+		else
+			rm -f "$pi.eff" 2>/dev/null || true
+		fi
+	fi
+	if ( "$spine" rotate-plan "$pi_eff" >"$plan.tmp" 2>/dev/null ) && jq -e . "$plan.tmp" >/dev/null 2>&1; then
+		rm -f "$pi.eff" 2>/dev/null || true
 		mv -f "$plan.tmp" "$plan"
 		log "rotation: refreshed $plan from the MEASURE daemon PlanInput (self-driven; age ${age}s, act=$(jq -r '.act // false' "$plan"))."
 	else
 		rm -f "$plan.tmp"
+		rm -f "$pi.eff" 2>/dev/null || true
 		warn "rotation: rotate-plan on the MEASURE PlanInput failed — keeping the existing $plan (if any)."
 	fi
 }

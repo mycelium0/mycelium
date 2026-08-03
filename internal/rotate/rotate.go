@@ -54,6 +54,13 @@ type PlanInput struct {
 	Limits        spec.RotationLimits      `json:"limits"`         // the rotation policy
 	State         spec.RotationState       `json:"state"`          // between-tick memory
 	Now           time.Time                `json:"now"`            // injected clock (never read internally)
+
+	// IssuedBaseline is the proto set that ALREADY-ISSUED client subscriptions contain — what a client in
+	// someone's hands can actually dial. It exists because the rotation space is the INTERSECTION of what
+	// the node serves and what clients hold: enabling a transport cannot reach an existing client, but
+	// disabling one always can. Empty means "unknown", and unknown fails closed: not knowing what was
+	// issued is not permission to remove something.
+	IssuedBaseline []string `json:"issued_baseline,omitempty"`
 }
 
 // impaired reports whether a connectivity state warrants considering a rotation (anything but a
@@ -176,12 +183,51 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		if anyBetterByMargin {
 			return hold(spec.RotationReasonTargetNotPromoted, "the best candidate is not tuner-promoted yet")
 		}
-		return hold(spec.RotationReasonNoBetterCandidate, "no closed-set candidate beats the incumbent by the margin")
+		// DEMOTE-ACTIVE. Everything above has already established that the incumbent is confirmed broken:
+		// impaired, past the hysteresis streak, past the cooldown, within budget. Reaching here only means
+		// no SIBLING is better by the margin, which on a node whose transports are all healthy-but-equal is
+		// the normal case — and is precisely why this branch used to be a permanent dead end.
+		//
+		// It is a dead end no longer, because the successor does not have to be advertised. Every issued
+		// subscription already carries a urltest group over the whole served set: the client holds all the
+		// endpoints and health-checks them itself. The node does not choose a successor — it stops serving
+		// the broken member and the client moves itself to one it already has.
+		//
+		// MEASURED before this was allowed. Client on one node, through another node's urltest group, real
+		// fault (the active member's port DROPped): the client failed at once and recovered 276s later WITH
+		// THE PORT STILL BLOCKED — one full urltest interval. So it works, and it costs up to one interval
+		// of total blackout; an outage SHORTER than the interval produces no failover at all.
+		//
+		// Gated on the INTERSECTION floor, never the served set — see DemoteKeepsIndependentFallback for
+		// the config that satisfies a served-set floor while stranding every client already holding one.
+		served := make([]string, 0, len(in.Ranked)+1)
+		served = append(served, in.Active.Proto)
+		for i := range in.Ranked {
+			served = append(served, in.Ranked[i].Proto)
+		}
+		if ok, fams := spec.DemoteKeepsIndependentFallback(served, in.IssuedBaseline, in.Active.Proto); ok {
+			to := in.Active
+			to.Action = spec.RotationActionDemoteActive
+			to.ToPort = 0
+			p := spec.RotationPlan{
+				Act: true, From: in.Active, To: to,
+				Reason:      spec.RotationReasonDegradedActive,
+				HeldBecause: fmt.Sprintf("the active member is confirmed impaired and no sibling beats it by the margin; ceasing to serve it leaves %d independent families that issued clients still hold, and their urltest group selects one", len(fams)),
+				NextState:   ns, DecidedAt: in.Now,
+			}
+			if err := p.Validate(); err != nil {
+				return spec.RotationPlan{}, fmt.Errorf("rotate plan (demote) invalid: %w", err)
+			}
+			return p, nil
+		}
+		return hold(spec.RotationReasonNoBetterCandidate, "no closed-set candidate beats the incumbent by the margin, and ceasing to serve the incumbent would not leave two independent families that issued clients hold")
 	}
 
-	// Act — rotate to the chosen candidate. C4a only ever promotes a healthy sibling; rotate-port /
-	// regen-reality / demote-active are reserved for later chunks, so the action is normalised
-	// unconditionally (a candidate's incoming Action is advisory only).
+	// Act — rotate to the chosen candidate. This branch only ever PROMOTES a healthy sibling, so the
+	// action is normalised unconditionally here (a candidate's incoming Action is advisory only).
+	// demote-active is emitted above on its own gated path; rotate-port and regen-reality stay reserved —
+	// both change what a client must DIAL, and unlike a demote the client cannot discover the new value
+	// from a set it already holds.
 	to := in.Ranked[bestIdx]
 	to.Action = spec.RotationActionPromoteSibling
 	ns.LastRotateAt = in.Now

@@ -68,14 +68,28 @@ command -v jq >/dev/null 2>&1 || { printf 'rotate_apply_executes: jq required\n'
 #                    OLD port with no live channel to re-fetch (the bundle is rendered but served on
 #                    loopback only). Until clients can learn a new port, this must stay unrequestable.
 #   regen-reality  — re-keying REALITY invalidates every issued client for that family, same problem.
-#   demote-active  — has no defined successor semantics without one of the two above.
-RESERVED="rotate-port regen-reality demote-active"
+# demote-active is NO LONGER reserved. It needs no successor semantics: every issued subscription already
+# carries a urltest group over the whole served set, so the client holds all the endpoints and picks one
+# itself. Measured before it was unreserved — client on one node through another's group, the active
+# member's port DROPped: dead at once, recovered 276s later WITH THE PORT STILL BLOCKED, one full urltest
+# interval. It works, and it costs up to one interval of blackout.
+RESERVED="rotate-port regen-reality"
 
 fail=0
 ok()    { printf '  ok    %s\n' "$1"; }
 badln() { printf '  FAIL  %s\n' "$1"; fail=1; }
 
 printf '== rotation apply: run the path, and refuse a move nothing can request ==\n'
+
+# The library's own reporting + fail-closed primitives. Without them `die` is merely a
+# command-not-found that RETURNS, so every fail-closed path under test silently continues and the
+# function runs on past the point it was supposed to abort. A gate that does not supply them is testing a
+# different program from the one that ships.
+log()  { printf 'log: %s\n' "$*"; }
+warn() { printf 'warn: %s\n' "$*" >&2; }
+die()  { printf 'die: %s\n' "$*" >&2; exit 1; }
+run()  { "$@"; }
+have() { command -v "$1" >/dev/null 2>&1; }
 
 # shellcheck source=/dev/null
 . "$FIXTURE" || { printf 'FAIL: could not source the fakenode fixture\n' >&2; exit 2; }
@@ -88,10 +102,10 @@ seed_params() {
 		shadowtls_enabled:            false, shadowtls_port:            8446
 	}' > "$1"
 }
-plan() { # PROTO TO_PORT -> a minimal act plan
-	jq -n --arg p "$1" --argjson tp "$2" \
+plan() { # PROTO TO_PORT [ACTION] -> a minimal act plan
+	jq -n --arg p "$1" --argjson tp "$2" --arg a "${3:-promote-sibling}" \
 		'{act:true, from:{proto:"vless-reality-vision",action:"none",from_port:8443,to_port:0},
-		  to:{proto:$p, action:"promote-sibling", from_port:0, to_port:$tp}, reason:"degraded-active"}'
+		  to:{proto:$p, action:$a, from_port:0, to_port:$tp}, reason:"degraded-active"}'
 }
 
 # --- A. execute the apply over the table -------------------------------------------------------------
@@ -139,12 +153,34 @@ plan() { # PROTO TO_PORT -> a minimal act plan
 
 	# 4. a to_port whose key is NOT operator-toggleable must NOT move
 	seed_params "$P"
+	# Narrowed for THIS row only. Leaving it narrowed leaked into every row below: the enable key of the
+	# next target then resolved empty, and the delta wrote a key named "" into params while the row under
+	# test reported the wrong reason entirely. A fixture that leaks state makes later rows measure the
+	# fixture.
+	_saved_toggles="$OPERATOR_TOGGLE_KEYS"
 	OPERATOR_TOGGLE_KEYS='["vless_reality_vision_enabled"]'
 	plan hysteria2 8455 > "$PL"
 	( apply_rotation_to_params "$PL" "$P" ) >/dev/null 2>&1 || true
 	[ "$(jq -r '.hysteria2_port' "$P")" = "8444" ] \
 		&& ok "a port key outside the operator toggle surface is NOT moved (fail-safe)" \
 		|| badln "the rotation moved a port key the operator's own toggle surface does not include — an unattended loop must not reach past it"
+
+	# 4b. AND the whole apply must abort, not proceed with an empty key. `die` inside $( ) kills only the
+	# substitution, so an unguarded caller carries on and writes a key named "" into params.
+	seed_params "$P"; _before_narrow="$(cat "$P")"
+	plan hysteria2 0 > "$PL"
+	if ( apply_rotation_to_params "$PL" "$P" ) >/dev/null 2>&1; then
+		badln "a target whose enable key is OUTSIDE the operator toggle surface was applied anyway"
+	else
+		ok "a target outside the operator toggle surface aborts the whole apply"
+	fi
+	printf '%s' "$(cat "$P")" | jq -e 'has("")' >/dev/null 2>&1 \
+		&& badln "params gained a key literally named \"\" — the refusal left the file corrupted rather than untouched" \
+		|| ok "and it wrote nothing (no empty-named key)"
+	[ "$_before_narrow" = "$(cat "$P")" ] \
+		&& ok "params are byte-unchanged after the refusal" \
+		|| badln "the refused apply still mutated params"
+	OPERATOR_TOGGLE_KEYS="$_saved_toggles"
 
 	# 5. a plan with no target fails closed
 	seed_params "$P"; before="$(cat "$P")"
@@ -157,6 +193,35 @@ plan() { # PROTO TO_PORT -> a minimal act plan
 	[ "$before" = "$(cat "$P")" ] \
 		&& ok "and it left params byte-unchanged" \
 		|| badln "the failed apply still mutated params — a partial delta is worse than none"
+
+	# 6. DEMOTE-ACTIVE must DISABLE its target. The executor read no action at all until this row existed:
+	# _rotation_set_delta hardcoded true, so the very first demote-active the planner emitted would have
+	# ENABLED the transport it had just decided to stop serving — unattended, every 90 seconds.
+	seed_params "$P"
+	plan hysteria2 0 demote-active > "$PL"
+	# NOT `|| true`: a silent swallow here reports "the demote did not disable" when the truth may be
+	# "the demote never ran". Those need different fixes and the row must not conflate them.
+	if ! _out="$( ( apply_rotation_to_params "$PL" "$P" ) 2>&1 )"; then
+		badln "the demote-active apply ABORTED, so the row below cannot mean what it says: $(printf '%s' "$_out" | tail -1)"
+	fi
+	[ "$(jq -r '.hysteria2_enabled' "$P")" = "false" ] \
+		&& ok "demote-active DISABLES its target" \
+		|| badln "demote-active left hysteria2_enabled=$(jq -r '.hysteria2_enabled' "$P"). An action-blind executor does the OPPOSITE of the plan it was handed: the planner decided to stop serving a confirmed-broken member, and the node would have kept serving it — or re-enabled it — on every tick."
+	[ "$(jq -r '.vless_reality_vision_enabled' "$P")" = "true" ] \
+		&& ok "and it leaves the other transports alone" \
+		|| badln "the demote also altered a transport outside the plan's target"
+
+	# 7. An action this executor does not know must not be guessed at.
+	seed_params "$P"; before="$(cat "$P")"
+	plan hysteria2 0 rotate-port > "$PL"
+	if ( apply_rotation_to_params "$PL" "$P" ) >/dev/null 2>&1; then
+		badln "a plan carrying a RESERVED action (rotate-port) was applied. The executor cannot honour a move it does not implement; applying it anyway means silently substituting a different action for the one the planner chose."
+	else
+		ok "an unrecognised action fails closed"
+	fi
+	[ "$before" = "$(cat "$P")" ] \
+		&& ok "and it left params byte-unchanged" \
+		|| badln "the refused action still mutated params"
 	exit "$fail"
 ) || fail=1
 

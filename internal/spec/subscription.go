@@ -217,9 +217,16 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 			subSimple{Type: "block", Tag: "block"},
 		)
 
+		// The transport set this client's file was built from — recorded by the caller as the ISSUED
+		// BASELINE. Not serialised into any client artifact, so byte-equivalence with the shell is untouched.
+		protos := make([]string, 0, len(enabled))
+		for _, d := range enabled {
+			protos = append(protos, d.Proto)
+		}
 		clash := renderClash(c.Name, nodeAddr, c.ID, donorSNI, pub, shortFirst, tlsSNI, ssUserPSK, hy2pw, tuicpw, trpw, grpcService, fp, enabled, portOf)
 
 		out = append(out, ClientSubscription{
+			Protos:  protos,
 			Name:    c.Name,
 			Safe:    sanitizeName(c.Name),
 			Singbox: SubDoc{Outbounds: outbounds},

@@ -19,7 +19,11 @@ package spec
 // This is the SERVE-TIME invariant the older gates deliberately did not check (transport_family_independence
 // asserts the CAPABILITY exists; sub_channel_not_single_point asserts the class-MAPPING spans >=2). Here we
 // check the actual rendered ARTIFACT a client would import. It is pure and rotation-safe by construction:
-// a RP-0012 rotation stays within the closed set and has no family-DISABLE action, so it can never reduce
+// a RP-0012 rotation stays within the closed set. It CAN now reduce the served set, because demote-active
+// exists — so the guarantee below is no longer supplied by the ABSENCE of an action. It is supplied by an
+// executable precondition, DemoteKeepsIndependentFallback, which the planner must satisfy before it may
+// emit one. This paragraph asserted the invariant in prose for a long time, and prose cannot fail a
+// build. Historically it read: a rotation has no family-DISABLE action, so it can never reduce
 // the served family set (it swaps the active shape / regenerates a parameter, it does not remove a family).
 
 // DistinctClasses returns the set of distinct transport FAMILIES (TransportClass) present in the bundle's
@@ -88,4 +92,58 @@ func enabledFamiliesDistinct(ds []ProtoDescriptor) int {
 		seen[blockFamily(ds[i].Class)] = true
 	}
 	return len(seen)
+}
+
+// descriptorForProto returns the registry descriptor for a proto name.
+func descriptorForProto(proto string) (ProtoDescriptor, bool) {
+	for i := range transportRegistry {
+		if transportRegistry[i].Proto == proto {
+			return transportRegistry[i], true
+		}
+	}
+	return ProtoDescriptor{}, false
+}
+
+// DemoteKeepsIndependentFallback answers whether the node may stop serving `demote` without stranding a
+// client that is already holding an issued subscription.
+//
+// THE FLOOR IS OVER THE INTERSECTION, and that is the whole point. The obvious version — "after the
+// demote, does the SERVED set still span >= 2 block-independence families?" — passes on a config that
+// strands every existing client. Concretely: a client was issued {vless-reality-vision, hysteria2}; the
+// node later enabled shadowtls and trojan; a demote now drops vision and hysteria2. The served set is
+// {shadowtls, trojan}, two families, floor satisfied, every node-local check green — and the client in
+// someone's hands holds only two endpoints, both of which the node has stopped serving. That is the
+// cdc5f61 shape exactly: the node's own view says healthy, the config it handed out is undialable.
+//
+// So the set that matters is what the node serves INTERSECTED with what issued clients actually hold.
+// Enabling a transport is the direction that cannot reach an existing client — it never appears in their
+// urltest group; disabling is the direction that always can.
+//
+// FAILS CLOSED on an empty or unknown baseline: not knowing what was issued is not permission to remove
+// something. Pure.
+func DemoteKeepsIndependentFallback(served, issuedBaseline []string, demote string) (bool, []TransportClass) {
+	if len(issuedBaseline) == 0 {
+		return false, nil
+	}
+	held := make(map[string]bool, len(issuedBaseline))
+	for _, p := range issuedBaseline {
+		held[p] = true
+	}
+	seen := make(map[TransportClass]bool, len(served))
+	fams := make([]TransportClass, 0, len(served))
+	for _, p := range served {
+		if p == demote || !held[p] {
+			continue
+		}
+		d, ok := descriptorForProto(p)
+		if !ok {
+			continue
+		}
+		f := blockFamily(d.Class)
+		if !seen[f] {
+			seen[f] = true
+			fams = append(fams, f)
+		}
+	}
+	return len(fams) >= 2, fams
 }
