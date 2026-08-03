@@ -21,9 +21,31 @@ The signing key is the maintainer's **SSH key** — the same key whose public ha
 
 ```sh
 git config gpg.format ssh
-git config user.signingkey ~/.ssh/id_ed25519.pub   # the key in operators' allowed_signers
+git config user.signingkey ~/.ssh/id_rsa.pub       # the key in operators' allowed_signers
 git config tag.gpgsign true
 ```
+
+This said `id_ed25519` and the key in use is **RSA** — following it verbatim configured signing against
+a file that does not exist. Check what you actually sign with before trusting either line:
+`git log -1 --show-signature` names the algorithm and fingerprint.
+
+> **PUBLISH THE PUBLIC HALF — nothing downstream works without it.** The signer identity is already
+> public — `git log -1 --format=%GS` prints it on any signed commit — but the KEY is not: it is in no
+> file in this repository,
+> and GitHub reports the commit signatures as `unknown_key` because it is not registered on the account.
+> So no downloader can run the authenticity check at all, and `verify-release.sh` degrades to
+> integrity-only — the one mode that cannot tell a substituted release from a genuine one. Two places,
+> both cheap:
+>
+> ```sh
+> # 1. in the repository, so every downloader has it after the first fetch
+> printf '%s %s\n' "$(git log -1 --format=%GS)" "$(cut -d' ' -f1,2 ~/.ssh/id_rsa.pub)" > allowed_signers
+>
+> # 2. on the GitHub account as a SIGNING key (Settings -> SSH and GPG keys -> New SSH key ->
+> #    key type "Signing Key"), which makes commits show Verified and gives a second, independent
+> #    channel — a key committed only to the repository it authenticates is circular for a first-time
+> #    downloader.
+> ```
 
 ## Cut a release
 
@@ -43,7 +65,7 @@ git tag -s vX.Y.Z -m "Mycelium vX.Y.Z"
 git push origin vX.Y.Z
 
 # 4. sign the checksums with the same key and attach the .sig to the published Release
-ssh-keygen -Y sign -f ~/.ssh/id_ed25519 -n file dist/SHA256SUMS    # → dist/SHA256SUMS.sig
+ssh-keygen -Y sign -f ~/.ssh/id_rsa -n file dist/SHA256SUMS        # → dist/SHA256SUMS.sig
 gh release upload vX.Y.Z dist/SHA256SUMS.sig
 ```
 
@@ -55,14 +77,14 @@ Use the helper (fail-closed — integrity always, authenticity when you supply t
 
 ```sh
 # from the directory holding mycelium-X.Y.Z.tar.gz + SHA256SUMS + SHA256SUMS.sig:
-scripts/verify-release.sh . --allowed-signers allowed_signers --signer <signer-id> [--tag vX.Y.Z]
+scripts/verify-release.sh . --allowed-signers allowed_signers --signer "$(awk 'NF{print $1; exit}' allowed_signers)" [--tag vX.Y.Z]
 ```
 
 It runs, fail-closed, the underlying checks:
 
 ```sh
 sha256sum -c SHA256SUMS                             # integrity (macOS: shasum -a 256 -c)
-ssh-keygen -Y verify -f allowed_signers -I <signer-id> -n file -s SHA256SUMS.sig < SHA256SUMS
+ssh-keygen -Y verify -f allowed_signers -I "$(awk 'NF{print $1; exit}' allowed_signers)" -n file -s SHA256SUMS.sig < SHA256SUMS
 git verify-tag vX.Y.Z                               # authenticity of the source (tag = root of trust)
 ```
 

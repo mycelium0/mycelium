@@ -89,4 +89,15 @@ if [ -n "$TAG" ]; then
 	fi
 fi
 
-echo "verify-release: OK"
+# SAY WHICH MODE PASSED. This was a bare "OK", identical in integrity-only mode and in the fully verified
+# one — same last line, same exit 0 — so a wrapper, a CI step, or an operator skimming the tail could not
+# tell "the bytes match the checksums shipped beside them" from "the maintainer signed this". That
+# distinction is the entire point of the tool, and it matters most right now: the maintainer's key is not
+# published, so integrity-only is the only mode a downloader can currently run.
+if [ -n "$ALLOWED" ]; then
+	echo "verify-release: OK — integrity AND authenticity verified"
+else
+	echo "verify-release: OK (INTEGRITY ONLY) — the artifacts match the checksums that came with them."
+	echo "verify-release: authenticity was NOT checked: nothing here proves who produced them. Supply"
+	echo "verify-release: --allowed-signers with the maintainer's key to verify that (docs/RELEASING.md)."
+fi

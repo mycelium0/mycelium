@@ -28,28 +28,48 @@ curl -fsSLO "$base/mycelium-${ver#v}.tar.gz"
 curl -fsSLO "$base/SHA256SUMS"
 curl -fsSLO "$base/SHA256SUMS.sig" || echo "note: SHA256SUMS.sig not attached yet — do an integrity-only check now, or wait for the maintainer to upload it for authenticity."
 
-# verify integrity + authenticity, fail-closed (REL-3)
+# verify, fail-closed (REL-3)
 tar -xzf "mycelium-${ver#v}.tar.gz" && cd "mycelium-${ver#v}"
-scripts/verify-release.sh .. --allowed-signers /path/to/allowed_signers --signer <signer-id> --tag "$ver"
+
+# TODAY: integrity only. This is executable right now and it fails closed — an empty, truncated or
+# HTML-body SHA256SUMS is refused rather than reported as verified.
+scripts/verify-release.sh ..
+
+# ONCE THE MAINTAINER'S KEY IS PUBLISHED (see below), add authenticity. You are never told the signer
+# identity separately — it is the first field of the published allowed_signers line:
+signer="$(awk 'NF{print $1; exit}' allowed_signers)"
+scripts/verify-release.sh .. --allowed-signers ./allowed_signers --signer "$signer" --tag "$ver"
 
 # put the VERIFIED tree where the node will keep it, so every later command means the same directory
 sudo mkdir -p /opt && sudo cp -a "../mycelium-${ver#v}" /opt/mycelium && cd /opt/mycelium
 ```
 
-Without `--allowed-signers` the helper checks **integrity only** and warns that authenticity is
-unverified. Passing `--allowed-signers` **before** `SHA256SUMS.sig` is attached **fails closed** (exit 1) —
-it will not silently downgrade to integrity-only. So: run the integrity-only form while the signature is
-pending, and re-run with the key once `SHA256SUMS.sig` lands. For a real deployment always end up on the
-signed form.
+> **The maintainer's public key is not published anywhere yet, so authenticity cannot currently be
+> verified by anyone else.** It is not in this repository, and GitHub reports the commit signatures as
+> `unknown_key` because the key is not registered on the account either. Until that changes there is
+> exactly one executable check — integrity — and it tells you the bytes match the checksums *shipped
+> beside them*, which is protection against a corrupted or truncated download and **not** against
+> someone who replaced both. This is a real gap, stated here rather than hidden behind a placeholder
+> path; it is tracked in [SECURITY.md §8](SECURITY.md#8-open-questions-tbd).
+
+Once the key is published you will have an `allowed_signers` line to save as a file, and the signed form
+above becomes the one to use. Two properties of the helper are worth knowing either way: without
+`--allowed-signers` it checks integrity and **warns** that authenticity is unverified rather than implying
+success, and passing `--allowed-signers` *before* `SHA256SUMS.sig` is attached **fails closed** (exit 1)
+instead of silently downgrading. For a real deployment always end up on the signed form.
 
 ## 2. Deploy
 
 ```sh
-scripts/fungi deploy \
+sudo /opt/mycelium/scripts/fungi deploy \
   --clients alice \
-  --node-address your.host.example \
-  --allowed-signers /path/to/allowed_signers
+  --node-address your.host.example
 ```
+
+`deploy` takes no `--allowed-signers`, and it used to be shown with one. The flag is parsed and then
+never read on this path: signature verification belongs to `update`, which fetches code it has not seen.
+The first deploy runs the tree you verified in step 1, so passing a key here checked nothing and only
+suggested otherwise.
 
 The engine versions + checksums — and the Go toolchain that builds the control-plane spine — are pinned in
 `control/engines.manifest.json` and fetched + checksum-verified automatically; you do **not** hand-enter
@@ -111,7 +131,8 @@ before a single fetched byte is executed.
 ```sh
 sudo rm -rf /opt/mycelium                        # replaced by a checkout of the same verified tag
 sudo git clone --branch vX.Y.Z https://github.com/mycelium0/mycelium /opt/mycelium
-sudo /opt/mycelium/scripts/fungi update --repo-ref vX.Y.Z --allowed-signers /path/to/allowed_signers
+sudo /opt/mycelium/scripts/fungi update --repo-ref vX.Y.Z \
+  --allowed-signers /etc/mycelium/allowed_signers   # the maintainer key — not published yet, see step 1
 ```
 
 `update` VERIFIES the signed ref before running anything it fetched, so it needs the key — the first
