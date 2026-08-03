@@ -689,6 +689,161 @@ issue_awg_client() {
 	log "awg-issue: hand it over out-of-band; it is a complete ready-to-import config (0600, node-local)."
 }
 
+# _awg_strip_peers FILE PUBKEYS... — rewrite FILE without the [Peer] blocks whose PublicKey is listed.
+# Pure text surgery on a copy; the caller validates and promotes. Blocks are matched on the KEY, never on
+# position, so a hand-edited or reordered conf is handled the same way.
+_awg_strip_peers() {
+	local file="$1"; shift
+	local kill="$*"
+	awk -v kill="$kill" '
+		function flush_block() {
+			if (inpeer) { if (!(pub in kills)) printf "\n%s", buf; inpeer=0; buf=""; pub="" }
+		}
+		BEGIN { n=split(kill, K, " "); for (i=1;i<=n;i++) if (K[i] != "") kills[K[i]]=1 }
+		/^\[Peer\]/ { flush_block(); inpeer=1; buf=$0 "\n"; pub=""; next }
+		inpeer { buf = buf $0 "\n"; if ($0 ~ /^PublicKey = /) pub=$3; next }
+		{ if (!seen_iface && $0 ~ /^[[:space:]]*$/) next; seen_iface=1; print }
+		END { flush_block() }
+	' "$file"
+}
+
+# revoke_awg_client NAME — REVOKE an AmneziaWG client: the credential stops working immediately and does
+# not come back.
+#
+# WHY THIS EXISTS. The node could issue AmneziaWG clients and had no way to un-issue one. Every peer ever
+# enrolled stayed valid forever, and there was no sanctioned way to retire a leaked or superseded key —
+# on a live node the only recourse was hand-editing awg0.conf, which is exactly the operation most likely
+# to leave the interface unable to come up.
+#
+# ORDER IS THE DESIGN. The live interface is cleared FIRST, with `awg set ... peer ... remove`: after that
+# single call the key cannot complete a handshake, even if every later step fails. Only then are files
+# touched. The reverse order would leave a window in which the operator has been told "revoked" while the
+# credential still works until the next restart.
+#
+# NO RESTART. Enrolment restarts awg-quick@awg0, which drops every other peer's session. A revoke has no
+# need to: the live removal is immediate and the conf edit only has to survive the NEXT start.
+#
+# IT RESOLVES THE PEER TWO WAYS, and this is not belt-and-braces:
+#   * by the public key derived from the stored private key — the normal case; and
+#   * by the "# name = NAME" marker in awg0.conf — because --awg-issue keys "is this a re-issue?" on the
+#     presence of clients/NAME.private, so a name whose key material was lost gets a SECOND peer enrolled
+#     at a new address under the same name. That state is reachable in practice (it was hit on a live
+#     node), and a revoke that only knew about the stored key would leave the other peer valid forever.
+# Every matching peer is removed, and a name with nothing to remove is a success, not an error.
+#
+# IT ALSO PURGES THE BACKUPS. _awg_rollback restores BOTH awg0.conf and clients/ from $STATE_DIR/awg/
+# backup-*/ when a dialect regen/rotate fails. A backup taken before the revoke would therefore resurrect
+# the peer AND its private key on the next failed rotation. Revoked has to mean revoked.
+revoke_awg_client() {
+	local name="$1"
+	need_root
+	[ -n "$name" ] || die "awg-revoke: a client NAME is required (--awg-revoke NAME)."
+	case "$name" in *[!A-Za-z0-9._-]*) die "awg-revoke: client NAME '$name' has characters outside [A-Za-z0-9._-]." ;; esac
+	have awg || die "awg-revoke: the awg tools are missing — bootstrap the node first."
+	# The default is the live path, unchanged; the override exists so the conformance gate can EXECUTE
+	# this function against a throwaway node root instead of asserting its source text. A revoke that is
+	# only read, never run, is exactly the kind of code that fails the first time an operator needs it.
+	local awg_conf="${MYC_AWG_CONF:-/etc/amnezia/amneziawg/awg0.conf}" awg_state="$STATE_DIR/awg"
+	local clients_dir="$awg_state/clients"
+	[ -f "$awg_conf" ] || die "awg-revoke: no live awg0.conf at $awg_conf (bootstrap the node first)."
+
+	# --- resolve every peer this name owns -----------------------------------------------------------
+	local pubs="" p
+	if [ -f "$clients_dir/$name.private" ]; then
+		p="$(awg pubkey <<<"$(cat "$clients_dir/$name.private")" 2>/dev/null || true)"
+		[ -n "$p" ] && pubs="$p"
+	fi
+	# Any block carrying this name's marker, whatever key it holds.
+	local by_name
+	by_name="$(awk -v want="$name" '
+		/^\[Peer\]/{nm=""; pk=""}
+		/^# name = /{ sub(/^# name = /, ""); nm=$0 }
+		/^PublicKey = /{ pk=$3; if (nm == want) print pk }' "$awg_conf" 2>/dev/null)"
+	for p in $by_name; do
+		case " $pubs " in *" $p "*) ;; *) pubs="${pubs:+$pubs }$p" ;; esac
+	done
+
+	local n_peers=0
+	for p in $pubs; do n_peers=$(( n_peers + 1 )); done
+
+	if [ "$n_peers" -eq 0 ] && [ ! -f "$clients_dir/$name.private" ] && [ ! -f "$clients_dir/$name.conf" ]; then
+		log "awg-revoke: '$name' has no peer in $awg_conf and no stored material — nothing to revoke (already clean)."
+		return 0
+	fi
+	[ "$n_peers" -le 1 ] || warn "awg-revoke: '$name' owns $n_peers peers — removing ALL of them. (--awg-issue enrols a second peer under the same name when the stored key material is missing; this is that state.)"
+
+	if [ "${DRY_RUN:-0}" -eq 1 ]; then
+		log "[dry-run] awg-revoke would remove $n_peers peer(s) for '$name' from the live interface and $awg_conf, and shred $clients_dir/$name.{private,psk,conf}"
+		return 0
+	fi
+
+	# --- 1. the live interface FIRST: the credential dies here ----------------------------------------
+	local removed_live=0
+	for p in $pubs; do
+		if awg set awg0 peer "$p" remove 2>/dev/null; then
+			removed_live=$(( removed_live + 1 ))
+		else
+			warn "awg-revoke: could not remove a peer from the live awg0 interface (it may already be absent); continuing with the on-disk config."
+		fi
+	done
+	[ "$removed_live" -eq 0 ] || log "awg-revoke: removed $removed_live peer(s) for '$name' from the RUNNING interface — the key can no longer complete a handshake."
+
+	# --- 2. the on-disk config, validated before it is promoted ---------------------------------------
+	if [ "$n_peers" -gt 0 ]; then
+		install -d -m 0700 "$awg_state" 2>/dev/null || true
+		local bak="$awg_state/awg0.pre-revoke.conf" tmp="$awg_conf.revoke.$$"
+		cp -a "$awg_conf" "$bak" || die "awg-revoke: could not back up $awg_conf before editing."
+		_awg_strip_peers "$awg_conf" $pubs > "$tmp" || { rm -f "$tmp"; die "awg-revoke: could not rewrite $awg_conf."; }
+		# Fail-closed sanity: the result must still be a usable server config, and must no longer name the
+		# revoked keys. A truncated or mangled file here means no AmneziaWG at all after the next restart.
+		local ok=1
+		grep -q '^\[Interface\]'  "$tmp" || ok=0
+		grep -q '^PrivateKey = '  "$tmp" || ok=0
+		grep -q '^ListenPort = '  "$tmp" || ok=0
+		# ANCHORED, not a substring search: one key can contain another as a prefix, and a substring
+		# match then reports a key as "still present" when it is not — aborting a revoke that in fact
+		# succeeded. (Caught by mutation-testing the gate: the duplicate-peer fixture has keys where one
+		# is a prefix of the other, and the revoke died on its own sanity check.)
+		for p in $pubs; do grep -qE "^PublicKey = ${p}[[:space:]]*\$" "$tmp" && ok=0; done
+		if [ "$ok" -ne 1 ]; then
+			rm -f "$tmp"
+			die "awg-revoke: the rewritten $awg_conf failed its sanity check — NOTHING was changed on disk (the peer is already off the running interface). Backup kept at $bak."
+		fi
+		chmod 0600 "$tmp"; mv -f "$tmp" "$awg_conf" || die "awg-revoke: could not promote the rewritten $awg_conf (backup at $bak)."
+		log "awg-revoke: removed $n_peers [Peer] block(s) for '$name' from $awg_conf (backup: $bak)."
+	fi
+
+	# --- 3. the stored client material ----------------------------------------------------------------
+	local f gone=0
+	for f in "$clients_dir/$name.private" "$clients_dir/$name.psk" "$clients_dir/$name.conf"; do
+		[ -e "$f" ] || continue
+		rm -f "$f" && gone=$(( gone + 1 ))
+	done
+	[ "$gone" -eq 0 ] || log "awg-revoke: deleted $gone stored client file(s) for '$name'."
+
+	# --- 4. the backups, or a failed dialect rollback resurrects both peer and key --------------------
+	local b purged=0
+	for b in "$awg_state"/backup-*; do
+		[ -d "$b" ] || continue
+		for f in "$b/clients/$name.private" "$b/clients/$name.psk" "$b/clients/$name.conf"; do
+			[ -e "$f" ] && { rm -f "$f"; purged=$(( purged + 1 )); }
+		done
+		if [ -f "$b/awg0.conf" ] && [ "$n_peers" -gt 0 ]; then
+			local btmp="$b/awg0.conf.revoke.$$"
+			if _awg_strip_peers "$b/awg0.conf" $pubs > "$btmp" 2>/dev/null && grep -q '^\[Interface\]' "$btmp"; then
+				chmod 0600 "$btmp"; mv -f "$btmp" "$b/awg0.conf"; purged=$(( purged + 1 ))
+			else
+				rm -f "$btmp"
+				warn "awg-revoke: could not strip '$name' from $b/awg0.conf — a dialect ROLLBACK from that backup would re-enrol this peer. Remove the backup by hand."
+			fi
+		fi
+	done
+	[ "$purged" -eq 0 ] || log "awg-revoke: purged $purged backup artefact(s) so a dialect rollback cannot resurrect '$name'."
+
+	log "awg-revoke: '$name' is revoked. Its key cannot handshake now and will not be re-admitted on restart."
+	log "awg-revoke: the client's own copy of the config is NOT recallable — treat the address ${AWG_PEER_BASE_V4:-10.13.13}.x it held as reusable only after you are content the holder is retired."
+}
+
 # rotate_awg_dialect — ROTATE this node's AmneziaWG dialect to a FRESH one: bump the rotation epoch and
 # re-derive, so the node moves to a completely different H1..H4 + jitter WITHOUT touching any key or peer.
 # Unlike --awg-regen (idempotent: it re-derives the CURRENT epoch, used to migrate a node onto its per-node

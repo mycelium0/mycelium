@@ -67,6 +67,12 @@
 #                        .conf at the node's CURRENT dialect. Idempotent for an existing NAME (reuses its
 #                        keys + address, re-renders only) — this is how clients are refreshed after an
 #                        --awg-regen / --awg-rotate. Honours Selective Growth (never a silent full tunnel).
+#     --awg-revoke NAME REVOKE an AmneziaWG client: remove its peer(s) from the RUNNING interface first (the
+#                        key stops handshaking immediately), then from awg0.conf, then shred its stored
+#                        key material, then purge it from the dialect backups so a failed --awg-rotate
+#                        rollback cannot resurrect it. Idempotent; other peers' sessions are NOT dropped
+#                        (no interface restart). Removes EVERY peer carrying the name — --awg-issue can
+#                        enrol a second one when the stored key material is missing. Supports --dry-run.
 #     --rotate         apply a rotation plan (RP-0012). DEFAULT = DRY-RUN: apply the plan's params delta
 #                        to a temp copy, render + validate (sing-box check); promotes NOTHING. Plan path:
 #                        ROTATE_PLAN (default $STATE_DIR/rotate_plan.json), from `myceliumctl rotate-plan`.
@@ -162,11 +168,12 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # ---------------------------------------------------------------------------
 # Defaults (every node-specific value is a placeholder / runtime-selected — NEVER committed).
 # ---------------------------------------------------------------------------
-MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | awg-regen | awg-rotate | awg-issue | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg | l7-probe-xhttp | pathsig-probe | fp-probe
+MODE="bootstrap"            # bootstrap | update | ack | revoke | disable-two-hop | node-apply | awg-regen | awg-rotate | awg-issue | awg-revoke | rotate | rotate-arm | rotate-disarm | rotate-enable-loop | rotate-disable-loop | measure-enable | measure-disable | measure-configure | l7-probe | l7-probe-awg | l7-probe-xhttp | pathsig-probe | fp-probe
 REVOKE_NAME=""              # client NAME|ID to revoke (with --revoke): revoke + re-render + reload
 STAGED=0
 DRY_RUN=0
 AWG_ISSUE_NAME=""          # with --awg-issue: the client identity to issue/re-issue
+AWG_REVOKE_NAME=""         # with --awg-revoke: the client identity whose peer(s) + key material are removed
 ROTATE_APPLY=0             # with --rotate: 0 = dry-run (default), 1 = LIVE apply (also requires the node arm sentinel)
 ASSUME_YES=0
 DO_HARDEN=1
@@ -283,6 +290,7 @@ while [ "$#" -gt 0 ]; do
 		--awg-regen)       MODE="awg-regen"; shift ;;
 		--awg-rotate)      MODE="awg-rotate"; shift ;;
 		--awg-issue)       MODE="awg-issue"; AWG_ISSUE_NAME="${2:?--awg-issue needs a client NAME}"; shift 2 ;;
+		--awg-revoke)      MODE="awg-revoke"; AWG_REVOKE_NAME="${2:?--awg-revoke needs a client NAME}"; shift 2 ;;
 		--rotate)          MODE="rotate"; shift ;;
 		--apply-rotation)  ROTATE_APPLY=1; shift ;;
 		--rotate-arm)      MODE="rotate-arm"; shift ;;
@@ -1048,6 +1056,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		awg-regen)       regen_awg_dialect ;;
 		awg-rotate)      rotate_awg_dialect ;;
 		awg-issue)       issue_awg_client "$AWG_ISSUE_NAME" ;;
+		awg-revoke)      revoke_awg_client "$AWG_REVOKE_NAME" ;;
 		rotate)          flow_rotate ;;
 		rotate-arm)      rotate_arm ;;
 		rotate-disarm)   rotate_disarm ;;

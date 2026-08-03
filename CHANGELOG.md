@@ -13,6 +13,32 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.50] — 2026-08-03
+
+> **The node could issue AmneziaWG clients and had no way to un-issue one.** Every peer ever enrolled
+> stayed valid forever; retiring a leaked key meant hand-editing `awg0.conf` on a live node, which is
+> the operation most likely to leave the interface unable to come up.
+
+### Added
+- **`--awg-revoke NAME`** — retires an AmneziaWG credential everywhere it is honoured. Order is the
+  design: the RUNNING interface is cleared FIRST with `awg set ... peer ... remove`, so the key cannot
+  handshake even if every later step fails; the reverse order leaves a window in which the operator has
+  been told "revoked" while the key still works. No interface restart, so other peers keep their
+  sessions. It resolves the peer BOTH by the stored key and by the `# name =` marker, because
+  `--awg-issue` keys re-issue on the presence of `clients/NAME.private` and therefore enrols a SECOND
+  peer under the same name when that material is missing — a state reached on a live node. It then
+  shreds the stored material and purges the dialect backups, because `_awg_rollback` restores both
+  `awg0.conf` and `clients/` from `backup-*/` on a failed regen/rotate and would otherwise resurrect the
+  peer and its private key. Idempotent; revoking a name that owns nothing is a success.
+- `tests/conformance/awg_revoke_is_final.sh` — executes the verb against a throwaway node root with a
+  recording `awg` stub. Mutation-verified against five reintroductions, including "clears the file but
+  not the running interface" and "resolves only by the stored key".
+
+### Fixed
+- The revoke's own post-rewrite sanity check compared public keys by substring, so a key that is a
+  prefix of another reported as still-present and aborted a revoke that had in fact succeeded. Found by
+  mutation-testing the gate, not by reading the code.
+
 ## [0.2.49] — 2026-08-03
 
 > **The two transports most likely to survive a block were the two the failover mechanism could never
