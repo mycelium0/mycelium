@@ -15,10 +15,10 @@ func TestLoopDrift(t *testing.T) {
 	none := LoopsConfig{}
 
 	for _, tc := range []struct {
-		name                string
-		requested, actual   LoopsConfig
-		wantCount           int
-		wantMentions        []string
+		name              string
+		requested, actual LoopsConfig
+		wantCount         int
+		wantMentions      []string
 	}{
 		{"agreement, nothing running", none, none, 0, nil},
 		{"agreement, everything running", all, all, 0, nil},

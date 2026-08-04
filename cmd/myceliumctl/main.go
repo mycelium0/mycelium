@@ -587,7 +587,6 @@ func cmdSubscription(args []string) error {
 		}
 	}
 
-
 	// STAMP WHAT WAS ISSUED — the same record the shell renderer writes, for the same reason. The
 	// rotation space is the INTERSECTION of what this node serves and what clients hold: enabling a
 	// transport cannot reach a client that already has a config, ceasing to serve one always can, and
@@ -1656,7 +1655,6 @@ func firstLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-
 // cmdAWGRevokePlan answers, from a config alone, which peers a by-name revoke targets and which it
 // cannot reach. The shell then performs the effects. Keeping the decision here is the point: every one
 // of these judgements was wrong in bash at least once, in ways a value table finds at once.
@@ -1727,7 +1725,6 @@ func cmdAWGStripPeers(args []string) error {
 	fmt.Print(after)
 	return nil
 }
-
 
 // cmdLoopDrift reconciles the loops a node profile REQUESTS against the loops actually running, which
 // only the caller can observe. Advisory: it reports, it actuates nothing.
