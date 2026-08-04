@@ -55,6 +55,14 @@ truth for the version is `internal/spec.Version`.
   not see it because every fixture key was letters and hyphens. Keys are compared as field VALUES now,
   and a fixture key carries `+` and `/`.
 
+### Fixed
+- **A demote spent no budget.** The promote branch advances `LastRotateAt`, increments
+  `RotationsInWindow` and clears the impaired streak; the demote branch did none of it. The 30-minute
+  cooldown never bit, the two-per-hour anti-beacon cap was never spent, and an uncleared streak made the
+  very next tick qualify again — an unattended loop free to demote a transport every ninety seconds, on
+  a node whose entire design is to not beacon. **Found by the first real execution of the apply path**,
+  not by a review that had read the same code twice.
+
 ### Measured
 - A real client on one node, through another node's `urltest` group, with the active member's port
   DROPped: dead at once, recovered **276 s later with the port still blocked** — one full urltest

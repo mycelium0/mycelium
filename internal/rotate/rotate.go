@@ -206,6 +206,16 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 			served = append(served, in.Ranked[i].Proto)
 		}
 		if ok, fams := spec.DemoteKeepsIndependentFallback(served, in.IssuedBaseline, in.Active.Proto); ok {
+			// An ACT plan spends the budget, whatever the action. The promote branch below does this and
+			// the demote branch did not, which meant the anti-beacon limits applied to one kind of
+			// rotation and not the other: LastRotateAt never advanced so the cooldown never bit,
+			// RotationsInWindow never rose so the per-hour cap was never spent, and the streak was never
+			// cleared so the very next tick qualified again. An unattended loop could have demoted every
+			// ninety seconds without limit — on a node whose whole design is to not beacon. Found on the
+			// first real execution of this path, which is what the drill was for.
+			ns.LastRotateAt = in.Now
+			ns.RotationsInWindow++
+			ns.ImpairedStreak = 0
 			to := in.Active
 			to.Action = spec.RotationActionDemoteActive
 			to.ToPort = 0
