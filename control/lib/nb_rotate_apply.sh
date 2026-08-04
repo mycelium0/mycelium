@@ -356,8 +356,12 @@ persist_rotation_state_preapply() {
 # record_rotation_rollback PLAN — fold a rollback into the between-tick state via the pure Go
 # rotate.RecordOutcome (spends the per-window rollback budget; latches the planner to hold once exhausted).
 # Needs the Go spine binary + a node-local rotate_limits.json; both are present on the Go-bearing node
-# where live rotation runs. Degrades to a warning (the rollback itself already happened) if either is
-# missing — for the drill rollback-latch case (Step 3/4) both MUST be present.
+# where live rotation runs. Never fatal — the rollback itself already happened and must not be undone by a
+# bookkeeping failure — but it RETURNS NON-ZERO on every path where the budget was not actually spent
+# (absent spine, no limits, unassemblable input, a refused rotate-record, an unpersistable result). The
+# caller words its closing message from that return: the message used to claim "rollback recorded"
+# unconditionally, which is precisely the failure this project keeps hitting — a component reporting on
+# something it did not establish. For the drill rollback-latch case (Step 3/4) spine + limits MUST be present.
 # _rotate_limits_file — the RotationLimits JSON a rollback record (rotate.RecordOutcome) needs. Prefers an
 # explicit rotate_limits.json; else DERIVES it from the limits the MEASURE daemon already carries in
 # measure.config.json (the single source), so the rollback budget + hold latch is never inert just because a
@@ -380,8 +384,8 @@ record_rotation_rollback() {
 	local spine="${SPINE_BIN:-$TOOLING_DIR/bin/myceliumctl-go}"
 	local limits; limits="$(_rotate_limits_file)"
 	[ "$DRY_RUN" -eq 0 ] || return 0
-	[ -x "$spine" ] || { warn "rotation: spine binary absent ($spine); rollback NOT recorded (budget/latch unchanged)."; return 0; }
-	[ -n "$limits" ] || { warn "rotation: no rotate_limits.json and no measure.config .limits; rollback NOT recorded (budget/latch unchanged)."; return 0; }
+	[ -x "$spine" ] || { warn "rotation: spine binary absent ($spine); rollback NOT recorded (budget/latch unchanged)."; return 1; }
+	[ -n "$limits" ] || { warn "rotation: no rotate_limits.json and no measure.config .limits; rollback NOT recorded (budget/latch unchanged)."; return 1; }
 	# THE INPUT STATE IS WHAT IS ON DISK, not the plan's next_state (Audit-0009 AA1). By the planner's own
 	# call order the pre-apply persist has already written next_state to disk, so on the normal path these
 	# are the same bytes — and where they differ, disk is the stricter one: it is what survives when the
@@ -393,12 +397,12 @@ record_rotation_rollback() {
 	input="$(jq -n --slurpfile p "$plan" --slurpfile l "$limits" \
 		--argjson disk "$( [ -f "$state_now" ] && jq -c . "$state_now" 2>/dev/null || printf 'null' )" \
 		'{state: ($disk // $p[0].next_state // {}), limits: $l[0], rolled_back: true}')" \
-		|| { warn "rotation: could not assemble rollback-record input."; return 0; }
+		|| { warn "rotation: could not assemble rollback-record input."; return 1; }
 	next="$(printf '%s' "$input" | "$spine" rotate-record - 2>/dev/null)" \
-		|| { warn "rotation: rotate-record failed; budget/latch unchanged."; return 0; }
-	tmp="$(mktemp)" || return 0
+		|| { warn "rotation: rotate-record failed; budget/latch unchanged."; return 1; }
+	tmp="$(mktemp)" || { warn "rotation: no temp file for the post-rollback state; rollback NOT recorded."; return 1; }
 	printf '%s\n' "$next" > "$tmp" && ( umask 077; mv -f "$tmp" "$(_rotate_state_file)" ) \
-		|| { rm -f "$tmp"; warn "rotation: could not persist post-rollback state."; return 0; }
+		|| { rm -f "$tmp"; warn "rotation: could not persist post-rollback state."; return 1; }
 	chmod 0600 "$(_rotate_state_file)" 2>/dev/null || true
 	log "rotation: recorded rollback (rollback budget spent; hold latch updated) -> $(_rotate_state_file)."
 }
@@ -523,8 +527,18 @@ rotate_apply_live() {
 	( write_params ) || warn "rotation: write_params failed during rollback; params.json may still hold the rotated values — operator attention needed."
 	apply_singbox || warn "rotation: could not restart sing-box onto the restored config — operator attention needed."
 	verify_post_apply || warn "rotation: service still unhealthy after rollback — operator attention needed."
-	record_rotation_rollback "$plan"
-	die "rotation: rolled back (fail-closed). Last-known-good config restored; overlay reverted; rollback recorded."
+	# The closing message must say what actually HAPPENED, not what the happy path would have. It read
+	# "rollback recorded" unconditionally, while record_rotation_rollback degrades to a warn on four
+	# separate paths (no spine, no limits, unassemblable input, rotate-record refused). On every one of
+	# them the operator was told the budget had been spent and the latch armed when neither was true —
+	# and the latch is the ONLY thing stopping a node that cannot rotate from restarting sing-box every
+	# 90 seconds. That is this project's own recurring defect: a component reporting confidently on
+	# something it did not establish. An `if` and not a bare call, because the entrypoint runs under
+	# `set -e`: a non-zero return from a bare call exits here and the operator loses the message entirely.
+	if record_rotation_rollback "$plan"; then
+		die "rotation: rolled back (fail-closed). Last-known-good config restored; overlay reverted; rollback recorded (budget spent, hold latch updated)."
+	fi
+	die "rotation: rolled back (fail-closed). Last-known-good config restored; overlay reverted — but the rollback was NOT RECORDED (see the warning above): the per-window budget is unspent and no hold latch is armed, so the planner can re-derive this same rotation on the next tick. Operator attention needed."
 }
 
 # flow_rotate — the --rotate dispatch target. Reads a RotationPlan (default $STATE_DIR/rotate_plan.json,

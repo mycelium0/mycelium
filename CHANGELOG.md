@@ -13,6 +13,32 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.59] — 2026-08-04
+
+> The rotation's rollback branch had never been executed — by anything. It is the node's whole safety net
+> for an unattended rotation, and every assurance about it came from reading it. It now runs in the suite,
+> on both failure edges, and the run found that its closing message claimed the rollback had been recorded
+> on four paths where it had not.
+
+### Added
+- `tests/conformance/rotate_rollback_executes.sh` — drives the REAL `rotate_apply_live` through both ways a
+  live apply fails (the restart itself; the health check after it) and asserts the whole recovery sequence:
+  last-known-good bytes restored, the operator-overrides overlay byte-reverted, params regenerated, the
+  service restarted onto the restored config, the rollback budget spent and the hold latch armed, and a
+  fail-closed exit. Plus three rows nothing else covers: a recovery step that itself fails must not skip the
+  ones after it; a degraded bookkeeping step must not undo the recovery; and a HEALTHY apply through the
+  same harness must roll back nothing — the control row, without which every assertion above is equally
+  consistent with a harness in which nothing can succeed.
+
+### Fixed
+- **`rotate_apply_live` told the operator the rollback was recorded when it was not.** The closing `die`
+  said "rollback recorded" unconditionally, while `record_rotation_rollback` degrades to a warning on four
+  separate paths (no spine binary, no limits, unassemblable input, a refused `rotate-record`). On each of
+  them the budget was unspent and no hold latch armed — and the latch is the only thing that stops a node
+  which *cannot* rotate from restarting sing-box every 90 seconds. `record_rotation_rollback` now returns
+  non-zero on every unrecorded path (never fatal — a bookkeeping failure must not undo a completed
+  recovery) and the message is written from that result.
+
 ## [0.2.58] — 2026-08-04
 
 > hysteria2 port hopping: a range the client is handed UP FRONT, so the served port can move inside it

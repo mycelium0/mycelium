@@ -343,6 +343,7 @@ GATES=(
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/rotate_apply_executes.sh"
+	"tests/conformance/rotate_rollback_executes.sh"
 	"tests/conformance/version_changelog_sync.sh"
 	"tests/conformance/readme_badges_honest.sh"
 	"tests/conformance/config_least_privilege.sh"
