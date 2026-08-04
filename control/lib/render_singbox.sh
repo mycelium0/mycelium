@@ -69,9 +69,8 @@ myc_sb_singbox_only() {
 #   * idle_timeout (30m): how long an unused endpoint's last result is trusted before a forced re-probe.
 #     Set well above the interval so a momentarily idle endpoint is not re-ranked on stale data.
 # Calibration rationale lives here so a future change is a single, reviewed edit.
-MYC_URLTEST_INTERVAL="5m"
-MYC_URLTEST_TOLERANCE=150
-MYC_URLTEST_IDLE_TIMEOUT="30m"
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/urltest_defaults.sh"
 
 # myc_sb_proto_enabled PARAMS_JSON PROTO -> 0 if enabled, 1 otherwise.
 # A protocol is enabled when params.<proto>_enabled is exactly true. The dash in a

@@ -293,7 +293,26 @@ type AggregateInput struct {
 // MYC_URLTEST_* single source with render_singbox.sh (C22 anti-flapping hysteresis for the cross-node
 // auto-switch); the probe URL is the same generate_204 endpoint the subscription path uses.
 const (
-	urltestInterval    = "5m"
+	// 90s, matching the node's own rotate tick, so the system has ONE control period instead of two
+	// unrelated ones. MEASURED at the old 5m: a client whose selected member's port was DROPped stayed
+	// completely dead for 276 seconds and only then moved to a sibling — sing-box's urltest re-selects on
+	// its interval and nothing else, so the interval IS the blackout. An outage shorter than the interval
+	// produced no failover at all.
+	//
+	// The interval also bounds recovery from a block the NODE CANNOT SEE, which is the case this product
+	// exists for: there the client's own re-test is the entire recovery mechanism and no node-side
+	// decision helps. That is what argues for the shorter period rather than the probe budget.
+	//
+	// MEASURED AGAIN AFTER THE CHANGE, same fault, same vantage: 169s of blackout instead of 276s. NOT
+	// 90s — the interval governs how often the group RE-TESTS, and the re-test itself must time out
+	// before the selected member is abandoned. sing-box exposes no per-test timeout (the urltest option
+	// surface is interval / tolerance / idle_timeout / interrupt_exist_connections, verified against the
+	// 1.13.13 binary), so ~169s is close to the floor this mechanism can reach.
+	//
+	// The cost is probe regularity: one HTTPS GET per member per interval. idle_timeout (30m) is what
+	// bounds it — the group stops testing when nothing is using the tunnel, so an idle client is not a
+	// heartbeat.
+	urltestInterval    = "90s"
 	urltestTolerance   = 150
 	urltestIdleTimeout = "30m"
 	urltestURL         = "https://www.gstatic.com/generate_204"

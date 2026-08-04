@@ -13,6 +13,30 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.57] — 2026-08-04
+
+### Changed
+- **The client urltest interval drops from 5m to 90s**, matching the node's own rotate tick so the system
+  has one control period instead of two. The interval is what a client's blackout costs: sing-box's
+  urltest re-selects on its interval and on nothing else, so an outage shorter than the interval produces
+  no failover at all. It also bounds recovery from a block the NODE CANNOT SEE — the case this product
+  exists for, where the client's own re-test is the entire recovery mechanism.
+- **Measured, not assumed.** Same fault, same vantage, before and after: **276s of total blackout at 5m,
+  169s at 90s.** Not 90s — the interval sets how often the group re-tests, and the re-test must itself
+  time out before the member is abandoned. sing-box exposes no per-test timeout (its urltest surface is
+  interval / tolerance / idle_timeout / interrupt_exist_connections, verified against the 1.13.13
+  binary), so ~169s is near this mechanism's floor.
+- `idle_timeout` stays 30m: the group stops probing when nothing uses the tunnel, so a shorter interval
+  does not turn an idle client into a heartbeat.
+
+### Fixed
+- **A conformance check restated the interval as a literal.** `control/selftest.sh` asserted
+  `interval=="5m"`, so a deliberate, measured retune read as a regression — and the obvious way out is to
+  edit the number in the test, which is how a check stops checking. The three knobs now live in
+  `control/lib/urltest_defaults.sh`, a values-only file both the renderer and the check source. Not the
+  renderer itself: `render_singbox.sh` calls `myc_vocab_protos` at top level, so sourcing it standalone
+  dies command-not-found — the cross-lib dependency a gate sourcing a lib always trips over.
+
 ## [0.2.56] — 2026-08-04
 
 > Two gate rows that asserted nothing, and the broken seam that made the rotation rollback path

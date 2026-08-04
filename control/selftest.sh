@@ -396,12 +396,20 @@ jq -e 'all(.outbounds[]; .tag != "trojan")' "$SB_CLIENT" >/dev/null \
 	&& ok "disabled trojan absent from client outbounds" || bad "trojan present in client"
 jq -e 'any(.outbounds[]; .type == "urltest" and .tag == "auto")' "$SB_CLIENT" >/dev/null \
 	&& ok "client has a urltest outbound" || bad "no urltest outbound"
-# C22 anti-flapping: the subscription urltest carries the widened hysteresis defaults so a single-node
-# client does not thrash between near-equal endpoints on jitter.
-jq -e '(.outbounds[] | select(.type=="urltest"))
-	| .interval=="5m" and .tolerance==150 and .idle_timeout=="30m"' "$SB_CLIENT" >/dev/null \
-	&& ok "C22 subscription urltest carries anti-flap hysteresis (interval 5m, tolerance 150, idle_timeout 30m)" \
-	|| bad "C22 subscription urltest missing anti-flap hysteresis fields"
+# C22 anti-flapping: the subscription urltest carries the hysteresis knobs, and carries the values the
+# RENDERER declares rather than a literal copied into this file. A hardcoded "5m" here made a deliberate,
+# measured retune of the interval look like a regression, and the obvious way out of that is to edit the
+# number in the gate — which is how a gate stops testing anything. Read the single source instead.
+# The single source of the three knobs. NOT render_singbox.sh: that calls myc_vocab_protos at top level,
+# so sourcing it standalone dies command-not-found — the cross-lib dependency a gate always trips over.
+# shellcheck source=/dev/null
+[ -n "${MYC_URLTEST_INTERVAL:-}" ] || . "$(dirname "${BASH_SOURCE[0]}")/lib/urltest_defaults.sh"
+_ut_i="${MYC_URLTEST_INTERVAL:?the renderer must define MYC_URLTEST_INTERVAL}"
+_ut_t="${MYC_URLTEST_TOLERANCE:?}"; _ut_d="${MYC_URLTEST_IDLE_TIMEOUT:?}"
+jq -e --arg i "$_ut_i" --argjson t "$_ut_t" --arg d "$_ut_d" '(.outbounds[] | select(.type=="urltest"))
+	| .interval==$i and .tolerance==$t and .idle_timeout==$d' "$SB_CLIENT" >/dev/null \
+	&& ok "C22 subscription urltest carries the renderer's anti-flap hysteresis (interval $_ut_i, tolerance $_ut_t, idle_timeout $_ut_d)" \
+	|| bad "C22 subscription urltest does not carry the hysteresis the renderer declares (want interval=$_ut_i tolerance=$_ut_t idle_timeout=$_ut_d)"
 jq -e 'any(.outbounds[]; .type == "selector" and .tag == "mycelium")' "$SB_CLIENT" >/dev/null \
 	&& ok "client has a selector outbound" || bad "no selector outbound"
 # Priority order: vision first in both urltest and selector.
@@ -799,12 +807,12 @@ jq -e '([.outbounds[] | select(.type=="urltest") | .outbounds[]] | sort)
 	== ([.outbounds[] | select(.type | IN("vless","hysteria2","tuic","shadowsocks","trojan")) | .tag] | sort)' "$AGG_OUT" >/dev/null \
 	&& ok "urltest covers exactly all merged proxy outbounds (cross-node auto-switch)" || bad "urltest does not cover all node proxies"
 
-# C22 anti-flapping: the aggregate urltest carries the widened hysteresis defaults (interval 5m,
-# tolerance 150ms, idle_timeout 30m) so the cross-node auto-switch does not thrash on jitter.
-jq -e '(.outbounds[] | select(.type=="urltest"))
-	| .interval=="5m" and .tolerance==150 and .idle_timeout=="30m"' "$AGG_OUT" >/dev/null \
-	&& ok "C22 aggregate urltest carries anti-flap hysteresis (interval 5m, tolerance 150, idle_timeout 30m)" \
-	|| bad "C22 aggregate urltest missing anti-flap hysteresis fields"
+# C22 anti-flapping: the aggregate urltest carries the same knobs, again read from the renderer rather
+# than duplicated here — two copies of a constant drift, and the copy in the test wins the argument.
+jq -e --arg i "$_ut_i" --argjson t "$_ut_t" --arg d "$_ut_d" '(.outbounds[] | select(.type=="urltest"))
+	| .interval==$i and .tolerance==$t and .idle_timeout==$d' "$AGG_OUT" >/dev/null \
+	&& ok "C22 aggregate urltest carries the renderer's anti-flap hysteresis (interval $_ut_i, tolerance $_ut_t, idle_timeout $_ut_d)" \
+	|| bad "C22 aggregate urltest does not carry the hysteresis the renderer declares"
 
 # A parsed outbound is well-formed: the nodeA vision outbound is a vless reality outbound that
 # dials nodeA's address (proof the link was parsed into a real client outbound, not passed opaque).
