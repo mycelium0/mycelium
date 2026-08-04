@@ -88,6 +88,11 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 	// of the sing-box subscription above, so no sing-box outbound dials it.)
 	wsPath := paramStr(params, "ws_path", "/ws")
 
+	// hysteria2 port hopping: a range the client is given UP FRONT, so the served port can move inside it
+	// without any client learning anything. Empty = off, and off must render byte-identically to before.
+	hy2HopPorts := paramStr(params, "hysteria2_hop_ports", "")
+	hy2HopInterval := paramStr(params, "hysteria2_hop_interval", "30s")
+
 	ssPassword := paramStr(params, "ss_password", "")
 	trojanPassword := paramStr(params, "trojan_password", "")
 	hysteria2Password := paramStr(params, "hysteria2_password", "")
@@ -178,7 +183,12 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 			case "vless-ws-tls":
 				proxies = append(proxies, subVLESS{Type: "vless", Tag: d.Proto, Server: nodeAddr, ServerPort: port, UUID: c.ID, Flow: "", PacketEncoding: "xudp", TLS: plainTLS([]string{"http/1.1"}), Transport: &subTransport{Type: "ws", Path: wsPath, Headers: &subHeaders{Host: tlsSNI}}})
 			case "hysteria2":
-				proxies = append(proxies, subHysteria2{Type: "hysteria2", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Password: hy2pw, TLS: quicTLS([]string{"h3"})})
+				h2 := subHysteria2{Type: "hysteria2", Tag: d.Proto, Server: nodeAddr, ServerPort: port, Password: hy2pw, TLS: quicTLS([]string{"h3"})}
+				if hy2HopPorts != "" {
+					h2.ServerPorts = []string{hy2HopPorts}
+					h2.HopInterval = hy2HopInterval
+				}
+				proxies = append(proxies, h2)
 			case "tuic":
 				proxies = append(proxies, subTUIC{Type: "tuic", Tag: d.Proto, Server: nodeAddr, ServerPort: port, UUID: c.ID, Password: tuicpw, CongestionControl: "bbr", TLS: quicTLS([]string{"h3"})})
 			case "shadowsocks":

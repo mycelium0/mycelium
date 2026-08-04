@@ -13,6 +13,36 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.58] — 2026-08-04
+
+> hysteria2 port hopping: a range the client is handed UP FRONT, so the served port can move inside it
+> and no client has to learn anything. Off by default; a node that does not configure a range renders
+> byte-identically to one that never heard of the feature.
+
+### Added
+- **`hysteria2_hop_ports` / `hysteria2_hop_interval`.** When set, every issued sing-box config carries
+  `server_ports` + `hop_interval` on the hysteria2 outbound. Verified against sing-box 1.13.13: this is
+  the ONLY family that accepts a range — tuic rejects `server_ports` as an unknown field — so the
+  capability is one protocol wide and the changelog should not pretend otherwise. Both renderers emit it
+  byte-identically.
+- **The server half is a REDIRECT, and it reconciles.** The hysteria2 INBOUND cannot listen on a range
+  either (same verification), so nat/PREROUTING delivers the range onto the single served port. It
+  reconciles rather than appends: `harden_ufw` never removes anything, so a range that CHANGED would
+  otherwise leave the old redirect pointing at whatever it used to.
+- **`verify_hy2_hop_nat`, fail-closed, in the converge tail.** The range is a promise the CLIENT CONFIG
+  makes and the FIREWALL keeps, and nothing else on the node can see whether it is kept: post-apply
+  verification checks the service is active, the socket is bound and a LOOPBACK handshake completes —
+  and loopback traffic never traverses PREROUTING. A missing or drifted rule would kill hysteria2 for the
+  whole population with every green light still green.
+- `tests/conformance/hy2_hop_redirect_kept.sh` — a value table over range parsing (malformed and
+  out-of-bounds yield NO rule), install, replace-on-change, remove-on-clear, and the three ways
+  verification must notice: no rule, wrong range, wrong port.
+
+### Note
+- `rotate-port` stays reserved. The mechanism now exists for hysteria2, but unreserving it means an
+  unattended loop moving a served port behind a firewall rule; that comes after the redirect has run
+  in production, not in the same change that introduces it.
+
 ## [0.2.57] — 2026-08-04
 
 ### Changed

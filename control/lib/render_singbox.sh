@@ -606,6 +606,14 @@ myc_sb_render_subscription() {
 
 			# Per-identity password falls back to the shared protocol secret.
 			local hy2_pw trojan_pw ss_pw stls_pw tuic_pw
+			# hysteria2 port hopping — a range handed to the client UP FRONT, so the served port can move
+			# inside it without any client learning anything. Empty = off, and off must render byte-identically
+			# to a node that never heard of the feature. Read here, in the CLIENT renderer, because that is the
+			# function whose jq consumes it — the server renderer is a different function and a `local` there is
+			# not in scope here.
+			local hysteria2_hop_ports hysteria2_hop_interval
+			hysteria2_hop_ports="$(myc_params_get "$params" '.hysteria2_hop_ports' '')"
+			hysteria2_hop_interval="$(myc_params_get "$params" '.hysteria2_hop_interval' '30s')"
 			hy2_pw="${ipw:-$hysteria2_password}"
 			ss_pw="${ipw:-$ss_password}"
 			stls_pw="${ipw:-$shadowtls_password}"
@@ -626,6 +634,8 @@ myc_sb_render_subscription() {
 				--arg sspw "$ss_pw" \
 				--arg sssrv "$ss_password" \
 				--arg hy2pw "$hy2_pw" \
+				--arg hy2hop "$hysteria2_hop_ports" \
+				--arg hy2hopiv "$hysteria2_hop_interval" \
 				--arg trpw "$trojan_pw" \
 				--arg stlspw "$stls_pw" \
 				--arg tuicpw "$tuic_pw" \
@@ -658,7 +668,9 @@ myc_sb_render_subscription() {
 					# donor). transport.type "ws" matches the server template; sing-box CAN dial it (native ws),
 					# so unlike xhttp-tls this outbound is emitted on the sing-box engine, not refused.
 					"vless-ws-tls":         { type: "vless", tag: "vless-ws-tls",         server: $server, server_port: $ports["vless-ws-tls"],         uuid: $uuid, flow: "", packet_encoding: "xudp", tls: plain_tls(["http/1.1"]), transport: { type: "ws", path: $wspath, headers: { Host: $tsni } } },
-					"hysteria2":            { type: "hysteria2", tag: "hysteria2",        server: $server, server_port: $ports["hysteria2"], password: $hy2pw, tls: quic_tls(["h3"]) },
+					"hysteria2":            ({ type: "hysteria2", tag: "hysteria2",        server: $server, server_port: $ports["hysteria2"] }
+					                          + (if $hy2hop != "" then { server_ports: [$hy2hop], hop_interval: $hy2hopiv } else {} end)
+					                          + { password: $hy2pw, tls: quic_tls(["h3"]) }),
 					"tuic":                 { type: "tuic", tag: "tuic",                  server: $server, server_port: $ports["tuic"], uuid: $uuid, password: $tuicpw, congestion_control: "bbr", tls: quic_tls(["h3"]) },
 					"shadowsocks":          { type: "shadowsocks", tag: "shadowsocks",    server: $server, server_port: $ports["shadowsocks"], method: "2022-blake3-aes-256-gcm", password: ($sssrv + ":" + $sspw) },
 					"shadowtls":            { type: "shadowsocks", tag: "shadowtls",        method: "2022-blake3-aes-256-gcm", password: $sssrv, detour: "shadowtls-handshake" },

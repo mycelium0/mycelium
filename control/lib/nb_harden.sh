@@ -298,6 +298,80 @@ verify_ufw_exposure() {
 # verify_ufw_exposure then reports every served port admitted. To take a port out of service, remove the
 # transport from the node profile (so it stops being served) or disarm the timer first — see
 # docs/runbooks/node-bootstrap.md.
+# _hy2_hop_range — the configured hysteria2 port-hop range, or empty. Validated here so a malformed
+# value can never reach a firewall rule.
+_hy2_hop_range() {
+	local r
+	# jq DIRECTLY, like the rest of this file. myc_params_get lives in jqlib.sh, which nb_harden does not
+	# source: when it is absent the call yields an EMPTY string, which this function would read as "no
+	# range configured" and silently do nothing — a missing dependency disguised as a decision.
+	[ -f "${PARAMS_JSON:-}" ] || { printf ''; return 0; }
+	r="$(jq -r '.hysteria2_hop_ports // ""' "$PARAMS_JSON" 2>/dev/null)"
+	case "$r" in
+		'') printf '' ;;
+		[0-9]*:[0-9]*)
+			local lo="${r%%:*}" hi="${r##*:}"
+			case "$lo$hi" in *[!0-9]*) printf '' ; return 0 ;; esac
+			[ "$lo" -ge 1024 ] && [ "$hi" -le 65535 ] && [ "$lo" -lt "$hi" ] && printf '%s' "$r" || printf '' ;;
+		*) printf '' ;;
+	esac
+}
+
+# reconcile_hy2_hop_nat — the SERVER half of hysteria2 port hopping.
+#
+# The client is handed a RANGE and hops across it; sing-box's hysteria2 INBOUND cannot listen on a range
+# (verified against 1.13.13 — `listen_port_range` and `server_ports` are both unknown fields there), so
+# the range is delivered by a REDIRECT in nat/PREROUTING onto the single port the listener holds.
+#
+# THIS RULE IS THE ONLY THING KEEPING THE PROMISE THE CLIENT CONFIG MAKES, and nothing else in the node's
+# post-apply verification can see it: verify_post_apply checks that the service is active, the socket is
+# bound and a LOOPBACK handshake completes — and loopback traffic never traverses PREROUTING, so the
+# redirect is invisible to every check the node performs on itself. A drifted or missing rule kills
+# hysteria2 for the entire population while every green light stays green. That is why this reconciles
+# rather than merely adds: an obsolete range must be REMOVED, not left redirecting.
+reconcile_hy2_hop_nat() {
+	have iptables || return 0
+	local want lstn wan
+	want="$(_hy2_hop_range)"
+	lstn="$(jq -r '.hysteria2_port // 8444' "$PARAMS_JSON" 2>/dev/null)"
+	# Drop every rule we previously installed, whatever its range — identified by our own comment, never
+	# by position, so a hand-added rule of someone else's is never touched.
+	local line
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		# shellcheck disable=SC2086
+		run iptables -t nat -D PREROUTING $line 2>/dev/null || true
+	done < <(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //')
+	[ -n "$want" ] || { log "hysteria2 port hopping: not configured; no redirect installed."; return 0; }
+	case "$lstn" in ''|*[!0-9]*) warn "hysteria2 port hopping: hysteria2_port is not a number ('$lstn') — refusing to install a redirect."; return 0 ;; esac
+	wan="$(ip route show default 2>/dev/null | awk '/default/{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+	[ -n "$wan" ] || { warn "hysteria2 port hopping: could not resolve the WAN interface — refusing to install a redirect."; return 0; }
+	run iptables -t nat -A PREROUTING -i "$wan" -p udp --dport "$want" -m comment --comment 'myc-hy2-hop' -j REDIRECT --to-ports "$lstn" \
+		|| { warn "hysteria2 port hopping: could not install the redirect — clients hopping outside $lstn will NOT reach this node."; return 0; }
+	log "hysteria2 port hopping: udp $want -> $lstn redirected on $wan."
+}
+
+# verify_hy2_hop_nat — fail-closed: if the client configs promise a range, the rule that keeps that
+# promise must exist and point at the port actually being served. Advisory checks are what let a broken
+# firewall look healthy; this one is loud.
+verify_hy2_hop_nat() {
+	local want lstn rule
+	want="$(_hy2_hop_range)"
+	[ -n "$want" ] || return 0
+	lstn="$(jq -r '.hysteria2_port // 8444' "$PARAMS_JSON" 2>/dev/null)"
+	rule="$(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | head -1)"
+	if [ -z "$rule" ]; then
+		warn "hysteria2 port hopping: params advertise the range $want to every client, but NO redirect is installed. Every client that hops off $lstn reaches nothing, and no node-local check can see this — loopback traffic does not traverse PREROUTING."
+		return 1
+	fi
+	printf '%s' "$rule" | grep -qF -- "--dport $want" \
+		|| { warn "hysteria2 port hopping: the installed redirect does not cover the advertised range $want (rule: $rule)."; return 1; }
+	printf '%s' "$rule" | grep -qE -- "--to-ports ${lstn}([[:space:]]|$)" \
+		|| { warn "hysteria2 port hopping: the redirect points somewhere other than the served port $lstn (rule: $rule)."; return 1; }
+	log "hysteria2 port hopping: verified — udp $want redirects to the served port $lstn."
+	return 0
+}
+
 harden_ufw() {
 	log "configuring the host firewall (ufw) for the enabled canonical ports"
 	need_root
@@ -381,6 +455,9 @@ harden_ufw() {
 	# to exist: it was absent on one live node (so this branch never fired at all) and WRONG on two (it
 	# held the canonical default while the tunnel ran elsewhere, so the firewall admitted a silent port
 	# and not the real one).
+	# The hop range must be admitted too, or the redirect never sees a packet.
+	local _hop; _hop="$(_hy2_hop_range)"
+	[ -z "$_hop" ] || { _harden_ufw_allow "${_hop//:/\:}/udp"; _served="$_served ${_hop}/udp"; }
 	if [ "$DO_AMNEZIAWG" -eq 1 ] && command -v _awg_resolve_port >/dev/null 2>&1; then
 		local awgp; awgp="$(_awg_resolve_port)"
 		_harden_ufw_allow "$awgp/udp"
@@ -388,6 +465,9 @@ harden_ufw() {
 	fi
 	# `ufw enable` is the one step that stays unconditional-and-fatal: everything above is a rule that can
 	# wait a cadence, this is whether the firewall is running at all. Already-active is a no-op in ufw.
+	# The redirect goes in AFTER the allow rules: admitting the range without redirecting it just opens a
+	# silent range, and redirecting without admitting it never sees a packet.
+	reconcile_hy2_hop_nat
 	if ! run ufw --force enable; then
 		warn "'ufw --force enable' FAILED — the host firewall is not converged."
 		return 1

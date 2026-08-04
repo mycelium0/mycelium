@@ -97,8 +97,17 @@ type subHysteria2 struct {
 	Tag        string `json:"tag"`
 	Server     string `json:"server"`
 	ServerPort int    `json:"server_port"`
-	Password   string `json:"password"`
-	TLS        subTLS `json:"tls"`
+	// ServerPorts and HopInterval are hysteria2 PORT HOPPING, omitted entirely when unconfigured so the
+	// emitted config is byte-identical to what it was before the feature existed.
+	//
+	// Only hysteria2 has this: verified against sing-box 1.13.13, tuic rejects `server_ports` as an
+	// unknown field, and the hysteria2 INBOUND rejects it too — the server listens on one port and a
+	// firewall DNAT maps the range onto it. That asymmetry is the whole design constraint: the range is a
+	// promise the FIREWALL keeps, and nothing in the node's post-apply verification can see a firewall.
+	ServerPorts []string `json:"server_ports,omitempty"`
+	HopInterval string   `json:"hop_interval,omitempty"`
+	Password    string   `json:"password"`
+	TLS         subTLS   `json:"tls"`
 }
 
 type subTUIC struct {

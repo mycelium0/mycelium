@@ -620,6 +620,11 @@ _report_loop_drift() {
 converge_node_tail() {
 	local failed=""
 	_report_loop_drift
+	# The promise every issued hysteria2 config makes is kept by a firewall rule that no other check on
+	# this node can see. Verify it here, where a failure is reported rather than assumed away.
+	if command -v verify_hy2_hop_nat >/dev/null 2>&1; then
+		verify_hy2_hop_nat || failed="$failed hysteria2-hop-redirect"
+	fi
 	# Every caller reaches here only after a promote was applied AND verified (or after establishing there
 	# was nothing to promote), so the previous run's failure snapshots are stale by definition. Retiring
 	# them here rather than in flow_update alone is what bounds their lifetime on the operator-driven paths
