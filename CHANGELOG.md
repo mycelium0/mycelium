@@ -13,6 +13,28 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.56] — 2026-08-04
+
+> Two gate rows that asserted nothing, and the broken seam that made the rotation rollback path
+> untestable in the first place.
+
+### Fixed
+- **The documented test seam killed its own caller.** `MYC_NB_NO_DISPATCH=1` is meant to let a test
+  SOURCE `node-bootstrap.sh` and exercise the functions the entrypoint defines — `verify_post_apply`
+  among them. The trailing `exit 0` sat OUTSIDE the guard that skips dispatch, so sourcing exited the
+  sourcing shell and no test could ever reach those functions. That is precisely why the rotation
+  rollback branch has never been executed by anything: it was unreachable, not merely uncovered.
+- **`rotate_apply_executes` row 4 asserted nothing.** It narrowed `OPERATOR_TOGGLE_KEYS` so that neither
+  the enable key nor the port key was allowed, so `apply_rotation_to_params` aborted at the enable-key
+  resolution and `_rotation_port_key_if_moving` was never reached — the port read its original value
+  because NOTHING RAN. Proven by deleting the port-key guard outright: the gate stayed fully green. The
+  row now allows the enable key and excludes only the port key, and the same mutation fails it.
+
+### Known, unfixed
+- `fp_ab_probe_producer`'s final row is vacuous by the same mechanism: deleting the rc-2 break in
+  `nb_selftest.sh` leaves the gate green. Its expectation is byte-identical to the preceding row's, so
+  it cannot distinguish the case it names.
+
 ## [0.2.55] — 2026-08-04
 
 > **Rotation can finally do something.** The move that works is the one that was dismissed as having no

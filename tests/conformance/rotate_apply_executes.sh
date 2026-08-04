@@ -158,7 +158,12 @@ plan() { # PROTO TO_PORT [ACTION] -> a minimal act plan
 	# test reported the wrong reason entirely. A fixture that leaks state makes later rows measure the
 	# fixture.
 	_saved_toggles="$OPERATOR_TOGGLE_KEYS"
-	OPERATOR_TOGGLE_KEYS='["vless_reality_vision_enabled"]'
+	# The ENABLE key must stay allowed and only the PORT key be excluded. Narrowing the surface so that
+	# neither is allowed made this row assert nothing: apply_rotation_to_params aborts at the enable-key
+	# resolution, _rotation_port_key_if_moving is never reached, and the port reads 8444 because NOTHING
+	# RAN. Proven by deleting the port-key guard outright — the gate stayed fully green. That is this
+	# project's own signature failure: a pass indistinguishable from "the code under test did not execute".
+	OPERATOR_TOGGLE_KEYS='["hysteria2_enabled"]'
 	plan hysteria2 8455 > "$PL"
 	( apply_rotation_to_params "$PL" "$P" ) >/dev/null 2>&1 || true
 	[ "$(jq -r '.hysteria2_port' "$P")" = "8444" ] \
@@ -166,7 +171,9 @@ plan() { # PROTO TO_PORT [ACTION] -> a minimal act plan
 		|| badln "the rotation moved a port key the operator's own toggle surface does not include — an unattended loop must not reach past it"
 
 	# 4b. AND the whole apply must abort, not proceed with an empty key. `die` inside $( ) kills only the
-	# substitution, so an unguarded caller carries on and writes a key named "" into params.
+	# substitution, so an unguarded caller carries on and writes a key named "" into params. THIS row is
+	# the one that needs the enable key excluded, so it narrows the surface itself rather than inheriting.
+	OPERATOR_TOGGLE_KEYS='["vless_reality_vision_enabled"]'
 	seed_params "$P"; _before_narrow="$(cat "$P")"
 	plan hysteria2 0 > "$PL"
 	if ( apply_rotation_to_params "$PL" "$P" ) >/dev/null 2>&1; then

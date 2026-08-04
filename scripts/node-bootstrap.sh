@@ -1082,5 +1082,9 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		fp-rotate-disarm)  fp_rotate_disarm ;;
 		*) die "unknown mode: $MODE" ;;
 	esac
+	# INSIDE the guard. A bare `exit 0` after the `fi` exits the SOURCING shell, so the documented
+	# MYC_NB_NO_DISPATCH seam — the only way a test can reach the functions this entrypoint defines,
+	# verify_post_apply among them — killed every caller that tried to use it. The rollback branch of the
+	# rotation executor is untestable for exactly this reason.
+	exit 0
 fi
-exit 0
