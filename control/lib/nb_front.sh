@@ -23,8 +23,29 @@ FRONT_DIR="${FRONT_DIR:-$STATE_DIR/front}"                     # where the compi
 # front_setup — apply the operator front when configured + enabled; otherwise a silent no-op. Called at the
 # tail of render_serve_bundle so it tracks every bundle render, and is idempotent.
 front_setup() {
-	[ -f "$FRONT_CONFIG" ] || return 0          # default-off: no config => inert
 	have jq || return 0
+	# node.config.json IS the node profile (ADR-0034), and it carries a `.front` object that
+	# spec.NodeProfile declares and Validate() checks — so an operator who configures the front THERE gets
+	# it accepted, reported by `node plan` / `node validate`, and consumed by nothing at all: this function
+	# only ever read the standalone front.config.json. Two files, one of them silently inert, and the inert
+	# one is the one the unified profile tells an operator to use.
+	#
+	# The standalone file still WINS when present (it is the older, explicit, node-local placement and an
+	# operator who put it there means it). The profile is the fallback, materialised into the same shape the
+	# rest of this function already consumes, so there is exactly one code path below.
+	local profile="${NODE_CONFIG_JSON:-$STATE_DIR/node.config.json}"
+	if [ ! -f "$FRONT_CONFIG" ] && [ -f "$profile" ] \
+	   && jq -e '.front | objects | select(.enabled == true)' "$profile" >/dev/null 2>&1; then
+		if jq -e '.front' "$profile" >"$STATE_DIR/front.from-profile.json" 2>/dev/null; then
+			chmod 0600 "$STATE_DIR/front.from-profile.json" 2>/dev/null || true
+			FRONT_CONFIG="$STATE_DIR/front.from-profile.json"
+			log "front: taking the configuration from the node profile ($profile .front); no standalone $STATE_DIR/front.config.json is present."
+		else
+			rm -f "$STATE_DIR/front.from-profile.json" 2>/dev/null || true
+			warn "front: the node profile declares .front but it could not be materialised; no fronting this run."
+		fi
+	fi
+	[ -f "$FRONT_CONFIG" ] || return 0          # default-off: no config anywhere => inert
 	local enabled
 	enabled="$(jq -r '.enabled // false' "$FRONT_CONFIG" 2>/dev/null)"
 	if [ "$enabled" != "true" ]; then

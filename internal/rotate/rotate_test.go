@@ -440,3 +440,74 @@ func TestExposureTiersAreTotalAndOrdered(t *testing.T) {
 		t.Error("an unknown proto must sort LAST, never be treated as safe")
 	}
 }
+
+// TestPlanNeverEmitsAPortMoveWhileRotatePortIsReserved is the guard the RESERVATION actually needs.
+//
+// `rotate-port` is declared, validated, round-trips, and is listed as deliberately not requestable — and
+// the reservation was enforced on the ACTION NAME alone. The capability rode in under promote-sibling:
+// ToPort reaches a candidate from the node-local measure config, the promote branch copied the candidate
+// wholesale, and the executor reads `.to.to_port` with no reference to `.to.action`. Port keys are in the
+// operator allowlist, so a moved port SURVIVES write_params. The result was an unattended 90-second loop
+// able to move a served port that every issued client config still names, with no channel to re-fetch —
+// precisely the outage the reservation was written to prevent.
+//
+// Asserting on the action name cannot catch that: the plan says "promote-sibling" in both the safe and the
+// unsafe case. The assertion has to be on the FIELD THAT CAUSES THE MOVE, over every branch that can emit
+// an act plan. Remove `to.ToPort = 0` from either branch of Plan and this fails.
+func TestPlanNeverEmitsAPortMoveWhileRotatePortIsReserved(t *testing.T) {
+	// A candidate carrying a port move, exactly as a hand-edited measure.config.json would supply it.
+	poisoned := cand("vless-reality-grpc", 0.9, true)
+	poisoned.FromPort = 8443
+	poisoned.ToPort = 9443
+
+	cases := []struct {
+		name string
+		in   PlanInput
+	}{
+		{
+			name: "promote-sibling: the ranked candidate carries a port move",
+			in: func() PlanInput {
+				in := base()
+				in.Ranked = []spec.RotationCandidate{poisoned}
+				return in
+			}(),
+		},
+		{
+			name: "demote-active: the incumbent carries a port move and no sibling beats it",
+			in: func() PlanInput {
+				in := base()
+				a := activeCand(0.2)
+				a.FromPort = 8443
+				a.ToPort = 9443
+				in.Active = a
+				// No candidate beats the incumbent by the margin -> the demote branch, if the baseline
+				// leaves an independent fallback. Two distinct families in the issued baseline do.
+				in.Ranked = []spec.RotationCandidate{cand("vless-reality-grpc", 0.2, true)}
+				in.IssuedBaseline = []string{"vless-reality-vision", "hysteria2", "trojan"}
+				return in
+			}(),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := Plan(tc.in)
+			if err != nil {
+				t.Fatalf("Plan: %v", err)
+			}
+			if !p.Act {
+				t.Skipf("this input held (%s) — the row asserts about an ACT plan", p.HeldBecause)
+			}
+			if p.To.ToPort != 0 {
+				t.Fatalf("the planner emitted an act plan carrying to_port=%d under action %q. "+
+					"The executor applies to_port without consulting the action, and the port key survives "+
+					"write_params, so this is a served-port move executed unattended while rotate-port is "+
+					"supposed to be unrequestable. Every issued client config still names the old port.",
+					p.To.ToPort, p.To.Action)
+			}
+			if p.To.Action == spec.RotationActionRotatePort {
+				t.Fatalf("the planner emitted the reserved action %q outright", p.To.Action)
+			}
+		})
+	}
+}

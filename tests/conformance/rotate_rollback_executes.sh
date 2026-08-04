@@ -282,9 +282,21 @@ for mode in restart-once verify; do
 		&& ok "step 2: operator-overrides.json is byte-restored to its pre-rotation snapshot" \
 		|| badln "the overlay still holds the rotated delta ($(field "$D" overlay)). It survives write_params, so the next --update or timer tick RE-APPLIES the rotation that just failed — a flap with no upper bound."
 
-	has "$D" write_params \
-		&& ok "step 3: params are regenerated from the reverted overlay" \
-		|| badln "write_params was never called during recovery; params.json keeps the rotated values while the config does not."
+	# ORDER, not membership. `has write_params` was satisfied by the PHASE-B call, which always precedes
+	# Phase C on both failure edges — so deleting the rollback's own write_params left this row green in
+	# every scenario and the whole suite unchanged. The digest is already ordered; assert against the
+	# position of rollback_config, which only the recovery branch writes.
+	_calls="$(field "$D" calls)"
+	_pos_rb="${_calls%%rollback_config*}"; _pos_rb=${#_pos_rb}
+	_after="${_calls:$_pos_rb}"
+	case "$_calls" in
+		*rollback_config*)
+			case "$_after" in
+				*write_params*) ok "step 3: params are regenerated AFTER the overlay is reverted" ;;
+				*) badln "write_params ran only BEFORE the rollback (Phase B), never after it. params.json keeps the rotated values while the live config is last-known-good, and the two stay disagreed until some later converge happens to reconcile them — on the very branch that exists to restore a consistent node." ;;
+			esac ;;
+		*) badln "rollback_config never ran, so there is no recovery-ordered write_params to look for" ;;
+	esac
 
 	[ "$(field "$D" restarts)" -ge 2 ] 2>/dev/null \
 		&& ok "step 4: the service is restarted onto the restored config ($(field "$D" restarts) restarts seen)" \

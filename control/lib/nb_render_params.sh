@@ -626,11 +626,6 @@ _report_loop_drift() {
 converge_node_tail() {
 	local failed=""
 	_report_loop_drift
-	# The promise every issued hysteria2 config makes is kept by a firewall rule that no other check on
-	# this node can see. Verify it here, where a failure is reported rather than assumed away.
-	if command -v verify_hy2_hop_nat >/dev/null 2>&1; then
-		verify_hy2_hop_nat || failed="$failed hysteria2-hop-redirect"
-	fi
 	# Every caller reaches here only after a promote was applied AND verified (or after establishing there
 	# was nothing to promote), so the previous run's failure snapshots are stale by definition. Retiring
 	# them here rather than in flow_update alone is what bounds their lifetime on the operator-driven paths
@@ -645,8 +640,30 @@ converge_node_tail() {
 	# unattended from the timer, where argv carries no posture at all.
 	if [ "$(node_profile_harden)" = "on" ]; then
 		( harden_ufw ) || failed="$failed firewall"
+		# AFTER the firewall step, not before it. reconcile_hy2_hop_nat — the only thing that installs the
+		# hysteria2 hop REDIRECT — runs inside harden_ufw, so verifying first reported
+		# "convergence INCOMPLETE — hysteria2-hop-redirect" on the very tick that was about to install the
+		# rule, and returned 1 from a state the next statement corrected. It never fired before only because
+		# verify_hy2_hop_nat returns 0 early on an empty range and the range key was UNSETTABLE until the
+		# commit that made it settable — the fix removed the mask and left the ordering.
+		if command -v verify_hy2_hop_nat >/dev/null 2>&1; then
+			verify_hy2_hop_nat || failed="$failed hysteria2-hop-redirect"
+		fi
 	else
 		log "host firewall: posture is OFF for this node (node.config.json .harden, or the remembered --no-harden bootstrap); leaving ufw untouched."
+		# A range advertised on a node whose firewall this run must not touch is a CONFLICT, not a no-op.
+		# reconcile_hy2_hop_nat never runs here, so every issued hysteria2 config names a range with no
+		# PREROUTING rule behind it — and nothing else on the node can see that (verify_post_apply checks
+		# the service, the bind and a LOOPBACK handshake; loopback never traverses PREROUTING). Reported,
+		# not silently installed: the operator asked this run to keep its hands off the firewall, so the
+		# resolution is theirs — turn the posture on, install the redirect by hand, or clear the range.
+		if command -v _hy2_hop_range >/dev/null 2>&1 && [ -n "$(_hy2_hop_range)" ]; then
+			warn "hysteria2 advertises the hop range $(_hy2_hop_range) to every client, and the redirect that"
+			warn "  makes it real is installed by the firewall step, which is OFF for this node. Those clients"
+			warn "  hop across ports nothing serves. Set .harden=true, install the REDIRECT by hand, or clear"
+			warn "  hysteria2_hop_ports in $OPERATOR_OVERRIDES."
+			failed="$failed hysteria2-hop-redirect(posture-off)"
+		fi
 	fi
 	( render_serve_bundle ) || failed="$failed served-bundle"
 	if [ -n "$failed" ]; then

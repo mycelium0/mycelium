@@ -13,6 +13,47 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.61] — 2026-08-05
+
+> An audit of everything still marked deferred, reserved or known-unfixed. The headline: the `rotate-port`
+> reservation was enforced on the ACTION NAME while the capability rode in under `promote-sibling`. Six
+> more, three of them in gates written this week — including one whose header claimed a check it did not
+> perform.
+
+### Fixed
+- **`rotate-port` was reserved in name only.** `Plan`'s promote branch copied the ranked candidate wholesale
+  and normalised only `Action`, so a `to_port` reaching a candidate from the node-local measure config was
+  emitted under `promote-sibling` — and the executor applies `.to.to_port` without consulting `.to.action`,
+  with port keys in the operator allowlist so the move survives `write_params`. An unattended 90-second loop
+  could move a served port that every issued client config still names, with no channel to re-fetch: the
+  exact outage the reservation exists to prevent. The demote branch had defended itself since it was
+  unreserved; this one never did. `to.ToPort = 0`, plus a planner test that asserts on the FIELD, not the name.
+- **The Go unit test pinning the operator allowlist was left red** by the previous commit, and `make test`
+  is the blocking half of CI. Every real regression until now would have arrived under a known failure.
+- **`converge_node_tail` verified the hysteria2 redirect before the step that installs it**, and verified it
+  unconditionally on a node whose firewall posture is off — where `reconcile_hy2_hop_nat` never runs at all.
+  Ordering fixed; the posture-off case now reports the conflict (a range advertised to clients that this
+  node is not permitted to make real) instead of asserting a rule nothing installs.
+- **`spec.NodeProfile.Front` was declared, validated and reported by `node plan`, and consumed by nothing** —
+  `front_setup` read only the standalone `front.config.json`, so an operator following the unified profile
+  configured a front that never existed. The profile is now the fallback source; the standalone file still wins.
+
+### Fixed — in the gates themselves
+- `hy2_hop_halves_agree.sh` executed a `sed`-extracted copy of the client renderer's validation and its
+  header claimed the copy's currency was checked. It was not. A second, unvalidated read added anywhere
+  after the block would have left all 19 rows green. Now checked, both count and position.
+- The same gate's round-trip row REPRODUCED `merge_operator_overrides` rather than driving it — so removing
+  the key from the real reduce left the row green and the defect just fixed fully reintroducible. It drives
+  the shipped function now.
+- `rotate_rollback_executes.sh` "step 3" was a membership test satisfied by the Phase-B `write_params`,
+  which always precedes Phase C. Deleting the rollback's own call left the row green. Now an ORDER assertion.
+- `reach_method_matches_transport.sh` only ever iterated what was EMITTED, so a family dropped from the
+  member enumeration vanished from both configs and passed — the two agreeing precisely because it was
+  absent from both. The forward direction its own comment promised is now checked.
+- `vocab_single_source.sh` printed "in sync with the Go source of truth" after SKIPPING the only check that
+  establishes it. On every jq-only lane — including a node, where the committed file is authoritative and
+  nothing regenerates it — it could not fail while claiming it had checked.
+
 ## [0.2.60] — 2026-08-05
 
 > hysteria2 port hopping shipped as "off by default". It was not off — it was UNSETTABLE. The key was in

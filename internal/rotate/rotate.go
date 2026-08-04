@@ -240,6 +240,21 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	// from a set it already holds.
 	to := in.Ranked[bestIdx]
 	to.Action = spec.RotationActionPromoteSibling
+	// AND THE PORT IS NOT A THING THIS BRANCH MAY MOVE. The comment above says rotate-port "stays
+	// reserved", and the reservation was enforced on the action NAME only — while the capability rode in
+	// under promote-sibling. The executor reads .to.to_port with no reference to .to.action
+	// (nb_rotate_apply.sh: the dry-run preview and the live overlay persist both), and port keys are in
+	// the operator allowlist, so the moved port SURVIVES write_params. ToPort reaches a candidate from
+	// the node-local measure config, which generate_measure_configs writes with to_port:0 but which runs
+	// only from operator verbs — never from a converge or a timer tick — so a hand-edited value persists
+	// indefinitely and the 90-second loop acts on it unattended. Every subscription already in a client's
+	// hands names the old port and there is no live channel to re-fetch: the exact outage the reservation
+	// exists to prevent, executed under a name the reservation did not cover.
+	//
+	// The demote branch three screens up has defended itself this way since it was unreserved. This one
+	// never did. Zeroing it here rather than validating downstream keeps the closed set closed at the ONE
+	// place that decides the move.
+	to.ToPort = 0
 	ns.LastRotateAt = in.Now
 	ns.RotationsInWindow++
 	ns.ImpairedStreak = 0

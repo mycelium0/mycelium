@@ -112,6 +112,23 @@ if [ -z "$BLOCK" ]; then
 	badln "could not extract the client renderer's hop-range validation from render_singbox.sh — this whole section would compare nothing"
 	BLOCK='hysteria2_hop_ports=""'
 fi
+
+# THE COPY MUST BE THE WHOLE STORY. Running an extracted copy is only sound while the extraction is the
+# only thing that decides the value — and this header used to CLAIM that was checked when it was not, which
+# is the same defect the gate exists to catch, aimed at the gate. A second, unvalidated read of
+# .hysteria2_hop_ports added anywhere after the block leaves the extracted text byte-identical, so all 19
+# rows below stay green while every issued client config carries the raw operator string.
+_reads="$(grep -cF "myc_params_get \"\$params\" '.hysteria2_hop_ports'" "$RENDER")"; _reads="${_reads:-0}"
+[ "$_reads" = "1" ] \
+	&& ok "the client renderer reads the range exactly once (the extracted block is the whole decision)" \
+	|| badln "render_singbox.sh reads .hysteria2_hop_ports $_reads times. This gate executes an EXTRACTED COPY of the validation, so a second read is invisible to every row below: the table stays green while the renderer emits an unvalidated value and reconcile_hy2_hop_nat installs no rule — the half whose failure the node cannot observe."
+_read_line="$(grep -nF "myc_params_get \"\$params\" '.hysteria2_hop_ports'" "$RENDER" | head -1 | cut -d: -f1)"
+_val_line="$(grep -nF '# VALIDATE, with the same rule as _hy2_hop_range' "$RENDER" | head -1 | cut -d: -f1)"
+if [ -n "$_read_line" ] && [ -n "$_val_line" ] && [ "$_val_line" -gt "$_read_line" ]; then
+	ok "and the validation sits after that read, so nothing reaches the emitter unvalidated"
+else
+	badln "the validation block (line ${_val_line:-?}) does not follow the read (line ${_read_line:-?}) — the value is emitted before it is judged"
+fi
 cat >"$WORK/render_half.sh" <<EOF
 hysteria2_hop_ports="\$1"
 $BLOCK
@@ -252,12 +269,21 @@ printf '\n-- the operator overlay round trip --\n'
 	OPERATOR_TOGGLE_KEYS="$(jq -ec '.operator_toggle_keys' "$VOCAB")"
 	printf '{"hysteria2_enabled":true,"hysteria2_hop_ports":"20000:21000"}\n' >"$OPERATOR_OVERRIDES"
 	jq -n '{hysteria2_enabled:false, hysteria2_port:8444, hysteria2_hop_ports:"", hysteria2_hop_interval:"30s"}' >"$WORK/defaults.json"
-	# The merge as nb_render_params.sh performs it. Driving the shipped function needs the whole entrypoint
-	# environment; the jq program is the load-bearing part and is reproduced here verbatim from that file.
-	jq -n --slurpfile base "$WORK/defaults.json" --slurpfile ovr "$OPERATOR_OVERRIDES" \
-		--argjson keys "$OPERATOR_TOGGLE_KEYS" \
-		'($base[0] // {}) as $d | ($ovr[0] // {}) as $o
-		 | reduce $keys[] as $k ($d; if ($o|has($k)) then . + { ($k): $o[$k] } else . end)' >"$WORK/merged.json"
+	# DRIVE THE SHIPPED FUNCTION. This row used to reproduce the jq program instead — which meant removing
+	# the key from the real reduce left the row green, and the defect it was written to pin was fully
+	# reintroducible without a single gate noticing. merge_operator_overrides needs nothing but
+	# $OPERATOR_OVERRIDES, $OPERATOR_TOGGLE_KEYS and log/die, so there was never a reason to copy it.
+	STATE_DIR="$WORK"                 # nb_render_params.sh sets OPERATOR_OVERRIDES from it at source time
+	log()  { :; }
+	warn() { :; }
+	die()  { printf 'lib: %s\n' "$*" >&2; exit 1; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	# shellcheck source=/dev/null
+	. "$PARAMS_LIB" 2>/dev/null || { printf 'could not source nb_render_params.sh\n' >&2; exit 1; }
+	OPERATOR_OVERRIDES="$WORK/ovr.json"
+	OPERATOR_TOGGLE_KEYS="$(jq -ec '.operator_toggle_keys' "$VOCAB")"
+	merge_operator_overrides "$WORK/defaults.json" || exit 1
+	cp "$WORK/defaults.json" "$WORK/merged.json"
 	got="$(jq -r '.hysteria2_hop_ports' "$WORK/merged.json")"
 	[ "$got" = "20000:21000" ] && exit 0 || { printf '%s' "$got" >"$WORK/got"; exit 1; }
 ) \

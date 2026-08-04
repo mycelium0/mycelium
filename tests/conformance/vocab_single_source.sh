@@ -215,5 +215,17 @@ if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the vocabulary is not single-sourced (file drift or internal inconsistency).\n' >&2
 	exit 1
 fi
+# THE PASS LINE MUST NOT CLAIM THE HALF THAT WAS SKIPPED. Without a toolchain this gate never diffs
+# against the Go emission, and the internal-consistency checks it does run only confirm that each registry
+# proto has its enable/port key — a knob added to operatorTunableKnobs is invisible to every one of them.
+# Printing "in sync with the Go source of truth" there is the project's own signature defect turned on the
+# gate itself, and it matters because install_tooling ships the COMMITTED vocab.json verbatim and nothing
+# regenerates it on a node: on every jq-only lane this file is authoritative and this is its only backstop.
+if [ -z "$GO" ]; then
+	printf 'PASS (internal consistency only): control/vocab.json is self-consistent. The Go regen diff — the\n'
+	printf '      only check that establishes SYNC WITH THE GO SOURCE — was skipped for want of a toolchain,\n'
+	printf '      so this run did not verify it. CI and the node lanes do.\n'
+	exit 0
+fi
 printf 'PASS: control/vocab.json is internally consistent and in sync with the Go source of truth.\n'
 exit 0

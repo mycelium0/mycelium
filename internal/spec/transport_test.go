@@ -171,6 +171,11 @@ func TestOperatorToggleKeysMatchesLegacy(t *testing.T) {
 		"vless_xhttp_tls_port", "vless_ws_tls_port", "hysteria2_port", "tuic_port", "shadowsocks_port", "shadowtls_port",
 		"trojan_port", "xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket",
 		"client_fingerprint", // RP-0015: the client uTLS-preset knob joined the tunable allowlist.
+		// hysteria2 port hopping. Adding these two to operatorTunableKnobs without adding them here left
+		// this test RED at HEAD, and `make test` is the blocking half of CI — so the next real regression
+		// would have arrived under a failure someone had already learned to expect. That has happened once
+		// in this repo already (b314bc8: "CI had been red for five commits and I never looked").
+		"hysteria2_hop_ports", "hysteria2_hop_interval",
 	}
 	got := OperatorToggleKeys()
 	asSet := func(s []string) map[string]int {

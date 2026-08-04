@@ -100,6 +100,30 @@ seed_params() { # PARAMS_PATH
 		case " $want " in *" $ref "*) ;; *) badln "anchor '$ref' is not a sing-box transport in the registry" ;; esac
 	done
 
+	# AND THE FORWARD DIRECTION, which this comment promised and the loop above did not do. Every check
+	# here iterated `.targets[]` — what was EMITTED — so it could only judge anchors that exist. Drop a
+	# family from the members enumeration in nb_measure.sh and it vanishes from BOTH configs at once:
+	# validateAgainstReach still passes because the two agree with each other, and this gate still passed
+	# because it only inspected what was emitted. The family goes silently unmeasured, the planner can
+	# never select it, and that is a rerun of the original defect — the two families most likely to survive
+	# a block becoming the two the planner cannot see — under the gate written to prevent it.
+	enabled="$(jq -r --slurpfile v "$VOCAB" '
+		[ $v[0].protos[]? | select(.engine=="sing-box") | select(.enable_key != "")
+		  | . as $p | select((($params[$p.enable_key]? // false) == true)) | .proto ] | sort | .[]' \
+		--argjson params "$(cat "$PARAMS_JSON")" <<<'null' 2>/dev/null)"
+	if [ -z "$enabled" ]; then
+		badln "could not derive the ENABLED transport set from params + vocab — the forward check would pass vacuously, which is exactly how the reverse-only version of it passed for so long"
+	else
+		anchored="$(jq -r '.targets[].ref' "$cfg" | sort -u)"
+		missing=""
+		for p in $enabled; do
+			printf '%s\n' "$anchored" | grep -qx "$p" || missing="$missing $p"
+		done
+		[ -z "$missing" ] \
+			&& ok "every ENABLED sing-box transport has an anchor (nothing is served unmeasured)" \
+			|| badln "these transports are SERVED and have no reach anchor:$missing. They are measured by nothing, so the tuner has no weight for them and the rotation planner can never select them — a served path the control plane does not know exists. Nothing else reports this: the two configs agree with each other precisely because the family is absent from both."
+	fi
+
 	# The mapping, checked per member against the member's OWN class from the vocab.
 	while IFS='|' read -r ref method; do
 		[ -n "$ref" ] || continue
