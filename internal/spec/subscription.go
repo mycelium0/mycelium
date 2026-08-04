@@ -90,8 +90,17 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 
 	// hysteria2 port hopping: a range the client is given UP FRONT, so the served port can move inside it
 	// without any client learning anything. Empty = off, and off must render byte-identically to before.
+	// VALIDATED, with the SAME predicate the firewall half uses. Unvalidated, an operator typo went
+	// straight into every issued client config while _hy2_hop_range refused to build the matching
+	// nat/PREROUTING rule — clients hopping across a range with nothing behind it, and every node-local
+	// check green, because verify_post_apply cannot see a firewall. Dropping a malformed value is the
+	// SAFE degradation and the one that keeps the halves in step: no range emitted, no rule installed,
+	// and the client falls back to the single served port it is still given.
 	hy2HopPorts := paramStr(params, "hysteria2_hop_ports", "")
-	hy2HopInterval := paramStr(params, "hysteria2_hop_interval", "30s")
+	if hy2HopPorts != "" && !ValidHysteria2HopRange(hy2HopPorts) {
+		hy2HopPorts = ""
+	}
+	hy2HopInterval := paramStr(params, "hysteria2_hop_interval", DefaultHysteria2HopInterval)
 
 	ssPassword := paramStr(params, "ss_password", "")
 	trojanPassword := paramStr(params, "trojan_password", "")

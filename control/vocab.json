@@ -44,7 +44,9 @@
     "ws_path",
     "grpc_service_name",
     "region_bucket",
-    "client_fingerprint"
+    "client_fingerprint",
+    "hysteria2_hop_ports",
+    "hysteria2_hop_interval"
   ],
   "client_fingerprints": [
     "chrome",

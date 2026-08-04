@@ -5,6 +5,11 @@
 
 package spec
 
+import (
+	"strconv"
+	"strings"
+)
+
 // -----------------------------------------------------------------------------
 // Canonical transport registry — the single Go-owned source of the proto->class
 // table the shell renderer used to hardcode in parallel copies (RP-0008 P2).
@@ -189,7 +194,13 @@ func HealthValues() []HealthValue {
 // operatorTunableKnobs are the operator-settable params that are NOT a per-proto enable/port toggle:
 // the transport-shape knobs (paths / gRPC service name) and the coarse region bucket. They are
 // deliberately NOT identity-derived, so an override may set them without pinning a secret/key stale.
-var operatorTunableKnobs = []string{"xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket", "client_fingerprint"}
+var operatorTunableKnobs = []string{"xhttp_path", "xhttp_path_tls", "ws_path", "grpc_service_name", "region_bucket", "client_fingerprint",
+	// hysteria2 port hopping. WITHOUT these two the feature is not merely off by default — it is
+	// UNSETTABLE: write_params regenerates params.json from identity + canonical ports, and
+	// merge_operator_overrides honours only the keys in this allowlist, so a hand-set range was
+	// erased on the very next converge (every timer tick). The capability shipped, the gate for it
+	// passed, and no operator could turn it on.
+	"hysteria2_hop_ports", "hysteria2_hop_interval"}
 
 // DefaultClientFingerprint is the uTLS ClientHello preset the client render + the node-local verify/probe
 // use unless an operator sets client_fingerprint. It is a REAL, current browser preset.
@@ -218,6 +229,61 @@ func ValidClientFingerprint(s string) bool {
 		}
 	}
 	return false
+}
+
+// DefaultHysteria2HopInterval is how often a hopping client moves to another port in its range. It is a
+// sing-box duration string; the value is a compromise, not a tuning result — long enough that the hop is
+// not itself a rhythm, short enough to leave a blocked port quickly.
+const DefaultHysteria2HopInterval = "30s"
+
+// ValidHysteria2HopRange reports whether s is a usable hysteria2 port-hop range ("LO:HI", 1024 <= LO < HI
+// <= 65535). Empty is NOT valid here — empty means "no hopping", which callers check separately.
+//
+// THIS EXISTS BECAUSE TWO HALVES HAVE TO AGREE. The range is a promise the CLIENT CONFIG makes and the
+// FIREWALL keeps: the subscription renderer emits `server_ports` and reconcile_hy2_hop_nat installs the
+// nat/PREROUTING REDIRECT that delivers it. The shell half validated (a malformed value yields no rule);
+// the renderer half did not. So an operator typo produced client configs advertising a range with NO rule
+// behind it — every hysteria2 client on that node hopping to ports nothing serves, while the node's own
+// checks stayed green because verify_post_apply is firewall-blind. Both halves now decide with the same
+// predicate, and tests/conformance/hy2_hop_halves_agree.sh drives them against one value table.
+//
+// Deliberately hand-parsed rather than regex: this decides whether a rule is written into a firewall, and
+// the shell peer is hand-parsed too — the two must be readable side by side to stay in step.
+func ValidHysteria2HopRange(s string) bool {
+	lo, hi, ok := parseHysteria2HopRange(s)
+	return ok && lo >= 1024 && hi <= 65535 && lo < hi
+}
+
+// parseHysteria2HopRange splits "LO:HI" into two integers. ok is false for anything that is not exactly
+// two all-digit fields — including the empty string, a bare port, and "1:2:3".
+func parseHysteria2HopRange(s string) (lo, hi int, ok bool) {
+	i := strings.IndexByte(s, ':')
+	if i <= 0 || i == len(s)-1 {
+		return 0, 0, false
+	}
+	a, b := s[:i], s[i+1:]
+	if strings.ContainsRune(b, ':') {
+		return 0, 0, false
+	}
+	for _, f := range []string{a, b} {
+		if len(f) > 5 {
+			return 0, 0, false
+		}
+		for _, c := range f {
+			if c < '0' || c > '9' {
+				return 0, 0, false
+			}
+		}
+	}
+	lo, err := strconv.Atoi(a)
+	if err != nil {
+		return 0, 0, false
+	}
+	hi, err = strconv.Atoi(b)
+	if err != nil {
+		return 0, 0, false
+	}
+	return lo, hi, true
 }
 
 // NormalizeClientFingerprint returns s if it is a valid closed-vocab preset, else DefaultClientFingerprint

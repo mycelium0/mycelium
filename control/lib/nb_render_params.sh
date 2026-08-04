@@ -392,6 +392,12 @@ write_params() {
 			ws_path: "/ws",
 			# HY2/TUIC default OFF: need a client cert pin the renderer does not yet emit (ADR-0014).
 			hysteria2_enabled:            false, hysteria2_port:            8444,
+			# hysteria2 PORT HOPPING, off by default (empty range). These two keys have to be EMITTED here,
+			# not merely read by the renderers: merge_operator_overrides lays the operator overlay on top
+			# of THIS object, and a key that never appears in it is a key an operator cannot set. Shipping
+			# the feature without them made it unsettable rather than off — a hand-edited params.json was
+			# erased by the next write_params, i.e. by every converge and every timer tick.
+			hysteria2_hop_ports: "", hysteria2_hop_interval: "30s",
 			tuic_enabled:                 false, tuic_port:                 8445,
 			shadowsocks_enabled:          false, shadowsocks_port:          8388,
 			shadowtls_enabled:            false, shadowtls_port:            8446,
