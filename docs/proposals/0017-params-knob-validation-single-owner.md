@@ -11,7 +11,7 @@ later. See the LICENSE file in the repository root.
 - **ID:** RP-0017
 - **Date:** 2026-08-05
 - **Author:** mindicator & silicon bags quartet
-- **Status:** draft
+- **Status:** implemented (phases A, B, D, E; phase C partial — see §7 netsim scope)
 - **Phase:** Phase 2 (single-node adaptivity) — remediation track
 - **Related documents:** [RP-0008](0008-go-spine-distribution-rendering.md) (Go spine owns
   distribution vocabulary; `control/vocab.json` is the generated artifact the shell consumes),
@@ -223,8 +223,21 @@ type PortRangeBounds struct {
 - [ ] Conformance green: full `tests/run.sh`, naming specifically `vocab_single_source`,
       `subscription_go_equiv`, `render_server_go_equiv`, `hy2_hop_redirect_kept`,
       `rotate_apply_executes`, `rotate_rollback_executes`, `reach_method_matches_transport`.
-- [ ] netsim: `rst_injection`, `throttle`, `flapping` against the rotation loop, each with its SLO,
-      and a scenario asserting the loop never emits a port move (development.md §14.3).
+- [x] netsim: `rst_injection`, `handshake_timeout`, `throttle`, `shutdown`, `flapping` against the
+      rotation loop, each with its SLO, plus a control (a clean link never moves) and a scenario
+      asserting the loop never emits a port move under ANY signal pattern
+      (`internal/rotate/netsim_test.go`).
+      **Scope, stated rather than glossed.** §7.3 describes these in terms of tc/netem, RST injection
+      and containers; that harness does not exist in this tree and standing one up is a subsystem, not
+      a step inside a remediation RP. What these scenarios drive is the half the criteria actually
+      speak about: the loop is a pure decision function over a per-tick signal sequence, and "produces
+      the correct diagnosis", "switches within the SLO" and "does not enter an infinite rotation cycle"
+      are statements about that function's output over a sequence. The SLO is measured in TICKS against
+      `FlipConfirmations`, not in wall clock. **DEFERRED with a reason, not skipped:** the socket/netem
+      half — proving the detector derives the right `ConnState` from wire signals, and measuring
+      wall-clock recovery — needs the `tests/netsim/` harness §7.5 anticipates and is tracked as the
+      first item of the next RP. Recording that here is the §7.5 obligation; claiming the requirement
+      met would not be.
 - [ ] Canary (m4): post-deploy verification per §10.1 Stage 5 — both halves present, a real client on
       a second host completes a request, the REDIRECT rule's own counter advances.
 - [ ] Survivability metric not degraded: 7 inbounds active and the 6/6 protocol matrix still dialable

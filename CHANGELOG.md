@@ -13,6 +13,22 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.64] — 2026-08-05
+
+> RP-0017 phase C. The rotation-loop change shipped two commits ago without the netsim scenarios
+> development.md §14.3 makes mandatory for any such change. They exist now, with the SLO measured in
+> ticks — and the socket/netem half is recorded as deferred with its reason rather than passed over.
+
+### Added
+- `internal/rotate/netsim_test.go` — the §7.3 signal patterns driven through the REAL planner with
+  state carried forward tick to tick: RST injection, handshake timeout, post-connect throttle and full
+  shutdown must each act exactly on the hysteresis boundary (no earlier, no later) and stay inside the
+  per-window budget; an oscillating link must not produce one move per oscillation; a clean link must
+  produce none at all — the control, without which every other row is consistent with a loop that
+  rotates unconditionally. A final scenario asserts that no signal pattern makes the loop emit a port
+  move, which is the scenario-level form of the reserved-move guard: the failure was never a single
+  malformed call, it was the unattended loop ticking every 90 s on a value nothing resets.
+
 ## [0.2.63] — 2026-08-05
 
 > RP-0017 phases D+E. Front configuration gets a single owner, and the documentation the earlier work
