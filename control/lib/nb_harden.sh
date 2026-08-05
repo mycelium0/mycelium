@@ -337,6 +337,35 @@ reconcile_hy2_hop_nat() {
 	done < <(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //')
 	[ -n "$want" ] || { log "hysteria2 port hopping: not configured; no redirect installed."; return 0; }
 	case "$lstn" in ''|*[!0-9]*) warn "hysteria2 port hopping: hysteria2_port is not a number ('$lstn') — refusing to install a redirect."; return 0 ;; esac
+	# COLLISION REFUSAL (Audit-0010 F-001). The bounds predicate judges the range's ENDPOINTS and knows
+	# nothing about this node. A REDIRECT covers every WAN-inbound UDP packet in its range, so a range
+	# that CONTAINS another served UDP port silently swallows that family — and nothing on this node can
+	# see it: every reach anchor is 127.0.0.1:<port>, and loopback never traverses a `-i $wan` PREROUTING
+	# rule, so the measure daemon keeps scoring the dead family alive and the rotation planner can promote
+	# it as the safe fallback. The feature built to add redundancy would remove it.
+	#
+	# Refused HERE because this is the only place that both knows the node's served ports and installs the
+	# rule; a range that reaches this point and collides is an operator error worth stopping loudly rather
+	# than a value to silently narrow.
+	local _lo="${want%%:*}" _hi="${want##*:}" _clash=""
+	local _k _p
+	for _k in tuic_port shadowsocks_port; do
+		_p="$(jq -r --arg k "$_k" '.[$k] // empty' "$PARAMS_JSON" 2>/dev/null)"
+		case "$_p" in ''|*[!0-9]*) continue ;; esac
+		[ "$_p" = "$lstn" ] && continue
+		[ "$_p" -ge "$_lo" ] && [ "$_p" -le "$_hi" ] && _clash="$_clash $_k=$_p"
+	done
+	if command -v _awg_resolve_port >/dev/null 2>&1; then
+		_p="$(_awg_resolve_port 2>/dev/null)"
+		case "$_p" in ''|*[!0-9]*) : ;; *) [ "$_p" -ge "$_lo" ] && [ "$_p" -le "$_hi" ] && _clash="$_clash amneziawg=$_p" ;; esac
+	fi
+	if [ -n "$_clash" ]; then
+		warn "hysteria2 port hopping: the range $want CONTAINS this node's own served UDP port(s):$_clash."
+		warn "  A REDIRECT over that range swallows every inbound packet for them, and NOTHING on this node"
+		warn "  would report it — the reach probes anchor on 127.0.0.1, which never traverses a PREROUTING"
+		warn "  rule. Refusing to install the redirect. Narrow hysteria2_hop_ports so it excludes those ports."
+		return 1
+	fi
 	wan="$(ip route show default 2>/dev/null | awk '/default/{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 	[ -n "$wan" ] || { warn "hysteria2 port hopping: could not resolve the WAN interface — refusing to install a redirect."; return 0; }
 	run iptables -t nat -A PREROUTING -i "$wan" -p udp --dport "$want" -m comment --comment 'myc-hy2-hop' -j REDIRECT --to-ports "$lstn" \
@@ -448,9 +477,15 @@ harden_ufw() {
 	# to exist: it was absent on one live node (so this branch never fired at all) and WRONG on two (it
 	# held the canonical default while the tunnel ran elsewhere, so the firewall admitted a silent port
 	# and not the real one).
-	# The hop range must be admitted too, or the redirect never sees a packet.
-	local _hop; _hop="$(_hy2_hop_range)"
-	[ -z "$_hop" ] || { _harden_ufw_allow "${_hop//:/\:}/udp"; _served="$_served ${_hop}/udp"; }
+	# NO ufw rule for the hop range, and the previous one was wrong twice over (Audit-0010 F-003/F-004).
+	# It is UNNECESSARY: the range arrives through a REDIRECT in nat/PREROUTING, and nat runs BEFORE
+	# filter — by the time a packet reaches ufw's INPUT chain its destination port has already been
+	# rewritten to the served port, which is admitted on its own line. This is measured, not reasoned:
+	# tests/netsim/lib.sh had to move its impairments out of filter/INPUT for exactly this reason, because
+	# a filter rule naming the RANGE never matched a single packet.
+	# It was also MALFORMED: `${_hop//:/\:}` emitted `20000\:21000/udp`, which ufw does not accept, and the
+	# un-escaped token was then added to the served set — where myc_ufw_admitted_ports cannot parse a range
+	# at all, so verify_ufw_exposure reported a missing admission on every converge, forever.
 	if [ "$DO_AMNEZIAWG" -eq 1 ] && command -v _awg_resolve_port >/dev/null 2>&1; then
 		local awgp; awgp="$(_awg_resolve_port)"
 		_harden_ufw_allow "$awgp/udp"

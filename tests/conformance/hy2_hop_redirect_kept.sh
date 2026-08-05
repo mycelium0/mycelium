@@ -165,6 +165,19 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 		badln "after a range change there are $n rules. harden_ufw only ever ADDS, so an obsolete redirect would keep sending an old range at a port — this one must reconcile."
 	fi
 
+	# COLLISION (Audit-0010 F-001): a range that CONTAINS another served UDP port must not become a rule.
+	# A REDIRECT over it swallows every inbound packet for that family, and no check on the node can see
+	# the loss — the reach probes anchor on 127.0.0.1 and loopback never traverses a `-i wan` PREROUTING
+	# rule, so the measure daemon keeps scoring the dead family alive and the planner can promote it.
+	jq -n '{hysteria2_enabled:true, hysteria2_port:8444, tuic_port:8445, hysteria2_hop_ports:"8000:9000"}' >"$FAKENODE_ROOT/params.json"
+	PARAMS_JSON="$FAKENODE_ROOT/params.json"
+	: >"$FAKENODE_ROOT/nat.rules"
+	reconcile_hy2_hop_nat >/dev/null 2>&1
+	n="$(grep -cF 'myc-hy2-hop' "$FAKENODE_ROOT/nat.rules" 2>/dev/null)"; n="${n:-0}"
+	[ "$n" = "0" ] \
+		&& ok "a range CONTAINING another served UDP port installs no redirect (fail-closed)" \
+		|| badln "a redirect was installed for a range that swallows tuic's own port. Every inbound tuic packet is now sent to the hysteria2 listener, tuic is dead for the whole population, and nothing on the node reports it: the reach anchors are loopback and never traverse PREROUTING, so the planner may promote the dead family as its safe fallback."
+
 	seed "" 8444
 	reconcile_hy2_hop_nat
 	# `grep -c` prints 0 AND exits 1 on no match, so a `|| printf 0` fallback yields "0\n0" and every
