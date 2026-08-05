@@ -13,6 +13,39 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.65] — 2026-08-05
+
+> The netsim harness §7.3 has required since the charter was written, and the first thing it measured
+> disproved the sentence the hysteria2 hop range shipped on.
+
+### Added
+- `tests/netsim/` — two isolated network namespaces joined by a veth, a REAL sing-box on each side, an
+  HTTP origin inside the server namespace, and the §7.3 impairment primitives (netem loss/delay/rate,
+  UDP DROP, TCP RST injection). The fixture refuses to start unless it can prove the namespaces have no
+  default route: these scenarios drop packets, and on a live node that guarantee is the whole safety
+  argument. Deliberately NOT wired into `tests/run.sh` — §7.5 runs socket-bound suites on a node and
+  records the result, and a green offline suite must not imply coverage that never ran.
+
+### Fixed — a documented claim that was false
+- **"A block on one UDP port no longer takes the family down" is false as stated**, and both
+  ARCHITECTURE.md and THREAT-MODEL.md said it. sing-box hops on a TIMER: it does not avoid dead ports
+  and has no signal that one is dead, so the client is down while it sits on a blocked port. Measured,
+  two points at a 3 s interval: a range of 3 with 1 blocked gapped 6 of 24 samples (25 %); a range of 11
+  with 1 blocked gapped 2 of 36 (6 %) — the outage fraction tracks blocked/total. **The range dilutes an
+  outage rather than removing it.** Both documents now say so, and the corollary that a WIDER range
+  dilutes better inverts the "prefer narrow" guidance into an explicit trade with no free side.
+- Recorded alongside it: an intermittently working member is not a cleanly dead one. A urltest group
+  re-selects on health, so a member answering most probes keeps its place while delivering periodic gaps
+  — and nothing on the node reports that, because the member is genuinely alive most of the time.
+
+### Fixed — in the fixture itself
+- Impairments moved from `filter/INPUT` to `raw/PREROUTING`. The hop range arrives through a REDIRECT in
+  `nat/PREROUTING`, and nat runs before filter — by the time a packet reaches INPUT its port has already
+  been rewritten, so a filter rule naming the RANGE can never match. Every impairment in the first
+  version was a no-op, and the scenario's own control row is what caught it. The same arithmetic applies
+  on a real node: a host firewall rule written against the advertised range does not do what its author
+  expects.
+
 ## [0.2.64] — 2026-08-05
 
 > RP-0017 phase C. The rotation-loop change shipped two commits ago without the netsim scenarios

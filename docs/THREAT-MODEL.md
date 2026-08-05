@@ -306,9 +306,27 @@ sound but, on its 2087 default, reachable on such a network only behind a 443 fr
 
 Hysteria2 is the only family sing-box can serve across a **port range**: the client is handed
 `server_ports` up front and hops inside it, while the server holds one port behind a nat/PREROUTING
-REDIRECT. The reachability argument is real — a block on one UDP port no longer takes the family down,
-and the served port can move inside the range without any client learning anything. The shape argument
-cuts the other way, and RP-0016 shipped the mechanism without making it.
+REDIRECT. The reachability argument is real but **weaker than it was claimed to be**, and the shape argument cuts
+the other way. RP-0016 shipped the mechanism having made neither.
+
+**What it actually buys, measured** (`tests/netsim/scenarios/hop_range_dilutes_a_port_block.sh`, run on
+a node with real sing-box processes in isolated namespaces). The feature shipped on the sentence "a block
+on one UDP port no longer takes the family down". That is **false as stated**. sing-box hops on a TIMER;
+it does not avoid dead ports and has no signal that one is dead. When the hop lands on a blocked port the
+tunnel is down for that interval and returns on the next hop by luck, not by recovery. Two measured
+points at a 3 s interval: a range of 3 with 1 port blocked gapped 6 of 24 samples (25 %); a range of 11
+with 1 blocked gapped 2 of 36 (6 %). The outage fraction tracks blocked/total. **The range dilutes an
+outage; it does not remove one.**
+
+Two consequences follow, and both cut against the guidance that would otherwise be obvious:
+
+- **Wider dilutes better.** For a fixed number of blocked ports the outage fraction falls as the range
+  grows — which is the opposite of "prefer narrow". The trade is therefore explicit and has no free
+  side: width buys availability and spends shape.
+- **An intermittent member is not a cleanly dead one, and that is worse than it sounds.** A client's
+  urltest group re-selects on health; a member that answers most probes keeps its place in the group
+  while delivering periodic gaps to the user. A *dead* member is failed over cleanly. Nothing on the
+  node reports this: the member is genuinely alive most of the time.
 
 **What a range costs.** An ordinary QUIC client contacts a server on **one** port and stays there. A
 client hopping across N ports on a fixed cadence produces a pattern no ordinary client produces: the same
@@ -325,8 +343,10 @@ blocking UDP ports the trade is pure loss.
   is realised only where a *port-keyed* filter is actually present — the same field condition documented
   in "non-443 port throughput degradation" above. Absent that evidence, a range adds shape and buys
   nothing.
-- **Prefer narrow.** The marginal reachability gain from a wide block is small (an adversary filtering a
-  contiguous UDP block filters all of it), while the pattern grows more distinctive with width.
+- **Width is a measured trade, not a preference.** A wider range dilutes an outage further (the fraction
+  tracks blocked/total) and is simultaneously more distinctive. Neither direction is free, and an
+  adversary filtering a contiguous UDP block filters all of it — against that adversary width buys
+  nothing at all and costs shape. Choose width from the observed block, and record the reasoning.
 - **The hop interval is a timing parameter, not a constant** (development.md §4.1). It is owned and
   emitted by `internal/spec`; the recorded basis for the default is that it must sit above the scale at
   which a periodic rebind is conspicuous and below the client's own urltest interval, so a hop never
