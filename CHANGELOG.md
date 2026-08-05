@@ -13,6 +13,31 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.62] — 2026-08-05
+
+> RP-0017 phases A+B. The hop-range rule had three hand-maintained implementations and a gate that
+> policed their agreement — a duplicated source of truth (development.md §2.2 item 8) dressed up as a
+> fix. It now has one owner, in Go, whose bounds are emitted into the vocab artifact the shell reads.
+
+### Changed
+- `internal/spec` is the sole owner of the hysteria2 hop-range predicate. Its bounds and the hop-interval
+  default are named constants with a recorded basis (§1.1), emitted into `control/vocab.json` under a new
+  additive `params_validation` block (ADR-0038).
+- Both shell consumers — the client renderer and the firewall reconcile — delegate to one comparator in
+  `common.sh`, the only file both shell entrypoints source. Neither holds any expression of the rule.
+  A vocab without bounds, or no vocab at all, refuses every range: no `server_ports`, no REDIRECT.
+
+### Added
+- `docs/proposals/0017-params-knob-validation-single-owner.md`, `docs/adr/0038-params-validation-single-owner.md`.
+- `tests/conformance/params_validation_single_owner.sh` replaces `hy2_hop_halves_agree.sh`. It asserts
+  that no second implementation exists — function-scoped, because per-file was too coarse (it flagged
+  libraries bounding an unrelated single port) and per-line was too narrow: a mutation restoring the
+  parser into `_hy2_hop_range` never names the key again and left the per-line version fully green.
+
+### Fixed
+- `hy2_hop_redirect_kept.sh` sourced `nb_harden.sh` without `common.sh`, which the lib now depends on —
+  every row read "no range" and the gate was testing a different program.
+
 ## [0.2.61] — 2026-08-05
 
 > An audit of everything still marked deferred, reserved or known-unfixed. The headline: the `rotate-port`

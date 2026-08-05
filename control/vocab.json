@@ -167,5 +167,12 @@
       "engine": "amneziawg",
       "exposure": 5
     }
-  ]
+  ],
+  "params_validation": {
+    "hysteria2_hop_ports": {
+      "min": 1024,
+      "max": 65535
+    },
+    "hysteria2_hop_interval_default": "30s"
+  }
 }

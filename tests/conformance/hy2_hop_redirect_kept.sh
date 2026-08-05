@@ -43,8 +43,14 @@ HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${MYC_REPO_ROOT:-$(cd -P "$HERE/../.." 2>/dev/null && pwd)}"
 [ -n "$REPO_ROOT" ] || { printf 'hy2_hop_redirect_kept: cannot resolve repo root\n' >&2; exit 2; }
 LIB="$REPO_ROOT/control/lib/nb_harden.sh"
+# common.sh, because nb_harden.sh now DELEGATES the hop-range decision to the single shell
+# comparator that lives there (ADR-0038). Sourcing the lib without it made _hy2_hop_range call an
+# undefined function, so every row read "no range" and the gate was testing a different program —
+# this project's own recurring test defect, arriving through a new dependency rather than a new gate.
+COMMON="$REPO_ROOT/control/lib/common.sh"
+VOCAB="$REPO_ROOT/control/vocab.json"
 FIXTURE="$REPO_ROOT/tests/lab/fakenode.sh"
-for f in "$LIB" "$FIXTURE"; do
+for f in "$LIB" "$COMMON" "$VOCAB" "$FIXTURE"; do
 	[ -f "$f" ] || { printf 'hy2_hop_redirect_kept: missing %s\n' "$f" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { printf 'hy2_hop_redirect_kept: jq required\n' >&2; exit 2; }
@@ -110,6 +116,9 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 	fakenode_init
 	install_ipt_stub
 	# shellcheck source=/dev/null
+	. "$COMMON"
+	MYC_VOCAB="$VOCAB"
+	# shellcheck source=/dev/null
 	. "$LIB"
 	for row in "20000:21000|20000:21000" "|" "abc|" "20000|" "0:100|" "5000:4000|" "1000:70000|" "20000:21000:5|"; do
 		want="${row##*|}"; r="${row%%|*}"
@@ -128,6 +137,9 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 	fail=0
 	fakenode_init
 	install_ipt_stub
+	# shellcheck source=/dev/null
+	. "$COMMON"
+	MYC_VOCAB="$VOCAB"
 	# shellcheck source=/dev/null
 	. "$LIB"
 
@@ -169,6 +181,9 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 	fail=0
 	fakenode_init
 	install_ipt_stub
+	# shellcheck source=/dev/null
+	. "$COMMON"
+	MYC_VOCAB="$VOCAB"
 	# shellcheck source=/dev/null
 	. "$LIB"
 

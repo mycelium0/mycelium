@@ -307,20 +307,7 @@ _hy2_hop_range() {
 	# range configured" and silently do nothing — a missing dependency disguised as a decision.
 	[ -f "${PARAMS_JSON:-}" ] || { printf ''; return 0; }
 	r="$(jq -r '.hysteria2_hop_ports // ""' "$PARAMS_JSON" 2>/dev/null)"
-	case "$r" in
-		'') printf '' ;;
-		# MORE THAN ONE COLON FIRST. `${r%%:*}` / `${r##*:}` take the OUTER fields, so "2000:3000:4000" gave
-		# lo=2000 hi=4000 — both in range and lo<hi — and this function returned the whole string, which then
-		# reached iptables as `--dport 2000:3000:4000`. iptables refuses it, so the rule silently fails to
-		# install while the CLIENT renderer had already accepted the same value and advertised the range.
-		# Exactly the two-halves-disagree failure the shared predicate exists to close.
-		*:*:*) printf '' ;;
-		[0-9]*:[0-9]*)
-			local lo="${r%%:*}" hi="${r##*:}"
-			case "$lo$hi" in *[!0-9]*) printf '' ; return 0 ;; esac
-			[ "$lo" -ge 1024 ] && [ "$hi" -le 65535 ] && [ "$lo" -lt "$hi" ] && printf '%s' "$r" || printf '' ;;
-		*) printf '' ;;
-	esac
+	myc_hop_range_ok "$r" && printf '%s' "$r" || printf ''
 }
 
 # reconcile_hy2_hop_nat — the SERVER half of hysteria2 port hopping.
