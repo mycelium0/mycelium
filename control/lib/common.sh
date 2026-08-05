@@ -135,3 +135,58 @@ myc_atomic_write() {
 	cat >"$tmp" || { rm -f "$tmp"; myc_die "could not write temp file for $dest"; }
 	mv -f "$tmp" "$dest" || { rm -f "$tmp"; myc_die "could not move temp file into place: $dest"; }
 }
+
+# ---------------------------------------------------------------------------
+# Emitted params-knob validation (ADR-0038). The POLICY lives in internal/spec; these helpers only
+# COMPARE against the numbers that package emits into control/vocab.json (.params_validation).
+#
+# WHY IT IS HERE. Two independent shell entrypoints judge a hysteria2 hop range — the client renderer
+# (via myceliumctl, which sources lib/vocab.sh) and the firewall reconcile (via node-bootstrap, which
+# does not) — and common.sh is the only file BOTH source. One comparator, therefore, and no second
+# expression of the rule anywhere in the tree.
+#
+# WHY IT MATTERS. The range is a promise the CLIENT CONFIG makes and the FIREWALL keeps. When the two
+# halves judged it separately they diverged, and the resulting state is invisible from the node:
+# clients hop across ports nothing serves while verify_post_apply reports healthy, because it checks
+# the service, the bind and a LOOPBACK handshake, and loopback never traverses PREROUTING.
+# ---------------------------------------------------------------------------
+
+# _myc_vocab_path — the Go-emitted vocabulary artifact, resolved the same way in both entrypoints.
+_myc_vocab_path() {
+	if [ -n "${MYC_VOCAB:-}" ]; then printf '%s' "$MYC_VOCAB"; return 0; fi
+	printf '%s/control/vocab.json' "${ARTIFACT_ROOT:-${REPO_ROOT:-.}}"
+}
+
+# myc_hop_range_ok VALUE — succeed iff VALUE is a usable hysteria2 hop range under the EMITTED bounds.
+# The empty string is NOT a range (it means "no hopping"); callers check that separately.
+#
+# FAIL-CLOSED on a vocab that carries no bounds: an older artifact beside a newer shell must yield NO
+# range, which is the unconfigured state (no server_ports emitted, no REDIRECT installed) — never a
+# permissive default. A permissive default here would hand clients a range with nothing behind it,
+# which is the exact failure this contract exists to remove.
+myc_hop_range_ok() {
+	[ -n "${1:-}" ] || return 1
+	# Reject more than one separator BEFORE splitting. `${v%%:*}` / `${v##*:}` take the OUTER fields, so
+	# "2000:3000:4000" yields 2000 and 4000 — in bounds, ordered — and would be accepted, then handed to
+	# iptables verbatim as `--dport 2000:3000:4000`, which it refuses. A value that passes validation and
+	# cannot become a rule is the disagreement, not an edge case.
+	case "$1" in *:*:*) return 1 ;; *:*) ;; *) return 1 ;; esac
+	local lo="${1%%:*}" hi="${1##*:}"
+	[ -n "$lo" ] && [ -n "$hi" ] || return 1
+	case "$lo$hi" in *[!0-9]*) return 1 ;; esac
+	local vocab min max
+	vocab="$(_myc_vocab_path)"
+	[ -f "$vocab" ] || return 1
+	min="$(jq -r '.params_validation.hysteria2_hop_ports.min // empty' "$vocab" 2>/dev/null)"
+	max="$(jq -r '.params_validation.hysteria2_hop_ports.max // empty' "$vocab" 2>/dev/null)"
+	case "${min:-x}${max:-x}" in *[!0-9]*) return 1 ;; esac
+	[ "$lo" -ge "$min" ] && [ "$hi" -le "$max" ] && [ "$lo" -lt "$hi" ]
+}
+
+# myc_hop_interval_default — the emitted default hop period. Empty when the vocab carries none, which
+# the caller must treat as "do not emit an interval" rather than substituting a guess.
+myc_hop_interval_default() {
+	local vocab; vocab="$(_myc_vocab_path)"
+	[ -f "$vocab" ] || { printf ''; return 0; }
+	jq -r '.params_validation.hysteria2_hop_interval_default // empty' "$vocab" 2>/dev/null || printf ''
+}

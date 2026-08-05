@@ -302,6 +302,44 @@ those ports are unreachable directly, so the family must be reached on 443 (dire
 field-validated working shape on this network is **`ws-tls` on 443**; the genuine-TLS `xhttp-tls` engine is
 sound but, on its 2087 default, reachable on such a network only behind a 443 front.
 
+## Attack surface: the hysteria2 port-hop range (a shape decision, not a free win)
+
+Hysteria2 is the only family sing-box can serve across a **port range**: the client is handed
+`server_ports` up front and hops inside it, while the server holds one port behind a nat/PREROUTING
+REDIRECT. The reachability argument is real — a block on one UDP port no longer takes the family down,
+and the served port can move inside the range without any client learning anything. The shape argument
+cuts the other way, and RP-0016 shipped the mechanism without making it.
+
+**What a range costs.** An ordinary QUIC client contacts a server on **one** port and stays there. A
+client hopping across N ports on a fixed cadence produces a pattern no ordinary client produces: the same
+source, the same destination address, a walk across a contiguous port block, at a period. That is a
+*distinguisher of its own* — the wider the range and the shorter the interval, the more it looks like
+exactly what it is. Set against project principle #2 ("indistinguishability over obfuscation"), a wide
+range trades a *reachability* gain for an *identifiability* loss, and on a network that is not actually
+blocking UDP ports the trade is pure loss.
+
+**Consequences for defaults and guidance.**
+- **Off by default, and it must stay off by default.** A node that configures no range renders
+  byte-identically to one that never heard of the feature ([ADR-0022](adr/0022-two-port-reality-default.md) minimal-exposure posture).
+- **Width is an operator decision keyed to an observed block, not a precaution.** The reachability gain
+  is realised only where a *port-keyed* filter is actually present — the same field condition documented
+  in "non-443 port throughput degradation" above. Absent that evidence, a range adds shape and buys
+  nothing.
+- **Prefer narrow.** The marginal reachability gain from a wide block is small (an adversary filtering a
+  contiguous UDP block filters all of it), while the pattern grows more distinctive with width.
+- **The hop interval is a timing parameter, not a constant** (development.md §4.1). It is owned and
+  emitted by `internal/spec`; the recorded basis for the default is that it must sit above the scale at
+  which a periodic rebind is conspicuous and below the client's own urltest interval, so a hop never
+  races the client's re-selection.
+
+**What the node cannot see about this.** The REDIRECT is the only thing that makes an advertised range
+real, and no node-local check observes it: `verify_post_apply` asserts the service is active, the socket
+is bound and a **loopback** handshake completes, and loopback traffic never traverses PREROUTING. A
+missing or drifted rule therefore kills hysteria2 for the whole population while every indicator stays
+green. This is why the rule is reconciled (never merely appended) and asserted fail-closed in the
+converge tail, and why the range and the rule are judged by one owner (ADR-0038) — two judges disagreeing
+produces precisely that invisible state.
+
 ## Attack surface: carriers, bridges, and spores
 
 Treating any carrier that moves authenticated bytes as a possible bridge (the carrier-agnostic model

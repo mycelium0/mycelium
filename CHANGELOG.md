@@ -13,6 +13,69 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.64] — 2026-08-05
+
+> RP-0017 phase C. The rotation-loop change shipped two commits ago without the netsim scenarios
+> development.md §14.3 makes mandatory for any such change. They exist now, with the SLO measured in
+> ticks — and the socket/netem half is recorded as deferred with its reason rather than passed over.
+
+### Added
+- `internal/rotate/netsim_test.go` — the §7.3 signal patterns driven through the REAL planner with
+  state carried forward tick to tick: RST injection, handshake timeout, post-connect throttle and full
+  shutdown must each act exactly on the hysteresis boundary (no earlier, no later) and stay inside the
+  per-window budget; an oscillating link must not produce one move per oscillation; a clean link must
+  produce none at all — the control, without which every other row is consistent with a loop that
+  rotates unconditionally. A final scenario asserts that no signal pattern makes the loop emit a port
+  move, which is the scenario-level form of the reserved-move guard: the failure was never a single
+  malformed call, it was the unattended loop ticking every 90 s on a value nothing resets.
+
+## [0.2.63] — 2026-08-05
+
+> RP-0017 phases D+E. Front configuration gets a single owner, and the documentation the earlier work
+> owed and did not deliver — including the observable-shape assessment of a hop range, which is the one
+> genuine cost of the feature and had never been written down.
+
+### Changed
+- `spec.LoadFrontConfig` accepts either a bare `FrontConfig` document or the node profile carrying one,
+  so `node.config.json` (ADR-0034) is the single owner of front configuration and `front_setup` hands
+  the profile to the spine directly. The derived `front.from-profile.json` is gone — materialising the
+  profile's `.front` into a third file was the same one-truth-two-locations defect being removed.
+- `front_setup` reads the enabled flag shape-aware; reading only the root would have reported "disabled"
+  for every operator who configured the front where ADR-0034 tells them to.
+
+### Documentation
+- `ARCHITECTURE.md`: the hysteria2 row records the port-range dimension and that the rule making it real
+  is invisible to every node-local check; Layer 2 gains the params-validation ownership rule and the
+  reserved-move semantics (enforced on the field, not the action name).
+- `THREAT-MODEL.md`: a new section assesses what a hop range COSTS — a client walking a contiguous port
+  block on a fixed cadence is a distinguisher no ordinary QUIC client produces. Off by default, width
+  keyed to an observed port-filter, prefer narrow, and the interval owned as a timing parameter (§4.1).
+
+## [0.2.62] — 2026-08-05
+
+> RP-0017 phases A+B. The hop-range rule had three hand-maintained implementations and a gate that
+> policed their agreement — a duplicated source of truth (development.md §2.2 item 8) dressed up as a
+> fix. It now has one owner, in Go, whose bounds are emitted into the vocab artifact the shell reads.
+
+### Changed
+- `internal/spec` is the sole owner of the hysteria2 hop-range predicate. Its bounds and the hop-interval
+  default are named constants with a recorded basis (§1.1), emitted into `control/vocab.json` under a new
+  additive `params_validation` block (ADR-0038).
+- Both shell consumers — the client renderer and the firewall reconcile — delegate to one comparator in
+  `common.sh`, the only file both shell entrypoints source. Neither holds any expression of the rule.
+  A vocab without bounds, or no vocab at all, refuses every range: no `server_ports`, no REDIRECT.
+
+### Added
+- `docs/proposals/0017-params-knob-validation-single-owner.md`, `docs/adr/0038-params-validation-single-owner.md`.
+- `tests/conformance/params_validation_single_owner.sh` replaces `hy2_hop_halves_agree.sh`. It asserts
+  that no second implementation exists — function-scoped, because per-file was too coarse (it flagged
+  libraries bounding an unrelated single port) and per-line was too narrow: a mutation restoring the
+  parser into `_hy2_hop_range` never names the key again and left the per-line version fully green.
+
+### Fixed
+- `hy2_hop_redirect_kept.sh` sourced `nb_harden.sh` without `common.sh`, which the lib now depends on —
+  every row read "no range" and the gate was testing a different program.
+
 ## [0.2.61] — 2026-08-05
 
 > An audit of everything still marked deferred, reserved or known-unfixed. The headline: the `rotate-port`

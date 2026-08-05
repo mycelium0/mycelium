@@ -231,10 +231,43 @@ func ValidClientFingerprint(s string) bool {
 	return false
 }
 
+// --- hysteria2 port hopping: the ONE place the rule and its numbers live (ADR-0038) ---------------
+//
+// A hop range is a promise the CLIENT CONFIG makes and the FIREWALL keeps: the subscription renderer
+// emits `server_ports`, and a nat/PREROUTING REDIRECT delivers that range onto the single port the
+// hysteria2 inbound holds. Three consumers therefore judge one value — this package, the shell client
+// renderer, and the firewall reconcile — and when they disagree the node enters a state NOTHING on it
+// can observe: clients hop across ports nothing serves while verify_post_apply reports healthy,
+// because it checks the service, the bind and a LOOPBACK handshake, and loopback never traverses
+// PREROUTING.
+//
+// So the policy is expressed exactly once, here, and the numbers are EMITTED into control/vocab.json
+// (Vocab.ParamsValidation) for the shell consumers to compare against. A shell consumer may compare;
+// it may not re-derive. See ADR-0038 and development.md §2.2 item 8.
+
 // DefaultHysteria2HopInterval is how often a hopping client moves to another port in its range. It is a
-// sing-box duration string; the value is a compromise, not a tuning result — long enough that the hop is
-// not itself a rhythm, short enough to leave a blocked port quickly.
+// sing-box duration string. BASIS: the hop must not become a rhythm of its own (a fixed short period is
+// a timing signature), and it must not be so long that a blocked port holds the client for minutes. 30s
+// sits above the ~10s scale at which a periodic rebind is conspicuous and below the urltest interval
+// (aggregate.go urltestInterval), so a hop never races the client's own re-selection.
 const DefaultHysteria2HopInterval = "30s"
+
+// PortRangeBounds is an inclusive admissible port window. It exists as a type so the bounds can be
+// EMITTED into the vocab artifact rather than restated by each consumer.
+type PortRangeBounds struct {
+	Min int `json:"min"` // lowest admissible port
+	Max int `json:"max"` // highest admissible port
+}
+
+// hysteria2HopPortBounds are the bounds a hop range must fall inside.
+//
+// BASIS for Min: 1024 is the unprivileged floor. Below it a range would demand CAP_NET_BIND_SERVICE
+// semantics the REDIRECT does not need and would overlap the well-known range where an unexplained UDP
+// flow is most conspicuous. BASIS for Max: 65535 is the protocol maximum.
+var hysteria2HopPortBounds = PortRangeBounds{Min: 1024, Max: 65535}
+
+// Hysteria2HopPortBounds returns the admissible hop-range window (a copy; the bounds are immutable).
+func Hysteria2HopPortBounds() PortRangeBounds { return hysteria2HopPortBounds }
 
 // ValidHysteria2HopRange reports whether s is a usable hysteria2 port-hop range ("LO:HI", 1024 <= LO < HI
 // <= 65535). Empty is NOT valid here — empty means "no hopping", which callers check separately.
@@ -251,7 +284,8 @@ const DefaultHysteria2HopInterval = "30s"
 // the shell peer is hand-parsed too — the two must be readable side by side to stay in step.
 func ValidHysteria2HopRange(s string) bool {
 	lo, hi, ok := parseHysteria2HopRange(s)
-	return ok && lo >= 1024 && hi <= 65535 && lo < hi
+	b := hysteria2HopPortBounds
+	return ok && lo >= b.Min && hi <= b.Max && lo < hi
 }
 
 // parseHysteria2HopRange splits "LO:HI" into two integers. ok is false for anything that is not exactly
@@ -331,6 +365,21 @@ type Vocab struct {
 	OperatorToggleKeys []string          `json:"operator_toggle_keys"` // closed allowlist of operator-settable params keys
 	ClientFingerprints []string          `json:"client_fingerprints"`  // closed client uTLS-preset vocabulary (RP-0015); [0] is the default
 	Protos             []ProtoDescriptor `json:"protos"`               // canonical proto registry, priority order
+	// ParamsValidation carries the BOUNDS AND DEFAULTS a shell consumer needs in order to judge a
+	// structured operator-settable knob without re-deriving the rule (ADR-0038). It is emitted, not
+	// restated: a consumer compares against these numbers; the policy that produced them lives in this
+	// package and nowhere else.
+	ParamsValidation ParamsValidationVocab `json:"params_validation"`
+}
+
+// ParamsValidationVocab is the emitted half of the params-knob validation contract. Additive: a shell
+// reading an older vocab finds it absent and must FAIL CLOSED — no bounds means no range, which is the
+// unconfigured state (no `server_ports` emitted, no REDIRECT installed), never a permissive default.
+type ParamsValidationVocab struct {
+	// Hysteria2HopPorts is the admissible window for the hysteria2 port-hop range (`LO:HI`).
+	Hysteria2HopPorts PortRangeBounds `json:"hysteria2_hop_ports"`
+	// Hysteria2HopInterval is the default hop period when the operator sets a range but no interval.
+	Hysteria2HopInterval string `json:"hysteria2_hop_interval_default"`
 }
 
 // NewVocab returns the canonical Vocab built from the Go-owned registries. It is pure:
@@ -345,5 +394,9 @@ func NewVocab() Vocab {
 		OperatorToggleKeys: OperatorToggleKeys(),
 		ClientFingerprints: ClientFingerprints(),
 		Protos:             TransportRegistry(),
+		ParamsValidation: ParamsValidationVocab{
+			Hysteria2HopPorts:    Hysteria2HopPortBounds(),
+			Hysteria2HopInterval: DefaultHysteria2HopInterval,
+		},
 	}
 }

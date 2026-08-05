@@ -366,6 +366,7 @@ write_params() {
 		--arg node_address "$node_address" \
 		--arg tls_cert "$TLS_DIR/fullchain.pem" --arg tls_key "$TLS_DIR/privkey.pem" \
 		--arg tls_domain "$tls_domain" \
+		--arg hy2hopiv "$(myc_hop_interval_default)" \
 		'{
 			node_address: $node_address,
 			donor_host: $donor, donor_sni: $donor,
@@ -397,7 +398,7 @@ write_params() {
 			# of THIS object, and a key that never appears in it is a key an operator cannot set. Shipping
 			# the feature without them made it unsettable rather than off — a hand-edited params.json was
 			# erased by the next write_params, i.e. by every converge and every timer tick.
-			hysteria2_hop_ports: "", hysteria2_hop_interval: "30s",
+			hysteria2_hop_ports: "", hysteria2_hop_interval: $hy2hopiv,
 			tuic_enabled:                 false, tuic_port:                 8445,
 			shadowsocks_enabled:          false, shadowsocks_port:          8388,
 			shadowtls_enabled:            false, shadowtls_port:            8446,

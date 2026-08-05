@@ -77,3 +77,44 @@ func TestFrontConfigValidate(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadFrontConfigAcceptsBothShapes pins ADR-0038 §2: node.config.json is the single owner of front
+// configuration, and the standalone file remains an explicit override. Before this, spec.NodeProfile
+// declared and VALIDATED a Front field that nothing consumed — an operator following ADR-0034 configured
+// a front that never existed, and `node plan` reported it as live. The first remediation materialised
+// the profile's .front into a derived third file, which is the same one-truth-two-locations defect
+// (development.md §2.2 item 8); deciding the shape here means no file is written.
+func TestLoadFrontConfigAcceptsBothShapes(t *testing.T) {
+	bare := []byte(`{"enabled":true,"domain":"front.example.invalid","transport":"vless-ws-tls","mode":"relay"}`)
+	got, err := LoadFrontConfig(bare)
+	if err != nil {
+		t.Fatalf("bare FrontConfig: %v", err)
+	}
+	if !got.Enabled || got.Domain != "front.example.invalid" {
+		t.Fatalf("bare FrontConfig decoded wrong: %+v", got)
+	}
+
+	profile := []byte(`{"harden":true,"reachable":true,"front":` + string(bare) + `}`)
+	got2, err := LoadFrontConfig(profile)
+	if err != nil {
+		t.Fatalf("node profile: %v", err)
+	}
+	if got2 != got {
+		t.Fatalf("the profile shape decoded differently from the bare one:\n bare=%+v\n prof=%+v\n"+
+			"Two shapes of one truth must resolve identically, or an operator who follows ADR-0034 gets a "+
+			"different front from one who writes the standalone file.", got, got2)
+	}
+
+	// A profile with no .front is the fail-closed direction: disabled, exactly like no configuration.
+	got3, err := LoadFrontConfig([]byte(`{"harden":true}`))
+	if err != nil {
+		t.Fatalf("profile without .front: %v", err)
+	}
+	if got3.Enabled {
+		t.Fatalf("a profile carrying no .front produced an ENABLED front (%+v) — absence must never enable", got3)
+	}
+
+	if _, err := LoadFrontConfig([]byte(`not json`)); err == nil {
+		t.Fatal("a non-JSON document was accepted; the loader must fail closed")
+	}
+}

@@ -613,30 +613,15 @@ myc_sb_render_subscription() {
 			# not in scope here.
 			local hysteria2_hop_ports hysteria2_hop_interval
 			hysteria2_hop_ports="$(myc_params_get "$params" '.hysteria2_hop_ports' '')"
-			hysteria2_hop_interval="$(myc_params_get "$params" '.hysteria2_hop_interval' '30s')"
-			# VALIDATE, with the same rule as _hy2_hop_range (nb_harden.sh) and spec.ValidHysteria2HopRange.
-			# The range is a promise this file makes and the FIREWALL keeps; if only one half rejects a
-			# malformed value the client is handed a range with no rule behind it, and nothing on the node
-			# can see the difference (verify_post_apply is firewall-blind — loopback never traverses
-			# PREROUTING). Dropping it here means no range AND no rule: the halves stay in step and the
-			# client falls back to the single served port it is still given.
-			case "$hysteria2_hop_ports" in
-				'') ;;
-				# MORE THAN ONE COLON FIRST. `${r%%:*}` / `${r##*:}` take the OUTER fields, so "2000:3000:4000"
-				# yields lo=2000 hi=4000 — both in range, lo<hi — and was accepted as a range, then handed to
-				# iptables verbatim as `--dport 2000:3000:4000`, which it rejects. A value that passes the
-				# validator and cannot become a rule is the disagreement this validation exists to prevent.
-				*:*:*) hysteria2_hop_ports='' ;;
-				[0-9]*:[0-9]*)
-					_hy2lo="${hysteria2_hop_ports%%:*}"; _hy2hi="${hysteria2_hop_ports##*:}"
-					case "$_hy2lo$_hy2hi" in *[!0-9]*) hysteria2_hop_ports='' ;; esac
-					if [ -n "$hysteria2_hop_ports" ]; then
-						{ [ "$_hy2lo" -ge 1024 ] && [ "$_hy2hi" -le 65535 ] && [ "$_hy2lo" -lt "$_hy2hi" ]; } \
-							|| hysteria2_hop_ports=''
-					fi
-					unset _hy2lo _hy2hi ;;
-				*)  hysteria2_hop_ports='' ;;
-			esac
+			# The default comes from the OWNER too (§4.1: an obfuscation/timing parameter is an adapter
+			# INPUT, not a constant). A literal here would be a second place to change when the basis for
+			# the value changes — and the basis is recorded beside the constant, not beside its use.
+			hysteria2_hop_interval="$(myc_params_get "$params" '.hysteria2_hop_interval' "$(myc_hop_interval_default)")"
+			# JUDGED BY THE OWNER, not here (ADR-0038). myc_hop_range_ok compares against the bounds
+			# internal/spec emits into control/vocab.json; this file holds no expression of the rule. A
+			# refused value becomes the unconfigured state — no range emitted here, and no REDIRECT
+			# installed by the firewall half, because both consult the same emitted numbers.
+			myc_hop_range_ok "$hysteria2_hop_ports" || hysteria2_hop_ports=''
 			hy2_pw="${ipw:-$hysteria2_password}"
 			ss_pw="${ipw:-$ss_password}"
 			stls_pw="${ipw:-$shadowtls_password}"
