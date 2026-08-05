@@ -100,7 +100,13 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 	if hy2HopPorts != "" && !ValidHysteria2HopRange(hy2HopPorts) {
 		hy2HopPorts = ""
 	}
+	// VALIDATED by the same owner (Audit-0010 F-005). An unjudged duration reached both the client
+	// config and the server render, where sing-box refuses the whole document — a converge failing every
+	// tick with a message about JSON rather than about the knob the operator mistyped.
 	hy2HopInterval := paramStr(params, "hysteria2_hop_interval", DefaultHysteria2HopInterval)
+	if !ValidHysteria2HopInterval(hy2HopInterval) {
+		hy2HopInterval = DefaultHysteria2HopInterval
+	}
 
 	ssPassword := paramStr(params, "ss_password", "")
 	trojanPassword := paramStr(params, "trojan_password", "")

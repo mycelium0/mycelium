@@ -386,11 +386,22 @@ verify_hy2_hop_nat() {
 		warn "hysteria2 port hopping: params advertise the range $want to every client, but NO redirect is installed. Every client that hops off $lstn reaches nothing, and no node-local check can see this — loopback traffic does not traverse PREROUTING."
 		return 1
 	fi
-	printf '%s' "$rule" | grep -qF -- "--dport $want" \
-		|| { warn "hysteria2 port hopping: the installed redirect does not cover the advertised range $want (rule: $rule)."; return 1; }
+	# ANCHORED, not a substring (Audit-0010 F-010b). `grep -F -- "--dport $want"` matches a rule whose
+	# range merely BEGINS with the advertised one: a rule for `--dport 20000:210000` satisfies a check for
+	# `20000:21000`. A rule covering a wider range than advertised is not a harmless superset — it is the
+	# collision case, silently swallowing whatever else lives in the excess.
+	printf '%s' "$rule" | grep -qE -- "--dport ${want}([[:space:]]|\$)" \
+		|| { warn "hysteria2 port hopping: the installed redirect does not cover exactly the advertised range $want (rule: $rule)."; return 1; }
 	printf '%s' "$rule" | grep -qE -- "--to-ports ${lstn}([[:space:]]|$)" \
 		|| { warn "hysteria2 port hopping: the redirect points somewhere other than the served port $lstn (rule: $rule)."; return 1; }
-	log "hysteria2 port hopping: verified — udp $want redirects to the served port $lstn."
+	# THE MESSAGE NAMES WHAT WAS CHECKED, AND ONLY THAT (Audit-0010 F-010a). It used to read "verified",
+	# unqualified, after inspecting `iptables -t nat -S` alone — the IPv4 table. reconcile_hy2_hop_nat
+	# installs an IPv4 rule only, while the sing-box inbounds listen on `::` and resolve_node_address falls
+	# back to a global IPv6 address when no global v4 exists. On such a node every client dials v6, no
+	# ip6tables rule exists, and this function reported the range verified. Saying "IPv4" is the honest
+	# minimum; installing the v6 twin (the pattern nb_render_awg.sh already uses) is the real fix and is
+	# tracked as an open condition rather than smuggled in here.
+	log "hysteria2 port hopping: IPv4 redirect verified — udp $want -> served port $lstn. NOTE: only the IPv4 nat table was inspected; a node reached over IPv6 has no equivalent rule."
 	return 0
 }
 

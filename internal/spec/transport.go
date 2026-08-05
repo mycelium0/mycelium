@@ -6,6 +6,7 @@
 package spec
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -269,6 +270,30 @@ var hysteria2HopPortBounds = PortRangeBounds{Min: 1024, Max: 65535}
 // Hysteria2HopPortBounds returns the admissible hop-range window (a copy; the bounds are immutable).
 func Hysteria2HopPortBounds() PortRangeBounds { return hysteria2HopPortBounds }
 
+// maxPortFieldDigits caps one field of a port range. BASIS: 65535 is five digits, so anything longer is
+// not a port however it is padded. It exists to make zero-padded and absurdly long fields REFUSED rather
+// than silently normalised, and it is emitted so every consumer applies the same cap.
+const maxPortFieldDigits = 5
+
+// hysteria2HopIntervalPattern is the ERE an accepted hop interval must match: a positive integer with a
+// Go/sing-box duration unit, e.g. `30s`, `2m`, `1h`. Deliberately NOT the full Go duration grammar —
+// this value becomes a client-config field and a timing parameter, and the compound forms Go accepts
+// (`1h2m3s`) buy nothing here while widening what has to be agreed on by two languages.
+const hysteria2HopIntervalPattern = `^[1-9][0-9]{0,4}(ms|s|m|h)$`
+
+// ValidHysteria2HopInterval reports whether s is an acceptable hop period. Empty is NOT valid; callers
+// substitute DefaultHysteria2HopInterval when the operator sets nothing.
+//
+// A duration is structured, so ARCHITECTURE's ownership rule covers it: without this it was
+// operator-settable and judged by nobody, and an unparseable value reached both the client config and
+// the server render, where sing-box refuses the whole document — a converge that fails on every tick
+// with a message about JSON rather than about the knob the operator actually mistyped.
+func ValidHysteria2HopInterval(s string) bool {
+	return hysteria2HopIntervalRe.MatchString(s)
+}
+
+var hysteria2HopIntervalRe = regexp.MustCompile(hysteria2HopIntervalPattern)
+
 // ValidHysteria2HopRange reports whether s is a usable hysteria2 port-hop range ("LO:HI", 1024 <= LO < HI
 // <= 65535). Empty is NOT valid here — empty means "no hopping", which callers check separately.
 //
@@ -300,7 +325,7 @@ func parseHysteria2HopRange(s string) (lo, hi int, ok bool) {
 		return 0, 0, false
 	}
 	for _, f := range []string{a, b} {
-		if len(f) > 5 {
+		if len(f) > maxPortFieldDigits {
 			return 0, 0, false
 		}
 		for _, c := range f {
@@ -378,8 +403,20 @@ type Vocab struct {
 type ParamsValidationVocab struct {
 	// Hysteria2HopPorts is the admissible window for the hysteria2 port-hop range (`LO:HI`).
 	Hysteria2HopPorts PortRangeBounds `json:"hysteria2_hop_ports"`
+	// MaxPortFieldDigits caps the digits in one field of a port range. It is EMITTED because it is
+	// policy, not an implementation detail: without it the shell accepted `001024:065535` and
+	// `0000000000000000000000000000002000:3000` — numerically in bounds under `test -ge`, which parses
+	// base 10 — while this package rejected every one (Audit-0010 F-006). Two answers to one input is
+	// the divergence ADR-0038 exists to remove, and it survived the first collapse because only the
+	// NUMBERS were emitted and the SHAPE was left restated on each side.
+	MaxPortFieldDigits int `json:"max_port_field_digits"`
 	// Hysteria2HopInterval is the default hop period when the operator sets a range but no interval.
 	Hysteria2HopInterval string `json:"hysteria2_hop_interval_default"`
+	// Hysteria2HopIntervalPattern is an ERE every accepted hop interval must match. A duration cannot be
+	// bounded by two integers, so the owner emits the SHAPE instead — same principle, different carrier.
+	// Until this existed the interval was operator-settable and judged by nobody (Audit-0010 F-005),
+	// contradicting the ownership rule ARCHITECTURE gained in the very same commit range.
+	Hysteria2HopIntervalPattern string `json:"hysteria2_hop_interval_pattern"`
 }
 
 // NewVocab returns the canonical Vocab built from the Go-owned registries. It is pure:
@@ -395,8 +432,10 @@ func NewVocab() Vocab {
 		ClientFingerprints: ClientFingerprints(),
 		Protos:             TransportRegistry(),
 		ParamsValidation: ParamsValidationVocab{
-			Hysteria2HopPorts:    Hysteria2HopPortBounds(),
-			Hysteria2HopInterval: DefaultHysteria2HopInterval,
+			Hysteria2HopPorts:           Hysteria2HopPortBounds(),
+			MaxPortFieldDigits:          maxPortFieldDigits,
+			Hysteria2HopInterval:        DefaultHysteria2HopInterval,
+			Hysteria2HopIntervalPattern: hysteria2HopIntervalPattern,
 		},
 	}
 }

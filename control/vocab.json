@@ -173,6 +173,8 @@
       "min": 1024,
       "max": 65535
     },
-    "hysteria2_hop_interval_default": "30s"
+    "max_port_field_digits": 5,
+    "hysteria2_hop_interval_default": "30s",
+    "hysteria2_hop_interval_pattern": "^[1-9][0-9]{0,4}(ms|s|m|h)$"
   }
 }

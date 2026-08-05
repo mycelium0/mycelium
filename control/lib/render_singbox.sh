@@ -622,6 +622,9 @@ myc_sb_render_subscription() {
 			# refused value becomes the unconfigured state — no range emitted here, and no REDIRECT
 			# installed by the firewall half, because both consult the same emitted numbers.
 			myc_hop_range_ok "$hysteria2_hop_ports" || hysteria2_hop_ports=''
+			# The interval is judged by the owner too (Audit-0010 F-005); an unacceptable one falls back to
+			# the emitted default rather than reaching sing-box, which would refuse the whole document.
+			myc_hop_interval_ok "$hysteria2_hop_interval" || hysteria2_hop_interval="$(myc_hop_interval_default)"
 			hy2_pw="${ipw:-$hysteria2_password}"
 			ss_pw="${ipw:-$ss_password}"
 			stls_pw="${ipw:-$shadowtls_password}"

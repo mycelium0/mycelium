@@ -174,13 +174,36 @@ myc_hop_range_ok() {
 	local lo="${1%%:*}" hi="${1##*:}"
 	[ -n "$lo" ] && [ -n "$hi" ] || return 1
 	case "$lo$hi" in *[!0-9]*) return 1 ;; esac
-	local vocab min max
+	local vocab min max cap
 	vocab="$(_myc_vocab_path)"
 	[ -f "$vocab" ] || return 1
 	min="$(jq -r '.params_validation.hysteria2_hop_ports.min // empty' "$vocab" 2>/dev/null)"
 	max="$(jq -r '.params_validation.hysteria2_hop_ports.max // empty' "$vocab" 2>/dev/null)"
-	case "${min:-x}${max:-x}" in *[!0-9]*) return 1 ;; esac
+	cap="$(jq -r '.params_validation.max_port_field_digits // empty' "$vocab" 2>/dev/null)"
+	case "${min:-x}${max:-x}${cap:-x}" in *[!0-9]*) return 1 ;; esac
+	# THE EMITTED DIGIT CAP, not a local rule (Audit-0010 F-006). Ownership had been collapsed for the
+	# NUMBERS and left restated for the SHAPE, so `001024:065535` was accepted here and refused by the
+	# owner: `test -ge` parses base 10, so a zero-padded field clears every numeric check. Two answers to
+	# one input is the divergence ADR-0038 exists to remove.
+	[ "${#lo}" -le "$cap" ] && [ "${#hi}" -le "$cap" ] || return 1
 	[ "$lo" -ge "$min" ] && [ "$hi" -le "$max" ] && [ "$lo" -lt "$hi" ]
+}
+
+# myc_hop_interval_ok VALUE — succeed iff VALUE matches the EMITTED hop-interval pattern.
+#
+# A duration cannot be bounded by two integers, so the owner emits the SHAPE (an ERE) instead. Until this
+# existed the interval was operator-settable and judged by nobody (Audit-0010 F-005): a mistyped value
+# reached the client config and the server render, and sing-box then refused the whole document — a
+# converge that fails on every tick with a message about JSON rather than about the knob.
+# Fail-closed on an artifact carrying no pattern, for the same reason the bounds do.
+myc_hop_interval_ok() {
+	[ -n "${1:-}" ] || return 1
+	local vocab pat
+	vocab="$(_myc_vocab_path)"
+	[ -f "$vocab" ] || return 1
+	pat="$(jq -r '.params_validation.hysteria2_hop_interval_pattern // empty' "$vocab" 2>/dev/null)"
+	[ -n "$pat" ] || return 1
+	printf '%s' "$1" | grep -qE "$pat"
 }
 
 # myc_hop_interval_default — the emitted default hop period. Empty when the vocab carries none, which
