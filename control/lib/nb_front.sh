@@ -36,18 +36,20 @@ front_setup() {
 	local profile="${NODE_CONFIG_JSON:-$STATE_DIR/node.config.json}"
 	if [ ! -f "$FRONT_CONFIG" ] && [ -f "$profile" ] \
 	   && jq -e '.front | objects | select(.enabled == true)' "$profile" >/dev/null 2>&1; then
-		if jq -e '.front' "$profile" >"$STATE_DIR/front.from-profile.json" 2>/dev/null; then
-			chmod 0600 "$STATE_DIR/front.from-profile.json" 2>/dev/null || true
-			FRONT_CONFIG="$STATE_DIR/front.from-profile.json"
-			log "front: taking the configuration from the node profile ($profile .front); no standalone $STATE_DIR/front.config.json is present."
-		else
-			rm -f "$STATE_DIR/front.from-profile.json" 2>/dev/null || true
-			warn "front: the node profile declares .front but it could not be materialised; no fronting this run."
-		fi
+		# The PROFILE ITSELF is handed to the spine — no derived copy. spec.LoadFrontConfig accepts either
+		# shape, so the discrimination happens once, in Go, and node.config.json stays the single owner of
+		# front configuration (ADR-0034, ADR-0038 §2). Materialising `.front` into a third file, as the
+		# first attempt did, is the same one-truth-two-locations defect this work exists to remove.
+		FRONT_CONFIG="$profile"
+		log "front: configuration taken from the node profile ($profile .front); no standalone $STATE_DIR/front.config.json is present."
 	fi
 	[ -f "$FRONT_CONFIG" ] || return 0          # default-off: no config anywhere => inert
+	# SHAPE-AWARE, because $FRONT_CONFIG may now be the node profile, whose flag lives at .front.enabled
+	# rather than at the root. Reading only the root would silently report "disabled" for every operator
+	# who configured the front where ADR-0034 tells them to — the same class of quiet no-op this change
+	# removes, reintroduced one line lower. The Go side discriminates the same way (spec.LoadFrontConfig).
 	local enabled
-	enabled="$(jq -r '.enabled // false' "$FRONT_CONFIG" 2>/dev/null)"
+	enabled="$(jq -r 'if has("front") then (.front.enabled // false) else (.enabled // false) end' "$FRONT_CONFIG" 2>/dev/null)"
 	if [ "$enabled" != "true" ]; then
 		log "front config present but disabled (enabled!=true); no fronting (default-off)."
 		return 0

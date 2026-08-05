@@ -13,6 +13,28 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.63] — 2026-08-05
+
+> RP-0017 phases D+E. Front configuration gets a single owner, and the documentation the earlier work
+> owed and did not deliver — including the observable-shape assessment of a hop range, which is the one
+> genuine cost of the feature and had never been written down.
+
+### Changed
+- `spec.LoadFrontConfig` accepts either a bare `FrontConfig` document or the node profile carrying one,
+  so `node.config.json` (ADR-0034) is the single owner of front configuration and `front_setup` hands
+  the profile to the spine directly. The derived `front.from-profile.json` is gone — materialising the
+  profile's `.front` into a third file was the same one-truth-two-locations defect being removed.
+- `front_setup` reads the enabled flag shape-aware; reading only the root would have reported "disabled"
+  for every operator who configured the front where ADR-0034 tells them to.
+
+### Documentation
+- `ARCHITECTURE.md`: the hysteria2 row records the port-range dimension and that the rule making it real
+  is invisible to every node-local check; Layer 2 gains the params-validation ownership rule and the
+  reserved-move semantics (enforced on the field, not the action name).
+- `THREAT-MODEL.md`: a new section assesses what a hop range COSTS — a client walking a contiguous port
+  block on a fixed cadence is a distinguisher no ordinary QUIC client produces. Off by default, width
+  keyed to an observed port-filter, prefer narrow, and the interval owned as a timing parameter (§4.1).
+
 ## [0.2.62] — 2026-08-05
 
 > RP-0017 phases A+B. The hop-range rule had three hand-maintained implementations and a gate that

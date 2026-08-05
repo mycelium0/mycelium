@@ -5,7 +5,10 @@
 
 package spec
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // FrontMode is the closed vocabulary for how an operator's CDN/ingress front handles the tunnel
 // (ADR-0033). It is the doctrine's relay-vs-terminate switch: relay keeps the metadata posture clean;
@@ -93,4 +96,37 @@ func (c FrontConfig) Validate() error {
 		return fmt.Errorf("front.mode terminate requires ack_terminate_tradeoff=true: a TLS-terminating edge sees the user's source address and destination hostnames (a metadata trade-off — ADR-0026 / THREAT-MODEL); relay is the doctrine-clean default")
 	}
 	return nil
+}
+
+// LoadFrontConfig decodes a front configuration from either shape an operator may legitimately hold:
+// a bare FrontConfig document, or the node profile (node.config.json) whose `.front` object carries it.
+//
+// WHY BOTH, IN ONE PLACE (ADR-0038 §2). ADR-0034 made node.config.json the node profile, and
+// spec.NodeProfile declares and validates a Front field — so an operator who configures the front there
+// gets it accepted and reported by `node plan`. Nothing consumed it: front_setup read only the
+// standalone front.config.json. The first remediation had the shell MATERIALISE the profile's `.front`
+// into a derived third file, which is the same one-truth-two-locations defect (development.md §2.2
+// item 8) the rest of this work exists to remove. Deciding the shape HERE means no file is written and
+// no caller re-implements the discrimination.
+//
+// Discrimination is on the presence of a `front` key: a NodeProfile has one, a FrontConfig does not.
+// A profile whose `.front` is absent yields the zero FrontConfig, i.e. disabled — the fail-closed
+// direction, and the same result as no configuration at all.
+func LoadFrontConfig(data []byte) (FrontConfig, error) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return FrontConfig{}, fmt.Errorf("front config: not a JSON object: %w", err)
+	}
+	if raw, ok := probe["front"]; ok {
+		var fc FrontConfig
+		if err := json.Unmarshal(raw, &fc); err != nil {
+			return FrontConfig{}, fmt.Errorf("front config: node profile .front is not a FrontConfig: %w", err)
+		}
+		return fc, nil
+	}
+	var fc FrontConfig
+	if err := json.Unmarshal(data, &fc); err != nil {
+		return FrontConfig{}, fmt.Errorf("front config: not a FrontConfig: %w", err)
+	}
+	return fc, nil
 }

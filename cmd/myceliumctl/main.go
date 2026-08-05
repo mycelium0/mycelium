@@ -467,8 +467,11 @@ func cmdBundle(args []string) error {
 		if err != nil {
 			return fmt.Errorf("bundle: read front %s: %w", *frontPath, err)
 		}
-		if err := json.Unmarshal(fdata, &fc); err != nil {
-			return fmt.Errorf("bundle: %s is not a valid FrontConfig: %w", *frontPath, err)
+		// Same loader as front-render: one place decides whether the document is a bare FrontConfig or
+		// the node profile carrying one, so the two commands can never disagree about a file the
+		// operator hands to both (ADR-0038 §2).
+		if fc, err = spec.LoadFrontConfig(fdata); err != nil {
+			return fmt.Errorf("bundle: %s: %w", *frontPath, err)
 		}
 	}
 	pdata, err := os.ReadFile(*paramsPath)
@@ -695,9 +698,12 @@ func cmdFrontRender(args []string) error {
 	if err != nil {
 		return fmt.Errorf("front-render: read front %s: %w", *frontPath, err)
 	}
-	var fc spec.FrontConfig
-	if err := json.Unmarshal(fdata, &fc); err != nil {
-		return fmt.Errorf("front-render: %s is not a valid FrontConfig: %w", *frontPath, err)
+	// spec.LoadFrontConfig, not a bare Unmarshal: it accepts a bare FrontConfig OR the node profile
+	// whose .front carries one, so node.config.json can be passed directly and no derived file exists
+	// (ADR-0038 §2).
+	fc, err := spec.LoadFrontConfig(fdata)
+	if err != nil {
+		return fmt.Errorf("front-render: %s: %w", *frontPath, err)
 	}
 	pdata, err := os.ReadFile(*paramsPath)
 	if err != nil {

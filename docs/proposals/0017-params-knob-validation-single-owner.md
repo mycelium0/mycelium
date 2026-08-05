@@ -16,7 +16,7 @@ later. See the LICENSE file in the repository root.
 - **Related documents:** [RP-0008](0008-go-spine-distribution-rendering.md) (Go spine owns
   distribution vocabulary; `control/vocab.json` is the generated artifact the shell consumes),
   [RP-0012](0012-phase2-auto-rotation-actuation.md) (rotation actuation + the reserved-move set),
-  [RP-0016](0016-transport-delivery-hardening.md), [ADR-0022](../adr/0022-default-transport-posture.md)
+  [RP-0016](0016-transport-delivery-hardening.md), [ADR-0022](../adr/0022-two-port-reality-default.md)
   (minimal-exposure default posture), [ADR-0034](../adr/0034-unified-node-profile.md)
   (`node.config.json` is the node profile), ADR-0038 (created by this RP, §8).
 
