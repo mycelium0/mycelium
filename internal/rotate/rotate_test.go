@@ -482,8 +482,21 @@ func TestPlanNeverEmitsAPortMoveWhileRotatePortIsReserved(t *testing.T) {
 				in.Active = a
 				// No candidate beats the incumbent by the margin -> the demote branch, if the baseline
 				// leaves an independent fallback. Two distinct families in the issued baseline do.
-				in.Ranked = []spec.RotationCandidate{cand("vless-reality-grpc", 0.2, true)}
-				in.IssuedBaseline = []string{"vless-reality-vision", "hysteria2", "trojan"}
+				// Candidates from THREE DISTINCT block families, none beating the incumbent by the margin.
+				// With only grpc ranked, served = {vision, grpc} — both reality-tcp, which fold to ONE block
+				// family — so excluding the demoted vision left a single family and the floor refused. The
+				// branch is unreachable with a same-family fixture, which is why the original row skipped.
+				in.Ranked = []spec.RotationCandidate{
+					cand("vless-reality-grpc", 0.2, true),
+					cand("hysteria2", 0.2, true),
+					cand("trojan", 0.2, true),
+				}
+				// The baseline MUST contain grpc. DemoteKeepsIndependentFallback intersects the served set
+				// with the issued baseline and skips any served proto the baseline does not hold; with grpc
+				// absent the intersection was empty, the floor refused, the planner HELD — and the row
+				// t.Skipped. The demote branch's own `to.ToPort = 0` was therefore enforced by nothing, while
+				// the commit that added it said otherwise (Audit-0010 F-011).
+				in.IssuedBaseline = []string{"vless-reality-vision", "vless-reality-grpc", "hysteria2", "trojan"}
 				return in
 			}(),
 		},
@@ -495,8 +508,13 @@ func TestPlanNeverEmitsAPortMoveWhileRotatePortIsReserved(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Plan: %v", err)
 			}
+			// FAIL, never skip. A skip here is indistinguishable from the assertion passing, and that is
+			// exactly what happened: the demote row held for a fixture reason and reported nothing, so one
+			// of the two branches this test exists to cover was never reached.
 			if !p.Act {
-				t.Skipf("this input held (%s) — the row asserts about an ACT plan", p.HeldBecause)
+				t.Fatalf("the planner HELD (%s), so this row asserted nothing about the branch it names. "+
+					"Fix the fixture until the branch is reached — a row that cannot reach its own code path "+
+					"is a pass indistinguishable from absent coverage.", p.HeldBecause)
 			}
 			if p.To.ToPort != 0 {
 				t.Fatalf("the planner emitted an act plan carrying to_port=%d under action %q. "+

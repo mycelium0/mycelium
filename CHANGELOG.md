@@ -13,6 +13,43 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.67] — 2026-08-06
+
+> Audit-0010 tail: the second S1 and the load-bearing S2s. Two of them were defects in tests I wrote
+> this week — one gate that accepted values its own owner rejects, and one row that skipped the branch
+> it was written to cover.
+
+### Fixed
+- **The shell comparator accepted values the owner rejects** (F-006). Ownership had been collapsed for
+  the NUMBERS and left restated for the SHAPE, so `001024:065535` and
+  `0000000000000000000000000000002000:3000` passed the shell — `test -ge` parses base 10, so a
+  zero-padded field clears every numeric check — while `ValidHysteria2HopRange` refused all of them. The
+  field-digit cap is now emitted (`params_validation.max_port_field_digits`) and applied, and the value
+  table carries the padded forms as regression rows.
+- **`hysteria2_hop_interval` was operator-settable and judged by nobody** (F-005), contradicting the
+  ownership rule ARCHITECTURE gained in the same commit range. A duration cannot be bounded by two
+  integers, so the owner emits the SHAPE — an ERE — and both renderers fall back to the emitted default
+  rather than letting a mistyped value reach sing-box, which refuses the whole document and turns an
+  operator typo into a converge that fails every tick with a message about JSON.
+- **The demote branch of the reserved-move fix was covered by nothing** (F-011). The row `t.Skipf`-ed:
+  served was `{vision, grpc}`, both reality-tcp, which fold to ONE block family, so the independent-
+  fallback floor refused and the planner held. A skip is indistinguishable from a pass. The fixture now
+  ranks three distinct families, the row FAILS instead of skipping, and removing `to.ToPort = 0` from
+  the demote branch is caught.
+- **`verify_hy2_hop_nat` claimed more than it checked** (F-010). `grep -F -- "--dport $want"` matched a
+  rule whose range merely BEGINS with the advertised one, so a redirect over `20000:210000` satisfied a
+  check for `20000:21000` — the collision case, silently swallowing the excess. Anchored. And the
+  success message said "verified" after inspecting the IPv4 table alone, on a project whose inbounds
+  listen on `::` and whose address resolution falls back to IPv6; it now names the family it checked.
+
+### Documentation
+- **THREAT-MODEL gains the node-side half of the hop-range shape** (F-002, S1). ARCHITECTURE forward-
+  references it for "the node's observable port footprint" and the section described only the client's
+  cadence — a dangling pointer in the document RP-0017 designated as the deliverable. What a scanner
+  sees is now written down: N contiguous UDP ports answering identically from one certificate, cheap to
+  confirm once suspected, standing whether or not a client is hopping, and unreadable from the firewall's
+  rule list because the REDIRECT precedes filter.
+
 ## [0.2.66] — 2026-08-05
 
 > Audit-0010 (event-triggered, §4.4; six lenses, each adversarially verified) returned

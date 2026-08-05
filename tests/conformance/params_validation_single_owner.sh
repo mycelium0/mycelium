@@ -204,7 +204,36 @@ abc|refuse
 20000:21000 |refuse
 -1:500|refuse
 1e4:2e4|refuse
+001024:065535|refuse
+0001024:0002000|refuse
+020000:21000|refuse
+0000000000000000000000000000002000:3000|refuse
 ROWS
+
+	# THE HOP INTERVAL, judged by the same owner (Audit-0010 F-005). It was operator-settable and
+	# validated by nobody, so a mistyped duration reached the client config and the server render and
+	# sing-box refused the whole document — a converge failing every tick with a message about JSON.
+	while IFS='|' read -r value want; do
+		[ -n "${value}${want}" ] || continue
+		if myc_hop_interval_ok "$value"; then got=accept; else got=refuse; fi
+		[ "$got" = "$want" ] \
+			&& printf '  ok    interval %s -> %s\n' "'${value:-<пусто>}'" "$want" \
+			|| { printf '  FAIL  interval %s: comparator says %s, expected %s\n' "'$value'" "$got" "$want"; fail=1; }
+	done <<'IROWS'
+30s|accept
+3s|accept
+2m|accept
+1h|accept
+500ms|accept
+|refuse
+30|refuse
+s|refuse
+0s|refuse
+-5s|refuse
+30sec|refuse
+1h2m3s|refuse
+30S|refuse
+IROWS
 
 	# THE PARTIALLY-UPDATED NODE. An artifact with no bounds must refuse everything — no range, hence no
 	# rule, hence the unconfigured state. A permissive default here would hand clients a range with

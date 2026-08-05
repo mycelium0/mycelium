@@ -336,6 +336,30 @@ exactly what it is. Set against project principle #2 ("indistinguishability over
 range trades a *reachability* gain for an *identifiability* loss, and on a network that is not actually
 blocking UDP ports the trade is pure loss.
 
+**What the NODE looks like, which the client-side account above omits and ARCHITECTURE forward-references
+here** (Audit-0010 F-002). Everything above is about the client's pattern. The other half is what a
+scanner sees, and it is the half an adversary can measure without any client present:
+
+- **N contiguous UDP ports on one address that all answer identically.** The REDIRECT terminates the whole
+  range on one QUIC endpoint, so every port in the block returns the same handshake behaviour from the same
+  certificate. A single UDP service answering across a contiguous block is not a shape ordinary hosts
+  produce; the block itself is the signature, and its WIDTH is how loud it is. This is a *server-side*
+  fingerprint and it exists whether or not any client is currently hopping.
+- **It is discoverable by scanning alone.** Enumerating UDP is expensive at internet scale, but confirming a
+  suspected host is cheap: probe three ports in the block and see the same endpoint three times. The range
+  therefore converts a per-port question into a per-host answer.
+- **The block outlives the traffic.** A client that stops hopping leaves the ports answering. Unlike the
+  client-side cadence, which is only observable while a client is active, the node-side block is a standing
+  property of the host for as long as the range is configured.
+- **It is not admitted by the host firewall, and that changes nothing.** The range is delivered by a
+  nat/PREROUTING REDIRECT, which runs *before* filter, so a ufw rule naming the range is neither present nor
+  needed — and the ports are reachable regardless. Reasoning about exposure from the firewall's rule list
+  will therefore understate it (this is measured: `tests/netsim/lib.sh` had to move its own impairments out
+  of `filter/INPUT` for exactly this reason).
+- **Contained, at least, to one family.** The REDIRECT is refused when the range covers another served UDP
+  port (`reconcile_hy2_hop_nat`), so the block cannot swallow tuic or AmneziaWG and turn a shape problem
+  into an availability one. That refusal is the reason the node-side cost stays bounded.
+
 **Consequences for defaults and guidance.**
 - **Off by default, and it must stay off by default.** A node that configures no range renders
   byte-identically to one that never heard of the feature ([ADR-0022](adr/0022-two-port-reality-default.md) minimal-exposure posture).
