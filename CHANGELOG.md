@@ -13,6 +13,27 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.66] — 2026-08-05
+
+> Audit-0010 (event-triggered, §4.4; six lenses, each adversarially verified) returned
+> `pass_with_conditions`. This closes the two live-node harms that were reachable without a design
+> decision. The S1 it found was produced by the previous commit's own fix.
+
+### Fixed
+- **A hop range containing another served UDP port is refused.** The single owner judges the range's
+  ENDPOINTS and knows nothing about the node — so `1024:65535` validated cleanly while a REDIRECT over it
+  swallows every inbound packet for tuic, shadowsocks and AmneziaWG. **Nothing on the node could report
+  it:** every reach anchor is `127.0.0.1:<port>`, and loopback never traverses a `-i <wan>` PREROUTING
+  rule, so the measure daemon would keep scoring the dead family alive and the rotation planner could
+  promote it as the safe fallback. `reconcile_hy2_hop_nat` now refuses, naming the collisions — the one
+  place that both knows this node's served ports and installs the rule.
+- **The ufw admission for the hop range is removed.** It was malformed (`${_hop//:/\:}` emitted
+  `20000\:21000/udp`, which ufw rejects) and it was unnecessary: nat/PREROUTING rewrites the destination
+  port before filter/INPUT ever sees the packet — measured, not argued, since `tests/netsim/lib.sh` had to
+  move its own impairments out of filter for exactly that reason. Its side effect was worse than its
+  absence: the un-parseable range token in the served set made `verify_ufw_exposure` report a missing
+  admission on every converge, forever.
+
 ## [0.2.65] — 2026-08-05
 
 > The netsim harness §7.3 has required since the charter was written, and the first thing it measured

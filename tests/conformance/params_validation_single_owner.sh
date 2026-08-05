@@ -165,6 +165,11 @@ fi
 # 3-4. THE COMPARATOR, driven. Including the artifact-without-bounds case.
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- the shipped comparator, over a value table --\n'
+# NOTE ON `1024:65535` (Audit-0010 F-001). It is pinned ACCEPT here because this comparator judges the
+# range's SYNTAX AND ENDPOINTS and nothing else — that is its whole contract. It is not a statement that
+# the value is safe to configure: a REDIRECT over the whole port space swallows every other served UDP
+# family on the node. That refusal belongs to reconcile_hy2_hop_nat, which is the only place that knows
+# which ports THIS node serves, and hy2_hop_redirect_kept.sh drives it.
 (
 	set -u
 	# shellcheck source=/dev/null
