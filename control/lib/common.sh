@@ -3,7 +3,13 @@
 # This file is part of Mycelium, licensed under the GNU Affero General Public License v3.0 or
 # later. See the LICENSE file in the repository root.
 #
-# common.sh — shared helpers for myceliumctl (logging, dependency checks, jq wrappers).
+# common.sh — the helpers BOTH shell entrypoints source: logging, dependency checks, jq wrappers, and
+# the single comparator for emitted params-knob validation (ADR-0038).
+#
+# The last responsibility is here for a stated reason rather than by drift: myceliumctl and
+# node-bootstrap each judge a hysteria2 hop range, node-bootstrap does not source lib/vocab.sh, and this
+# is the only file both reach. Keeping the comparator anywhere else would mean two of them, which is the
+# defect ADR-0038 exists to remove. It holds no policy — it compares against numbers internal/spec emits.
 # Author: mindicator & silicon bags quartet.
 #
 # This file is meant to be sourced, never executed directly. It defines functions only;

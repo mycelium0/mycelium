@@ -13,6 +13,41 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.68] — 2026-08-06
+
+> The rest of the Audit-0010 tail. Two more were assertions that could not fail, one was a metric that
+> reported success for work that had not happened, and one was a rule whose lifetime did not match the
+> listener it serves.
+
+### Fixed
+- **The reserved-move rule now lives in the contract, not only in the planner** (F-016). It was two
+  assignments inside `rotate.Plan`; nothing related `To.Action` to `To.ToPort`, so a plan from any other
+  producer — a hand-written `rotate_plan.json`, a replayed stale plan — validated and moved a served
+  port under an authorised action. `RotationPlan.Validate` refuses it. The reserved action itself stays
+  REPRESENTABLE: it is unrequestable, not unexpressible, and the difference matters the day it is unreserved.
+- **The netsim budget assertion could not fail** (F-012). `MinInterval` (30 min) is four times wider than
+  the six 90-second ticks it ran over, so the cooldown blocked everything after the first act and the
+  comparison was always `1 > 2`. That scenario now pins exactly one act (which is what the cooldown
+  guarantees) and the budget has its own scenario, ticking past the cooldown so the cap is what binds.
+- **`record_converge_ok` stamped success before the tail ran** (F-014). A tail failing on every tick kept
+  advancing "last successful converge" — the one fact that separates a healthy node from one whose timer
+  died. Both calls stay bare so `set -e` aborts before the stamp; wrapping the tail in `if` would have
+  swallowed a fatal convergence failure into a silent success.
+- **The hop REDIRECT did not survive a reboot** (F-008) while the ufw half of the same design did — one
+  promise with two lifetimes. The sing-box unit reinstalls it in `ExecStartPre`, tying the rule's
+  lifetime to the listener it serves. Non-fatal by construction, so a node without a range still starts.
+- **The appointed owner had no behavioural test** (F-007). Its only coverage was a gate driving the SHELL
+  comparator and a grep for the function's name — proof that it exists, not that it decides correctly.
+- **The gate's function-body extraction silently inspected nothing** for nine functions (F-013), keyed on
+  a literal `name() {` that misses padded alignment, and ran one-line bodies to the next `^}`. Rewritten
+  with a bounded awk extraction plus a self-check: an empty body is now reported, not skipped.
+
+### Documentation
+- `common.sh`'s header names the third responsibility it acquired, with the reason it lives there (F-024).
+- The measure config records that a hop range is unmeasurable from the node **by construction** (F-009):
+  the anchor is the served port, the clients dial range ports, and the REDIRECT is `-i <wan>` in
+  PREROUTING, which loopback never traverses. A green hysteria2 weight is not evidence that hopping works.
+
 ## [0.2.67] — 2026-08-06
 
 > Audit-0010 tail: the second S1 and the load-bearing S2s. Two of them were defects in tests I wrote

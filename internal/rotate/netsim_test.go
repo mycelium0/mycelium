@@ -110,13 +110,62 @@ func TestNetsimSustainedImpairmentActsWithinSLO(t *testing.T) {
 					"every client a reconnect. Later means impairment persists past the SLO.",
 					tc.name, acted[0], slo-1, lim.FlipConfirmations)
 			}
-			// And the window budget must bound what follows: MaxPerWindow acts, not one per tick.
-			if len(acted) > lim.MaxPerWindow {
-				t.Fatalf("%s: %d rotations in one window, budget is %d. An unattended loop rotating on "+
-					"every tick is a beacon — the anti-beacon cap is the whole reason the budget exists.",
-					tc.name, len(acted), lim.MaxPerWindow)
+			// EXACTLY ONE act in this window. MinInterval (30 min) is four times wider than the six
+			// 90-second ticks here, so the cooldown blocks everything after the first. Asserting the
+			// per-window BUDGET here could not fail — the comparison was always `1 > 2`, and deleting the
+			// budget guard changed nothing. The budget has its own scenario below, ticking past the
+			// cooldown so it is the binding constraint rather than a bystander (Audit-0010 F-012a).
+			if len(acted) != 1 {
+				t.Fatalf("%s: %d acts across %d ticks (at %v), expected exactly 1 — MinInterval is %v, wider "+
+					"than this whole window, so a second act means the cooldown did not hold.",
+					tc.name, len(acted), slo+3, acted, lim.MinInterval)
 			}
 		})
+	}
+}
+
+// TestNetsimWindowBudgetBinds is the budget assertion, given ticks wide enough for it to bind.
+//
+// In the sustained-impairment scenarios the cooldown is the only thing that stops the loop, so a budget
+// assertion there compares 1 against 2 forever — it cannot fail, which is the same as not existing. Here
+// the ticks are spaced PAST MinInterval, so the per-window cap is the only remaining bound, and deleting
+// the cap fails this.
+func TestNetsimWindowBudgetBinds(t *testing.T) {
+	lim := DefaultRotationLimits()
+	in := base()
+	in.State = spec.RotationState{}
+	blocked := vdt(spec.ConnStateBlocked, spec.ReasonConnectionReset)
+
+	spacing := lim.MinInterval + time.Minute
+	ticks := int(lim.Window/spacing) + 2
+	if ticks <= lim.MaxPerWindow {
+		t.Fatalf("the fixture cannot exercise the cap: %d ticks fit the window, cap is %d", ticks, lim.MaxPerWindow)
+	}
+
+	acted := 0
+	st := in.State
+	for i := 0; i < ticks; i++ {
+		cur := in
+		cur.State = st
+		cur.ActiveVerdict = blocked
+		cur.Now = t0.Add(time.Duration(i) * spacing)
+		p, err := Plan(cur)
+		if err != nil {
+			t.Fatalf("tick %d: Plan: %v", i, err)
+		}
+		if p.Act {
+			acted++
+		}
+		st = p.NextState
+	}
+	if acted == 0 {
+		t.Fatalf("no rotation at all across %d ticks spaced %v apart — the act path is never reached, so "+
+			"the cap was not exercised either and this row asserts nothing", ticks, spacing)
+	}
+	if acted > lim.MaxPerWindow {
+		t.Fatalf("%d rotations inside one %v window, cap is %d. With the cooldown cleared by the tick "+
+			"spacing the cap is the only bound left, and an unattended loop that keeps rotating is a beacon "+
+			"on a rhythm — which is the whole reason the cap exists.", acted, lim.Window, lim.MaxPerWindow)
 	}
 }
 

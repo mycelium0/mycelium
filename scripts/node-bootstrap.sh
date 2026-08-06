@@ -298,6 +298,11 @@ while [ "$#" -gt 0 ]; do
 		--awg-revoke)      MODE="awg-revoke"; AWG_REVOKE_NAME="${2:?--awg-revoke needs a client NAME}"; shift 2 ;;
 		--awg-revoke-peer) MODE="awg-revoke-peer"; AWG_REVOKE_PUB="${2:?--awg-revoke-peer needs a PUBKEY}"; shift 2 ;;
 		--rotate)          MODE="rotate"; shift ;;
+		# Reinstall the hysteria2 hop REDIRECT and nothing else. Invoked from the sing-box unit's
+		# ExecStartPre so the rule's lifetime matches the listener it serves: it lives in the running kernel
+		# only, nothing in this tree persists iptables, and its sole other installer is the converge — so a
+		# reboot left every hopping client reaching nothing until the next update tick (Audit-0010 F-008).
+		--hy2-hop-reconcile) MODE="hy2-hop-reconcile"; shift ;;
 		--apply-rotation)  ROTATE_APPLY=1; shift ;;
 		--rotate-arm)      MODE="rotate-arm"; shift ;;
 		--rotate-disarm)   MODE="rotate-disarm"; shift ;;
@@ -769,8 +774,18 @@ flow_update() {
 		# is quietly up to date from one whose timer died weeks ago, and on 2026-07-28 that distinction had
 		# to be made by hand on three nodes. Written on BOTH success paths (byte-identical and applied),
 		# because "nothing to do" is a successful converge; exported by the dataplane metrics generator.
-		record_converge_ok
+		# ORDER (Audit-0010 F-014): the stamp goes AFTER the tail. It used to precede it, so a tail failing
+		# on every tick — a zero-padded range that never yields a rule, a posture-off node advertising one
+		# — kept advancing "last successful converge" forever, and the one fact that distinguishes a
+		# healthy node from one whose timer died would have read healthy on a node that had not fully
+		# converged since the condition appeared.
+		#
+		# Both calls stay BARE. Under `set -euo pipefail` a failing tail aborts here, so the stamp is
+		# simply never reached — which is the semantics wanted. Wrapping the tail in `if` (the first
+		# attempt) would have SWALLOWED that failure and continued to `return 0`, converting a fatal
+		# convergence failure into a silent success: worse than the defect being fixed.
 		converge_node_tail
+		record_converge_ok
 		return 0
 	fi
 	if [ "$STAGED" -eq 1 ]; then
@@ -864,11 +879,21 @@ flow_update() {
 		# is quietly up to date from one whose timer died weeks ago, and on 2026-07-28 that distinction had
 		# to be made by hand on three nodes. Written on BOTH success paths (byte-identical and applied),
 		# because "nothing to do" is a successful converge; exported by the dataplane metrics generator.
-		record_converge_ok
 		# Converge the rest of the node with the primary engine: xray, firewall, then the served bundle
 		# re-rendered from the now-live identity/params (see converge_node_tail). Previously this path
 		# refreshed only the bundle, so an armed timer left the xray engine and the firewall behind.
+		# ORDER (Audit-0010 F-014): the stamp goes AFTER the tail. It used to precede it, so a tail failing
+		# on every tick — a zero-padded range that never yields a rule, a posture-off node advertising one
+		# — kept advancing "last successful converge" forever, and the one fact that distinguishes a
+		# healthy node from one whose timer died would have read healthy on a node that had not fully
+		# converged since the condition appeared.
+		#
+		# Both calls stay BARE. Under `set -euo pipefail` a failing tail aborts here, so the stamp is
+		# simply never reached — which is the semantics wanted. Wrapping the tail in `if` (the first
+		# attempt) would have SWALLOWED that failure and continued to `return 0`, converting a fatal
+		# convergence failure into a silent success: worse than the defect being fixed.
 		converge_node_tail
+		record_converge_ok
 	else
 		warn "post-apply verification failed; rolling back."
 		# Remember EXACTLY what failed, BEFORE rollback_config overwrites the live config with the last
@@ -1065,6 +1090,7 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		awg-revoke)      revoke_awg_client "$AWG_REVOKE_NAME" ;;
 		awg-revoke-peer) revoke_awg_peer "$AWG_REVOKE_PUB" ;;
 		rotate)          flow_rotate ;;
+		hy2-hop-reconcile) reconcile_hy2_hop_nat ;;
 		rotate-arm)      rotate_arm ;;
 		rotate-disarm)   rotate_disarm ;;
 		rotate-enable-loop)  rotate_enable_loop ;;

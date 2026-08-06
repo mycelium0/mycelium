@@ -262,6 +262,14 @@ Type=simple
 User=$SINGBOX_RUN_USER
 Group=$SINGBOX_RUN_GROUP
 ExecStartPre=$SINGBOX_BIN check -c $SINGBOX_CONFIG
+# The hysteria2 hop REDIRECT lives in the running kernel only — nothing in this tree persists iptables
+# (no iptables-save / netfilter-persistent). Its sole installer runs inside the converge, so after a
+# reboot every client hopping across the advertised range reached nothing until the next update tick,
+# while the ufw half of the same design DID persist: one promise with two lifetimes (Audit-0010 F-008).
+# Reinstating it here ties the rule's lifetime to the listener it serves. Non-fatal by construction:
+# `-` prefixes the command, so a node without the range configured (the default, where the helper is a
+# no-op) and a node where the reconcile fails both still start the data plane.
+ExecStartPre=-$NB_SELF --hy2-hop-reconcile
 ExecStart=$SINGBOX_BIN run -c $SINGBOX_CONFIG -D $STATE_DIR/run
 Restart=on-failure
 RestartSec=5s
