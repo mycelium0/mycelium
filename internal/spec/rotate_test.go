@@ -35,7 +35,11 @@ func TestRotationEnumsIsValid(t *testing.T) {
 }
 
 func goodCandidate() RotationCandidate {
-	return RotationCandidate{Proto: "vless-reality-grpc", Class: TransportClassRealityTCP, Action: RotationActionPromoteSibling, FromPort: 443, ToPort: 8443, Promoted: true, Weight: 0.8}
+	// ToPort 0: a promote-sibling candidate may NOT carry a port move. The fixture used to set 8443,
+	// which encoded the permissive contract that let the reserved move ride in under an authorised action
+	// (Audit-0010 F-016). FromPort still names where the sibling is served — reporting where a member
+	// lives is not moving it.
+	return RotationCandidate{Proto: "vless-reality-grpc", Class: TransportClassRealityTCP, Action: RotationActionPromoteSibling, FromPort: 8443, ToPort: 0, Promoted: true, Weight: 0.8}
 }
 
 func TestRotationCandidateValidate(t *testing.T) {
@@ -130,5 +134,37 @@ func TestRotationPlanValidate(t *testing.T) {
 	p.Reason = RotationReasonUnknown
 	if err := p.Validate(); err == nil {
 		t.Fatal("plan with an unknown reason must fail")
+	}
+}
+
+// TestRotationPlanRefusesAPortMoveUnderAnAuthorisedAction pins the reserved-move invariant at the
+// contract layer (Audit-0010 F-016). Before this, the rule was two assignments inside rotate.Plan and
+// nothing related To.Action to To.ToPort — so any OTHER producer of a plan (a hand-written
+// rotate_plan.json, a replayed stale plan, a future planner) could move a served port under an action
+// the reservation exists to forbid, and the plan validated and round-tripped cleanly.
+func TestRotationPlanRefusesAPortMoveUnderAnAuthorisedAction(t *testing.T) {
+	now := time.Now().UTC()
+	for _, action := range []RotationAction{RotationActionPromoteSibling, RotationActionDemoteActive} {
+		c := goodCandidate()
+		c.Action = action
+		c.ToPort = 9443
+		p := RotationPlan{Act: true, To: c, Reason: RotationReasonDegradedActive, DecidedAt: now}
+		if err := p.Validate(); err == nil {
+			t.Fatalf("a plan carrying to_port=9443 under action %q VALIDATED. The executor applies "+
+				"to.to_port without consulting to.action and port keys survive write_params, so this plan "+
+				"moves a served port that every issued client config still names, with no channel to "+
+				"re-fetch — the exact outage the reservation exists to prevent.", action)
+		}
+	}
+	// And the reserved action itself may carry one — the reservation is on REQUESTING it, not on the
+	// shape being expressible. A validator that refused it outright would make the reserved move
+	// unrepresentable rather than unrequestable, and the difference matters the day it is unreserved.
+	c := goodCandidate()
+	c.Action = RotationActionRotatePort
+	c.ToPort = 9443
+	p := RotationPlan{Act: true, To: c, Reason: RotationReasonDegradedActive, DecidedAt: now}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("a rotate-port plan carrying to_port must remain REPRESENTABLE (it is unrequestable, not "+
+			"unexpressible): %v", err)
 	}
 }

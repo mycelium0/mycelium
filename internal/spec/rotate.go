@@ -247,6 +247,17 @@ func (p *RotationPlan) Validate() error {
 		if p.Reason != RotationReasonDegradedActive {
 			return fmt.Errorf("rotation plan acts but the reason is %q (only %q acts)", p.Reason, RotationReasonDegradedActive)
 		}
+		// THE RESERVED-MOVE INVARIANT, at the contract layer (Audit-0010 F-016). Until now the rule was
+		// two assignments inside rotate.Plan and lived nowhere else: nothing related To.Action to
+		// To.ToPort, so a plan assembled by ANY other producer — a hand-written rotate_plan.json, a
+		// replayed stale plan, a future planner — validated, round-tripped, and moved a served port under
+		// an action the reservation exists to forbid. The executor applies .to.to_port without consulting
+		// .to.action and port keys survive write_params, so this is the last place it can be caught before
+		// a client's issued config names a port the node no longer serves.
+		if p.To.ToPort != 0 && p.To.Action != RotationActionRotatePort {
+			return fmt.Errorf("rotation plan: action %q carries to_port=%d — only %q may move a served port and it is reserved (unrequestable); a port moved under any other action is the reserved move performed under a name that does not name it",
+				p.To.Action, p.To.ToPort, RotationActionRotatePort)
+		}
 	} else {
 		if p.To.Action != RotationActionNone && p.To.Action != RotationActionUnknown {
 			return fmt.Errorf("rotation plan holds but carries a target action %q", p.To.Action)

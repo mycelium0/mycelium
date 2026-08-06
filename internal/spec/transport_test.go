@@ -203,3 +203,65 @@ func TestOperatorToggleKeysMatchesLegacy(t *testing.T) {
 		}
 	}
 }
+
+// TestValidHysteria2HopRange is the owner's own behavioural test (Audit-0010 F-007). The appointed
+// single owner of a rule that decides what goes into a firewall had NO test of its own: the conformance
+// gate drives the SHELL comparator and greps Go for the function's name, which proves the function
+// exists, not that it decides correctly. A predicate whose only coverage is "a grep found it" is
+// coverage of the wrong thing.
+func TestValidHysteria2HopRange(t *testing.T) {
+	b := Hysteria2HopPortBounds()
+	cases := []struct {
+		in   string
+		want bool
+		why  string
+	}{
+		{"20000:21000", true, "ordinary range"},
+		{"1024:65535", true, "the exact bounds are inclusive"},
+		{"2000:2001", true, "the narrowest usable range"},
+		{"", false, "empty is not a range; it means no hopping and callers check that separately"},
+		{"20000", false, "a bare port is not a range"},
+		{":20000", false, "no low field"},
+		{"20000:", false, "no high field"},
+		{"0:100", false, "below the unprivileged floor"},
+		{"1023:2000", false, "one below the floor"},
+		{"20000:70000", false, "above the protocol maximum"},
+		{"5000:4000", false, "reversed"},
+		{"5000:5000", false, "empty interval — lo must be strictly below hi"},
+		{"2000:3000:4000", false, "three fields; the outer-field expansions accepted this in shell and iptables refuses it"},
+		{" 20000:21000", false, "leading space"},
+		{"20000:21000 ", false, "trailing space"},
+		{"-1:500", false, "sign"},
+		{"1e4:2e4", false, "exponent notation"},
+		{"001024:065535", false, "zero-padded: numerically in bounds, and the digit cap refuses it"},
+		{"0000000000000000000000000000002000:3000", false, "absurd padding"},
+		{"abc", false, "not digits"},
+	}
+	for _, c := range cases {
+		if got := ValidHysteria2HopRange(c.in); got != c.want {
+			t.Errorf("ValidHysteria2HopRange(%q) = %v, want %v (%s). Bounds are %d..%d; this predicate "+
+				"decides whether a nat/PREROUTING REDIRECT is written, so a wrong answer is either a rule "+
+				"that swallows traffic or an advertised range with nothing behind it.",
+				c.in, got, c.want, c.why, b.Min, b.Max)
+		}
+	}
+}
+
+// TestValidHysteria2HopInterval pins the duration predicate (Audit-0010 F-005), which had no test either.
+func TestValidHysteria2HopInterval(t *testing.T) {
+	for in, want := range map[string]bool{
+		"30s": true, "3s": true, "2m": true, "1h": true, "500ms": true,
+		"": false, "30": false, "s": false, "0s": false, "-5s": false,
+		"30sec": false, "1h2m3s": false, "30S": false, "99999s": true, "100000s": false,
+	} {
+		if got := ValidHysteria2HopInterval(in); got != want {
+			t.Errorf("ValidHysteria2HopInterval(%q) = %v, want %v — an unjudged duration reaches sing-box, "+
+				"which refuses the whole document and turns an operator typo into a converge that fails "+
+				"every tick with a message about JSON.", in, got, want)
+		}
+	}
+	if !ValidHysteria2HopInterval(DefaultHysteria2HopInterval) {
+		t.Fatalf("the emitted DEFAULT %q fails the predicate that judges it — every fallback would be "+
+			"refused by the very consumer it was meant to satisfy", DefaultHysteria2HopInterval)
+	}
+}

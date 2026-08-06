@@ -247,6 +247,17 @@ install_singbox_unit() {
 	log "installing the sing-box systemd unit"
 	need_root
 	local unit="/etc/systemd/system/sing-box.service"
+	# WHY THE SECOND ExecStartPre (Audit-0010 F-008). The hysteria2 hop REDIRECT lives in the running
+	# kernel only — nothing in this tree persists iptables (no iptables-save, no netfilter-persistent) —
+	# and its sole other installer runs inside the converge. So after a reboot every client hopping across
+	# the advertised range reached nothing until the next update tick, while the ufw half of the SAME
+	# design did persist: one promise with two lifetimes. Reinstalling it here ties the rule's lifetime to
+	# the listener it serves. `-` prefixed, hence non-fatal: a node with no range (the default, where the
+	# helper is a no-op) and a node where the reconcile fails both still start the data plane.
+	#
+	# The rationale lives HERE and not in the unit text: everything inside the heredoc is written to
+	# /etc/systemd/system on every node, and a paragraph of our reasoning does not belong in a deployed
+	# artifact. It also contained a backtick, which shellcheck reads as a command substitution.
 	if [ "$DRY_RUN" -eq 0 ]; then
 		# Mirror the hardened unit conventions in infra/ansible/roles/singbox/templates/singbox.service.j2.
 		# The two unit sources are kept in lockstep — especially RestrictAddressFamilies incl. AF_NETLINK
@@ -262,6 +273,8 @@ Type=simple
 User=$SINGBOX_RUN_USER
 Group=$SINGBOX_RUN_GROUP
 ExecStartPre=$SINGBOX_BIN check -c $SINGBOX_CONFIG
+# Reinstall the hysteria2 hop redirect (no-op when no range is configured). Non-fatal.
+ExecStartPre=-$NB_SELF --hy2-hop-reconcile
 ExecStart=$SINGBOX_BIN run -c $SINGBOX_CONFIG -D $STATE_DIR/run
 Restart=on-failure
 RestartSec=5s

@@ -182,6 +182,16 @@ generate_measure_configs() {
 		targets: [ .[] | {
 			ref: .ref,
 			method: (if .class == "quic-udp" then "quic" else "tcp" end),
+			# THE ANCHOR IS THE SERVED PORT, and for a hysteria2 range that is NOT what clients dial
+			# (Audit-0010 F-009). For every other family the probed port is the port a client uses; with a hop
+			# range configured the client dials range ports this anchor never names, and the REDIRECT that
+			# delivers them is `-i <wan>` in PREROUTING, which loopback does not traverse. The hop path is
+			# therefore unmeasurable from the node BY CONSTRUCTION, not merely unmeasured, and would stay so
+			# even if the anchor moved off loopback. What the measure plane reports for hysteria2 is the health
+			# of the LISTENER: a true statement about a different thing. The rule that makes the range real is
+			# asserted separately by verify_hy2_hop_nat in the converge tail, and the end-to-end behaviour of a
+			# range by tests/netsim. Recorded here so the next reader does not mistake a green hysteria2 weight
+			# for evidence that hopping works.
 			address: ("127.0.0.1:" + (.port|tostring)),
 			interval_ms: $probe, timeout_ms: $tmo } ]
 	}' >"$reach_cfg.tmp" && mv -f "$reach_cfg.tmp" "$reach_cfg"

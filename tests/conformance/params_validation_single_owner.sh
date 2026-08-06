@@ -98,12 +98,33 @@ strip_comments() { sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$1"; }
 # it may not name a bound or split the value into fields.
 offenders=""
 checked=0
+empty_bodies=""
 for f in "$REPO_ROOT"/control/lib/*.sh; do
 	base="$(basename "$f")"
 	[ "$base" = common.sh ] && continue          # holds the one permitted comparator, checked separately
-	# Function names in this tree are `name() {` at column 0; bodies end at a lone `}`.
-	for fn in $(grep -oE '^[a-z_][a-z0-9_]*\(\)' "$f" | tr -d '()'); do
-		body="$(sed -n "/^${fn}() {/,/^}$/p" "$f" | sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//')"
+	# EXTRACTION, and its self-check. The first version keyed on the literal `^name() {`, which misses
+	# `name()  {` (padded alignment) — NINE functions in this tree yielded an EMPTY body, after which the
+	# consumer test below failed and the loop `continue`d having inspected nothing. It also ran a one-line
+	# body `f() { …; }` to the NEXT `^}`, swallowing whole neighbouring functions. Both are the same
+	# failure this gate exists to catch, in the gate: silence read as a pass.
+	#
+	# awk, bounded on BOTH ends: from the definition line to the first `}` at column 0 OR the next
+	# definition, whichever comes first. And every enumerated name must yield a non-empty body — an empty
+	# one means the enumeration broke, which is reported rather than skipped.
+	for fn in $(grep -oE '^[a-z_][a-z0-9_]*\(\)[[:space:]]*\{?' "$f" | sed 's/().*//'); do
+		body="$(awk -v fn="$fn" '
+			# A ONE-LINER carries its whole body on the definition line (`f() { a; b; }`), so skipping that
+			# line drops it entirely — two such functions still read as empty after the first fix.
+			$0 ~ "^" fn "\\(\\)[[:space:]]*\\{.*\\}[[:space:]]*$" { print; next }
+			$0 ~ "^" fn "\\(\\)[[:space:]]*\\{" { inside = 1; next }
+			inside && /^}$/                          { inside = 0 }
+			inside && /^[a-z_][a-z0-9_]*\(\)/       { inside = 0 }
+			inside                                    { print }
+		' "$f" | sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//')"
+		if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+			empty_bodies="$empty_bodies $base:$fn"
+			continue
+		fi
 		# CONSUMERS only: a function that READS the value from params must delegate. A function that
 		# merely emits the key in the defaults object (write_params) or names it in a message to the
 		# operator (converge_node_tail) consumes nothing and has nothing to delegate — requiring it to
@@ -118,6 +139,9 @@ for f in "$REPO_ROOT"/control/lib/*.sh; do
 			|| offenders="$offenders${offenders:+; }$base:$fn reads the range and never delegates to the comparator"
 	done
 done
+[ -z "$empty_bodies" ] \
+	&& ok "every enumerated shell function yielded a body (the extraction inspected something)" \
+	|| badln "these enumerated functions yielded an EMPTY body, so this section inspected nothing for them:$empty_bodies. A gate whose extraction silently returns nothing reports a pass for work it did not do — the exact failure it exists to catch."
 [ "$checked" -ge 2 ] \
 	|| badln "found only $checked function(s) handling the hop range; both the client renderer and the firewall reconcile must appear, or this section is inspecting the wrong thing"
 [ -z "$offenders" ] \
