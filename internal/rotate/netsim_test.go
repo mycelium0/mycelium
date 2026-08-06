@@ -124,26 +124,49 @@ func TestNetsimSustainedImpairmentActsWithinSLO(t *testing.T) {
 	}
 }
 
-// TestNetsimWindowBudgetBinds is the budget assertion, given ticks wide enough for it to bind.
+// TestNetsimWindowBudgetIsUnreachableUnderValidLimits records what is actually true about the
+// per-window rotation budget, because two attempts to "test" it produced assertions that could not fail.
 //
-// In the sustained-impairment scenarios the cooldown is the only thing that stops the loop, so a budget
-// assertion there compares 1 against 2 forever — it cannot fail, which is the same as not existing. Here
-// the ticks are spaced PAST MinInterval, so the per-window cap is the only remaining bound, and deleting
-// the cap fails this.
-func TestNetsimWindowBudgetBinds(t *testing.T) {
+// FIRST ATTEMPT: assert `len(acted) <= MaxPerWindow` inside the sustained-impairment scenario. That spans
+// six 90-second ticks against a 30-minute MinInterval, so the cooldown blocked everything after the first
+// act and the comparison was permanently `1 > 2`.
+//
+// SECOND ATTEMPT: give the budget its own scenario, spacing the ticks PAST the cooldown so the cap would
+// be the binding constraint. It passed, and deleting the budget guard from Plan did not fail it — because
+// the cap CANNOT be the binding constraint. RotationLimits.Validate refuses any limits where
+// `MinInterval < Window/MaxPerWindow` (internal/spec/rotate.go), so for every VALID configuration the
+// cooldown already spaces acts at least Window/MaxPerWindow apart, which bounds a rolling window to
+// MaxPerWindow acts on its own. `if ns.RotationsInWindow >= in.Limits.MaxPerWindow` is therefore
+// unreachable for any limits the system will accept.
+//
+// So the honest test is not a scenario that pretends to exercise the guard. It is: (1) pin the INVARIANT
+// that makes the guard redundant, and (2) pin the property that actually matters — the observed count
+// never exceeds the cap. If the validity rule is ever relaxed, (1) fails, the guard becomes load-bearing,
+// and whoever relaxed it is told here that it now needs a real test.
+func TestNetsimWindowBudgetIsUnreachableUnderValidLimits(t *testing.T) {
 	lim := DefaultRotationLimits()
+	if err := lim.Validate(); err != nil {
+		t.Fatalf("the defaults do not validate: %v", err)
+	}
+
+	// (1) THE INVARIANT. This is why the budget guard cannot bind.
+	spacingFloor := lim.Window / time.Duration(lim.MaxPerWindow)
+	if lim.MinInterval < spacingFloor {
+		t.Fatalf("MinInterval (%v) is now SHORTER than Window/MaxPerWindow (%v). The cooldown no longer "+
+			"bounds the per-window count on its own, so `RotationsInWindow >= MaxPerWindow` in rotate.Plan "+
+			"has become the binding constraint — and it has no test, because until now it could not be "+
+			"reached. Write one before shipping this.", lim.MinInterval, spacingFloor)
+	}
+
+	// (2) THE PROPERTY. Ticks spaced past the cooldown, sustained impairment throughout: the count must
+	// stay within the cap however the two mechanisms divide the work between them.
 	in := base()
 	in.State = spec.RotationState{}
 	blocked := vdt(spec.ConnStateBlocked, spec.ReasonConnectionReset)
-
 	spacing := lim.MinInterval + time.Minute
 	ticks := int(lim.Window/spacing) + 2
-	if ticks <= lim.MaxPerWindow {
-		t.Fatalf("the fixture cannot exercise the cap: %d ticks fit the window, cap is %d", ticks, lim.MaxPerWindow)
-	}
 
-	acted := 0
-	st := in.State
+	acted, st := 0, in.State
 	for i := 0; i < ticks; i++ {
 		cur := in
 		cur.State = st
@@ -159,13 +182,12 @@ func TestNetsimWindowBudgetBinds(t *testing.T) {
 		st = p.NextState
 	}
 	if acted == 0 {
-		t.Fatalf("no rotation at all across %d ticks spaced %v apart — the act path is never reached, so "+
-			"the cap was not exercised either and this row asserts nothing", ticks, spacing)
+		t.Fatalf("no rotation across %d ticks spaced %v apart under sustained impairment — the act path is "+
+			"never reached, so this row measures nothing", ticks, spacing)
 	}
 	if acted > lim.MaxPerWindow {
-		t.Fatalf("%d rotations inside one %v window, cap is %d. With the cooldown cleared by the tick "+
-			"spacing the cap is the only bound left, and an unattended loop that keeps rotating is a beacon "+
-			"on a rhythm — which is the whole reason the cap exists.", acted, lim.Window, lim.MaxPerWindow)
+		t.Fatalf("%d rotations inside one %v window, cap %d. An unattended loop that keeps rotating is a "+
+			"beacon on a rhythm.", acted, lim.Window, lim.MaxPerWindow)
 	}
 }
 
