@@ -13,6 +13,27 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.69] — 2026-08-06
+
+> The two posture-shaped findings from Audit-0010. Both were claims stated in a document and enforced by
+> nothing.
+
+### Fixed
+- **`live_artifact_posture.sh` could not see a non-boolean posture knob** (F-019). It builds its
+  assertion set from `<proto>_enabled: true|false` greps, so `hysteria2_hop_ports` — the one knob that
+  widens a node's observable port footprint — was outside it by construction, while THREAT-MODEL says it
+  "must stay off by default" and development.md §2.2 item 11 makes widening the default posture a
+  lockstep change gated exactly here. The gate now asserts the default is empty, and fails if a fresh
+  node would advertise a range.
+
+### Documentation
+- **ADR-0038 §3 records the posture-conflict decision** (F-023): a node whose firewall posture is off
+  while a range is configured FAILS the converge tail rather than logging and continuing. The state is
+  genuinely broken — `reconcile_hy2_hop_nat` runs inside `harden_ufw` and never executes there, so every
+  issued config advertises a range with no rule — and nothing else can report it. The run is explicitly
+  NOT allowed to install the rule itself: `--no-harden` means this run does not manage the host firewall,
+  and writing a nat rule anyway would substitute our judgement on the one subsystem the operator reserved.
+
 ## [0.2.68] — 2026-08-06
 
 > The rest of the Audit-0010 tail. Two more were assertions that could not fail, one was a metric that
