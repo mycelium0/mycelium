@@ -75,7 +75,10 @@ have() { command -v "$1" >/dev/null 2>&1; }
 install_ipt_stub() {
 	cat >"$STUBDIR/iptables" <<'STUB'
 #!/usr/bin/env bash
-f="${FAKENODE_ROOT:?}/nat.rules"; : >>"$f"
+# One file PER FAMILY, keyed on the tool name: reconcile installs an IPv4 rule and an IPv6
+# twin, and a shared file cannot tell "one per family" from "two of one".
+case "$0" in *ip6tables) f="${FAKENODE_ROOT:?}/nat6.rules" ;; *) f="${FAKENODE_ROOT:?}/nat.rules" ;; esac
+: >>"$f"
 args=("$@"); out=(); tbl=""; act=""; chain=""
 i=0
 while [ $i -lt ${#args[@]} ]; do
@@ -94,6 +97,12 @@ esac
 exit 0
 STUB
 	chmod +x "$STUBDIR/iptables"
+	# ip6tables shares the stub: reconcile now installs an IPv6 twin (Audit-0010 F-010a) and verify
+	# checks it. Without this the fixture has no v6 tool, `have ip6tables` is false, and every v6 row
+	# would be skipped — the gate would pass while testing only half the program it claims to cover.
+	cp "$STUBDIR/iptables" "$STUBDIR/ip6tables"
+	chmod +x "$STUBDIR/ip6tables"
+	: >"$FAKENODE_ROOT/nat6.rules"
 	cat >"$STUBDIR/ip" <<'STUB'
 #!/usr/bin/env bash
 [ "${1:-}" = route ] && printf 'default via 10.0.0.1 dev eth0 proto static\n'
@@ -148,8 +157,10 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 	# `grep -c` prints 0 AND exits 1 on no match, so a `|| printf 0` fallback yields "0\n0" and every
 	# comparison below silently reads a two-line string. Capture plainly; default only the empty case.
 	n="$(grep -cF 'myc-hy2-hop' "$FAKENODE_ROOT/nat.rules" 2>/dev/null)"; n="${n:-0}"
-	[ "$n" = "1" ] && ok "a configured range installs exactly one redirect" \
-		|| badln "expected one redirect, found $n"
+	n6="$(grep -cF 'myc-hy2-hop' "$FAKENODE_ROOT/nat6.rules" 2>/dev/null)"; n6="${n6:-0}"
+	{ [ "$n" = "1" ] && [ "$n6" = "1" ]; } \
+		&& ok "a configured range installs exactly one redirect PER FAMILY (v4 + v6)" \
+		|| badln "expected one redirect per family, found v4=$n v6=$n6. The inbounds listen on '::' and resolve_node_address falls back to IPv6, so a node with only the v4 rule hands every v6 client a range backed by nothing — and the v4-only verifier used to call that verified."
 	grep -qF -- '--dport 20000:21000' "$FAKENODE_ROOT/nat.rules" && grep -qF -- '--to-ports 8444' "$FAKENODE_ROOT/nat.rules" \
 		&& ok "it covers the advertised range and targets the served port" \
 		|| badln "the redirect does not cover 20000:21000 -> 8444: $(cat "$FAKENODE_ROOT/nat.rules")"
@@ -159,10 +170,12 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 	# `grep -c` prints 0 AND exits 1 on no match, so a `|| printf 0` fallback yields "0\n0" and every
 	# comparison below silently reads a two-line string. Capture plainly; default only the empty case.
 	n="$(grep -cF 'myc-hy2-hop' "$FAKENODE_ROOT/nat.rules" 2>/dev/null)"; n="${n:-0}"
-	if [ "$n" = "1" ] && grep -qF -- '--dport 30000:31000' "$FAKENODE_ROOT/nat.rules"; then
+	n6="$(grep -cF 'myc-hy2-hop' "$FAKENODE_ROOT/nat6.rules" 2>/dev/null)"; n6="${n6:-0}"
+	if [ "$n" = "1" ] && [ "$n6" = "1" ] && grep -qF -- '--dport 30000:31000' "$FAKENODE_ROOT/nat.rules" \
+	   && grep -qF -- '--dport 30000:31000' "$FAKENODE_ROOT/nat6.rules"; then
 		ok "changing the range REPLACES the rule (reconcile, not append)"
 	else
-		badln "after a range change there are $n rules. harden_ufw only ever ADDS, so an obsolete redirect would keep sending an old range at a port — this one must reconcile."
+		badln "after a range change there are v4=$n v6=$n6 rules. harden_ufw only ever ADDS, so an obsolete redirect would keep sending an old range at a port — this one must reconcile."
 	fi
 
 	# COLLISION (Audit-0010 F-001): a range that CONTAINS another served UDP port must not become a rule.
@@ -183,7 +196,8 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 	# `grep -c` prints 0 AND exits 1 on no match, so a `|| printf 0` fallback yields "0\n0" and every
 	# comparison below silently reads a two-line string. Capture plainly; default only the empty case.
 	n="$(grep -cF 'myc-hy2-hop' "$FAKENODE_ROOT/nat.rules" 2>/dev/null)"; n="${n:-0}"
-	[ "$n" = "0" ] && ok "clearing the range removes the redirect" \
+	n6="$(grep -cF 'myc-hy2-hop' "$FAKENODE_ROOT/nat6.rules" 2>/dev/null)"; n6="${n6:-0}"
+	{ [ "$n" = "0" ] && [ "$n6" = "0" ]; } && ok "clearing the range removes BOTH redirects" \
 		|| badln "an obsolete redirect survived the range being cleared ($n rules) — it keeps redirecting a range nothing advertises"
 	exit "$fail"
 ) || fail=1
@@ -221,10 +235,18 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 		&& badln "a redirect pointing at a port nothing serves passed verification" \
 		|| ok "a redirect pointing at the wrong port FAILS verification"
 
+	# v4 CORRECT, v6 MISSING — the exact state a node was left in before the twin existed, and the state
+	# the IPv4-only verifier used to call "verified" (Audit-0010 F-010a).
 	printf 'eth0 -p udp -m udp --dport 20000:21000 -m comment --comment myc-hy2-hop -j REDIRECT --to-ports 8444\n' >"$FAKENODE_ROOT/nat.rules"
+	: >"$FAKENODE_ROOT/nat6.rules"
 	verify_hy2_hop_nat >/dev/null 2>&1 \
-		&& ok "a correct redirect passes" \
-		|| badln "a correct redirect was rejected — the check would fail every healthy converge"
+		&& badln "the IPv4 redirect alone passed verification. The inbounds listen on '::' and resolve_node_address falls back to a global IPv6 address, so on such a node every client dials v6, no rule backs the range, and this is precisely the outage nothing else can see." \
+		|| ok "an IPv4-only redirect FAILS verification (the IPv6 twin is required)"
+
+	printf 'eth0 -p udp -m udp --dport 20000:21000 -m comment --comment myc-hy2-hop -j REDIRECT --to-ports 8444\n' >"$FAKENODE_ROOT/nat6.rules"
+	verify_hy2_hop_nat >/dev/null 2>&1 \
+		&& ok "both families correct: verification passes" \
+		|| badln "a correct redirect pair was rejected — the check would fail every healthy converge"
 	exit "$fail"
 ) || fail=1
 

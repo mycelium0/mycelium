@@ -13,6 +13,33 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.71] — 2026-08-06
+
+> A correction to 0.2.70, and the last two open audit findings.
+
+### Corrected — 0.2.70 reported a defect that is not one
+- **The anti-beacon cap is not weaker than its name.** 0.2.70 recorded that any rolling hour holds
+  `MaxPerWindow + 1` acts and left it as an operator decision. That measurement used a **closed**
+  interval `[t-W, t]`, which double-counts the point on the boundary. Measured both ways:
+  `cap=2, closed=3, half-open=2`. With `MinInterval * MaxPerWindow >= Window` the cooldown places acts
+  exactly `W/M` apart, so every **half-open** window `(t-W, t]` holds exactly `MaxPerWindow` — which is
+  the correct convention for a rate cap. There is nothing to change in `MinInterval`, `Window` or the cap.
+  The convention is now stated on the field itself, and the test measures it that way.
+
+### Fixed
+- **The renderer half of the hop-range collision refusal** (F-001, previously deferred). The firewall
+  refused a range containing another served UDP port; the renderers still emitted it, so a client was
+  handed a range the node had already decided not to make real. Both now refuse. The policy — WHICH keys
+  name a UDP-served port — is emitted (`params_validation.udp_port_keys`), so the two halves compare
+  against one list instead of each holding their own idea of it.
+- **`ServesUDP` is declared in the registry, not inferred from the class.** Deriving the UDP set from
+  class names silently omitted shadowsocks-2022, which is class `shadowsocks-tcp` and serves UDP anyway —
+  so a range covering its port would have been accepted by the renderers.
+- **The IPv6 twin REDIRECT** (F-010a). The inbounds listen on `::` and `resolve_node_address` falls back
+  to a global IPv6 address, so on such a node every client dials v6 — and no `ip6tables` rule existed,
+  while the IPv4-only verifier reported the range "verified". Both families are now installed,
+  reconciled and verified; an IPv4-only redirect FAILS verification.
+
 ## [0.2.70] — 2026-08-06
 
 > A constraint census of the rotation planner, run because six patches in a row each spawned a defect of

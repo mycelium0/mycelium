@@ -335,6 +335,13 @@ reconcile_hy2_hop_nat() {
 		# shellcheck disable=SC2086
 		run iptables -t nat -D PREROUTING $line 2>/dev/null || true
 	done < <(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //')
+	if have ip6tables; then
+		while IFS= read -r line; do
+			[ -n "$line" ] || continue
+			# shellcheck disable=SC2086
+			run ip6tables -t nat -D PREROUTING $line 2>/dev/null || true
+		done < <(ip6tables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //')
+	fi
 	[ -n "$want" ] || { log "hysteria2 port hopping: not configured; no redirect installed."; return 0; }
 	case "$lstn" in ''|*[!0-9]*) warn "hysteria2 port hopping: hysteria2_port is not a number ('$lstn') — refusing to install a redirect."; return 0 ;; esac
 	# COLLISION REFUSAL (Audit-0010 F-001). The bounds predicate judges the range's ENDPOINTS and knows
@@ -369,8 +376,18 @@ reconcile_hy2_hop_nat() {
 	wan="$(ip route show default 2>/dev/null | awk '/default/{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 	[ -n "$wan" ] || { warn "hysteria2 port hopping: could not resolve the WAN interface — refusing to install a redirect."; return 0; }
 	run iptables -t nat -A PREROUTING -i "$wan" -p udp --dport "$want" -m comment --comment 'myc-hy2-hop' -j REDIRECT --to-ports "$lstn" \
-		|| { warn "hysteria2 port hopping: could not install the redirect — clients hopping outside $lstn will NOT reach this node."; return 0; }
-	log "hysteria2 port hopping: udp $want -> $lstn redirected on $wan."
+		|| { warn "hysteria2 port hopping: could not install the IPv4 redirect — clients hopping outside $lstn will NOT reach this node."; return 0; }
+	# THE IPv6 TWIN (Audit-0010 F-010a). The sing-box inbounds listen on `::` and resolve_node_address
+	# falls back to a global IPv6 address when no global v4 exists, so on such a node every client dials
+	# v6 — and until now no ip6tables rule existed, leaving the advertised range backed by nothing while
+	# the IPv4-only verifier reported it "verified". Same reconcile discipline as the v4 rule: the old
+	# rules are dropped by comment above, so this only ever adds the current one. Best-effort: a host with
+	# no ip6tables (or with IPv6 disabled) is not a failure, it is a v4-only node.
+	if have ip6tables; then
+		run ip6tables -t nat -A PREROUTING -i "$wan" -p udp --dport "$want" -m comment --comment 'myc-hy2-hop' -j REDIRECT --to-ports "$lstn" \
+			|| warn "hysteria2 port hopping: the IPv6 redirect could not be installed; clients reaching this node over IPv6 will not follow the range."
+	fi
+	log "hysteria2 port hopping: udp $want -> $lstn redirected on $wan (IPv4$(have ip6tables && printf ' + IPv6'))."
 }
 
 # verify_hy2_hop_nat — fail-closed: if the client configs promise a range, the rule that keeps that
@@ -401,7 +418,24 @@ verify_hy2_hop_nat() {
 	# ip6tables rule exists, and this function reported the range verified. Saying "IPv4" is the honest
 	# minimum; installing the v6 twin (the pattern nb_render_awg.sh already uses) is the real fix and is
 	# tracked as an open condition rather than smuggled in here.
-	log "hysteria2 port hopping: IPv4 redirect verified — udp $want -> served port $lstn. NOTE: only the IPv4 nat table was inspected; a node reached over IPv6 has no equivalent rule."
+	# THE IPv6 TWIN IS CHECKED TOO, and its absence is reported rather than narrated away (Audit-0010
+	# F-010a). A node reached over IPv6 with no v6 rule is the same invisible outage as one with no v4
+	# rule: clients hop across the range and reach nothing, while every loopback check stays green.
+	if have ip6tables; then
+		local rule6
+		rule6="$(ip6tables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | head -1)"
+		if [ -z "$rule6" ]; then
+			warn "hysteria2 port hopping: the IPv4 redirect is present but there is NO IPv6 twin, and the inbounds listen on '::'. A client reaching this node over IPv6 hops across $want and reaches nothing."
+			return 1
+		fi
+		printf '%s' "$rule6" | grep -qE -- "--dport ${want}([[:space:]]|\$)" \
+			|| { warn "hysteria2 port hopping: the IPv6 redirect does not cover exactly the advertised range $want (rule: $rule6)."; return 1; }
+		printf '%s' "$rule6" | grep -qE -- "--to-ports ${lstn}([[:space:]]|$)" \
+			|| { warn "hysteria2 port hopping: the IPv6 redirect points somewhere other than the served port $lstn (rule: $rule6)."; return 1; }
+		log "hysteria2 port hopping: verified on IPv4 AND IPv6 — udp $want -> served port $lstn."
+		return 0
+	fi
+	log "hysteria2 port hopping: IPv4 redirect verified — udp $want -> served port $lstn (no ip6tables on this host, so there is no IPv6 path to back)."
 	return 0
 }
 

@@ -65,7 +65,8 @@
       "default_port": 443,
       "scheme": "vless",
       "engine": "sing-box",
-      "exposure": 1
+      "exposure": 1,
+      "serves_udp": false
     },
     {
       "proto": "vless-reality-grpc",
@@ -75,7 +76,8 @@
       "default_port": 8443,
       "scheme": "vless",
       "engine": "sing-box",
-      "exposure": 1
+      "exposure": 1,
+      "serves_udp": false
     },
     {
       "proto": "vless-reality-xhttp",
@@ -85,7 +87,8 @@
       "default_port": 2096,
       "scheme": "vless",
       "engine": "sing-box",
-      "exposure": 1
+      "exposure": 1,
+      "serves_udp": false
     },
     {
       "proto": "vless-xhttp-tls",
@@ -95,7 +98,8 @@
       "default_port": 2087,
       "scheme": "vless",
       "engine": "xray",
-      "exposure": 3
+      "exposure": 3,
+      "serves_udp": false
     },
     {
       "proto": "vless-ws-tls",
@@ -105,7 +109,8 @@
       "default_port": 2089,
       "scheme": "vless",
       "engine": "sing-box",
-      "exposure": 3
+      "exposure": 3,
+      "serves_udp": false
     },
     {
       "proto": "hysteria2",
@@ -115,7 +120,8 @@
       "default_port": 8444,
       "scheme": "hysteria2",
       "engine": "sing-box",
-      "exposure": 4
+      "exposure": 4,
+      "serves_udp": true
     },
     {
       "proto": "tuic",
@@ -125,7 +131,8 @@
       "default_port": 8445,
       "scheme": "tuic",
       "engine": "sing-box",
-      "exposure": 4
+      "exposure": 4,
+      "serves_udp": true
     },
     {
       "proto": "shadowsocks",
@@ -135,7 +142,8 @@
       "default_port": 8388,
       "scheme": "ss",
       "engine": "sing-box",
-      "exposure": 6
+      "exposure": 6,
+      "serves_udp": true
     },
     {
       "proto": "shadowtls",
@@ -145,7 +153,8 @@
       "default_port": 8446,
       "scheme": "ss",
       "engine": "sing-box",
-      "exposure": 2
+      "exposure": 2,
+      "serves_udp": false
     },
     {
       "proto": "trojan",
@@ -155,7 +164,8 @@
       "default_port": 8447,
       "scheme": "trojan",
       "engine": "sing-box",
-      "exposure": 3
+      "exposure": 3,
+      "serves_udp": false
     },
     {
       "proto": "amneziawg",
@@ -165,7 +175,8 @@
       "default_port": 0,
       "scheme": "",
       "engine": "amneziawg",
-      "exposure": 5
+      "exposure": 5,
+      "serves_udp": true
     }
   ],
   "params_validation": {
@@ -175,6 +186,11 @@
     },
     "max_port_field_digits": 5,
     "hysteria2_hop_interval_default": "30s",
+    "udp_port_keys": [
+      "hysteria2_port",
+      "tuic_port",
+      "shadowsocks_port"
+    ],
     "hysteria2_hop_interval_pattern": "^[1-9][0-9]{0,4}(ms|s|m|h)$"
   }
 }
