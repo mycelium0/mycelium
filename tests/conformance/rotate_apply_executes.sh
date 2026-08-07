@@ -244,7 +244,15 @@ for a in $declared; do
 	[ -n "$konst" ] || continue
 	# An ASSIGNMENT of the constant anywhere in production Go (not the declaration, not the validity
 	# switch, not tests) is what makes a move requestable.
-	assigns="$(grep -rn "= *spec\.$konst\|= *$konst" --include='*.go' "$REPO_ROOT/internal" "$REPO_ROOT/cmd" 2>/dev/null \
+	# AN ASSIGNMENT, NOT ANY OCCURRENCE OF `=`. The pattern used to be `= *$konst`, which matches the
+	# tail of `!= $konst` — so the moment a COMPARISON against the reserved constant was added to
+	# RotationPlan.Validate (the invariant that ENFORCES the reservation), this gate concluded the move
+	# was requestable and stopped demanding a reason for it. The guard disarmed the guard's own watchman.
+	#
+	# So: an `=` whose preceding character is not one of ! = < > (excluding !=, ==, >=, <=), or a struct
+	# literal field `Action: <konst>` — which is how a planner would assign it and which the old pattern
+	# could not see at all.
+	assigns="$(grep -rnE "(^|[^!=<>])= *(spec\.)?$konst\b|:[[:space:]]*(spec\.)?$konst\b" --include='*.go' "$REPO_ROOT/internal" "$REPO_ROOT/cmd" 2>/dev/null \
 		| grep -v '_test\.go' | grep -vE 'RotationAction[A-Za-z]+ +RotationAction +=' | wc -l | tr -d ' ')"
 	if [ "${assigns:-0}" -gt 0 ]; then
 		ok "$a: requestable (assigned in production code)"

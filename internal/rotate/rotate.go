@@ -137,10 +137,21 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	if !in.State.LastRotateAt.IsZero() && in.Now.Sub(in.State.LastRotateAt) < in.Limits.MinInterval {
 		return hold(spec.RotationReasonInCooldown, "within min-interval of the last rotation")
 	}
-	// Guard 5 — per-window rotation budget (anti-beacon).
-	if ns.RotationsInWindow >= in.Limits.MaxPerWindow {
-		return hold(spec.RotationReasonNoBudget, "per-window rotation budget spent")
-	}
+	// NO GUARD 5. The per-window budget guard used to sit here and it could not bind.
+	//
+	// RotationsInWindow rises only at an act, and every act also sets LastRotateAt = Now. Guard 4 then
+	// forces consecutive acts at least MinInterval apart, so by the time a tick reaches this point
+	// `Now - WindowStart >= MaxPerWindow * MinInterval`. RotationLimits.Validate requires
+	// `MinInterval * MaxPerWindow >= Window` (exactly — see the note there on why it multiplies rather
+	// than divides), and the window rolls at `>= Window`. The two intervals do not overlap: the roll
+	// always fires first. For every configuration the system accepts, this guard was dead code that read
+	// exactly like enforcement — and three separate attempts to test it produced three assertions that
+	// could not fail, because no valid input can reach it.
+	//
+	// The anti-beacon property it was believed to provide now lives entirely in that inequality, which is
+	// asserted for the shipped defaults and for any operator-supplied limits at load time. Deleting the
+	// guard is what makes the property checkable: an inequality over three numbers can be verified by
+	// reading it, a guard that never runs cannot.
 
 	// Guard 6 — pick the best closed-set candidate that beats the incumbent by the margin.
 	order := registryOrder()

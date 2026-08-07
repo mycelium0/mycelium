@@ -45,20 +45,13 @@ func TestEveryActPlanSpendsTheBudget(t *testing.T) {
 }
 
 // And the budget must actually STOP a second demote once spent.
-func TestDemoteRespectsThePerWindowCap(t *testing.T) {
-	in := base()
-	in.Ranked = []spec.RotationCandidate{cand("hysteria2", 0.2, false), cand("shadowsocks", 0.2, false)}
-	in.IssuedBaseline = []string{"vless-reality-vision", "hysteria2", "shadowsocks"}
-	// A ZERO WindowStart rolls the window and zeroes the counter, so the fixture must place the window
-	// start inside it or the row silently tests nothing.
-	in.State.WindowStart = in.Now.Add(-in.Limits.Window / 2)
-	in.State.RotationsInWindow = in.Limits.MaxPerWindow
-
-	p := mustPlan(t, in)
-	if p.Act {
-		t.Fatalf("a demote was emitted with the per-window budget already spent (%d/%d)", in.State.RotationsInWindow, in.Limits.MaxPerWindow)
-	}
-	if p.Reason != spec.RotationReasonNoBudget {
-		t.Errorf("reason = %q, want %q", p.Reason, spec.RotationReasonNoBudget)
-	}
-}
+// TestDemoteRespectsThePerWindowCap was DELETED, not repaired.
+//
+// It injected `RotationsInWindow = MaxPerWindow` with a mid-window WindowStart and asserted a hold. That
+// state is unreachable by any schedule — producing it needs two acts closer together than MinInterval —
+// and the guard it exercised has been removed as dead code. A test whose only input is a state the
+// system cannot enter, asserting a guard that cannot run, proves nothing about the running program.
+//
+// What it was believed to protect — the anti-beacon cap — is asserted from a REACHABLE schedule by
+// TestPlanRateBudgetIsBoundedBySchedule in rotate_test.go, which also records the measured finding that
+// the true ROLLING bound is MaxPerWindow + 1 rather than MaxPerWindow.

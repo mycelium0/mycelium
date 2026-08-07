@@ -87,7 +87,9 @@ func TestPlanFingerprintGuardOrder(t *testing.T) {
 	// Guard 4: within min-interval of the last rotation.
 	holds("cooldown", func(i *spec.FingerprintPlanInput) { i.State.LastRotateAt = fpNow().Add(-time.Minute) }, spec.RotationReasonInCooldown)
 	// Guard 5: the per-window budget is spent.
-	holds("no budget", func(i *spec.FingerprintPlanInput) { i.State.RotationsInWindow = i.Limits.MaxPerWindow }, spec.RotationReasonNoBudget)
+	// The "no budget" row is gone with the guard. It injected RotationsInWindow = MaxPerWindow, a state
+	// no schedule reaches (it needs acts closer together than MinInterval), and asserted a hold from a
+	// guard that Validate's exact `MinInterval * MaxPerWindow >= Window` makes unreachable.
 	// Guard 6: no valid target distinct from the current preset.
 	holds("target == current", func(i *spec.FingerprintPlanInput) { i.Target = "chrome" }, spec.RotationReasonNoBetterCandidate)
 	holds("target off-vocab", func(i *spec.FingerprintPlanInput) { i.Target = "bogus" }, spec.RotationReasonNoBetterCandidate)

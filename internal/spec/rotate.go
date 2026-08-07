@@ -83,8 +83,6 @@ const (
 	// RotationReasonInCooldown — within MinInterval of the last rotation, or within
 	// CooldownAfterRollback (hold).
 	RotationReasonInCooldown RotationReason = "in-cooldown"
-	// RotationReasonNoBudget — the per-window rotation budget is spent (hold).
-	RotationReasonNoBudget RotationReason = "no-budget"
 	// RotationReasonRollbackHold — the rollback budget was exhausted and the planner is latched into
 	// a hold (leave last-known-good running, stop the retry storm) until the latch expires (hold).
 	RotationReasonRollbackHold RotationReason = "rollback-hold"
@@ -99,7 +97,7 @@ const (
 func (r RotationReason) IsValid() bool {
 	switch r {
 	case RotationReasonDegradedActive, RotationReasonClean, RotationReasonStreakTooShort,
-		RotationReasonInCooldown, RotationReasonNoBudget, RotationReasonRollbackHold,
+		RotationReasonInCooldown, RotationReasonRollbackHold,
 		RotationReasonNoBetterCandidate, RotationReasonTargetNotPromoted:
 		return true
 	default:
@@ -172,6 +170,12 @@ type RotationLimits struct {
 
 // Validate checks the limits are internally consistent (positive durations, counts >= 1, margin in
 // [0,1] — the !(>=0 && <=1) form rejects NaN). Pure.
+// maxPerWindowCeiling bounds MaxPerWindow so `MinInterval * MaxPerWindow` cannot overflow a
+// time.Duration (int64 nanoseconds). BASIS: a rotation budget is an anti-beacon cap measured in single
+// digits; 1024 is four orders of magnitude above anything defensible and still leaves the product safe
+// for any MinInterval up to ~285 years.
+const maxPerWindowCeiling = 1024
+
 func (l RotationLimits) Validate() error {
 	if l.FlipConfirmations < 1 {
 		return fmt.Errorf("rotation limits: flip_confirmations must be >= 1, got %d", l.FlipConfirmations)
@@ -191,7 +195,12 @@ func (l RotationLimits) Validate() error {
 	if l.MaxRollbacksPerWindow < 1 {
 		return fmt.Errorf("rotation limits: max_rollbacks_per_window must be >= 1, got %d", l.MaxRollbacksPerWindow)
 	}
-	if l.CooldownAfterRollback < 0 {
+	// `<= 0`, not `< 0`. Zero was accepted and it DISABLES the rollback latch outright: RecordOutcome
+	// sets HoldUntil = now, and `Now.Before(HoldUntil)` is false at that instant and forever after — so
+	// the guard reads as enforcement and never fires. Every other duration here is gated `<= 0`; this
+	// one was the exception, and the exception was a valid configuration in which a safety mechanism
+	// silently did not exist (the constraint census, G2).
+	if l.CooldownAfterRollback <= 0 {
 		return fmt.Errorf("rotation limits: cooldown_after_rollback must be >= 0, got %s", l.CooldownAfterRollback)
 	}
 	// Rolling-window correctness: the cooldown must space rotations far enough that no rolling Window
@@ -199,8 +208,17 @@ func (l RotationLimits) Validate() error {
 	// permits a boundary burst (e.g. 2/window + a window reset = 3 in a rolling window), breaking the
 	// anti-flap / anti-beacon contract. Requiring MinInterval >= Window/MaxPerWindow makes the
 	// cooldown the binding constraint and the rolling-window bound an invariant.
-	if l.MinInterval < l.Window/time.Duration(l.MaxPerWindow) {
-		return fmt.Errorf("rotation limits: min_interval %s must be >= window/max_per_window (%s) so no rolling window exceeds the rotation budget",
+	// MULTIPLY, do not divide (Audit-0010 / the constraint census). `Window/MaxPerWindow` is integer
+	// time.Duration division, so it enforced `MinInterval >= floor(W/M)` and left a slit of `W mod M`
+	// NANOSECONDS in which more than MaxPerWindow acts could fall inside one window. That slit was the
+	// only thing the per-window budget guard could ever catch, and it was unreachable in practice while
+	// looking exactly like live enforcement. The guard is gone; this inequality is now the whole
+	// argument, so it must be exact: I*M >= W, with no rounding to hide in.
+	if l.MaxPerWindow > maxPerWindowCeiling {
+		return fmt.Errorf("rotation limits: max_per_window %d is implausibly large (ceiling %d) — the product below would overflow", l.MaxPerWindow, maxPerWindowCeiling)
+	}
+	if l.MinInterval*time.Duration(l.MaxPerWindow) < l.Window {
+		return fmt.Errorf("rotation limits: min_interval %s x max_per_window must be >= window (%s) so the cooldown alone bounds a window to max_per_window acts",
 			l.MinInterval, l.Window/time.Duration(l.MaxPerWindow))
 	}
 	return nil
