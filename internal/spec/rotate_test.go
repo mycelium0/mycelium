@@ -23,7 +23,7 @@ func TestRotationEnumsIsValid(t *testing.T) {
 	if RotationReasonUnknown.IsValid() {
 		t.Fatal("RotationReasonUnknown must be invalid")
 	}
-	for _, r := range []RotationReason{RotationReasonDegradedActive, RotationReasonClean, RotationReasonStreakTooShort, RotationReasonInCooldown, RotationReasonNoBudget, RotationReasonRollbackHold, RotationReasonNoBetterCandidate, RotationReasonTargetNotPromoted} {
+	for _, r := range []RotationReason{RotationReasonDegradedActive, RotationReasonClean, RotationReasonStreakTooShort, RotationReasonInCooldown, RotationReasonRollbackHold, RotationReasonNoBetterCandidate, RotationReasonTargetNotPromoted} {
 		if !r.IsValid() {
 			t.Fatalf("RotationReason %q must be valid", r)
 		}

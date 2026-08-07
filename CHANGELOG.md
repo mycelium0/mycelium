@@ -13,6 +13,45 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.70] — 2026-08-06
+
+> A constraint census of the rotation planner, run because six patches in a row each spawned a defect of
+> the same class. It found that the gate guarding the reserved-move set had been disarmed by the fix for
+> the reserved-move set, that the per-window budget guard could never run, and that the anti-beacon cap
+> has always been one weaker than its name.
+
+### Fixed
+- **The reserved-move gate was disarmed by the commit that strengthened the reservation.**
+  `rotate_apply_executes.sh` decides whether a declared move is "requestable" by grepping for `= <konst>`
+  — and `!= RotationActionRotatePort`, added to `RotationPlan.Validate` to ENFORCE the reservation,
+  matched it. The gate concluded `rotate-port` was requestable and stopped demanding a reason for it.
+  The detector now requires a real assignment (an `=` not preceded by `! = < >`) and additionally sees
+  struct-literal assignment `Action: <konst>`, which the old pattern could not see at all.
+- **`RotationLimits.Validate` used integer division.** `MinInterval < Window/MaxPerWindow` enforces
+  `I >= floor(W/M)`, leaving a `W mod M` NANOSECOND slit. It multiplies now: `I*M >= W`, exactly, with an
+  overflow ceiling on `MaxPerWindow`.
+- **`CooldownAfterRollback` accepted zero**, which silently disables the rollback latch: `RecordOutcome`
+  sets `HoldUntil = now` and `Now.Before(HoldUntil)` is false at that instant and forever. Every other
+  duration in that validator is gated `<= 0`; this one was the exception, and the exception was a valid
+  configuration in which a safety mechanism did not exist.
+
+### Removed
+- **The per-window budget guard, in both planners.** It could not bind: an act sets `LastRotateAt`, the
+  cooldown then forces `Now - WindowStart >= MaxPerWindow * MinInterval` before a tick can reach it, and
+  the window rolls at `>= Window`. Dead code that read exactly like enforcement — and the reason three
+  separate attempts to test it produced three assertions that could not fail. `RotationReasonNoBudget`
+  goes with it.
+- The two tests that asserted it, both of which injected `RotationsInWindow = MaxPerWindow` — a state no
+  schedule can produce, since reaching it needs two acts closer together than `MinInterval`.
+
+### Found, and NOT fixed here — it is an operator decision
+- **The anti-beacon cap bounds a TUMBLING window, not a rolling one.** With the shipped defaults
+  (`30m x 2 == 1h`) the cooldown permits acts at 0, I, 2I…, so any rolling hour holds
+  `MaxPerWindow + 1`. Measured, and measured to be **pre-existing**: the identical schedule overruns by
+  the same margin on `e52813e`, which still contains the guard. Bounding the rolling window needs a
+  STRICT inequality (`I*M > W`), which the defaults do not satisfy — making it strict means changing
+  MinInterval, Window or the cap on three live nodes. Recorded in the test that measures it.
+
 ## [0.2.69] — 2026-08-06
 
 > The two posture-shaped findings from Audit-0010. Both were claims stated in a document and enforced by

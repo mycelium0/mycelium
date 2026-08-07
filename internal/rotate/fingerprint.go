@@ -79,10 +79,11 @@ func PlanFingerprint(in spec.FingerprintPlanInput) (spec.FingerprintPlan, error)
 	if !in.State.LastRotateAt.IsZero() && in.Now.Sub(in.State.LastRotateAt) < in.Limits.MinInterval {
 		return hold(spec.RotationReasonInCooldown, "within min-interval of the last fingerprint rotation")
 	}
-	// Guard 5 — per-window rotation budget (anti-beacon), on the SEPARATE fp window.
-	if ns.RotationsInWindow >= in.Limits.MaxPerWindow {
-		return hold(spec.RotationReasonNoBudget, "per-window fingerprint-rotation budget spent")
-	}
+	// NO GUARD 5 — the per-window budget guard is gone here for the same reason as in Plan: with the
+	// identical guard order and the identical limits type, Guard 4 already forces
+	// `Now - WindowStart >= MaxPerWindow * MinInterval` before a tick can reach this point, and
+	// RotationLimits.Validate requires `MinInterval * MaxPerWindow >= Window` exactly. The window rolls
+	// first, every time. See the long note at the same position in rotate.go.
 	// Guard 6 — a valid closed-vocab target distinct from the current preset (never a randomiser). The
 	// producer's A/B already found this Target ALIVE; the planner re-checks it is a real vocabulary member.
 	if !spec.ValidClientFingerprint(in.Target) || in.Target == in.Current {

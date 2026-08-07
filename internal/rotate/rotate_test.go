@@ -106,17 +106,110 @@ func TestPlanCooldown(t *testing.T) {
 	}
 }
 
-func TestPlanRateBudget(t *testing.T) {
-	in := base()
-	in.State.LastRotateAt = t0.Add(-35 * time.Minute) // cooldown ok (> MinInterval 30m)
-	in.State.WindowStart = t0.Add(-40 * time.Minute)  // window still current (<1h)
-	in.State.RotationsInWindow = 2                    // == MaxPerWindow
-	p, err := Plan(in)
-	if err != nil {
-		t.Fatal(err)
+// TestPlanRateBudgetIsBoundedBySchedule replaces a test that asserted an UNREACHABLE state.
+//
+// It used to hand-build `RotationsInWindow = MaxPerWindow` with a mid-window WindowStart and a
+// LastRotateAt 35 minutes back — a state no schedule can produce, because two acts inside a 40-minute
+// window require them 5 minutes apart and the cooldown is 30. It then asserted the per-window budget
+// guard fired. That guard is now deleted: with `MinInterval * MaxPerWindow >= Window` enforced exactly by
+// RotationLimits.Validate, the cooldown alone bounds a window and the guard could never bind.
+//
+// The property that actually matters survives and is asserted here the only honest way — by ITERATING
+// the planner from the zero state and counting, so every state visited is one the system can reach.
+func TestPlanRateBudgetIsBoundedBySchedule(t *testing.T) {
+	lim := DefaultRotationLimits()
+	if err := lim.Validate(); err != nil {
+		t.Fatalf("defaults do not validate: %v", err)
 	}
-	if p.Act || p.Reason != spec.RotationReasonNoBudget {
-		t.Fatalf("spent budget must hold no-budget, got act=%v reason=%q", p.Act, p.Reason)
+	in := base()
+	in.State = spec.RotationState{}
+	blocked := vdt(spec.ConnStateBlocked, spec.ReasonConnectionReset)
+
+	// Tick every minute for three windows. Sustained impairment throughout: the planner is trying to act
+	// on every tick and only the rate machinery stops it.
+	const tick = time.Minute
+	ticks := int(3 * lim.Window / tick)
+	st := in.State
+	worst := 0
+	var acts []time.Time
+	for i := 0; i < ticks; i++ {
+		cur := in
+		cur.State = st
+		cur.ActiveVerdict = blocked
+		cur.Now = t0.Add(time.Duration(i) * tick)
+		p, err := Plan(cur)
+		if err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+		if p.Act {
+			acts = append(acts, cur.Now)
+			// Count acts inside every rolling Window ending at this act — the property the deleted guard
+			// claimed to enforce, measured over the schedule rather than over an injected counter.
+			n := 0
+			for _, a := range acts {
+				if !a.Before(cur.Now.Add(-lim.Window)) {
+					n++
+				}
+			}
+			if n > worst {
+				worst = n
+			}
+		}
+		st = p.NextState
+	}
+	if len(acts) == 0 {
+		t.Fatal("no act in three windows of sustained impairment — the schedule never reaches the act path, so this measures nothing")
+	}
+	// THE TRUE BOUND IS MaxPerWindow + 1, AND THAT IS A FINDING, NOT A ROUNDING ALLOWANCE.
+	//
+	// `MaxPerWindow` bounds a TUMBLING window — the counter resets when WindowStart is re-anchored. What
+	// an observer sees is a ROLLING window, and with `MinInterval * MaxPerWindow == Window` (the shipped
+	// defaults: 30m x 2 == 1h) the cooldown permits acts at 0, I, 2I, ... so any span of length W holds
+	// floor(W/I) + 1 == MaxPerWindow + 1 of them.
+	//
+	// The deleted budget guard did NOT prevent this: the identical schedule overruns by the same margin on
+	// the revision that still contains it (measured, e52813e), because it read the tumbling counter and
+	// was unreachable anyway. So the anti-beacon cap has always been one weaker than its name suggests.
+	//
+	// Bounding the ROLLING window to MaxPerWindow needs a STRICT inequality — `MinInterval *
+	// MaxPerWindow > Window` — which the shipped defaults do not satisfy (30m x 2 == 1h, not >). Making
+	// it strict is a posture change to three live nodes: it would require MinInterval 31m, or Window 59m,
+	// or a different cap. That is an operator decision, recorded rather than taken here.
+	if worst > lim.MaxPerWindow+1 {
+		t.Fatalf("%d acts inside one rolling %v window; the documented cap is %d and the true bound under "+
+			"`MinInterval * MaxPerWindow == Window` is %d. Exceeding even that means the cooldown itself is "+
+			"not holding. Acts at %v.",
+			worst, lim.Window, lim.MaxPerWindow, lim.MaxPerWindow+1, acts)
+	}
+	// And pin the gap itself, so the day someone makes the inequality strict this row tells them the
+	// bound tightened and the comment above is stale.
+	if lim.MinInterval*time.Duration(lim.MaxPerWindow) > lim.Window && worst > lim.MaxPerWindow {
+		t.Fatalf("the inequality is now STRICT (%v x %d > %v), which should bound a ROLLING window to %d, "+
+			"but %d acts landed in one. Either the arithmetic or this expectation is wrong.",
+			lim.MinInterval, lim.MaxPerWindow, lim.Window, lim.MaxPerWindow, worst)
+	}
+}
+
+// TestRotationLimitsArithmeticIsExact pins the inequality that replaced the deleted guard. It must
+// MULTIPLY: `Window/MaxPerWindow` is integer time.Duration division, which left a `Window mod
+// MaxPerWindow` nanosecond slit where an extra act could fall inside a window — the only case the
+// deleted guard could ever have caught, and unreachable in practice while looking like enforcement.
+func TestRotationLimitsArithmeticIsExact(t *testing.T) {
+	// A configuration that the old DIVIDING form accepted and the exact form must refuse: W=1h, M=7,
+	// floor(W/M) = 514285714285ns, and 7 * that = 1h - 5ns < 1h.
+	l := DefaultRotationLimits()
+	l.Window = time.Hour
+	l.MaxPerWindow = 7
+	l.MinInterval = l.Window / 7 // integer division: 5ns short of the exact requirement
+	if err := l.Validate(); err == nil {
+		t.Fatalf("limits accepted with MinInterval*MaxPerWindow = %v < Window = %v. The rounding slit is "+
+			"exactly what the deleted budget guard was the only defence against; the inequality must be "+
+			"exact or the deletion is unsound.", l.MinInterval*time.Duration(l.MaxPerWindow), l.Window)
+	}
+	l.MinInterval = (l.Window + 6) / 7 // ceil: 7 * this >= Window
+	if err := l.Validate(); err != nil {
+		t.Fatalf("limits refused when MinInterval*MaxPerWindow = %v >= Window = %v: %v",
+			l.MinInterval*time.Duration(l.MaxPerWindow), l.Window, err)
 	}
 }
 
