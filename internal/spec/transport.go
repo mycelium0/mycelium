@@ -101,6 +101,11 @@ type ProtoDescriptor struct {
 	Scheme      string         `json:"scheme"`       // share-link URI scheme ("" if it has no bundle share-link)
 	Engine      ProtoEngine    `json:"engine"`       // data-plane engine that serves it
 	Exposure    ExposureTier   `json:"exposure"`     // detection-exposure tier; lower = safer = preferred
+	// ServesUDP is whether this proto occupies a UDP port on the host. DECLARED, not inferred from the
+	// class: shadowsocks-2022 is class shadowsocks-TCP and nonetheless serves UDP too (harden_ufw opens
+	// it in the udp family), so deriving the set from class names silently omitted it — and the set is
+	// what decides whether a hysteria2 hop range would swallow another family.
+	ServesUDP bool `json:"serves_udp"`
 }
 
 // transportRegistry is the ordered canonical proto table. The order of the
@@ -114,12 +119,12 @@ var transportRegistry = []ProtoDescriptor{
 	{Proto: "vless-reality-xhttp", Class: TransportClassRealityTCP, EnableKey: "vless_reality_xhttp_enabled", PortKey: "vless_reality_xhttp_port", DefaultPort: 2096, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureBorrowedTLS},
 	{Proto: "vless-xhttp-tls", Class: TransportClassXHTTPTLS, EnableKey: "vless_xhttp_tls_enabled", PortKey: "vless_xhttp_tls_port", DefaultPort: 2087, Scheme: "vless", Engine: EngineXray, Exposure: ExposureOwnCertTLS},
 	{Proto: "vless-ws-tls", Class: TransportClassWSTLS, EnableKey: "vless_ws_tls_enabled", PortKey: "vless_ws_tls_port", DefaultPort: 2089, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureOwnCertTLS},
-	{Proto: "hysteria2", Class: TransportClassQUICUDP, EnableKey: "hysteria2_enabled", PortKey: "hysteria2_port", DefaultPort: 8444, Scheme: "hysteria2", Engine: EngineSingBox, Exposure: ExposureQUIC},
-	{Proto: "tuic", Class: TransportClassQUICUDP, EnableKey: "tuic_enabled", PortKey: "tuic_port", DefaultPort: 8445, Scheme: "tuic", Engine: EngineSingBox, Exposure: ExposureQUIC},
-	{Proto: "shadowsocks", Class: TransportClassShadowsocksTCP, EnableKey: "shadowsocks_enabled", PortKey: "shadowsocks_port", DefaultPort: 8388, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureNoCover},
+	{Proto: "hysteria2", Class: TransportClassQUICUDP, EnableKey: "hysteria2_enabled", PortKey: "hysteria2_port", DefaultPort: 8444, Scheme: "hysteria2", Engine: EngineSingBox, Exposure: ExposureQUIC, ServesUDP: true},
+	{Proto: "tuic", Class: TransportClassQUICUDP, EnableKey: "tuic_enabled", PortKey: "tuic_port", DefaultPort: 8445, Scheme: "tuic", Engine: EngineSingBox, Exposure: ExposureQUIC, ServesUDP: true},
+	{Proto: "shadowsocks", Class: TransportClassShadowsocksTCP, EnableKey: "shadowsocks_enabled", PortKey: "shadowsocks_port", DefaultPort: 8388, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureNoCover, ServesUDP: true},
 	{Proto: "shadowtls", Class: TransportClassShadowTLSTCP, EnableKey: "shadowtls_enabled", PortKey: "shadowtls_port", DefaultPort: 8446, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureCoveredTLS},
 	{Proto: "trojan", Class: TransportClassTrojanTLS, EnableKey: "trojan_enabled", PortKey: "trojan_port", DefaultPort: 8447, Scheme: "trojan", Engine: EngineSingBox, Exposure: ExposureOwnCertTLS},
-	{Proto: "amneziawg", Class: TransportClassAmneziaWGUDP, EnableKey: "", PortKey: "", DefaultPort: 0, Scheme: "", Engine: EngineAmneziaWG, Exposure: ExposureObfuscatedUDP},
+	{Proto: "amneziawg", Class: TransportClassAmneziaWGUDP, EnableKey: "", PortKey: "", DefaultPort: 0, Scheme: "", Engine: EngineAmneziaWG, Exposure: ExposureObfuscatedUDP, ServesUDP: true},
 }
 
 // transportClasses is the canonical CLOSED transport-class vocabulary in audited
@@ -294,6 +299,52 @@ func ValidHysteria2HopInterval(s string) bool {
 
 var hysteria2HopIntervalRe = regexp.MustCompile(hysteria2HopIntervalPattern)
 
+// UDPPortKeys returns the params keys naming ports this node serves over UDP, in registry order.
+// Derived from the registry's ServesUDP flag, never hand-listed: a transport added with that flag joins
+// the set automatically, which is the point — the collision check must not go stale the day a family is
+// added. AmneziaWG carries the flag but no params port key (its port lives in the awg subsystem), so it
+// is absent here by construction and the firewall reconcile resolves it separately; that split is
+// deliberate and is the only place the two halves legitimately differ.
+func UDPPortKeys() []string {
+	out := make([]string, 0, 4)
+	for i := range transportRegistry {
+		d := transportRegistry[i]
+		if d.PortKey == "" {
+			continue
+		}
+		if d.ServesUDP {
+			out = append(out, d.PortKey)
+		}
+	}
+	return out
+}
+
+// Hysteria2HopRangeCollisions returns the UDP port keys whose configured value falls INSIDE the given
+// hop range, excluding the hysteria2 port the range is redirected onto. Empty means the range is safe.
+//
+// A REDIRECT covers every WAN-inbound UDP packet in its range, so a range containing another served UDP
+// port sends that family's traffic to the hysteria2 listener — and nothing on the node reports it,
+// because every reach anchor is 127.0.0.1 and loopback never traverses a `-i <wan>` PREROUTING rule. The
+// firewall reconcile refuses such a range; this is the RENDERER's half, so a client is never handed a
+// range the node has already decided not to make real (Audit-0010 F-001, the deferred leg).
+func Hysteria2HopRangeCollisions(rangeStr string, servedPort int, portOf func(key string) (int, bool)) []string {
+	lo, hi, ok := parseHysteria2HopRange(rangeStr)
+	if !ok || portOf == nil {
+		return nil
+	}
+	var clash []string
+	for _, k := range UDPPortKeys() {
+		p, ok := portOf(k)
+		if !ok || p == servedPort {
+			continue
+		}
+		if p >= lo && p <= hi {
+			clash = append(clash, k)
+		}
+	}
+	return clash
+}
+
 // ValidHysteria2HopRange reports whether s is a usable hysteria2 port-hop range ("LO:HI", 1024 <= LO < HI
 // <= 65535). Empty is NOT valid here — empty means "no hopping", which callers check separately.
 //
@@ -412,6 +463,13 @@ type ParamsValidationVocab struct {
 	MaxPortFieldDigits int `json:"max_port_field_digits"`
 	// Hysteria2HopInterval is the default hop period when the operator sets a range but no interval.
 	Hysteria2HopInterval string `json:"hysteria2_hop_interval_default"`
+	// UDPPortKeys are the params keys naming a port this node serves over UDP. EMITTED because deciding
+	// WHICH keys those are is policy (it is derived from the registry's transport classes plus the
+	// AmneziaWG dataplane, which is not a params-toggled proto), while checking whether a number falls
+	// inside a range is not. A hop range that CONTAINS one of these ports makes the REDIRECT swallow that
+	// family's traffic, and no check on the node can see it: the reach anchors are loopback and never
+	// traverse a `-i <wan>` PREROUTING rule (Audit-0010 F-001).
+	UDPPortKeys []string `json:"udp_port_keys"`
 	// Hysteria2HopIntervalPattern is an ERE every accepted hop interval must match. A duration cannot be
 	// bounded by two integers, so the owner emits the SHAPE instead — same principle, different carrier.
 	// Until this existed the interval was operator-settable and judged by nobody (Audit-0010 F-005),
@@ -434,6 +492,7 @@ func NewVocab() Vocab {
 		ParamsValidation: ParamsValidationVocab{
 			Hysteria2HopPorts:           Hysteria2HopPortBounds(),
 			MaxPortFieldDigits:          maxPortFieldDigits,
+			UDPPortKeys:                 UDPPortKeys(),
 			Hysteria2HopInterval:        DefaultHysteria2HopInterval,
 			Hysteria2HopIntervalPattern: hysteria2HopIntervalPattern,
 		},

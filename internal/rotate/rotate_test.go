@@ -143,11 +143,14 @@ func TestPlanRateBudgetIsBoundedBySchedule(t *testing.T) {
 		}
 		if p.Act {
 			acts = append(acts, cur.Now)
-			// Count acts inside every rolling Window ending at this act — the property the deleted guard
-			// claimed to enforce, measured over the schedule rather than over an injected counter.
+			// HALF-OPEN, (Now-Window, Now] — the convention RotationLimits.MaxPerWindow documents. The
+			// first version of this loop counted a CLOSED interval and reported 3 against a cap of 2,
+			// which looked like an overrun and was a boundary coincidence: with MinInterval*MaxPerWindow
+			// == Window the acts land exactly Window/MaxPerWindow apart, so a closed interval always
+			// catches one extra at its left endpoint. Measured both ways before this was settled.
 			n := 0
 			for _, a := range acts {
-				if !a.Before(cur.Now.Add(-lim.Window)) {
+				if a.After(cur.Now.Add(-lim.Window)) && !a.After(cur.Now) {
 					n++
 				}
 			}
@@ -160,33 +163,23 @@ func TestPlanRateBudgetIsBoundedBySchedule(t *testing.T) {
 	if len(acts) == 0 {
 		t.Fatal("no act in three windows of sustained impairment — the schedule never reaches the act path, so this measures nothing")
 	}
-	// THE TRUE BOUND IS MaxPerWindow + 1, AND THAT IS A FINDING, NOT A ROUNDING ALLOWANCE.
+	// THE BOUND IS EXACTLY MaxPerWindow, and the cooldown alone delivers it.
 	//
-	// `MaxPerWindow` bounds a TUMBLING window — the counter resets when WindowStart is re-anchored. What
-	// an observer sees is a ROLLING window, and with `MinInterval * MaxPerWindow == Window` (the shipped
-	// defaults: 30m x 2 == 1h) the cooldown permits acts at 0, I, 2I, ... so any span of length W holds
-	// floor(W/I) + 1 == MaxPerWindow + 1 of them.
+	// RotationLimits.Validate requires MinInterval*MaxPerWindow >= Window (exactly — see the note there
+	// on why it multiplies). Points at least MinInterval apart inside a half-open interval of length
+	// Window therefore number at most Window/MinInterval <= MaxPerWindow. That is the whole anti-beacon
+	// argument, it holds without any counter, and it is why the per-window budget guard was deleted as
+	// unreachable rather than repaired.
 	//
-	// The deleted budget guard did NOT prevent this: the identical schedule overruns by the same margin on
-	// the revision that still contains it (measured, e52813e), because it read the tumbling counter and
-	// was unreachable anyway. So the anti-beacon cap has always been one weaker than its name suggests.
-	//
-	// Bounding the ROLLING window to MaxPerWindow needs a STRICT inequality — `MinInterval *
-	// MaxPerWindow > Window` — which the shipped defaults do not satisfy (30m x 2 == 1h, not >). Making
-	// it strict is a posture change to three live nodes: it would require MinInterval 31m, or Window 59m,
-	// or a different cap. That is an operator decision, recorded rather than taken here.
-	if worst > lim.MaxPerWindow+1 {
-		t.Fatalf("%d acts inside one rolling %v window; the documented cap is %d and the true bound under "+
-			"`MinInterval * MaxPerWindow == Window` is %d. Exceeding even that means the cooldown itself is "+
-			"not holding. Acts at %v.",
-			worst, lim.Window, lim.MaxPerWindow, lim.MaxPerWindow+1, acts)
-	}
-	// And pin the gap itself, so the day someone makes the inequality strict this row tells them the
-	// bound tightened and the comment above is stale.
-	if lim.MinInterval*time.Duration(lim.MaxPerWindow) > lim.Window && worst > lim.MaxPerWindow {
-		t.Fatalf("the inequality is now STRICT (%v x %d > %v), which should bound a ROLLING window to %d, "+
-			"but %d acts landed in one. Either the arithmetic or this expectation is wrong.",
-			lim.MinInterval, lim.MaxPerWindow, lim.Window, lim.MaxPerWindow, worst)
+	// This row is the schedule-level check of that arithmetic: it iterates the planner from the zero
+	// state so every state visited is one the system can actually enter, which the deleted guard's tests
+	// did not do — they injected RotationsInWindow = MaxPerWindow, a state reachable only by two acts
+	// closer together than MinInterval.
+	if worst > lim.MaxPerWindow {
+		t.Fatalf("%d acts inside one half-open %v window, cap %d, acts at %v. MinInterval*MaxPerWindow >= "+
+			"Window is supposed to make this impossible without any counter; if it fails, that inequality "+
+			"no longer holds and the anti-beacon property has nothing enforcing it.",
+			worst, lim.Window, lim.MaxPerWindow, acts)
 	}
 }
 

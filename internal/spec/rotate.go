@@ -159,11 +159,17 @@ func (c *RotationCandidate) Validate() error {
 // RotationLimits is the explicit Layer-2 rotation policy (development.md §2.2 #4 — no silent
 // bypass). Every knob is named (no magic constants). All durations strictly positive; counts >= 1.
 type RotationLimits struct {
-	FlipConfirmations     int           `json:"flip_confirmations"`         // consecutive impaired verdicts before any move (hysteresis)
-	MinWeightMargin       float64       `json:"min_weight_margin"`          // a candidate must beat the incumbent weight by this much
-	MinInterval           time.Duration `json:"min_interval_ns"`            // minimum between two promotions (cooldown)
-	Window                time.Duration `json:"window_ns"`                  // rate-limit window
-	MaxPerWindow          int           `json:"max_per_window"`             // max rotations per Window (anti-beacon)
+	FlipConfirmations int           `json:"flip_confirmations"` // consecutive impaired verdicts before any move (hysteresis)
+	MinWeightMargin   float64       `json:"min_weight_margin"`  // a candidate must beat the incumbent weight by this much
+	MinInterval       time.Duration `json:"min_interval_ns"`    // minimum between two promotions (cooldown)
+	Window            time.Duration `json:"window_ns"`          // rate-limit window
+	// MaxPerWindow is the anti-beacon cap, and "per window" means a HALF-OPEN interval (t-Window, t].
+	// The convention is load-bearing, not pedantry: with MinInterval*MaxPerWindow == Window (the shipped
+	// defaults) the cooldown places acts exactly Window/MaxPerWindow apart, so a CLOSED interval
+	// [t-Window, t] catches one extra act at its left endpoint — 3 where the cap says 2 — while every
+	// half-open interval holds exactly MaxPerWindow. Measuring the closed form once made a boundary
+	// coincidence look like an overrun and a non-defect look like an operator decision.
+	MaxPerWindow          int           `json:"max_per_window"`             // max rotations per HALF-OPEN Window (anti-beacon)
 	MaxRollbacksPerWindow int           `json:"max_rollbacks_per_window"`   // rollback budget before the planner latches to hold
 	CooldownAfterRollback time.Duration `json:"cooldown_after_rollback_ns"` // hold-only span after any rollback
 }

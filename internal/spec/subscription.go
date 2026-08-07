@@ -29,6 +29,17 @@ import (
 // per-identity password falls back to the shared protocol secret (TUIC uses the UUID); the own-cert
 // genuine-TLS families fail closed without an explicit tls_sni (C03). Pure + deterministic. The
 // subscription_go_equiv gate pins the byte-equivalence; until green the shell stays authoritative.
+// portOfKey reads a params port key as an integer. Absent or non-numeric yields an error; callers treat
+// that as "this family has no configured port" rather than substituting a guess, because the value feeds
+// a collision check whose wrong answer either strands a family or lets a REDIRECT swallow one.
+func portOfKey(params map[string]json.RawMessage, key string) (int, error) {
+	s := paramStr(params, key, "")
+	if s == "" {
+		return 0, fmt.Errorf("params: %s is absent or empty", key)
+	}
+	return strconv.Atoi(s)
+}
+
 func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) ([]ClientSubscription, error) {
 	// Pre-filter enabled set: every params-toggled proto that is on (sing-box + xray engines, registry
 	// order — the shell's myc_sb_enabled_list over MYC_SB_PROTOS).
@@ -99,6 +110,23 @@ func RenderSubscription(params map[string]json.RawMessage, clients []SubClient) 
 	hy2HopPorts := paramStr(params, "hysteria2_hop_ports", "")
 	if hy2HopPorts != "" && !ValidHysteria2HopRange(hy2HopPorts) {
 		hy2HopPorts = ""
+	}
+	// COLLISION, the renderer's half (Audit-0010 F-001). The firewall reconcile refuses to install a
+	// REDIRECT whose range contains another served UDP port; without the same refusal here the client was
+	// still handed the range, so every hysteria2 client hopped across ports the node had already decided
+	// not to make real. Dropping it keeps the two halves in step — no range emitted, no rule installed —
+	// which is the same safe degradation an invalid range gets.
+	if hy2HopPorts != "" {
+		hy2Served := 0
+		if p, err := portOfKey(params, "hysteria2_port"); err == nil {
+			hy2Served = p
+		}
+		if c := Hysteria2HopRangeCollisions(hy2HopPorts, hy2Served, func(k string) (int, bool) {
+			v, err := portOfKey(params, k)
+			return v, err == nil
+		}); len(c) > 0 {
+			hy2HopPorts = ""
+		}
 	}
 	// VALIDATED by the same owner (Audit-0010 F-005). An unjudged duration reached both the client
 	// config and the server render, where sing-box refuses the whole document — a converge failing every

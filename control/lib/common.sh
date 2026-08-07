@@ -192,7 +192,28 @@ myc_hop_range_ok() {
 	# owner: `test -ge` parses base 10, so a zero-padded field clears every numeric check. Two answers to
 	# one input is the divergence ADR-0038 exists to remove.
 	[ "${#lo}" -le "$cap" ] && [ "${#hi}" -le "$cap" ] || return 1
-	[ "$lo" -ge "$min" ] && [ "$hi" -le "$max" ] && [ "$lo" -lt "$hi" ]
+	[ "$lo" -ge "$min" ] && [ "$hi" -le "$max" ] && [ "$lo" -lt "$hi" ] || return 1
+
+	# COLLISION, the renderer's half (Audit-0010 F-001). A REDIRECT covers every WAN-inbound UDP packet in
+	# its range, so a range CONTAINING another served UDP port sends that family to the hysteria2 listener
+	# — and nothing on the node reports it: the reach anchors are 127.0.0.1 and loopback never traverses a
+	# `-i <wan>` PREROUTING rule. The firewall reconcile already refuses such a range; refusing it here too
+	# is what stops a client being handed a range the node has decided not to make real.
+	#
+	# WHICH keys count as served UDP ports is POLICY and is emitted (.params_validation.udp_port_keys,
+	# derived from the registry's UDP classes plus the AmneziaWG dataplane). Whether a number lies between
+	# two others is not policy, so comparing here duplicates nothing.
+	local params="${MYC_HOP_PARAMS:-${PARAMS_JSON:-}}"
+	[ -n "$params" ] && [ -f "$params" ] || return 0
+	local served k p
+	served="$(jq -r '.hysteria2_port // empty' "$params" 2>/dev/null)"
+	for k in $(jq -r '.params_validation.udp_port_keys[]? // empty' "$vocab" 2>/dev/null); do
+		p="$(jq -r --arg k "$k" '.[$k] // empty' "$params" 2>/dev/null)"
+		case "$p" in ''|*[!0-9]*) continue ;; esac
+		[ "$p" = "$served" ] && continue
+		if [ "$p" -ge "$lo" ] && [ "$p" -le "$hi" ]; then return 1; fi
+	done
+	return 0
 }
 
 # myc_hop_interval_ok VALUE — succeed iff VALUE matches the EMITTED hop-interval pattern.
