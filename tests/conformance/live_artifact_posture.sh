@@ -116,6 +116,22 @@ else
 	badln "render_singbox.sh does not wire clash_api.secret from clash_secret — clash_api would lack auth even when a secret is provisioned"
 fi
 
+# --- 5. NON-BOOLEAN posture knobs (Audit-0010 F-019) ---------------------------------------------
+# The on-set above is built from `<proto>_enabled: true|false` greps, so a posture knob that is not a
+# boolean is outside this gate BY CONSTRUCTION. hysteria2_hop_ports is exactly that: THREAT-MODEL states
+# "off by default, and it must stay off by default" and development.md §2.2 item 11 makes widening the
+# default posture a lockstep change gated HERE — while the one knob that widens the node's observable
+# port footprint could not be seen. A claim enforced nowhere is a claim, not a posture.
+HOP_DEFAULT="$(sed -n '/^write_params()/,/^}$/p' "$WRITE_PARAMS_SRC" \
+	| grep -oE 'hysteria2_hop_ports:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)".*/\1/')"
+if ! sed -n '/^write_params()/,/^}$/p' "$WRITE_PARAMS_SRC" | grep -q 'hysteria2_hop_ports:'; then
+	badln "write_params does not emit hysteria2_hop_ports at all — the knob is unsettable again (the defect RP-0017 closed), and this gate cannot see its default"
+elif [ -z "$HOP_DEFAULT" ]; then
+	okln "hysteria2_hop_ports defaults to empty — no hop range, no REDIRECT, no widened port footprint"
+else
+	badln "hysteria2_hop_ports defaults to '$HOP_DEFAULT'. A fresh node would advertise a port range to every client and install a nat/PREROUTING REDIRECT covering it — widening the observable footprint of EVERY node by default. THREAT-MODEL says this must stay off by default and development.md §2.2 item 11 makes widening the default posture a lockstep change; this is that gate."
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the deployed artifact posture is not as documented (clash_api bind/secret, default-on set, or ShadowTLS strict_mode).\n' >&2

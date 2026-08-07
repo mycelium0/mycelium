@@ -105,6 +105,27 @@ therefore the single owner of front configuration. `front.config.json` remains s
 explicit node-local override and **wins when present**, because an operator who placed it there meant
 it; when absent, `front_setup` reads the profile **directly**. No derived third file is written.
 
+**§3 — an advisory conflict fails the converge tail.** When a node's firewall posture is off and a hop
+range is nevertheless configured, `converge_node_tail` counts it as a FAILED step rather than logging and
+moving on (Audit-0010 F-023 asked for this decision; it was taken implicitly in code and is recorded here).
+
+The state is genuinely broken: `reconcile_hy2_hop_nat` runs inside `harden_ufw` and therefore never runs
+on such a node, so every issued hysteria2 config advertises a range with no rule behind it. Nothing else
+can report it — `verify_post_apply` checks the service, the bind and a loopback handshake, and loopback
+never traverses PREROUTING.
+
+The alternative — log and continue — was rejected for a specific reason and not on general strictness:
+this project's recurring defect is a component reporting healthy about something it cannot observe, and a
+converge that returns success while every client of one family is broken is exactly that shape. The cost
+is real and bounded: the tail's other steps still run (one failing step does not cancel the rest), the
+node keeps serving, and the failure repeats every tick until an operator resolves it — which is the
+intended pressure, because the resolution is theirs. Three ways out are named in the warning: turn the
+posture on, install the REDIRECT by hand, or clear `hysteria2_hop_ports`.
+
+The run is NOT allowed to install the rule itself. `--no-harden` means this run does not manage the host
+firewall, and quietly writing a nat rule anyway would substitute our judgement for the operator's on the
+one subsystem they explicitly reserved.
+
 ## Consequences
 
 **Positive.**
