@@ -655,6 +655,26 @@ For architecturally significant changes a PR must contain:
 - indication of whether an event-driven audit is needed (new transport, new node class,
   change to the trust model, change to the control plane — typically yes).
 
+**Merge LOCALLY, never with the GitHub button.** After CI passes on the PR, merge with
+`git merge --no-ff <branch>` and push. `gh pr merge` / the web "Merge pull request" button must not be
+used on this repository.
+
+The reason is the armed update path, not taste. `verify_signed_ref` (`control/lib/nb_update_apply.sh`)
+runs `git verify-commit` on the tip of `origin/main` against the operator's allowed-signers file, and
+refuses to apply anything it cannot authenticate (§8.7). A locally authored commit carries that
+signature; **a merge commit created by GitHub does not** — `git log --format=%G?` reads `G` for the
+first and `E` for the second. A PR merged with the button therefore leaves a tip every node refuses,
+and the network silently stops advancing while `main` is green, the PR is green, and nothing on any
+dashboard is red. It is visible only in a node's journal:
+
+```text
+node-bootstrap: error: signature verification FAILED for 'origin/main'
+  — refusing to apply unauthenticated artifacts (fail-closed)
+```
+
+This is the correct fail-closed behaviour of the update path (§8.7 "provenance before execution"), so
+the fix is the merge procedure, not the check.
+
 See checklists in [refactoring.md §16](refactoring.md).
 
 ### 6.4. Red master freeze
