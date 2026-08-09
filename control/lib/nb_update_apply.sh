@@ -31,6 +31,17 @@
 # runtime from the shared sourced scope. The --update re-exec-from-immutable-copy guard stays in
 # flow_update (orchestration). Behaviour is byte-identical to the inline definitions it replaced.
 
+# _record_update_failure_if_available REASON — count the failure when the observability lib is loaded.
+#
+# Guarded by `command -v` rather than assumed: this lib is sourced by the entrypoint alongside
+# nb_observability.sh, but it is also sourced STANDALONE by conformance gates, and a bookkeeping call
+# that turned into a command-not-found would convert a clean fail-closed refusal into a different,
+# noisier failure. Bookkeeping must never be the reason a refusal changes shape.
+_record_update_failure_if_available() {
+	command -v record_update_failure >/dev/null 2>&1 && record_update_failure "$1"
+	return 0
+}
+
 # ---------------------------------------------------------------------------
 # Authenticity gate for fetched artifacts (SUPPLY-CHAIN). Fast-forward-only stops history
 # rewrites but does NOT stop a brand-new malicious commit reaching every node: a single bad push
@@ -203,7 +214,7 @@ verify_signed_ref() {
 			&& GNUPGHOME="$ALLOWED_SIGNERS" git -C "$CHECKOUT_DIR" verify-commit "$rev" >/dev/null 2>&1; then ok=1; fi
 	fi
 	[ "$ok" -eq 1 ] \
-		|| die "signature verification FAILED for '$rev' — refusing to apply unauthenticated artifacts (fail-closed). A valid operator signature is the required approval."
+		|| { _record_update_failure_if_available signature; die "signature verification FAILED for '$rev' — refusing to apply unauthenticated artifacts (fail-closed). A valid operator signature is the required approval."; }
 	log "signature verified for '$rev' against the operator key (out-of-band)."
 }
 
@@ -261,7 +272,7 @@ myc_fetch_artifacts() {
 	# Fast-forward ONLY: never rewrite local history; never take a force-push silently. Only after a
 	# successful signature check does the verified revision touch the working tree.
 	run git -C "$CHECKOUT_DIR" merge --ff-only "$target" \
-		|| die "fast-forward update failed (history diverged or force-pushed) — refusing (fail-closed)."
+		|| { _record_update_failure_if_available fast-forward; die "fast-forward update failed (history diverged or force-pushed) — refusing (fail-closed). A LOCALLY MODIFIED checkout produces this too: using a live node as a build or test host leaves files behind and the node then stops taking updates."; }
 
 	# THE MERGE SUCCEEDING IS NOT THE CHECKOUT BEING AT THE PIN.
 	#

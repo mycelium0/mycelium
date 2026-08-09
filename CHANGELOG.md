@@ -13,6 +13,31 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.72] — 2026-08-07
+
+> Two causes had put every node into "refusing to update" — and both were invisible from every surface
+> anyone watches. Fixed at the shared root rather than one at a time.
+
+### Added
+- **The node publishes the FAILURE side of the update outcome**, not only the success timestamp:
+  `mycelium_update_consecutive_failures` and `mycelium_update_last_failure_reason` (a closed-vocab
+  integer: 1 signature, 2 fast-forward, 3 validate, 4 post-apply, 9 other — never the error text, which
+  can carry a path or a ref, and this file is read by node_exporter). A success resets both, so a
+  recovered node stops reporting a stall. A staleness-only signal could not express this: "how long is
+  too long" depends on the timer period, which the metric does not carry.
+- The two refusals that actually stalled the network record themselves at the point of refusal, guarded
+  by `command -v` so a bookkeeping call can never change the shape of a fail-closed refusal.
+- `tests/conformance/update_chain_is_unbroken.sh` — guards the CAUSE and the REPORTING. The cause is
+  offline-checkable: a merge made with GitHub's button carries the committer `GitHub
+  <noreply@github.com>`, and CI can see that even though it cannot verify the operator's key (the
+  allowed-signers file is out-of-band by design, §8.7). The baseline is named: PRs #10–#17 were merged
+  with the button before this was understood, and a gate that stays red over landed history is one
+  people learn to skip.
+
+### Fixed
+- **`vless-reality-vision` restored on m1** and proven to carry traffic from a second host (HTTP 200).
+  The rotation loop had demoted it on 2026-08-05; the donor negotiates h2 again, so the demote is stale.
+
 ## [0.2.71] — 2026-08-06
 
 > A correction to 0.2.70, and the last two open audit findings.

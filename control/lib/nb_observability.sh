@@ -243,20 +243,92 @@ record_l7_verdict() {
 	return 0
 }
 
-record_converge_ok() {
-	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
-	local now dir out
-	now="$(date +%s 2>/dev/null)" || return 0
-	case "$now" in ''|*[!0-9]*) return 0 ;; esac
-	printf '%s\n' "$now" > "$STATE_DIR/last_converge_ok" 2>/dev/null || true
+# --- update OUTCOME, not just update SUCCESS ------------------------------------------------------
+#
+# WHY THIS EXISTS. Two separate defects put every node into "refusing to update" and BOTH were invisible
+# from every surface anyone watches: an unsigned tip (a PR merged with GitHub's button leaves a commit
+# the operator key did not sign, and verify_signed_ref correctly refuses it) and a dirty checkout (a
+# fast-forward that cannot apply). In each case `main` was green, CI was green, the timer was `active`,
+# the service was enabled, and the ONLY place the truth appeared was `journalctl -u mycelium-update`.
+#
+# A success timestamp cannot express this. Its staleness is the signal, and staleness is a question
+# nobody asks until something else has already gone wrong — "how long is too long" depends on the timer
+# period, which the metric does not carry. So the node publishes the FAILURE side explicitly: how many
+# consecutive attempts have failed, and a closed-vocabulary code for why. A stalled network then shows up
+# as a number going up rather than as an absence someone has to notice.
+#
+# CLOSED VOCABULARY, deliberately. The reason is emitted as a small integer, never the error text: an
+# error string can carry a path, a hostname or a ref, and this file is read by node_exporter (§8.5 —
+# nothing that could identify a node or a client leaves the loopback exporter).
+#   0 = none (last attempt succeeded)   1 = signature verification refused the fetched ref
+#   2 = the checkout could not fast-forward (dirty tree, or history diverged)
+#   3 = render/validate refused the candidate   4 = post-apply verification failed, rolled back
+#   9 = other/unclassified
+myc_update_reason_code() {
+	case "$1" in
+		none|"")      printf '0' ;;
+		signature)    printf '1' ;;
+		fast-forward) printf '2' ;;
+		validate)     printf '3' ;;
+		post-apply)   printf '4' ;;
+		*)            printf '9' ;;
+	esac
+}
+
+# _write_update_prom CONSEC REASON_CODE LAST_SUCCESS — publish the whole update-outcome block atomically.
+# One writer for all three series, so a partial update can never leave the success timestamp fresh next
+# to a stale failure count; the two disagreeing is exactly the state that hides a stall.
+_write_update_prom() {
+	local consec="$1" code="$2" last_ok="$3" dir out
 	dir="$NODE_EXPORTER_TEXTFILE_DIR"; [ -d "$dir" ] || dir="$STATE_DIR"
 	out="$dir/mycelium_update.prom"
 	{
 		printf '# HELP mycelium_update_last_success_timestamp_seconds Unix time of the last successful unattended converge; 0 = never.\n'
 		printf '# TYPE mycelium_update_last_success_timestamp_seconds gauge\n'
-		printf 'mycelium_update_last_success_timestamp_seconds %s\n' "$now"
+		printf 'mycelium_update_last_success_timestamp_seconds %s\n' "$last_ok"
+		printf '# HELP mycelium_update_consecutive_failures Consecutive failed update attempts; 0 = the last attempt succeeded.\n'
+		printf '# TYPE mycelium_update_consecutive_failures gauge\n'
+		printf 'mycelium_update_consecutive_failures %s\n' "$consec"
+		printf '# HELP mycelium_update_last_failure_reason Closed-vocab code for the last failure: 0 none, 1 signature, 2 fast-forward, 3 validate, 4 post-apply, 9 other.\n'
+		printf '# TYPE mycelium_update_last_failure_reason gauge\n'
+		printf 'mycelium_update_last_failure_reason %s\n' "$code"
 	} >"$out.tmp" 2>/dev/null && { chmod 0644 "$out.tmp" 2>/dev/null || true; mv -f "$out.tmp" "$out" 2>/dev/null || true; }
 	rm -f "$out.tmp" 2>/dev/null || true
+	return 0
+}
+
+# record_update_failure REASON — count one failed attempt and publish why. Never fatal: bookkeeping must
+# not turn a recoverable update failure into a different failure.
+record_update_failure() {
+	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
+	local reason="${1:-other}" consec last_ok code
+	consec="$(cat "$STATE_DIR/update_consecutive_failures" 2>/dev/null || printf '0')"
+	case "$consec" in ''|*[!0-9]*) consec=0 ;; esac
+	consec=$((consec + 1))
+	printf '%s\n' "$consec" > "$STATE_DIR/update_consecutive_failures" 2>/dev/null || true
+	last_ok="$(cat "$STATE_DIR/last_converge_ok" 2>/dev/null || printf '0')"
+	case "$last_ok" in ''|*[!0-9]*) last_ok=0 ;; esac
+	code="$(myc_update_reason_code "$reason")"
+	printf '%s\n' "$code" > "$STATE_DIR/update_last_failure_reason" 2>/dev/null || true
+	_write_update_prom "$consec" "$code" "$last_ok"
+	warn "update attempt FAILED ($reason); $consec consecutive failure(s). This node is not taking new"
+	warn "  code and nothing else reports that: the timer stays active and the data plane keeps serving"
+	warn "  the last-known-good config. mycelium_update_consecutive_failures is the metric to alert on."
+	return 0
+}
+
+record_converge_ok() {
+	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
+	local now
+	now="$(date +%s 2>/dev/null)" || return 0
+	case "$now" in ''|*[!0-9]*) return 0 ;; esac
+	printf '%s\n' "$now" > "$STATE_DIR/last_converge_ok" 2>/dev/null || true
+	# RESET the failure side in the same breath. A success that leaves the counter standing is the same
+	# defect from the other direction: a recovered node would keep reporting a stall, and a metric that
+	# cries wolf is one people learn to skip.
+	printf '0\n' > "$STATE_DIR/update_consecutive_failures" 2>/dev/null || true
+	printf '0\n' > "$STATE_DIR/update_last_failure_reason" 2>/dev/null || true
+	_write_update_prom 0 0 "$now"
 	return 0
 }
 
