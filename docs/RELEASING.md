@@ -49,27 +49,89 @@ a file that does not exist. Check what you actually sign with before trusting ei
 
 ## Cut a release
 
+**The signed bytes must be the published bytes.** The old order in this file did not guarantee that
+(Audit-0011 #15): step 2 built `dist/SHA256SUMS` locally from `HEAD`, *before the tag existed*, step 4
+signed that local copy, and the workflow published CI's own independently built copy. Nothing compared
+them. Any commit landing between the local build and the tag made the signed file describe a different
+tarball from the published one — and then `scripts/verify-release.sh` fails closed for **every**
+downloader while the maintainer, who never re-checks, sees a normal release. The order below builds at
+the tag and then signs the file that was *actually published*, so the two cannot diverge.
+
 ```sh
+# 0. ADVISORY — check engine currency BEFORE tagging. Maintenance currency is load-bearing for
+#    indistinguishability (docs/adr, dependency_policy.sh header), but "is the pin the latest upstream
+#    tag" is deploy-time state, not a CI invariant, so no gate can answer it offline. Tag time is the
+#    one moment it is both answerable and actionable. Compare each pin against upstream; if an engine is
+#    behind, decide DELIBERATELY whether to bump it in this release or record why not.
+gh release view --repo SagerNet/sing-box --json tagName -q .tagName
+gh release view --repo XTLS/Xray-core   --json tagName -q .tagName
+jq -r '.engines | to_entries[] | "\(.key)\t\(.value.version)"' control/engines.manifest.json
+
 # 1. bump the single source of truth + record the change
 $EDITOR internal/spec/version.go          # const Version = "X.Y.Z"
 $EDITOR CHANGELOG.md                       # add "## [X.Y.Z] — <date>"
 git add -A && git commit && git push origin main
 #    → wait for green CI (build/vet/test/race + all gates, incl. release_dist_sane)
 
-# 2. sanity-build the artifact locally and run its gate
-make dist                                  # → dist/mycelium-X.Y.Z.tar.gz + dist/SHA256SUMS
-MYC_REPO_ROOT="$PWD" bash tests/conformance/release_dist_sane.sh
-
-# 3. sign + push the tag → triggers .github/workflows/release.yml (REL-2)
+# 2. sign + push the tag → triggers .github/workflows/release.yml (REL-2)
+#    The workflow now refuses to publish unless `git verify-tag` passes against the committed
+#    allowed_signers, so an unsigned `git tag` can no longer produce a normal-looking release.
 git tag -s vX.Y.Z -m "Mycelium vX.Y.Z"
 git push origin vX.Y.Z
 
-# 4. sign the checksums with the same key and attach the .sig to the published Release
-ssh-keygen -Y sign -f ~/.ssh/id_rsa -n file dist/SHA256SUMS        # → dist/SHA256SUMS.sig
-gh release upload vX.Y.Z dist/SHA256SUMS.sig
+# 3. sanity-build AT THE TAG and run its gate. Not from HEAD — HEAD may already have moved.
+git checkout --detach vX.Y.Z
+make dist DIST_REF=vX.Y.Z                  # → dist/mycelium-X.Y.Z.tar.gz + dist/SHA256SUMS
+MYC_REPO_ROOT="$PWD" bash tests/conformance/release_dist_sane.sh
+
+# 4. wait for the workflow, then DOWNLOAD what it actually published
+mkdir -p /tmp/rel && cd /tmp/rel
+gh release download vX.Y.Z --pattern 'mycelium-*.tar.gz' --pattern 'SHA256SUMS' --clobber
+
+# 5. assert byte equality against the local build. If this differs, DO NOT SIGN — something landed
+#    between the tag and the build, or the workflow built a different ref. Investigate, do not paper over.
+cmp /tmp/rel/SHA256SUMS "$OLDPWD/dist/SHA256SUMS" \
+  || { echo "published SHA256SUMS != locally built at the tag — STOP"; exit 1; }
+
+# 6. sign the DOWNLOADED copy — the bytes the world will verify — and attach the signature
+ssh-keygen -Y sign -f ~/.ssh/id_rsa -n file /tmp/rel/SHA256SUMS      # → SHA256SUMS.sig
+gh release upload vX.Y.Z /tmp/rel/SHA256SUMS.sig
+
+# 7. re-verify in SIGNED mode, from the download directory, as a stranger would
+scripts/verify-release.sh /tmp/rel --allowed-signers allowed_signers \
+  --signer "$(awk 'NF{print $1; exit}' allowed_signers)" --tag vX.Y.Z
 ```
 
-`make dist` is reproducible: re-running it at the same tag yields a byte-identical tarball (pinned by `release_dist_sane`). So any third party can rebuild and confirm the published artifact independently.
+`make dist` is reproducible using git's internal zlib: re-running it at the same tag yields a
+byte-identical tarball, confirmed on macOS and Linux and pinned by `release_dist_sane`. That is
+independence from the host's `gzip` and from a `tar.tar.gz.command` set in the operator's git config —
+it is **not** a claim of bit-identical output across every platform and git version.
+
+## A bad release
+
+There is no downgrade verb and no code rollback (Audit-0011 #21). `rollback_config` restores the last
+known-good *config*; the revision and the spine have already advanced by then
+(`scripts/node-bootstrap.sh`), so "roll back" does not undo an update. Plan accordingly:
+
+1. **Stop the spread first.** The nodes only take signed tips of `origin/main`. Revert the offending
+   commit on `main` and push the revert, signed, the normal way (`git revert`, then
+   `git merge --no-ff -S` if it went through a branch). Armed nodes converge onto the revert on their
+   next tick; that is the fastest lever available and it needs no node access.
+2. **Delete the release, keep the tag.** `gh release delete vX.Y.Z` removes the assets that
+   `QUICKSTART.md` resolves to. Leave the tag in place — deleting a pushed tag rewrites what other
+   people already fetched, and a tag that resolves to nothing is worse than one that resolves to a
+   known-bad commit you have documented. Add a `## [X.Y.Z] — YANKED` line to CHANGELOG.md saying why.
+3. **Per node, if a node already took it.** Each node records the revision it was on before the fetch
+   in `$STATE_DIR/update.prev_rev`; that value is what to return to:
+
+   ```sh
+   git -C /opt/mycelium checkout --detach "$(cat /var/lib/mycelium/update.prev_rev)"
+   fungi apply          # re-render + validate + promote from the older tree
+   ```
+
+   Disarm first if the timer would just pull the bad tip back: `sudo rm -f /var/lib/mycelium/update.armed`.
+4. **Then fix forward.** A node pinned to a detached revision is not receiving updates. Land the real
+   fix, cut the next tag, re-arm, and confirm `mycelium_update_last_success_timestamp_seconds` moves.
 
 ## Verify a release (operator / downloader)
 

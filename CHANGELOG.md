@@ -13,6 +13,96 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.74] — 2026-08-09
+
+> Audit-0011 asked whether this is a real release. It found 21 blockers, and the honest answer was no.
+> This closes every one of them except the signing key itself, which is the operator's to publish. The
+> recurring theme is not new: **a component reporting confidently on something it cannot observe** — and
+> this time most of the offenders were *documents and badges* rather than code.
+
+### Fixed — claims that were not true
+
+- **The release lane never verified its own authenticity root.** `release.yml` calls the signed tag "the
+  authenticity root" and used `gh release create --verify-tag`, which — despite the name — asserts only
+  that the tag EXISTS ON THE REMOTE. A plain, unsigned `git tag vX.Y.Z && git push --tags` produced a
+  complete, normal-looking release and nothing anywhere would have said otherwise. Not hypothetical:
+  RELEASING.md records that the documented `user.signingkey` once pointed at a file that did not exist.
+  The lane now runs `git verify-tag` against the committed `allowed_signers` and **fails closed when that
+  file is absent** — which it is today, so the lane refuses to publish until the key ships. That refusal
+  is the point: a release whose root cannot be verified must not be produced.
+- **The signed bytes were not the published bytes.** RELEASING.md built `dist/SHA256SUMS` locally from
+  `HEAD` *before the tag existed*, signed that copy, and let the workflow publish CI's independently built
+  one. Nothing compared them. Any commit landing in between made the signature describe a different
+  tarball — and then `verify-release.sh` fails closed for **every** downloader while the maintainer, who
+  never re-checks, sees a normal release. Reordered: build at the tag, download what was actually
+  published, assert byte equality, sign *that*, re-verify in signed mode.
+- **The gates badge counted files, not passes** — including one gate `tests/run.sh` deliberately never
+  runs. It said "N passing" about an execution that job never observed. It now says "defined".
+- **"Proven from-zero deploy path"** (ROADMAP, development.md) had no evidence row. Narrowed to what was
+  measured: the maintainer, on a deliberately wiped node, 2026-08-09. No second operator has stood a node
+  up from a release package, which is what AC-1 actually asks.
+- **The Phase-2 ledger claimed a signed release tag existed at v0.2.46.** None exists at any version;
+  `git tag` is empty and `release.yml` has zero runs. The sentence stood for eight days while the version
+  moved past 0.2.7x. Corrected in place, with why it decayed. Its "65 gates" is now dated and counted.
+- **RP-0011 was `active` with no acceptance ledger**, so three of its ten criteria were being read as met
+  when they were not. Added [`docs/rp0011-acceptance-ledger.md`](docs/rp0011-acceptance-ledger.md):
+  5 met, 1 partial, 2 unmet, 2 deferred — **NOT ACCEPTED**. Chunk F's `cdn enable` renamed to the `front`
+  verb that actually shipped.
+- **The end-to-end verification claim in QUICKSTART.** AmneziaWG is built on the node from a `git clone`
+  of upstream *mutable tags* — a different trust root from the tarball the reader just checked.
+
+### Fixed — a redactor nobody could reach
+
+- **`fungi diag <collect|redact>`.** SECURITY.md and the bug-report template both told reporters to run
+  `myceliumctl diag collect`. **Nothing puts any `myceliumctl` on `$PATH`**, and the only file of that
+  name on a node is the shell tool, whose dispatch has no `diag` verb at all. So the PII redactor built
+  specifically to keep key material, peer addresses and client names out of public issues was unreachable
+  by the person it protects, and the path of least resistance was pasting raw journald. The scrubber
+  existing is not the scrubber being reachable.
+
+### Fixed — silence
+
+- **Two alerts on the update path** (`MyceliumUpdateFailing`, `MyceliumUpdateStalled`). The metrics landed
+  in 0.2.73; nothing alerted on them, and a metric nobody alerts on is the same silence with more disk
+  writes. `MyceliumUpdateStalled` carries an `absent()` arm deliberately — a node that reports nothing is
+  exactly the one a threshold over a missing series passes in silence.
+- **`resolve_node_address` now names its cause.** Falling through to the placeholder because no public
+  address exists (pass `--node-address`) and falling through because the artifact is broken need different
+  actions, and the call-site warning cannot tell them apart.
+- **The pre-fetch revision is recorded** (`$STATE_DIR/update.prev_rev`) before any update moves the
+  checkout. There is no downgrade verb and no code rollback: `rollback_config` restores the last
+  known-good *config*, by which time the revision and spine have already advanced. The one value an
+  operator needs to escape a bad release had to be written down before the fetch or it was gone. Consumed
+  by the new **"A bad release"** section in RELEASING.md.
+
+### Fixed — reproducibility
+
+- **`tar.tar.gz.command` is pinned** to git's internal-zlib magic value in `make dist`. Unset, the digest
+  is stable — but it is a plain config key, so a distro `/etc/gitconfig` carrying `gzip -1n` silently
+  produced a different tarball from the same tag. Measured: the digest moves. The empty value is **not**
+  equivalent (git exits 128). The reproducibility claim is narrowed to what is standing-checked:
+  independence from the host `gzip` and from this config key, on macOS and Linux — not all platforms.
+
+### Added — gates
+
+- **`node_address_is_public.sh`** drives `resolve_node_address` against a stubbed address helper: a
+  private-only host reaches the placeholder and warns, a public address survives, a missing helper fails
+  closed, an explicit `--node-address` still wins even when private (NAT with a forwarded port is a real
+  deployment), and a value already in `params.json` survives a re-run. Restoring the old
+  `ip … scope global | head -n1` turns it red.
+- **Three rows in `fungi_scoped.sh`**: `fungi deploy <mode-flag>` is refused with the actuator invoked
+  zero times (four flags, each valueless — an earlier draft used `--revoke alice` and went green under
+  mutation because the bare `alice` tripped a *different* guard, the same exit code from an unrelated
+  cause); a legitimate converge-shaping flag still gets through; and every verb named in an
+  operator-facing string is dispatched by the tool that string names.
+
+### Changed
+
+- QUICKSTART gained "Before you run this", a table of what `deploy` changes on the host, an
+  install-from-clone path, and a "Connect a client" step; the update section now leads with the fact that
+  the documented signed-update path is not runnable yet.
+
+
 ## [0.2.73] — 2026-08-09
 
 > A production node was wiped and reinstalled from zero to close the one gap the release audit could not

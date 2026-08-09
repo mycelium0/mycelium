@@ -48,8 +48,13 @@ autonomous self-healing, carrier-agnostic bridging, and biological-flow optimiza
 >   measure→detect→tune→rotate→rollback, end-to-end client recovery
 >   ([RP-0013](proposals/0013-phase3-e2e-client-recovery.md)), detector hardening
 >   ([RP-0014](proposals/0014-phase2-detector-hardening.md)), the client-fingerprint knob + gated rotation
->   ([RP-0015](proposals/0015-fingerprint-adaptivity.md), live-validated on a node), and the proven
->   from-zero deploy path — **plus the release MECHANISM** (reproducible signed artifacts + verify, a
+>   ([RP-0015](proposals/0015-fingerprint-adaptivity.md), live-validated on a node), and the from-zero
+>   deploy path — **measured by the maintainer on a deliberately wiped node on 2026-08-09** (rc=0 in 50s;
+>   a client on a second host reached it over the public internet), which is evidence the path WORKS but
+>   is *not* the AC-1 bar: no second operator has stood a node up from the release package. Until one
+>   has, "proven" here means measured-by-the-author, and the word is qualified deliberately — the first
+>   attempt to measure it found a bug that had made the first install fail for **every** operator without
+>   pre-existing state, and nothing in the tree had noticed for months — **plus the release MECHANISM** (reproducible signed artifacts + verify, a
 >   QUICKSTART). This is the closing milestone of Phase 2 (Decision B, unchanged); Decision C only declares
 >   the bar reached, so cutting the release is now a mechanism step, not a "one more RP" wait.
 > - **Client-side hardening — a named POST-RELEASE track.** Further single-node deepening of the

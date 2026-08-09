@@ -16,6 +16,33 @@ networks. This guide takes a fresh Linux server to a running node in a few comma
 - The maintainer's **signing key**, obtained out-of-band, as an `allowed_signers` line (used to
   verify the release; see [docs/RELEASING.md](docs/RELEASING.md)).
 
+## Before you run this
+
+**No release is tagged yet.** Step 1 below describes the release path and will 404 today; until a tag
+exists, install from a clone — see *1b* immediately after it. Everything from step 2 onward is the same
+either way.
+
+**What `deploy` changes on your host, before you point it at one** (all default-on; `--no-harden`
+disables the host-hardening group):
+
+| It does this | Where |
+|---|---|
+| **Deletes `/var/log/journal`** and makes journald RAM-only (`Storage=volatile`, 64 MB) | `control/lib/nb_harden.sh` |
+| **Rewrites sshd config** — password and keyboard-interactive auth off, root key-only. Refuses if it finds no authorized key (anti-lockout) | same |
+| **Enables ufw** with a default-deny policy and opens only the ports it serves plus live sshd | same |
+| Installs systemd units, downloads and compiles engines **on the box** | `nb_install.sh`, `nb_render_awg.sh` |
+
+Use a host you are willing to hand over to this. It is not designed to share a machine with your other
+services.
+
+**Requirements the package cannot give you:** a Debian-family host with `apt` and systemd; outbound
+HTTPS to `github.com` and `go.dev`; enough CPU and RAM to compile Go on the box; and a public IP — on a
+NAT'd host, address auto-detection **refuses** the private address and you must pass `--node-address`
+yourself.
+
+**Read first:** [THREAT-MODEL](docs/THREAT-MODEL.md) — what this does and does not protect, and the
+legal exposure an exit node carries. [ACCEPTABLE-USE](ACCEPTABLE-USE.md) — what you agree not to do.
+
 ## 1. Fetch and verify a release
 
 ```sh
@@ -57,6 +84,17 @@ above becomes the one to use. Two properties of the helper are worth knowing eit
 `--allowed-signers` it checks integrity and **warns** that authenticity is unverified rather than implying
 success, and passing `--allowed-signers` *before* `SHA256SUMS.sig` is attached **fails closed** (exit 1)
 instead of silently downgrading. For a real deployment always end up on the signed form.
+
+## 1b. …or install from a clone (what to do TODAY)
+
+```sh
+sudo git clone --depth 1 https://github.com/mycelium0/mycelium.git /opt/mycelium
+cd /opt/mycelium
+```
+
+There is no authenticity check on this path — you are trusting the transport and GitHub, exactly as with
+any `git clone`. That is strictly weaker than the verified path above, and it is the honest state of
+things until a signed release is published.
 
 ## 2. Deploy
 
@@ -104,6 +142,33 @@ scripts/fungi status        # service state, public listeners, engine versions (
 scripts/fungi plan          # preview what this node will deploy (read-only)
 ```
 
+## 4. Connect a client
+
+`deploy --clients alice` mints alice's material **on the node**; nothing is sent anywhere and nothing is
+served publicly. Retrieve it over your existing SSH session:
+
+```sh
+# AmneziaWG — a ready-to-import wg/awg config
+sudo cat /var/lib/mycelium/awg/clients/alice.conf
+
+# sing-box / Clash-Meta — generated on demand from the node's own params + identities
+sudo /opt/mycelium/control/myceliumctl subscription --engine singbox \
+     --params /var/lib/mycelium/params.json \
+     --state  /var/lib/mycelium/identities.json \
+     --out    /tmp/sub
+sudo cat /tmp/sub/*.singbox.json     # sing-box
+sudo cat /tmp/sub/*.clash.yaml       # Clash-Meta
+```
+
+The served bundle vhost binds **loopback only** by default, so there is no URL to hand a phone: copy the
+file out yourself, or front it with your own HTTPS (see the caddy role). That is deliberate — an
+always-on public subscription endpoint is a single point of block and a discovery surface.
+
+**Then actually dial it**, from a different machine, before you trust the node. `deploy` reporting
+success means the node is serving locally; it does not mean your provider's security group, or the
+network you are on, lets a client reach it. Nothing on the node can observe that — the liveness probes
+are loopback by design — so your own client is the only thing that can tell you.
+
 ## Later
 
 ```sh
@@ -112,12 +177,20 @@ sudo /opt/mycelium/scripts/fungi apply    # apply node-descriptor changes (trans
 
 ### Updating a node
 
+**The documented signed-update path is not runnable yet** (Audit-0011 #10): it requires the maintainer's
+`allowed_signers`, which is not published, and `verify_signed_ref` refuses to apply anything it cannot
+authenticate. Until the key exists, the supported interim is to re-run the install: fetch the newer tree
+the same way you first obtained it, then `fungi deploy` again. An unarmed node never updates itself, and
+that is the current state for everyone.
+
 **A tarball install is not a git checkout, and `fungi update` is a git fetch.** Run it against the tree
 you extracted above and it will refuse — correctly — because there is nothing to fetch into. Two supported
 ways forward; pick one deliberately, because only the second can ever run unattended.
 
-**Re-deploy from a newer release.** No git, and the verification chain stays end to end: every byte the
-node runs came out of a tarball you checked.
+**The verification chain is NOT end to end, and saying otherwise would be false** (Audit-0011 #17).
+The tarball you check covers this repository. AmneziaWG is then built on the node from `git clone`
+of upstream **mutable tags**, and the engines are fetched by pinned SHA256 — good, but a different
+trust root from the one you just verified. Treat the release check as covering Mycelium's own code.
 
 ```sh
 # repeat step 1 with the new tag, then, from the new /opt/mycelium:

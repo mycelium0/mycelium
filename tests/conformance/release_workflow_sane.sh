@@ -55,6 +55,40 @@ grep -q "internal/spec/version.go" "$WF" && grep -qiE "does not match|!= *\"?\$v
 	&& ok "guards that the tag matches internal/spec.Version" \
 	|| badln "release.yml does not guard tag == spine Version"
 
+# 3b. THE AUTHENTICITY ROOT IS ACTUALLY CHECKED (Audit-0011 #14).
+#
+# This workflow's header calls the signed tag "the authenticity root", and `gh release create
+# --verify-tag` reads as though it verifies that. It does not: gh defines --verify-tag as aborting if the
+# tag does not exist ON THE REMOTE — existence, not signature. So a plain `git tag vX.Y.Z && git push
+# --tags` produced a complete, normal-looking release with assets, notes and a version guard all green,
+# and nothing in the lane could tell. Not theoretical: docs/RELEASING.md records that the documented
+# `user.signingkey` once pointed at a nonexistent file, so local signing had already failed silently.
+#
+# `git verify-tag` is the only command here that reads the signature. It must run BEFORE publish, and it
+# must resolve against the repository's committed allowed_signers rather than whatever the runner happens
+# to have configured.
+if grep -qE '^[[:space:]]*(-|run:|[[:space:]])*.*git verify-tag' "$WF"; then
+	ok "the lane runs \`git verify-tag\` on the pushed tag (gh's --verify-tag checks EXISTENCE, not signature)"
+	grep -q 'allowedSignersFile' "$WF" \
+		&& ok "and resolves it against the committed allowed_signers, not the runner's ambient config" \
+		|| badln "git verify-tag runs without setting gpg.ssh.allowedSignersFile. On a GitHub runner there is no ambient allowed-signers file, so the verification resolves against nothing and its result is meaningless."
+	# It must precede the publish, or it verifies something already released.
+	# Ignore COMMENT lines on both sides. The first draft compared line numbers without doing so and
+	# reported the publish as preceding the check — because the rationale comment above the new step
+	# mentions `gh release create` by name. A gate that reads prose as code is the defect it is here to
+	# catch, in miniature.
+	nocomment() { grep -vE '^[[:space:]]*#' "$WF" | grep -n "$1" | head -1 | cut -d: -f1; }
+	vline="$(nocomment 'git verify-tag')"
+	pline="$(nocomment 'gh release create')"
+	if [ -n "$vline" ] && [ -n "$pline" ] && [ "$vline" -lt "$pline" ]; then
+		ok "and it runs BEFORE \`gh release create\` (line $vline < $pline)"
+	else
+		badln "git verify-tag appears at line ${vline:-?} but the publish is at line ${pline:-?} — verifying after publishing is not a gate, it is a post-mortem. A failed check would leave a signed tag with assets already attached."
+	fi
+else
+	badln "release.yml never runs \`git verify-tag\`. Its own header calls the signed tag the authenticity root, and \`gh release create --verify-tag\` does NOT check a signature — gh defines it as aborting only if the tag does not exist on the remote. Without this, an unsigned \`git tag\` publishes a complete, normal-looking release."
+fi
+
 # 4. every third-party action pinned to a 40-hex SHA (no @vN / @main / @branch)
 unpinned="$(grep -nE '^\s*-?\s*uses:' "$WF" | grep -vE '@[0-9a-f]{40}\b' || true)"
 if [ -z "$unpinned" ]; then
@@ -112,7 +146,7 @@ sums_built=0; sums_pub=0
 grep -qE '^[[:space:]]*run:[[:space:]]*make dist' "$WF" && sums_built=1
 grep -qE 'dist/SHA256SUMS' "$WF" && sums_pub=1
 if [ "$sums_built" -eq 1 ] && [ "$sums_pub" -eq 1 ]; then
-	ok "the published SHA256SUMS is the one 'make dist' produced (same producer as the maintainer signs)"
+	ok "the published SHA256SUMS has the same PRODUCER as the one the maintainer builds (byte equality is asserted by the operator at RELEASING.md step 5, not observable here)"
 else
 	badln "the workflow does not both build via 'make dist' and publish dist/SHA256SUMS (build=$sums_built publish=$sums_pub). If CI computes the checksums by some other means, the maintainer's locally signed SHA256SUMS is a signature over a different file and verify-release.sh fails closed for every downloader."
 fi

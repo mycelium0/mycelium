@@ -14,7 +14,7 @@ later. See the LICENSE file in the repository root.
 <p align="center">
   <a href="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml"><img src="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mycelium0/mycelium/badges/coverage.json" alt="Go test coverage">
-  <img src="https://img.shields.io/badge/version-0.2.73-blue" alt="version 0.2.73">
+  <img src="https://img.shields.io/badge/version-0.2.74-blue" alt="version 0.2.74">
   <img src="https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.25+">
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/contribute-welcome-brightgreen" alt="contribute"></a>
 </p>
@@ -48,9 +48,12 @@ file/QR hand-off — can bridge it (the mycelial model: [docs/vision/0002-carrie
 
 ## Get started
 
-Stand up a node in a few commands — fetch + verify a signed release, then `scripts/fungi deploy`. See
+Stand up a node in a few commands — fetch and verify a release, then `scripts/fungi deploy`. See
 **[QUICKSTART.md](QUICKSTART.md)**. Engine versions/checksums are pinned and resolved automatically;
-the release is signed and verifiable ([docs/RELEASING.md](docs/RELEASING.md)).
+release artifacts are reproducible and checksum-verifiable today; **authenticity verification is not
+yet available to downloaders** — the maintainer signing key is not published, so `verify-release.sh`
+runs in integrity-only mode ([QUICKSTART](QUICKSTART.md), [docs/RELEASING.md](docs/RELEASING.md)).
+**No release has been tagged yet:** install from a clone until one is.
 
 ## Status
 

@@ -18,7 +18,7 @@ later. See the LICENSE file in the repository root.
 > Xray alternative engine and a separate AmneziaWG UDP path, the `myceliumctl` control tooling,
 > the Ansible deployment, observability, the conformance tests, and the operational runbooks are
 > all present in the tree. Phases **0, 1 and 2 are GO-signed against live operator nodes** (see the
-> phase-0 / phase-1 / phase-2 acceptance ledgers) and the from-zero deploy path is proven. What remains
+> phase-0 / phase-1 / phase-2 acceptance ledgers) and the from-zero deploy path has been measured by the maintainer on a wiped node (2026-08-09), though not yet by a second operator from the release package — which is what AC-1 actually asks. What remains
 > per ROADMAP Decision C is the **release mechanism** (reproducible signed artifacts + verify + a
 > QUICKSTART) plus the operator's own on-device authoritative run — Definition-of-Done evidence is
 > validated against a real node, not in CI. This document describes the *idealised* structure (`nodes/`, `control/`, `infra/`); the

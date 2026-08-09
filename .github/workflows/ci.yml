@@ -152,6 +152,10 @@ jobs:
           # Fail-soft: a missing/empty cover.out must NOT abort the step under `set -eo pipefail`.
           cov="$( { go tool cover -func=cover.out 2>/dev/null || true; } | awk '/^total:/{print $3}' )"
           [ -n "$cov" ] || cov="n/a"
+          # `ls | wc -l` counts FILES, not passes — and it counts files tests/run.sh deliberately never
+          # runs (cover_site_probe.sh needs network). Calling that number "passing" was a claim about an
+          # execution this job never observed (Audit-0011 #22). The badge says "defined" now; the pass/fail
+          # signal is the gates JOB's own status, which is what a red X on the commit already shows.
           gates="$(ls tests/conformance/*.sh | wc -l | tr -d ' ')"
           echo "cov=$cov"   >>"$GITHUB_OUTPUT"
           echo "gates=$gates" >>"$GITHUB_OUTPUT"
@@ -171,7 +175,7 @@ jobs:
           fi
           tmp="$(mktemp -d)"
           printf '{"schemaVersion":1,"label":"coverage","message":"%s","color":"%s"}\n' "$COV" "$color" >"$tmp/coverage.json"
-          printf '{"schemaVersion":1,"label":"gates","message":"%s passing","color":"blue"}\n' "$GATES" >"$tmp/gates.json"
+          printf '{"schemaVersion":1,"label":"gates","message":"%s defined","color":"blue"}\n' "$GATES" >"$tmp/gates.json"
           printf 'Machine-generated shields.io endpoints, refreshed by CI on push to main. Do not edit by hand.\n' >"$tmp/README.md"
           cd "$tmp"
           git init -q

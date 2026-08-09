@@ -17,7 +17,7 @@ body:
 
         > ⚠️ **Privacy — read before posting.** A public issue is world-readable. **Do not paste raw
         > logs, IP addresses, hostnames, domains, keys, UUIDs, or `journalctl` output.** Attach a
-        > **sanitized diagnostics bundle** instead — `myceliumctl diag collect` produces one,
+        > **sanitized diagnostics bundle** instead — `fungi diag collect` produces one,
         > redacted by construction. Anything that could expose an **operator, a node, or a user** is a
         > security matter — report it through a private
         > [Security Advisory](https://github.com/mycelium0/mycelium/security/advisories/new), not here.

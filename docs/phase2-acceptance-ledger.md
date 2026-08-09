@@ -138,10 +138,16 @@ adaptivity-core blocker:
   hardening (Audit-0007 S1 + all of S2) is landed and CI-green. **Phase-2 single-node-adaptivity core
   ACCEPTED.** End-to-end client recovery and the release track are the closing first-release milestone
   of Phase 2, and the advisory/fungi boundary — built inert here — goes live in Phase 3, per Decision B.
-- **Engineering plane:** the offline conformance suite (65 gates) is green; the Go spine builds and passes
+- **Engineering plane:** the offline conformance suite (99 gates as of 2026-08-09; 65 when this line was written) is green; the Go spine builds and passes
   `go vet` / unit tests / `-race`; every Audit-0007 S1 + S2 remediation commit is CI-green on `main`. The
-  Phase-2-closing first release ships as **v0.2.46** — the repository's first signed release tag, cut from
-  `internal/spec.Version` = 0.2.46 (CHANGELOG `[0.2.46]`).
+  Phase-2-closing first release was planned as **v0.2.46**.
+
+  *Corrected 2026-08-09 (Audit-0011 #19).* It was never cut. **No signed release tag exists in this
+  repository at any version** — `git tag` is empty and `.github/workflows/release.yml` has zero runs. The
+  sentence above stated a tag as accomplished fact and stood for eight days while the version moved past
+  0.2.7x without one ever being created. That is how a planning statement decays into a false one: nothing
+  re-reads it. What still blocks the tag is scored in
+  [rp0011-acceptance-ledger.md](rp0011-acceptance-ledger.md), not here.
 
   *Amended 2026-08-01.* This said v0.2.29, and that version was reached on 2026-07-04 and then never
   moved again: 97 further commits landed, 67 of them `feat`/`fix`, with the const frozen because the bump

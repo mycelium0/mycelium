@@ -257,6 +257,21 @@ myc_fetch_artifacts() {
 	# that, the bare `||` list inherits it, and `set -e` kills the update with no message. Same construct
 	# that killed a from-zero install from nb_render_awg.sh; the empty case is handled just below.
 	[ -n "$ref" ] || ref="$(git -C "$CHECKOUT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+	# RECORD WHERE WE ARE BEFORE MOVING (Audit-0011 #21). There is no downgrade verb and no code
+	# rollback: `rollback_config` restores the last known-good CONFIG, but by the time it runs the
+	# revision and the spine have already advanced. So the one thing an operator needs to escape a bad
+	# release — the revision this node was on before the fetch — has to be written down BEFORE the fetch,
+	# or it is gone. Best-effort by design: this must never be the reason an update fails, and a tarball
+	# install has no revision to record. docs/RELEASING.md "A bad release" is the consumer.
+	if [ -n "${STATE_DIR:-}" ] && [ -d "$STATE_DIR" ]; then
+		local prev_rev
+		prev_rev="$(git -C "$CHECKOUT_DIR" rev-parse HEAD 2>/dev/null || true)"
+		if [ -n "$prev_rev" ]; then
+			printf '%s\n' "$prev_rev" >"$STATE_DIR/update.prev_rev.tmp" 2>/dev/null \
+				&& mv -f "$STATE_DIR/update.prev_rev.tmp" "$STATE_DIR/update.prev_rev" 2>/dev/null \
+				|| rm -f "$STATE_DIR/update.prev_rev.tmp" 2>/dev/null || true
+		fi
+	fi
 	log "fetching canonical artifacts (ref: ${ref:-current})"
 	# Fetch ONLY updates remote-tracking refs + tags; it does NOT touch the working tree, so no
 	# fetched code runs yet. We verify the SIGNATURE on the fetched objects BEFORE merging.
@@ -304,6 +319,7 @@ myc_fetch_artifacts() {
 				warn "  git -C $CHECKOUT_DIR checkout --detach $target"
 				warn "and re-run; or pin --repo-ref to a tag at or ahead of this checkout." ;;
 		esac
+		_record_update_failure_if_available fast-forward
 		die "refusing to converge from a checkout that is not at the pinned ref (fail-closed)."
 	fi
 }
@@ -359,7 +375,7 @@ validate_config() {
 	local cfg="$1"
 	log "validating candidate with 'sing-box check' (fail-closed gate)"
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] sing-box check -c $cfg"; return 0; fi
-	have "$SINGBOX_BIN" || die "sing-box binary missing; cannot validate."
+	have "$SINGBOX_BIN" || { _record_update_failure_if_available validate; die "sing-box binary missing; cannot validate."; }
 	"$SINGBOX_BIN" check -c "$cfg" && return 0
 	keep_invalid_candidate "$cfg" "${INVALID_CONFIG:-}" "sing-box" \
 		"$SINGBOX_BIN check -c ${INVALID_CONFIG:-}"
@@ -446,7 +462,7 @@ validate_xray_config() {
 	local cfg="$1"
 	log "validating xray candidate with 'xray run -test' (fail-closed gate)"
 	if [ "$DRY_RUN" -eq 1 ]; then log "[dry-run] xray run -test -c $cfg"; return 0; fi
-	have "$XRAY_BIN" || die "xray binary missing; cannot validate."
+	have "$XRAY_BIN" || { _record_update_failure_if_available validate; die "xray binary missing; cannot validate."; }
 	"$XRAY_BIN" run -test -c "$cfg" && return 0
 	keep_invalid_candidate "$cfg" "${XRAY_INVALID_CONFIG:-}" "xray" \
 		"$XRAY_BIN run -test -c ${XRAY_INVALID_CONFIG:-}"
