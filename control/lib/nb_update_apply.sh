@@ -257,21 +257,21 @@ myc_fetch_artifacts() {
 	# that, the bare `||` list inherits it, and `set -e` kills the update with no message. Same construct
 	# that killed a from-zero install from nb_render_awg.sh; the empty case is handled just below.
 	[ -n "$ref" ] || ref="$(git -C "$CHECKOUT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-	# RECORD WHERE WE ARE BEFORE MOVING (Audit-0011 #21). There is no downgrade verb and no code
+	# REMEMBER WHERE WE ARE BEFORE MOVING (Audit-0011 #21). There is no downgrade verb and no code
 	# rollback: `rollback_config` restores the last known-good CONFIG, but by the time it runs the
-	# revision and the spine have already advanced. So the one thing an operator needs to escape a bad
-	# release — the revision this node was on before the fetch — has to be written down BEFORE the fetch,
-	# or it is gone. Best-effort by design: this must never be the reason an update fails, and a tarball
-	# install has no revision to record. docs/RELEASING.md "A bad release" is the consumer.
-	if [ -n "${STATE_DIR:-}" ] && [ -d "$STATE_DIR" ]; then
-		local prev_rev
-		prev_rev="$(git -C "$CHECKOUT_DIR" rev-parse HEAD 2>/dev/null || true)"
-		if [ -n "$prev_rev" ]; then
-			printf '%s\n' "$prev_rev" >"$STATE_DIR/update.prev_rev.tmp" 2>/dev/null \
-				&& mv -f "$STATE_DIR/update.prev_rev.tmp" "$STATE_DIR/update.prev_rev" 2>/dev/null \
-				|| rm -f "$STATE_DIR/update.prev_rev.tmp" 2>/dev/null || true
-		fi
-	fi
+	# revision and the spine have already advanced. So the one value an operator needs to escape a bad
+	# release — the revision this node was on before it moved — has to be captured before the merge, or
+	# it is gone. docs/RELEASING.md "A bad release" is the consumer.
+	#
+	# HELD IN A VARIABLE, NOT WRITTEN YET. The first version of this wrote the file here, on every tick.
+	# Measured on a live node: the timer fires every ~15 minutes and nearly every firing is a NO-OP, so
+	# the recorded value was immediately overwritten with the revision the node was already on. An
+	# operator who noticed a bad release an hour later would have read the file and been sent straight
+	# back to the bad revision — an escape hatch that points at the fire. The file is written ONLY when
+	# HEAD actually moves (below), so it always names the last revision this node ran BEFORE the current
+	# one, however long ago that was.
+	local prev_rev
+	prev_rev="$(git -C "$CHECKOUT_DIR" rev-parse HEAD 2>/dev/null || true)"
 	log "fetching canonical artifacts (ref: ${ref:-current})"
 	# Fetch ONLY updates remote-tracking refs + tags; it does NOT touch the working tree, so no
 	# fetched code runs yet. We verify the SIGNATURE on the fetched objects BEFORE merging.
@@ -292,6 +292,19 @@ myc_fetch_artifacts() {
 	# successful signature check does the verified revision touch the working tree.
 	run git -C "$CHECKOUT_DIR" merge --ff-only "$target" \
 		|| { _record_update_failure_if_available fast-forward; die "fast-forward update failed (history diverged or force-pushed) — refusing (fail-closed). A LOCALLY MODIFIED checkout produces this too: using a live node as a build or test host leaves files behind and the node then stops taking updates."; }
+
+	# NOW record it — only if the checkout actually MOVED. Best-effort: this must never be the reason an
+	# update fails, and a tarball install has no revision to record.
+	if [ -n "${STATE_DIR:-}" ] && [ -d "$STATE_DIR" ] && [ -n "$prev_rev" ]; then
+		local now_rev
+		now_rev="$(git -C "$CHECKOUT_DIR" rev-parse HEAD 2>/dev/null || true)"
+		if [ -n "$now_rev" ] && [ "$now_rev" != "$prev_rev" ]; then
+			printf '%s\n' "$prev_rev" >"$STATE_DIR/update.prev_rev.tmp" 2>/dev/null \
+				&& mv -f "$STATE_DIR/update.prev_rev.tmp" "$STATE_DIR/update.prev_rev" 2>/dev/null \
+				|| rm -f "$STATE_DIR/update.prev_rev.tmp" 2>/dev/null || true
+			log "recorded the pre-update revision (${prev_rev:0:12}) for the bad-release escape path"
+		fi
+	fi
 
 	# THE MERGE SUCCEEDING IS NOT THE CHECKOUT BEING AT THE PIN.
 	#
