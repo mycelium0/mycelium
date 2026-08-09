@@ -182,7 +182,7 @@ done
 # it never touched this shape (Audit-0009 C2).
 exec_all="$(systemctl show "$SVC_NAME" -p ExecStart --value 2>/dev/null \
 	| sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p' | sed 's/[[:space:]]*$//' | grep -v '^$')"
-[ -n "$exec_all" ] || exec_all="$(directives "$UNIT_DIR/$SVC_NAME" 2>/dev/null | grep -E '^ExecStart=' | sed 's/^ExecStart=//')"
+[ -n "$exec_all" ] || exec_all="$(directives "$UNIT_DIR/$SVC_NAME" 2>/dev/null | grep -E '^ExecStart=' | sed 's/^ExecStart=//' || true)"
 exec_n="$(printf '%s\n' "$exec_all" | grep -c . || true)"
 # The checks below reason over the CONCATENATION, so a flag in any command is seen. Count is reported
 # separately: on this unit more than one ExecStart is itself the finding, whatever the commands say.

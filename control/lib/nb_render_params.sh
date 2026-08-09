@@ -55,8 +55,15 @@ resolve_node_address() {
 	# Best-effort auto-detect of the primary GLOBAL-scope address (no external service contacted).
 	local addr=""
 	if have ip; then
-		addr="$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
-		[ -n "$addr" ] || addr="$(ip -o -6 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+		# `|| true` INSIDE both substitutions. These are PIPELINES under `set -o pipefail`, so two ordinary
+		# conditions make them non-zero: a host whose kernel has IPv6 disabled (the `ip -6` call itself
+		# errors) and `head -n1` closing the pipe early enough to SIGPIPE its upstream — the same trap this
+		# tree already documents for `awg` in nb_render_awg.sh. The v6 line is the RIGHT side of a bare
+		# `||`, so its failure status becomes the list's and `set -e` kills write_params with no message,
+		# on an IPv4-only machine, during the FIRST install. An empty result is already handled two lines
+		# down by the placeholder path; a dead run is not.
+		addr="$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
+		[ -n "$addr" ] || addr="$(ip -o -6 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
 	fi
 	if [ -n "$addr" ]; then printf '%s\n' "$addr"; return 0; fi
 	# Fail-closed fallback: the documented placeholder, with a loud warning at the call site.
@@ -520,7 +527,23 @@ apply_node_xray_engine() {
 	fi
 	if [ -f "$XRAY_CONFIG" ] && cmp -s "$xray_candidate" "$XRAY_CONFIG"; then
 		rm -f "$xray_candidate" 2>/dev/null || true
-		log "xray config byte-identical to the live one; secondary engine left untouched."
+		# "NOTHING TO RENDER" IS NOT "NOTHING TO CONVERGE". This branch used to `return 0` here, which
+		# assumed that identical bytes imply a live service. Measured on a node whose xray unit had been
+		# removed while its config survived: every converge logged this line and returned SUCCESS while
+		# xray stayed dead — the secondary engine down indefinitely, with the primary green and nothing
+		# reporting it. Same shape as the defect promote_paths_converge exists to prevent, on the branch
+		# that skips the promote.
+		#
+		# install_xray_unit is idempotent, so re-asserting it costs a file write and buys the guarantee
+		# that the unit matching this config actually exists.
+		install_xray_unit
+		if [ "$DRY_RUN" -eq 0 ] && ! systemctl is-active --quiet xray 2>/dev/null; then
+			warn "xray config is byte-identical but the service is NOT active — starting it."
+			restart_xray
+			systemctl is-active --quiet xray 2>/dev/null \
+				|| { warn "xray still not active after a start on the byte-identical path; the secondary engine is down and its config is current, so nothing else on this node will notice."; return 1; }
+		fi
+		log "xray config byte-identical to the live one; unit re-asserted, service active."
 		return 0
 	fi
 	promote_xray_config "$xray_candidate"
