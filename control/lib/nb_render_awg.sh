@@ -599,7 +599,11 @@ issue_awg_client() {
 	# here-string, never a pipe: a pipeline into awg can SIGPIPE under set -o pipefail (RP-0014 lesson).
 	srv_pub="$(awg pubkey <<<"$srv_key")" || die "awg-issue: could not derive the server public key."
 	port="$(grep -E '^ListenPort = ' "$awg_conf" | head -1 | sed -E 's/^ListenPort = //; s/[[:space:]]*$//')"
-	[ -n "$port" ] || port="$(_awg_resolve_port)"
+	# `|| true` inside, for the same reason as _awg_resolve_port's own fallback. This one is safe TODAY —
+	# that helper always ends in a printf and cannot return non-zero — but the construct is fatal the day
+	# it can: under `set -e` the assignment inherits the substitution's status and the whole run dies with
+	# no message. The value is optional here; the silence would not be.
+	[ -n "$port" ] || port="$(_awg_resolve_port || true)"
 	node_addr="$(resolve_node_address 2>/dev/null || printf '%s' "$NODE_ADDRESS_PLACEHOLDER")"
 	has_v6=0; grep -qE '^Address = .*,' "$awg_conf" && has_v6=1
 
@@ -712,7 +716,14 @@ _awg_resolve_port() {
 		port="$(awk -F= '/^[[:space:]]*ListenPort[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2; exit}' "$conf" 2>/dev/null)"
 	fi
 	case "$port" in ''|*[!0-9]*) port="" ;; esac
-	[ -n "$port" ] || port="$(cat "$STATE_DIR/awg.port" 2>/dev/null)"
+	# `|| true`, and it is load-bearing. Without it this line KILLS EVERY FROM-ZERO DEPLOY: on a node
+	# with no awg.port cache yet — which is every fresh node — `cat` exits 1, the assignment inherits that
+	# status, the `||` list inherits it too, and `set -euo pipefail` terminates the bootstrap. Measured on
+	# a wiped node: rc=1 after 50s, sing-box already promoted and running, and NOT ONE line of error,
+	# because `2>/dev/null` swallowed the only clue. The operator gets a half-installed host and an exit
+	# code. The next two lines already treat an empty/garbage value as "use the canonical default", so
+	# there was never anything for the failure to signal.
+	[ -n "$port" ] || port="$(cat "$STATE_DIR/awg.port" 2>/dev/null || true)"
 	case "$port" in ''|*[!0-9]*) port="51820" ;; esac
 	# Keep the cache honest, so the NEXT firewall pass admits the right port even if the conf is gone.
 	if [ "${DRY_RUN:-0}" -eq 0 ] && [ "$(cat "$STATE_DIR/awg.port" 2>/dev/null)" != "$port" ]; then

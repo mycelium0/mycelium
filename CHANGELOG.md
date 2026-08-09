@@ -13,6 +13,34 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.73] — 2026-08-09
+
+> A production node was wiped and reinstalled from zero to close the one gap the release audit could not
+> reach. The first install did not work, and had never worked for anyone who did not already have state.
+
+### Fixed
+- **A from-zero install died silently.** `_awg_resolve_port`'s cache fallback,
+  `[ -n "$port" ] || port="$(cat "$STATE_DIR/awg.port" 2>/dev/null)"`, exits non-zero on a node with no
+  cache — which is every fresh node. The assignment inherits that status, the `||` list inherits it, and
+  `set -euo pipefail` terminates the bootstrap. Measured on a wiped node: **rc=1 after 50 s, sing-box
+  already promoted and running, AmneziaWG half-configured, and not one line of error** because the
+  `2>/dev/null` swallowed the only clue. Every node here was bootstrapped before this shape existed, so
+  nothing could notice.
+- **Five more instances of the same construct**, found by the gate rather than by reading — including
+  `resolve_node_address`'s IPv6 fallback, a PIPELINE under `pipefail` that would kill `write_params` on
+  any IPv4-only host, and one in a drill where a non-matching `grep` would end the run.
+- **An unexpected death now names itself.** The entrypoint had no ERR trap at all: `set -E` plus a trap
+  that prints the file, line, command and exit code, with a deliberate `die` excluded so a refusal is not
+  also reported as a bug. Finding the defect above needed `bash -x` on a half-installed host.
+- **A byte-identical xray config skipped installing its unit.** `converge_node_tail`'s short-circuit
+  returned before `install_xray_unit`, so on a node whose unit was missing the converge logged success
+  while the secondary engine stayed dead. "Nothing to render" is not "nothing to converge".
+
+### Added
+- `tests/conformance/bootstrap_from_zero_survives.sh` — drives the exact line against a genuinely empty
+  state dir, forbids the construct as a CLASS, and asserts the ERR trap fires on that construct from
+  inside a function. The first run is the one path nothing else in the suite covers.
+
 ## [0.2.72] — 2026-08-07
 
 > Two causes had put every node into "refusing to update" — and both were invisible from every surface

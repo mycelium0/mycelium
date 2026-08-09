@@ -10,7 +10,9 @@
 # rule so the entrypoint cannot silently re-grow a render/validate/policy/merge control-decision function.
 #
 # WHAT COUNTS AS ORCHESTRATION (the allowlist of function names the entrypoint may DEFINE):
-#   * the tiny helpers: die, log, warn, have, run, need_root, usage, main
+#   * the tiny helpers: die, log, warn, have, run, need_root, usage, main, _myc_err_trap
+#     (_myc_err_trap is the ERR-trap reporter: prints and returns, decides nothing; it must be in
+#      the entrypoint because that is where the shell options and the trap are installed)
 #   * the flow dispatchers: flow_*  (bootstrap/update/ack/revoke/disable-two-hop/rotate — they SEQUENCE steps)
 #   * the post-apply verifiers: verify_*  (verify the deploy succeeded; no rendering/policy)
 # ANYTHING ELSE defined in node-bootstrap.sh is a control-logic or rendering function that belongs in a
@@ -45,6 +47,13 @@ printf 'script: scripts/node-bootstrap.sh (%s lines)\n' "$(wc -l < "$NB" | tr -d
 is_orchestration() {
 	case "$1" in
 		die|log|warn|have|run|need_root|usage|main) return 0 ;;
+		# _myc_err_trap is the ERR-trap reporter. It is a HELPER of exactly the same kind as die/log/warn —
+		# it prints and returns, decides nothing, renders nothing, reads no params. It has to live in the
+		# entrypoint because that is where `set -Eeuo pipefail` and the `trap ... ERR` are installed, and a
+		# trap handler in a sourced lib would be installed before the shell options it depends on.
+		# It exists because a from-zero install died with an EMPTY log: without it, any command that trips
+		# `set -e` exits silently and diagnosing takes `bash -x` on a half-installed host.
+		_myc_err_trap)                              return 0 ;;
 		flow_*|verify_*)                            return 0 ;;
 		*)                                          return 1 ;;
 	esac

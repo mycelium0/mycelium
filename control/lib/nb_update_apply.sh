@@ -252,7 +252,11 @@ myc_fetch_artifacts() {
 	fi
 	local ref
 	ref="$REPO_REF"
-	[ -n "$ref" ] || ref="$(git -C "$CHECKOUT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+	# `|| true` inside: on a DETACHED HEAD `rev-parse --abbrev-ref` still prints "HEAD" and exits 0, but in
+	# a checkout with no commits — or one git refuses to read — it exits non-zero, the assignment inherits
+	# that, the bare `||` list inherits it, and `set -e` kills the update with no message. Same construct
+	# that killed a from-zero install from nb_render_awg.sh; the empty case is handled just below.
+	[ -n "$ref" ] || ref="$(git -C "$CHECKOUT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 	log "fetching canonical artifacts (ref: ${ref:-current})"
 	# Fetch ONLY updates remote-tracking refs + tags; it does NOT touch the working tree, so no
 	# fetched code runs yet. We verify the SIGNATURE on the fetched objects BEFORE merging.

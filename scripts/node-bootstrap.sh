@@ -166,7 +166,31 @@ REPO_ROOT="$(cd -P "$NB_DIR/.." && pwd)"
 
 log()  { printf 'node-bootstrap: %s\n' "$*"; }
 warn() { printf 'node-bootstrap: warning: %s\n' "$*" >&2; }
-die()  { printf 'node-bootstrap: error: %s\n' "$*" >&2; exit 1; }
+# MYC_DELIBERATE_EXIT distinguishes a fail-closed refusal (which has already said why) from an
+# unexpected one (which has not). The ERR trap below reads it.
+MYC_DELIBERATE_EXIT=0
+die()  { MYC_DELIBERATE_EXIT=1; printf 'node-bootstrap: error: %s\n' "$*" >&2; exit 1; }
+
+# THE ERR TRAP, and it is not decoration — it exists because its absence cost a from-zero install.
+#
+# On a wiped node this script exited 1 after 50 seconds having printed NOT ONE line of error: a bare
+# `port="$(cat "$STATE_DIR/awg.port" 2>/dev/null)"` returned non-zero on a node with no cache yet, the
+# `||` list inherited that status, `set -e` terminated the run, and `2>/dev/null` had swallowed the only
+# clue. The operator was left with a half-installed host and an exit code. Finding it needed `bash -x`.
+#
+# Any command that trips `set -e` now names itself. `set -E` propagates the trap into functions and
+# subshells, without which every failure inside the libs — i.e. nearly all of them — would still be
+# silent. A `die` has already explained itself, so it is excluded rather than reported twice.
+_myc_err_trap() {
+	local rc=$1 line=$2 cmd=$3
+	[ "${MYC_DELIBERATE_EXIT:-0}" -eq 0 ] || return 0
+	printf 'node-bootstrap: error: UNEXPECTED failure (exit %s) at %s:%s\n' "$rc" "${BASH_SOURCE[1]:-?}" "$line" >&2
+	printf 'node-bootstrap: error:   while running: %s\n' "$cmd" >&2
+	printf 'node-bootstrap: error: This is a bug, not a refusal — a fail-closed refusal prints a reason.\n' >&2
+	printf 'node-bootstrap: error: The node may be PARTLY converged; re-run after the fix.\n' >&2
+}
+set -E
+trap '_myc_err_trap "$?" "$LINENO" "$BASH_COMMAND"' ERR
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # ---------------------------------------------------------------------------
