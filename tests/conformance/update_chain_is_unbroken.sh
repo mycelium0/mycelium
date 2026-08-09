@@ -156,6 +156,89 @@ printf '\n-- a refusing node says so, in a metric --\n'
 ) || fail=1
 
 # ---------------------------------------------------------------------------------------------------
+# C2. THE ESCAPE HATCH MUST NOT POINT AT THE FIRE.
+#
+# There is no downgrade verb and no code rollback: `rollback_config` restores the last known-good
+# CONFIG, and by the time it runs the revision and the spine have already advanced. So the ONE value an
+# operator needs to escape a bad release is the revision the node was on before it moved
+# ($STATE_DIR/update.prev_rev), and docs/RELEASING.md "A bad release" hands it to them.
+#
+# The first implementation wrote that file on every tick, before the fetch. Measured on a live node: the
+# timer fires roughly every 15 minutes and nearly every firing is a NO-OP, so within one tick of a bad
+# release the file had been overwritten with the bad revision itself. An operator reading it an hour
+# later would have been sent straight back to what they were escaping.
+#
+# So this is driven against real git repositories, over TWO ticks — one that moves and one that does not
+# — because the defect is invisible in a single-tick test and invisible in the source text.
+printf '\n-- the pre-update revision survives the no-op ticks that follow it --\n'
+if ! command -v git >/dev/null 2>&1; then
+	printf '  SKIP  git unavailable; the escape-hatch path was not driven.\n'
+else
+(
+	set -u
+	G="$WORK/esc"; mkdir -p "$G/origin" "$G/state"
+	export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@invalid
+	git -C "$G/origin" init -q -b main
+	echo one >"$G/origin/f"; git -C "$G/origin" add f; git -C "$G/origin" commit -qm one
+	git clone -q "$G/origin" "$G/co" 2>/dev/null
+	REV1="$(git -C "$G/co" rev-parse HEAD)"
+
+	CHECKOUT_DIR="$G/co"; STATE_DIR="$G/state"; REPO_REF="main"
+	DRY_RUN=0
+	log()  { :; }
+	warn() { :; }
+	die()  { printf 'lib-die: %s\n' "$*" >&2; exit 1; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	run()  { "$@"; }
+	# shellcheck source=/dev/null
+	. "$UPD" >/dev/null 2>&1 || { printf 'SOURCE-FAILED\n'; exit 3; }
+	# Neutralise the parts this row is not about: the signature gate (the operator key is out-of-band by
+	# design, §8.7) and the failure recorder. The MOVE and the RECORD are what is under test.
+	verify_signed_ref() { :; }
+	_record_update_failure_if_available() { :; }
+	CHECKOUT_DIR="$G/co"; STATE_DIR="$G/state"; REPO_REF="main"
+
+	prom_read() { cat "$STATE_DIR/update.prev_rev" 2>/dev/null; }
+
+	rc=0
+	# TICK 1 — nothing new upstream. A no-op must not invent a record.
+	myc_fetch_artifacts main >/dev/null 2>&1 || true
+	if [ -n "$(prom_read)" ]; then
+		printf '  FAIL  a NO-OP tick wrote update.prev_rev (%s). The file must name a revision the node has actually left; writing it when nothing moved makes it a record of the present, not the past.\n' "$(prom_read)"; rc=1
+	else
+		printf '  ok    a no-op tick records nothing (the node has not left any revision yet)\n'
+	fi
+
+	# The bad release lands.
+	echo two >>"$G/origin/f"; git -C "$G/origin" add f; git -C "$G/origin" commit -qm two
+	BAD="$(git -C "$G/origin" rev-parse HEAD)"
+	myc_fetch_artifacts main >/dev/null 2>&1 || true
+	if [ "$(prom_read)" = "$REV1" ]; then
+		printf '  ok    the tick that MOVED recorded the revision the node came from\n'
+	else
+		printf '  FAIL  after moving %s -> %s the escape record is "%s", expected %s. Without it there is no way back: there is no downgrade verb, and rollback_config restores config only.\n' "${REV1:0:8}" "${BAD:0:8}" "$(prom_read)" "${REV1:0:8}"; rc=1
+	fi
+
+	# THE DEFECT: four more no-op ticks, exactly as the timer produces every ~15 minutes.
+	for _ in 1 2 3 4; do myc_fetch_artifacts main >/dev/null 2>&1 || true; done
+	got="$(prom_read)"
+	if [ "$got" = "$REV1" ]; then
+		printf '  ok    and four subsequent NO-OP ticks leave it pointing at the good revision\n'
+	elif [ "$got" = "$BAD" ]; then
+		printf '  FAIL  four no-op ticks overwrote the escape record with the BAD revision itself. An operator who notices an hour later reads this file and is sent back to exactly what they are escaping. Write it only when HEAD actually moves.\n'; rc=1
+	else
+		printf '  FAIL  after four no-op ticks the escape record is "%s"; expected the pre-update revision %s.\n' "$got" "${REV1:0:8}"; rc=1
+	fi
+	exit "$rc"
+)
+	case "$?" in
+		0) : ;;
+		3) badln "nb_update_apply.sh could not be sourced standalone, so the escape-hatch rows were not driven and prove nothing" ;;
+		*) fail=1 ;;
+	esac
+fi
+
+# ---------------------------------------------------------------------------------------------------
 # D. THE REFUSAL SITES CALL IT. A recorder nothing invokes is the same silence with more code.
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- the refusals that stalled the network are the ones instrumented --\n'
