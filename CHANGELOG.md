@@ -13,6 +13,56 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.75] — 2026-08-10
+
+> Two live defects, found by attacking my own answer rather than defending it. The operator objected to
+> AC-1 requiring "a second operator" when three disposable test nodes exist for exactly this. They were
+> right — but the adversarial reading of *why* they were right turned up two things nothing would have
+> caught, including one I had shipped four hours earlier.
+
+### Fixed — a client that connects and carries nothing
+
+- **The default AmneziaWG client config routes only the tunnel subnet, and QUICKSTART never said so.**
+  With no region-exclude list, `compute_client_allowed` emits the safe-narrow default: `AllowedIPs` = the
+  in-tunnel `/24`. Measured on a live node — a served `alice.conf` carrying `AllowedIPs = 10.13.13.0/24`.
+  That client completes a handshake, holds it open on `PersistentKeepalive`, shows perfectly in
+  `wg show` — and not one byte of user traffic enters the node. The narrow default is **deliberate**
+  (we never silently full-tunnel), but the document handed the reader that file, called it
+  "ready-to-import", and had **zero** mentions of `AllowedIPs`, split-tunnel, region-exclude or the
+  default route. QUICKSTART step 4 now shows the line, says what it means, and gives the two ways to
+  change it.
+- **…and the surface QUICKSTART teaches could not change it.** `--region-exclude` — the only input that
+  alters what a client routes — was missing from the `fungi deploy` allow-list added in 0.2.74, so the
+  documented one-command path had no way to reach it. `--full-tunnel` likewise.
+
+### Fixed — a regression I shipped in 0.2.74
+
+- **`fungi deploy` refused `--singbox-sha256` and `--xray-sha256`.** QUICKSTART "Covered architectures"
+  tells every non-amd64/arm64 operator to pass exactly those. The allow-list that stopped
+  `fungi deploy --revoke alice` silently running a different verb also broke the one architecture class
+  the document singles out. `--singbox-version` was allow-listed and `--singbox-sha256` was not, which is
+  worse than either: an armv7 operator passes both and is refused on the second.
+- **A gate so it cannot recur, derived from the document rather than transcribed.** `fungi_scoped.sh`
+  extracts every `--flag` QUICKSTART names, keeps those `node-bootstrap.sh` accepts and no mode flag, and
+  drives each against a recording stub in both arities. Removing the three flags turns it red.
+
+### Fixed — the prerequisites could not be satisfied
+
+- QUICKSTART's "You need" listed the maintainer's signing key as a requirement; 60 lines later the same
+  document states the key is not published anywhere. A reader working top-down could not get past item 2.
+  No machine notices an unobtainable prerequisite — it simply takes the other branch.
+
+### Changed — AC-1 is scored against a property, not a person
+
+`docs/rp0011-acceptance-ledger.md` replaces "a second operator can stand up a node" with a checkable
+property, and records the two conditions that make the machine-driven substitution honest: the end-state
+assertion is **per-family egress observed off the node** (not `rc=0`, not the node's self-report — the
+L7 probe is loopback-only by design), and the harness publishes its own inputs as a diff against the
+document. It also records the limit plainly: a harness is the maintainer's tacit knowledge compiled to
+executable form, and every assertion it omits leaves no trace. Both defects above would have passed every
+rung of the obvious ladder, including a real AmneziaWG handshake.
+
+
 ## [0.2.74] — 2026-08-09
 
 > Audit-0011 asked whether this is a real release. It found 21 blockers, and the honest answer was no.

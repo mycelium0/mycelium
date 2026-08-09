@@ -7,7 +7,7 @@ later. See the LICENSE file in the repository root.
 
 # RP-0011 acceptance ledger — Phase-2 fungi packaging + management CLI
 
-**Scored:** 2026-08-09 · **Against:** `internal/spec.Version` 0.2.74 · **Verdict: NOT ACCEPTED.**
+**Scored:** 2026-08-09 · **Against:** `internal/spec.Version` 0.2.75 · **Verdict: NOT ACCEPTED.**
 
 [RP-0011](proposals/0011-phase2-fungi-packaging-and-cli.md) has been `Status: active` with no ledger
 behind it. Audit-0011 #19 named that as the defect: an RP with ten acceptance criteria and no scoring is
@@ -26,7 +26,7 @@ reporting confidently on something it cannot observe, and its twin is a criterio
 
 | | Criterion | Verdict | What decides it |
 |---|---|---|---|
-| **AC-1** | Deployable release — a *second operator* stands up a node from the release package, no manual fixups | **UNMET** | No release package exists (no tag, `release.yml` has zero runs), so nobody can have installed from one. The deploy path itself is measured: a deliberately wiped node, from-zero, `rc=0` in 50s on 2026-08-09, with a client on a second host reaching it over the public internet. That measurement is what AC-1 needs *after* a package exists — and it is also what found the bug below. |
+| **AC-1** | Deployable release — a first install from the release package succeeds with no manual fixups (see "What AC-1 actually asks", below) | **UNMET** | No release package exists — no tag, `release.yml` has zero runs — so nobody, human or machine, can have installed from one. The deploy path itself is measured: a deliberately wiped node, from-zero, `rc=0` in 50s on 2026-08-09, a client on a second host reaching it over the public internet. Two blockers found since, both live: `fungi deploy` refused `--singbox-sha256`, which QUICKSTART tells every non-amd64/arm64 operator to pass; and the default AmneziaWG client config carries `AllowedIPs = <tunnel>/24`, so it handshakes and routes nothing while every status surface reports success — QUICKSTART did not mention routing at all. Both fixed in 0.2.75. |
 | **AC-2** | The four functions — holds its population, serves/refreshes its bundle, publishes a redacted class-aggregate weather snapshot | **PARTIAL** | Population and bundle: MET, exercised on live nodes and by gates. The weather half is **inert** — the aggregate exists, nothing publishes it. Deferred to Phase 3 per Decision B. |
 | **AC-3** | Introduction — a TTL-bounded, depth/degree-capped, double-opt-in bridge invitation; a gate proves no path enumerates a neighbour list | **UNMET, DEFERRED** | No `bridge` or `invite` verb exists in either surface; full dispatch was read to confirm it. The **must-not-enumerate** half is MET and gated independently, which is the half with a safety property attached. Deferred to Phase 4/5 per Decision C. |
 | **AC-4** | Anastomosis survives the introducer | **DEFERRED** | Explicitly scoped by the RP itself to the Phase-4 → 5 boundary. Not a debt against this release. |
@@ -38,6 +38,48 @@ reporting confidently on something it cannot observe, and its twin is a criterio
 | **AC-10** | Honest CI + positioning-clean badges | **MET** | The merge gate compiles, vets, tests and race-checks the Go spine. One dishonesty was found and fixed under this criterion: the gates pill counted *files* — including one gate CI can never run — and called the number "passing". It now says "defined". |
 
 **Met: 5 · Partial: 1 · Unmet: 2 (one deferred) · Deferred outright: 2.**
+
+## What AC-1 actually asks — and why it does not ask for a second human
+
+The audit proposed closing AC-1 with "a fresh VPS, a second pair of hands, QUICKSTART verbatim". The
+project operator objected: three disposable test nodes exist precisely so that a machine can do this.
+They are right that **"a second operator" is a proxy, not the property.** The property is:
+
+> A machine carrying none of this project's state installs a node using only what the documentation
+> says, and ends with a client on a different host actually carrying traffic through it.
+
+A machine is *better* than a human at most of that: it is repeatable, it can be turned red by a mutation,
+it cannot quietly apply knowledge the doc does not contain, and one human succeeding proves nothing about
+the next reader. So the bar above replaces the person.
+
+**But the substitution has a real limit, and pretending otherwise would repeat the mistake this audit
+exists to correct.** A harness is the maintainer's tacit knowledge compiled to executable form: every
+assertion it makes is a decision, and — decisively — **every assertion it omits leaves no trace**. A gate
+re-answers a question someone already thought to ask. It cannot ask a new one.
+
+That is not theoretical. It is how the two live defects above were found. Neither is a comprehension
+failure a doc reviewer could catch, because the doc was not ambiguous — it was *silent*. And neither
+would have failed any rung of the obvious assertion ladder: `deploy` exits 0, `fungi status` shows the
+listeners, the port answers from a second host, and the AmneziaWG **handshake completes**, because
+`AllowedIPs` is client-side routing policy and has no bearing on a handshake. A harness written before
+the finding passes at every rung. Only "compare the observed egress address, per family" catches it —
+and that assertion exists solely because someone asked why their address had not changed.
+
+So AC-1 is scored against the property, and the drill is machine-driven — with two conditions recorded
+here rather than discovered later:
+
+1. **The end-state assertion is per-family egress, from off the node**, not `rc=0` and not the node's
+   own self-report. `fungi status` reads local binds and the L7 probe is loopback-only by design
+   (ADR-0036); neither observes whether a client's traffic actually arrives.
+2. **The harness's own inputs are published as a diff against the document** — every parameter it
+   supplies and every placeholder it resolves. A parameter the doc does not tell a reader to supply is a
+   documentation defect the harness would otherwise absorb silently.
+
+What this bar does **not** cover, stated so the ledger does not overclaim: whether the prose is
+comprehensible to someone who has never seen the system, and whether the stated prerequisites can be
+obtained at all. The second is currently failing — QUICKSTART lists the maintainer's signing key as a
+requirement and then says it is not published anywhere. No machine can notice that a prerequisite is
+unobtainable; it just takes the other branch.
 
 ## What actually blocks the tag
 

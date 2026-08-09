@@ -13,8 +13,11 @@ networks. This guide takes a fresh Linux server to a running node in a few comma
 ## You need
 
 - A Linux server (x86-64 / amd64 or arm64) with `root` (or `sudo`), `curl`, `tar`, and `git`.
-- The maintainer's **signing key**, obtained out-of-band, as an `allowed_signers` line (used to
-  verify the release; see [docs/RELEASING.md](docs/RELEASING.md)).
+- **Not the maintainer's signing key** — you cannot obtain it, because it is not published yet. This
+  line used to list it as a requirement, which made the prerequisites unsatisfiable: a reader working
+  top-down could not get past item 2, and the explanation was 60 lines further down. Until the key ships
+  there is no authenticity check available to anyone, and step 1b below is the path that works today. The
+  gap is stated in full at step 1 and tracked in [SECURITY.md §8](SECURITY.md#8-open-questions-tbd).
 
 ## Before you run this
 
@@ -163,6 +166,44 @@ sudo cat /tmp/sub/*.clash.yaml       # Clash-Meta
 The served bundle vhost binds **loopback only** by default, so there is no URL to hand a phone: copy the
 file out yourself, or front it with your own HTTPS (see the caddy role). That is deliberate — an
 always-on public subscription endpoint is a single point of block and a discovery surface.
+
+### Read the `AllowedIPs` line before you decide the client works
+
+The AmneziaWG config you just printed carries, by default:
+
+```
+AllowedIPs = 10.13.13.0/24
+```
+
+**That is the tunnel subnet, not your traffic.** With that line the handshake completes, the peer stays
+up on `PersistentKeepalive`, `wg show` looks perfect — and your default route is untouched, so nothing
+you do goes through the node. Every status surface, on the node and on the client, reports success.
+
+This is deliberate, not a bug: the node **never silently full-tunnels** you. Choosing what a client sends
+through a node is a decision the operator makes explicitly, and there is no default that is right for
+everyone. But it does mean a fresh `deploy` gives you a client that connects and carries nothing, and you
+have to pick one of these:
+
+| you want | pass to `deploy` | what the client gets |
+|---|---|---|
+| everything through the node | `--full-tunnel` | `AllowedIPs = 0.0.0.0/0` — plus `::/0` on a dual-stack node |
+| only certain destinations | `--region-exclude <file>` | one `AllowedIPs` entry per CIDR in the file (plus `::/0` if the file is IPv4-only, so v6 cannot leak around the split) |
+| the default | neither | tunnel ranges only — connects, routes nothing |
+
+```sh
+# everything through the node
+sudo /opt/mycelium/scripts/fungi deploy --clients alice --full-tunnel
+
+# or: only the CIDRs you list, one per line
+printf '%s\n' 198.51.100.0/24 203.0.113.0/24 | sudo tee /etc/mycelium/region-exclude.txt
+sudo /opt/mycelium/scripts/fungi deploy --clients alice --region-exclude /etc/mycelium/region-exclude.txt
+```
+
+Re-running `deploy` re-renders alice's config in place; re-import it on the client afterwards.
+
+The sing-box and Clash-Meta subscriptions above are unaffected by this — they carry their own routing
+rules and are full-tunnel by default. The asymmetry is real and worth knowing: the same node can hand you
+one client that routes everything and another that routes nothing.
 
 **Then actually dial it**, from a different machine, before you trust the node. `deploy` reporting
 success means the node is serving locally; it does not mean your provider's security group, or the
