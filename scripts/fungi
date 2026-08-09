@@ -21,9 +21,11 @@
 #   fungi transport <list|enable|disable> [P]  choose which transports this node serves   (-> myceliumctl transport)
 #   fungi front <enable|disable|show> [opts]   turn a bring-your-own-domain CDN front on/off (-> myceliumctl front)
 #   fungi reachable <on|off>                   set the node's public-entry posture         (-> myceliumctl reachable)
+#   fungi diag <collect|redact>                PII-scrubbed bundle / scrub stdin  (-> myceliumctl diag)
+#                         ALWAYS run this before attaching anything to a public issue.
 #   fungi status          read-only: what this node is running
 #
-# Exit: forwards the delegated command's exit; 2 = usage, 3 = the Go spine (plan/transport/front/reachable) is unavailable.
+# Exit: forwards the delegated command's exit; 2 = usage, 3 = the Go spine (plan/transport/front/reachable/diag) is unavailable.
 
 set -euo pipefail
 
@@ -64,15 +66,55 @@ fungi_status() {
 	else
 		printf '  (systemctl unavailable)\n'
 	fi
+	# EVERY BRANCH REPORTS, including the one that cannot look (Audit-0011 #9). Without the `else` this
+	# printed the heading and nothing under it on a host with no `ss`, and returned 0 — indistinguishable
+	# from "no public listeners", which is the single most alarming thing this command can truthfully say.
+	# A status verb that cannot tell "none" from "I could not check" is worse than no status verb.
+	local seen=0
 	printf 'public listeners:\n'
 	if command -v ss >/dev/null 2>&1; then
-		ss -ltnH 2>/dev/null | awk '{print $4}' | grep -vE '127\.0\.0\.1|\[::1\]' | sort -u | sed 's/^/  /' || true
+		local lst
+		lst="$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -vE '127\.0\.0\.1|\[::1\]' | sort -u || true)"
+		if [ -n "$lst" ]; then printf '%s\n' "$lst" | sed 's/^/  /'; seen=1
+		else printf '  (none — no non-loopback TCP listener)\n'; seen=1; fi
+	else
+		printf '  (UNKNOWN: ss unavailable, so this host cannot be inspected)\n'
 	fi
 	printf 'engine versions:\n'
 	command -v sing-box >/dev/null 2>&1 && printf '  sing-box %s\n' "$(sing-box version 2>/dev/null | sed -n 's/.*version[[:space:]]*//p' | head -1)"
 	command -v xray >/dev/null 2>&1 && printf '  xray %s\n' "$(xray version 2>/dev/null | sed -n 's/^Xray[[:space:]]*//p' | awk '{print $1}' | head -1)"
+	command -v sing-box >/dev/null 2>&1 || command -v xray >/dev/null 2>&1 \
+		|| printf '  (UNKNOWN: neither engine binary is on PATH from here)\n'
+	# The arm sentinel, because "is this node allowed to rotate itself" is the one piece of posture an
+	# operator cannot infer from listeners or versions, and it is the difference between a node that
+	# adapts unattended and one that only plans.
+	# ENGINE PIN DRIFT (Audit-0011 #20). install_singbox runs only inside flow_bootstrap, while
+	# install_xray also runs from converge_node_tail — so bumping the manifest for a CVE reaches the
+	# SECONDARY engine unattended and never reaches the PRIMARY one. Upgrading a data-plane binary on a
+	# timer is a posture change nobody has authorised, so this REPORTS the drift instead of acting on it,
+	# and RELEASING.md says plainly that engine pins need an attended deploy.
+	printf 'engine pin: '
+	local mfile pin cur
+	mfile="${MYC_ARTIFACT_ROOT:-/opt/mycelium}/control/engines.manifest.json"
+	if [ -r "$mfile" ] && command -v jq >/dev/null 2>&1 && command -v sing-box >/dev/null 2>&1; then
+		pin="$(jq -r '.. | .singbox? // empty | .version? // empty' "$mfile" 2>/dev/null | head -1)"
+		cur="$(sing-box version 2>/dev/null | sed -n 's/.*version[[:space:]]*//p' | head -1)"
+		if [ -z "$pin" ]; then printf '(UNKNOWN: no sing-box pin readable in the manifest)\n'
+		elif [ "${pin#v}" = "${cur#v}" ]; then printf 'sing-box matches the manifest (%s)\n' "$cur"
+		else printf 'DRIFT — installed sing-box %s, manifest pins %s. The primary engine is NOT upgraded by the unattended converge; re-run `fungi deploy` to pick it up.\n' "${cur:-unknown}" "$pin"; fi
+	else
+		printf '(UNKNOWN: manifest or engine not readable from here)\n'
+	fi
+	printf 'unattended rotation: '
+	if [ -e "${MYC_STATE_DIR:-/var/lib/mycelium}/rotate-live.enabled" ]; then printf 'ARMED (the loop may promote)\n'
+	elif [ -d "${MYC_STATE_DIR:-/var/lib/mycelium}" ]; then printf 'not armed (plans only; arm with `fungi deploy --auto-rotate`)\n'
+	else printf '(UNKNOWN: no node state directory here)\n'; fi
+	# Non-zero when NOTHING could be observed: a status that always exits 0 cannot be used in a check.
+	[ "$seen" -eq 1 ] || return 1
 	return 0
 }
+
+fungi_die() { printf 'fungi: error: %s\n' "$*" >&2; exit 2; }
 
 [ -x "$NODE_BOOTSTRAP" ] || { echo "fungi: actuator not found: $NODE_BOOTSTRAP" >&2; exit 2; }
 
@@ -101,11 +143,29 @@ case "${1:-}" in
 		#   --auto-rotate  the above PLUS the sentinel: the loop may promote unattended
 		#   --no-arm       none of the three: serve only
 		arm=1; autorotate=0; deploy_args=()
+		# ALLOW-LIST, not pass-through (Audit-0011 #7). Everything unrecognised used to be forwarded to
+		# node-bootstrap.sh, which parses each flag as a whole-run MODE, last-wins. So
+		# `fungi deploy --revoke alice` REVOKED A CLIENT and never converged — the verb the operator typed
+		# was silently replaced by a different one, and `deploy` reported success. A converge verb must not
+		# be a channel for reaching every other mode by accident.
 		for a in "$@"; do
 			case "$a" in
 				--no-arm)      arm=0 ;;
 				--auto-rotate) autorotate=1 ;;
-				*)             deploy_args+=("$a") ;;
+				# Converge-shaping flags: safe on this path because none of them selects a MODE.
+				--clients|--client-names|--node-address|--allowed-signers|--singbox-version|--xray-version|--repo-url|--repo-ref)
+					deploy_args+=("$a"); shift_next=1 ;;
+				--no-harden|--harden|--no-amneziawg|--no-observability|--assume-yes|--dry-run|--staged)
+					deploy_args+=("$a") ;;
+				--*=*) case "${a%%=*}" in
+						--clients|--client-names|--node-address|--allowed-signers|--singbox-version|--xray-version|--repo-url|--repo-ref)
+							deploy_args+=("$a") ;;
+						*) fungi_die "deploy: unknown flag '$a'." ;;
+					esac ;;
+				-*)  fungi_die "deploy: '$a' is not a deploy flag. node-bootstrap.sh parses mode flags like --revoke/--rotate/--update as a WHOLE-RUN MODE, last-wins, so forwarding it here would silently run a DIFFERENT verb than the one you typed." ;;
+				*)   # a bare value belonging to the previous flag (e.g. `--clients alice`)
+					if [ "${shift_next:-0}" -eq 1 ]; then deploy_args+=("$a"); shift_next=0
+					else fungi_die "deploy: unexpected argument '$a'."; fi ;;
 			esac
 		done
 		"$NODE_BOOTSTRAP" ${deploy_args[@]+"${deploy_args[@]}"}
@@ -158,8 +218,17 @@ case "${1:-}" in
 		# run `fungi deploy` once first, or edit from a checkout with myceliumctl directly).
 		mc="$(resolve_myctl_go)" || { echo "fungi $verb: the Go spine (myceliumctl-go) is not built here; run 'fungi deploy' first, or use 'myceliumctl $verb' from a checkout." >&2; exit 3; }
 		exec "$mc" "$verb" "$@" ;;
+	diag) shift
+		# THE SURFACE THAT DID NOT EXIST (Audit-0011 #8). SECURITY.md and the bug-report template both
+		# told reporters to run `myceliumctl diag collect` — but nothing puts any `myceliumctl` on $PATH,
+		# and the only file of that name on a node is the SHELL tool, whose dispatch has no `diag` verb at
+		# all. So the redactor built precisely to keep keys, peer addresses and client names out of a
+		# public issue was unreachable by the person it protects, and the path of least resistance was
+		# pasting raw journald. The scrubber existing is not the same as the scrubber being reachable.
+		mc="$(resolve_myctl_go)" || { echo "fungi diag: the Go spine (myceliumctl-go) is not built here, so the PII redactor cannot run. Run 'fungi deploy' on this node first. DO NOT paste raw logs into a public issue — they carry peer addresses, client names and key material." >&2; exit 3; }
+		exec "$mc" diag "$@" ;;
 	status) shift; fungi_status ;;
 	help|-h|--help) usage; exit 0 ;;
 	"") usage >&2; exit 2 ;;
-	*) echo "fungi: unknown verb '$1' (deploy|update|apply|plan|transport|front|reachable|status)" >&2; usage >&2; exit 2 ;;
+	*) echo "fungi: unknown verb '$1' (deploy|update|apply|plan|transport|front|reachable|diag|status)" >&2; usage >&2; exit 2 ;;
 esac

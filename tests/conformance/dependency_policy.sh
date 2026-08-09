@@ -54,7 +54,10 @@
 # OUT OF SCOPE (by design)
 #   * The Aparecium-style live post-handshake probe is a LIVE, post-deploy check; it belongs in a
 #     runbook against a deployed node, NOT in this offline gate.
-#   * "Is the pin the latest upstream tag" — deploy-time currency, not a CI invariant.
+#   * "Is the pin the latest upstream tag" — deploy-time currency, not a CI invariant. It IS load-bearing
+#     (see the header above), which is why leaving it nowhere at all was a real gap: it now runs as an
+#     advisory step 0 in docs/RELEASING.md, at tag time — the one moment it is both answerable
+#     (network available, a human present) and actionable (the pin can still change).
 #
 # NEGATIVE TESTING
 #   Set MYC_DEPPOLICY_SCAN_DIR to a directory that may contain either or both of:

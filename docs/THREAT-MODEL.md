@@ -133,7 +133,7 @@ profile-update-interval cadence. This adds a new surface, treated as follows:
 
 ## Attack surface: the node diagnostics bundle (diag collect)
 
-`myceliumctl diag collect` assembles a node diagnostics bundle (spine/engine versions, unit states, the
+`fungi diag collect` assembles a node diagnostics bundle (spine/engine versions, unit states, the
 recent engine journal) that an operator may **attach to a public bug report** — so it leaves the node and
 must carry none of the PII the project forbids collecting (SECURITY.md §4.2, asset #1 operator/node
 identity and location). It is treated as follows:
@@ -547,8 +547,12 @@ platforms; exit nodes may bear liability for transited traffic.
 
 Design implications (not merely a disclaimer):
 
-- **Knowledge minimisation.** Nodes store as little about users as possible; logs are off by
-  default; data that is never collected cannot be seized or compelled.
+- **Knowledge minimisation.** Nodes store as little about users as possible, and data that is never
+  collected cannot be seized or compelled. **What holds today is weaker than "logs are off", which this
+  section used to claim** (Audit-0011 #16): the engines run at **warn**, and a warn/error line can carry
+  a client source IP. Nothing is written to disk — journald is `Storage=volatile`, RAM-only, 64 MB, and
+  does not survive a reboot — so there is no on-disk record to seize, but a powered-on node holds recent
+  engine logs in memory. No-logs-by-design is the TARGET posture; plan around what is true now.
 - **At-rest local aggregate profile — a bounded, accepted exception.** An operator who runs
   several of their own nodes may merge those nodes' per-node distribution bundles into one
   client profile, **locally**, with `myceliumctl aggregate`. That merged profile is one client

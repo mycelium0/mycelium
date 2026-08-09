@@ -69,11 +69,19 @@ conformance:
 # release is authenticated by a SIGNED git TAG (ADR-0015 SSH-sig, the same scheme verify_signed_ref uses)
 # and an SSH signature over SHA256SUMS — neither produced here (the maintainer signs locally; see
 # docs/RELEASING.md). Pinned by tests/conformance/release_dist_sane.sh.
+#
+# `tar.tar.gz.command` is PINNED (Audit-0011 #23). Left unset, git uses its internal zlib and the digest
+# is stable — but it is a plain git config key, so an operator (or a distro-shipped /etc/gitconfig) with
+# `tar.tar.gz.command = gzip -1n` set for unrelated reasons silently produces a DIFFERENT tarball from
+# the same tag, and the release_dist_sane gate's gzip-independence check only sabotages $PATH, not this.
+# `"git archive gzip"` is git's documented magic value meaning "use the internal implementation" — the
+# empty value is NOT equivalent (git exits 128).
 dist:
 	@command -v git >/dev/null 2>&1 || { echo "dist: git is required" >&2; exit 1; }
 	@git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "dist: not inside a git work tree" >&2; exit 1; }
 	@mkdir -p "$(DIST_DIR)"
 	@name="mycelium-$(DIST_VERSION)"; \
-	  git archive --format=tar.gz --prefix="$$name/" "$(DIST_REF)" > "$(DIST_DIR)/$$name.tar.gz"; \
+	  git -c tar.tar.gz.command="git archive gzip" \
+	    archive --format=tar.gz --prefix="$$name/" "$(DIST_REF)" > "$(DIST_DIR)/$$name.tar.gz"; \
 	  ( cd "$(DIST_DIR)" && $(SHA256SUM) "$$name.tar.gz" > SHA256SUMS ); \
 	  echo "dist: wrote $(DIST_DIR)/$$name.tar.gz + $(DIST_DIR)/SHA256SUMS (version $(DIST_VERSION), ref $(DIST_REF))"

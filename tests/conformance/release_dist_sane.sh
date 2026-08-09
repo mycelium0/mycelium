@@ -94,8 +94,35 @@ fi
 # 4. secret-free (defence-in-depth: git archive ships only tracked files, but PIN it)
 if [ -f "$tarball" ]; then
 	leak="$(tar tzf "$tarball" 2>/dev/null | grep -E '(^|/)(params|identity|identities)\.json$|\.pem$|\.key$|(^|/)(server|config)\.json$|config\.(candidate|staged|lastgood)\.json$' || true)"
-	[ -z "$leak" ] && ok "tarball is secret-free (no identity/params/keys/rendered configs)" \
+	[ -z "$leak" ] && ok "tarball is secret-free by FILENAME (no identity/params/keys/rendered configs)" \
 		|| badln "tarball carries a secret/identity/rendered-config artifact: $(printf '%s' "$leak" | tr '\n' ' ')"
+
+	# ...AND THE ARTIFACT IS EXACTLY THE TRACKED SET (Audit-0011 #23).
+	#
+	# The check above reads the tar LISTING only, so it can catch a secret only if it arrives under a
+	# suspicious NAME. The obvious next move is to scan the extracted bytes for keys and operator
+	# addresses — and the first draft did, which promptly flagged five IANA special-purpose blocks in an
+	# xray blocklist and a well-known public test target in another gate. That draft had invented a
+	# SECOND definition of "an address this project may ship", to sit alongside the one check_ppn_wording
+	# already owns. Two definitions of the same rule drifting apart is the exact defect this cycle spent
+	# the day removing; adding one here to catch a hypothetical would have been indefensible.
+	#
+	# So assert the property that makes the existing rule transfer instead: the artifact's file set is
+	# EXACTLY the tracked set. `git archive` ships tracked files only, gitleaks and check_ppn_wording
+	# already scan tracked content in CI, and therefore every byte in this tarball is already covered —
+	# but only for as long as that equality holds. If the dist rule ever grows a generated or copied-in
+	# file, the artifact silently leaves the scanned set, and this row is what notices.
+	if tracked="$(git -C "$REPO_ROOT" ls-tree -r --name-only "${DIST_REF:-HEAD}" 2>/dev/null)" && [ -n "$tracked" ]; then
+		shipped="$(printf '%s\n' "$listing" | sed "s|^mycelium-$ver/||" | grep -v '/$' | sed '/^$/d' | sort)"
+		extra="$(comm -23 <(printf '%s\n' "$shipped") <(printf '%s\n' "$tracked" | sort) | head -5)"
+		if [ -z "$extra" ]; then
+			ok "and every shipped path is a tracked path — so gitleaks + check_ppn_wording already cover every byte in it"
+		else
+			badln "the tarball ships paths that are NOT tracked: $(printf '%s' "$extra" | tr '\n' ' '). Untracked content is scanned by neither gitleaks nor check_ppn_wording, so it reaches the release unreviewed. Whatever puts it there must be removed from the dist rule, or those scanners extended to cover it."
+		fi
+	else
+		printf '  SKIP  no git tree for %s; the tracked-set equality was not checked.\n' "${DIST_REF:-HEAD}"
+	fi
 fi
 
 # 5. deterministic (reproducible release)
@@ -140,10 +167,31 @@ if [ -f "$tarball" ] && command -v gzip >/dev/null 2>&1; then
 	if [ -z "$c" ]; then
 		badln "the sabotaged-gzip rebuild produced no tarball — cannot judge host independence; re-confirm this check"
 	elif [ "$a" = "$c" ]; then
-		ok "the artifact does not depend on the host's gzip (compression is git's own — reproducible across platforms)"
+		ok "the artifact does not depend on the host's gzip (compression is git's own internal zlib)"
 	else
 		badln "make dist produces a DIFFERENT tarball when the host's gzip changes ($a vs $c). It is therefore not reproducible across machines, and docs/RELEASING.md signs a locally built SHA256SUMS while release.yml publishes CI's — so the signed sums and the published sums disagree and verify-release.sh fails closed for every downloader. Compress with \`git archive --format=tar.gz\` (git's own zlib) rather than piping into the host gzip."
 	fi
+
+fi
+
+# THE OTHER LEVER ON THE SAME DIGEST (Audit-0011 #23). The check above sabotages $PATH, which is only
+# half of it: `tar.tar.gz.command` is a plain git config key, so a distro-shipped /etc/gitconfig or an
+# operator who set `gzip -1n` for unrelated reasons moves the digest without touching $PATH at all.
+# Measured: unpinned, a hostile value changes the tarball hash; pinned to git's internal-zlib magic
+# value, it does not. (The EMPTY value is not equivalent — git exits 128.)
+if [ -f "$tarball" ]; then
+	( GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=tar.tar.gz.command GIT_CONFIG_VALUE_0="gzip -1n" \
+		make -C "$REPO_ROOT" dist DIST_DIR="$WORK/d4" >/dev/null 2>&1 )
+	d="$(SUM "$WORK/d4/mycelium-$ver.tar.gz" 2>/dev/null | awk '{print $1}')"
+else
+	d=""
+fi
+if [ -z "$d" ]; then
+	printf '  SKIP  could not rebuild under a hostile tar.tar.gz.command; the config-key pin is unverified here.\n'
+elif [ "$a" = "$d" ]; then
+	ok "and not on the host's tar.tar.gz.command git config either (the dist rule pins it)"
+else
+	badln "make dist produces a DIFFERENT tarball when tar.tar.gz.command is set in git config ($a vs $d). That key is settable in /etc/gitconfig by a distro, so two maintainers on the same tag can publish different bytes — and the locally signed SHA256SUMS then disagrees with the published one, failing verify-release.sh closed for every downloader. Pin it in the dist rule: git -c tar.tar.gz.command=\"git archive gzip\"."
 fi
 
 if [ "$fail" -eq 0 ]; then

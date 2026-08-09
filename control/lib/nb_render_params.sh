@@ -52,20 +52,38 @@ resolve_node_address() {
 			printf '%s\n' "$prev"; return 0
 		fi
 	fi
-	# Best-effort auto-detect of the primary GLOBAL-scope address (no external service contacted).
+	# AUTO-DETECT A PUBLIC ADDRESS, and refuse a private one (Audit-0011 #5).
+	#
+	# This used to be `ip -o -4 addr show scope global | head -n1`, and `scope global` INCLUDES RFC1918.
+	# Measured on a live node: that command returns `84.21.173.169 10.13.13.1 10.77.99.5` — the public
+	# address, the AmneziaWG gateway and a test interface — and `head -n1` takes whichever the kernel
+	# enumerates first. On a NAT'd VPS the first one IS private, and the loud warning below never fired
+	# because it tests only for the literal placeholder: the node recorded `10.0.0.5`, logged
+	# "recording node_address for subscriptions" as a SUCCESS, and every issued client config pointed at
+	# an unroutable address. The operator finds out when their own client fails.
+	#
+	# _l7_own_public_addr (nb_selftest.sh) already rejects loopback, RFC1918, CGNAT, link-local, multicast
+	# and IPv6 ULA, and is already driven by ss_l7_probe_failsafe.sh — one rejector, already gated, rather
+	# than a second opinion about what "public" means.
+	#
+	# FAIL-CLOSED both ways: a host with only private addresses, and a host where the helper is missing
+	# (a broken artifact), both fall through to the placeholder — which makes the warning below fire and
+	# tells the operator to pass --node-address. A guess is worse than a refusal here, because the guess
+	# is silent and reaches every client.
 	local addr=""
-	if have ip; then
-		# `|| true` INSIDE both substitutions. These are PIPELINES under `set -o pipefail`, so two ordinary
-		# conditions make them non-zero: a host whose kernel has IPv6 disabled (the `ip -6` call itself
-		# errors) and `head -n1` closing the pipe early enough to SIGPIPE its upstream — the same trap this
-		# tree already documents for `awg` in nb_render_awg.sh. The v6 line is the RIGHT side of a bare
-		# `||`, so its failure status becomes the list's and `set -e` kills write_params with no message,
-		# on an IPv4-only machine, during the FIRST install. An empty result is already handled two lines
-		# down by the placeholder path; a dead run is not.
-		addr="$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
-		[ -n "$addr" ] || addr="$(ip -o -6 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
+	if command -v _l7_own_public_addr >/dev/null 2>&1; then
+		addr="$(_l7_own_public_addr 2>/dev/null || true)"
+	else
+		warn "cannot resolve a PUBLIC node address: the address helper is unavailable in this artifact."
 	fi
 	if [ -n "$addr" ]; then printf '%s\n' "$addr"; return 0; fi
+	# NAME THE CAUSE. The call site warns when the result IS the placeholder, but it cannot tell the two
+	# reasons apart, and they need different actions: a NAT'd VPS needs --node-address with the public
+	# address of its port forward, whereas a missing helper means a broken artifact. "Could not resolve"
+	# with no reason is the kind of message an operator reads past.
+	if [ -z "$addr" ] && command -v _l7_own_public_addr >/dev/null 2>&1; then
+		warn "no PUBLIC address found on this host — every candidate was loopback, RFC1918, CGNAT or link-local. If this node is behind NAT with a forwarded port, pass --node-address <public-address>; client configs are unusable otherwise."
+	fi
 	# Fail-closed fallback: the documented placeholder, with a loud warning at the call site.
 	printf '%s\n' "$NODE_ADDRESS_PLACEHOLDER"
 	return 0
@@ -289,8 +307,10 @@ write_params() {
 	node_address="$(resolve_node_address)"
 	if [ "$node_address" = "$NODE_ADDRESS_PLACEHOLDER" ]; then
 		warn "node_address is the placeholder '$NODE_ADDRESS_PLACEHOLDER': generated client"
-		warn "subscriptions will NOT connect. Set the real value with --node-address ADDR (or fix"
-		warn "auto-detection) before generating subscriptions from this node's params.json."
+		warn "subscriptions will NOT connect. Set the real value with --node-address ADDR."
+		warn "  This is also what you see on a NAT'd host: auto-detection REFUSES a private address"
+		warn "  (RFC1918/CGNAT/link-local) rather than writing one into every client config, because a"
+		warn "  private address there is unroutable and nothing on this node would report it."
 	else
 		log "recording node_address for subscriptions (local-only): $node_address"
 	fi

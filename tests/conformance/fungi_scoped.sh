@@ -145,6 +145,83 @@ done
 [ -n "$(drive base)" ] && ok "the recording stub is reached at all (the harness is not vacuous)" \
 	|| badln "the stub recorded nothing — fungi did not invoke node-bootstrap, so every row above is vacuous"
 
+# ---------------------------------------------------------------------------
+# A CONVERGE VERB MUST NOT BE A CHANNEL TO EVERY OTHER MODE (Audit-0011 #7).
+#
+# `fungi deploy` used to forward every unrecognised argument straight to node-bootstrap.sh, which parses
+# each flag as a whole-run MODE, last-wins. So `fungi deploy --revoke alice` REVOKED A CLIENT and never
+# converged — the verb the operator typed was silently replaced by a different one, and deploy reported
+# success. Driven, because an allow-list that is grepped is an allow-list nobody proved rejects anything.
+#
+# Each row uses a mode flag that takes NO argument. An earlier draft used `--revoke alice`, and under a
+# mutation that removed the allow-list the row still went green — because the bare `alice` then tripped a
+# DIFFERENT guard ("unexpected argument"). Same exit code, unrelated cause: the row was measuring the
+# wrong refusal. A valueless flag has nowhere else to fail.
+printf '\n'
+for mode in --rotate --node-apply --rotate-arm --update; do
+	: >"$WORK/argv.mode"
+	MYC_ARGV_LOG="$WORK/argv.mode" bash "$WORK/scripts/fungi" deploy "$mode" >/dev/null 2>&1
+	rc=$?
+	n="$(wc -l <"$WORK/argv.mode" | tr -d ' ')"
+	if [ "$rc" -ne 0 ] && [ "$n" -eq 0 ]; then
+		ok "deploy $mode: refused (rc=$rc), actuator invoked 0 times"
+	else
+		badln "\`fungi deploy $mode\` exited $rc having invoked the actuator $n time(s): $(tr '\n' '|' <"$WORK/argv.mode"). node-bootstrap parses $mode as a whole-run MODE, last-wins, so this silently runs a DIFFERENT verb than the operator typed while deploy reports success. Measured with --revoke: it revoked a client and never converged."
+	fi
+done
+# ...while a legitimate converge-shaping flag still gets through. An allow-list that rejects everything
+# is not a fix, and this is the row that would catch it.
+: >"$WORK/argv.legit"
+MYC_ARGV_LOG="$WORK/argv.legit" bash "$WORK/scripts/fungi" deploy --no-harden >/dev/null 2>&1
+if grep -qF -- '--no-harden' "$WORK/argv.legit"; then
+	ok "and a legitimate converge-shaping flag (--no-harden) still reaches the actuator"
+else
+	badln "the allow-list also blocked --no-harden, which shapes the converge and selects no mode. An allow-list that refuses valid input is a different outage, not a fix."
+fi
+
+# ---------------------------------------------------------------------------
+# EVERY VERB NAMED IN A FALLBACK STRING IS DISPATCHED BY THE TOOL THAT STRING NAMES (Audit-0011 #8).
+#
+# SECURITY.md and the bug-report template both told reporters to run `myceliumctl diag collect`. Nothing
+# puts any `myceliumctl` on $PATH; the only file of that name on a node is the SHELL tool, whose dispatch
+# has no `diag` verb at all. So the PII redactor built specifically to keep keys, peer addresses and
+# client names out of a public issue was unreachable by the person it protects, and the path of least
+# resistance was pasting raw journald into a public issue.
+printf '\n'
+SHELL_CTL="$REPO_ROOT/control/myceliumctl"
+# DERIVE the verb list from the documents themselves rather than hard-coding it. A hand-maintained list
+# would only ever contain the verbs someone remembered to add — and the whole finding is that nobody
+# noticed `myceliumctl diag collect` had no dispatch behind it for the life of the feature. Anything an
+# operator-facing document tells a person to type is in scope, automatically, including the next one.
+DOCS="$REPO_ROOT/SECURITY.md $REPO_ROOT/docs/THREAT-MODEL.md $REPO_ROOT/QUICKSTART.md"
+[ -d "$REPO_ROOT/.github/ISSUE_TEMPLATE" ] && DOCS="$DOCS $(find "$REPO_ROOT/.github/ISSUE_TEMPLATE" -type f 2>/dev/null | tr '\n' ' ')"
+# shellcheck disable=SC2086  # DOCS is a deliberate word-split list of paths, none containing spaces
+verbs="$(grep -rhoE '`?(fungi|myceliumctl) [a-z][a-z-]+' $DOCS 2>/dev/null \
+	| sed 's/^`//; s/^[a-z]* //' | sort -u)"
+if [ -z "$verbs" ]; then
+	printf '  SKIP  no operator-facing doc names a fungi/myceliumctl verb; nothing to reach.\n'
+fi
+# Strip comments ONCE, into a variable. Piping into `grep -q` inside the loop made printf write into a
+# pipe grep had already closed on its first match — a "Broken pipe" line per verb, in a gate whose job is
+# to be read.
+F_NOCOMMENT="$(sed 's/[[:space:]]#.*$//' "$F")"
+for verb in $verbs; do
+	if printf '%s\n' "$F_NOCOMMENT" | grep -qE "^[[:space:]]*([a-z-]+\|)*${verb}(\|[a-z-]+)*\)"; then
+		ok "\`fungi $verb\` — named in a doc, dispatched by fungi"
+	elif [ -f "$SHELL_CTL" ] && grep -qE "^[[:space:]]*([a-z-]+\|)*${verb}(\|[a-z-]+)*\)" "$SHELL_CTL"; then
+		ok "\`$verb\` — named in a doc, dispatched by control/myceliumctl"
+	else
+		badln "an operator-facing document tells a reader to run a '$verb' verb that NEITHER scripts/fungi NOR control/myceliumctl dispatches. Measured instance: SECURITY.md and the bug-report template both said \`myceliumctl diag collect\`, nothing puts any myceliumctl on \$PATH, and the shell tool of that name has no diag verb — so the PII redactor was unreachable by the person filing the report and raw journald, which carries client source addresses and key material, was the path of least resistance."
+	fi
+done
+# And the docs must point at a tool that exists on a node. `myceliumctl` is not on $PATH anywhere.
+docs_ref="$(grep -rn 'myceliumctl diag' "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/.github/ISSUE_TEMPLATE/" "$REPO_ROOT/docs/THREAT-MODEL.md" 2>/dev/null | head -3)"
+if [ -z "$docs_ref" ]; then
+	ok "no operator-facing doc instructs a reporter to run a \`myceliumctl\` that is not on \$PATH"
+else
+	badln "these still tell a reporter to run \`myceliumctl diag\`, and nothing installs a \`myceliumctl\` on \$PATH (the Go binary is myceliumctl-go under TOOLING_DIR): $(printf '%s' "$docs_ref" | tr '\n' '|' | cut -c1-220). Use \`fungi diag\`."
+fi
+
 # plan delegates to the Go deploy-plan verb (pure preview), not to a live read
 grep -qE 'deploy-plan' "$F" \
 	&& ok "verb 'plan' delegates to myceliumctl deploy-plan (pure preview)" \

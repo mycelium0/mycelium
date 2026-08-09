@@ -231,6 +231,58 @@ groups:
           runbook: "docs/runbooks/node-bootstrap.md"
 
   # ===========================================================================
+  # Unattended updates — the network stopped taking code for DAYS and no surface said so.
+  #
+  # Two unrelated causes (a GitHub-button merge leaving an unsigned tip; a dirty checkout left on a node
+  # used as a build host) made every node refuse every update. Each refusal was CORRECT and fail-closed.
+  # But `main` was green, CI was green, the timer was `active`, the unit was `enabled`, and the data
+  # plane kept serving traffic — so every surface anyone watches said "fine". The truth existed only in
+  # `journalctl -u mycelium-update`, on each node, one at a time.
+  #
+  # nb_observability.sh now publishes the refusal (a consecutive count and a closed-vocab reason code)
+  # and resets both on success. These alerts are what make that publication mean anything: a metric
+  # nobody alerts on is the same silence with more disk writes.
+  # ===========================================================================
+  - name: mycelium.update
+    rules:
+      - alert: MyceliumUpdateFailing
+        expr: mycelium_update_consecutive_failures >= 3
+        for: 30m
+        labels:
+          severity: warning
+          component: update
+        annotations:
+          summary: "{{ $labels.instance }} has refused {{ $value }} consecutive updates"
+          description: >-
+            The unattended updater is running and REFUSING to apply — the fail-closed behaviour
+            working as designed. But the node is pinned to old code and stays there until someone
+            acts. mycelium_update_last_failure_reason names the cause: 1 = signature verification
+            (the tip of origin/main is not signed by the operator key — almost always a merge made
+            with the GitHub button instead of `git merge --no-ff -S`); 2 = fast-forward refused (the
+            checkout on the node is dirty, usually because it was used as a build or test host);
+            3 = validate refused the rendered config; 4 = post-apply rollback; 9 = unclassified, read
+            the journal. Fix the CAUSE. Never disarm the check to clear the alert.
+          runbook: "docs/runbooks/node-bootstrap.md"
+
+      - alert: MyceliumUpdateStalled
+        expr: >-
+          (time() - mycelium_update_last_success_timestamp_seconds > 86400)
+          or absent(mycelium_update_last_success_timestamp_seconds)
+        for: 1h
+        labels:
+          severity: warning
+          component: update
+        annotations:
+          summary: "{{ $labels.instance }} has not completed an update in over 24h"
+          description: >-
+            No successful converge in a day. This covers the cases MyceliumUpdateFailing cannot see,
+            because they produce no failures to count: the timer is dead or was never enabled, the
+            unit is masked, the node was never armed, or the updater is not running at all. The
+            `absent()` arm is the important half — a node that reports nothing is exactly the one a
+            threshold over a missing series passes in silence.
+          runbook: "docs/runbooks/node-bootstrap.md"
+
+  # ===========================================================================
   # Collector self-health — keep the operator from trusting a blind dashboard.
   # ===========================================================================
   - name: mycelium.monitoring

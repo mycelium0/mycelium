@@ -341,6 +341,7 @@ GATES=(
 	"tests/conformance/update_flap_guard.sh"
 	"tests/conformance/update_chain_is_unbroken.sh"
 	"tests/conformance/bootstrap_from_zero_survives.sh"
+	"tests/conformance/node_address_is_public.sh"
 	"tests/conformance/promote_paths_converge.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"

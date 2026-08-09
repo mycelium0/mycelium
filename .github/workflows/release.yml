@@ -43,6 +43,32 @@ jobs:
             echo "::error::tag v$tag does not match internal/spec.Version $ver — bump one to match before tagging"; exit 1
           fi
           echo "releasing v$ver"
+      # THE AUTHENTICITY ROOT, ACTUALLY CHECKED (Audit-0011 #14). This workflow's header calls the signed
+      # tag "the authenticity root", and `gh release create --verify-tag` sounds like it checks that. It
+      # does not: gh's --verify-tag asserts the tag EXISTS ON THE REMOTE. A plain, unsigned
+      # `git tag vX.Y.Z && git push --tags` produced a complete, normal-looking release and nothing said
+      # otherwise. Not hypothetical — RELEASING.md records that the documented `user.signingkey` once
+      # pointed at a file that did not exist, so local signing had already failed quietly once.
+      #
+      # This FAILS CLOSED, including when allowed_signers is absent — deliberately. The file is untracked
+      # today (the signing key is unpublished), so this lane now refuses to publish until the key ships.
+      # A release lane that cannot verify its own root must not produce a release, and that refusal
+      # belongs here, loudly, rather than in a downloader's failed check weeks later.
+      - name: Guard — the tag is signed by the operator key
+        run: |
+          set -eu
+          if [ ! -f allowed_signers ]; then
+            echo "::error::allowed_signers is not committed, so the tag signature cannot be verified against anything. Publish the signing key and commit the file (docs/RELEASING.md) before cutting a release. Refusing to publish an artifact whose authenticity root is unverifiable."
+            exit 1
+          fi
+          git config gpg.ssh.allowedSignersFile allowed_signers
+          if ! git verify-tag "${GITHUB_REF_NAME}" 2>verify-tag.err; then
+            echo "::error::git verify-tag ${GITHUB_REF_NAME} failed — the tag is unsigned, or signed by a key absent from allowed_signers. gh --verify-tag would NOT have caught this: it only checks the tag exists on the remote."
+            sed "s/^/  /" verify-tag.err >&2 || true
+            exit 1
+          fi
+          rm -f verify-tag.err
+          echo "tag ${GITHUB_REF_NAME} verifies against the committed allowed_signers"
       - name: Build the deterministic source artifact
         run: make dist DIST_REF="${GITHUB_REF_NAME}"
       - name: Verify the artifact (release_dist_sane gate, with a git work tree)

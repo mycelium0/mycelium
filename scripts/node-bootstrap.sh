@@ -884,6 +884,7 @@ flow_update() {
 				warn "its last known-good config (systemctl is-active; client reachability is not asserted here)."
 				warn "Push a rev that changes what this node renders (applied on the next tick), run '$0 --node-apply'"
 				warn "after fixing the cause out of band, or remove $FAILED_CONFIG to force a retry now."
+				_record_update_failure_if_available validate
 				die "update declined: known-bad candidate inside the retry hold (sing-box active on the last known-good)."
 			fi
 		else
@@ -945,6 +946,7 @@ flow_update() {
 		rollback_config
 		apply_singbox || true
 		verify_post_apply || warn "service still unhealthy after rollback — operator attention needed."
+		_record_update_failure_if_available post-apply
 		die "update rolled back (fail-closed). The previous known-good config was restored."
 	fi
 }
