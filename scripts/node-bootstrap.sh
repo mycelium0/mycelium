@@ -1102,6 +1102,22 @@ verify_listen_ports() {
 # MYC_NB_NO_DISPATCH=1 lets a test SOURCE this script to exercise the pure helpers (assert_two_hop_shape,
 # seed/merge_operator_overrides, bundle_served_age_seconds) WITHOUT running a root-requiring flow. It is
 # never set in production; the normal invocation leaves it unset and dispatches as before.
+# ...but ONLY when this file is SOURCED, which is the only thing the seam was ever for. Executed with
+# the variable set, the guard skipped every flow, fell off the end of the script, and exited **0** —
+# measured. A converge that does nothing and reports success is the worst possible failure here: it is
+# indistinguishable from a converge that worked, and the variable is an ordinary exported string that a
+# CI runner, a harness, or a shell that once ran the rotate gate can be carrying. It would have made a
+# from-zero drill green on a host where nothing was installed at all.
+# `(return 0 2>/dev/null)` succeeds only inside a sourced file — the canonical test, and the reason it is
+# used here instead of comparing BASH_SOURCE[0] to $0: that comparison is wrong whenever the two happen
+# to be equal, e.g. `bash -c '. "$0"' script.sh`, which is exactly the shape the first draft of this
+# gate's own probe used. A guard that misfires on a legitimate caller gets deleted by the next person.
+_myc_sourced=0
+(return 0 2>/dev/null) && _myc_sourced=1
+if [ "${MYC_NB_NO_DISPATCH:-0}" = "1" ] && [ "$_myc_sourced" -eq 0 ]; then
+	printf '%s\n' "node-bootstrap: MYC_NB_NO_DISPATCH=1 is set, but this script was EXECUTED, not sourced. That variable exists solely so a test can source this file to reach its pure helpers; honouring it here would skip every flow and exit 0, reporting success for a converge that did nothing. Unset it and re-run." >&2
+	exit 2
+fi
 if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 	case "$MODE" in
 		bootstrap)       flow_bootstrap ;;
