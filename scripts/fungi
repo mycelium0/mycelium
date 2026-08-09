@@ -153,12 +153,23 @@ case "${1:-}" in
 				--no-arm)      arm=0 ;;
 				--auto-rotate) autorotate=1 ;;
 				# Converge-shaping flags: safe on this path because none of them selects a MODE.
-				--clients|--client-names|--node-address|--allowed-signers|--singbox-version|--xray-version|--repo-url|--repo-ref)
+				# VALUE-TAKING converge-shaping flags. --singbox-sha256/--xray-sha256 and --region-exclude
+				# were MISSING from the first version of this list, and their absence was a regression I
+				# introduced with the allow-list itself: QUICKSTART "Covered architectures" tells every
+				# non-amd64/arm64 operator to pass --singbox-sha256 explicitly, and the surface the same
+				# document teaches them to use refused it. --region-exclude is worse — see below.
+				--clients|--client-names|--node-address|--allowed-signers|--singbox-version|--singbox-sha256|--xray-version|--xray-sha256|--region-exclude|--repo-url|--repo-ref)
 					deploy_args+=("$a"); shift_next=1 ;;
-				--no-harden|--harden|--no-amneziawg|--no-observability|--assume-yes|--dry-run|--staged)
+				# --region-exclude is the ONLY way to change what a client config routes. Without it
+				# compute_client_allowed (control/lib/nb_render_awg.sh) emits the safe-narrow default —
+				# tunnel ranges only, deliberately, because we never silently full-tunnel — so the client
+				# handshakes and carries no user traffic. --full-tunnel is the explicit opt-out. An operator
+				# who cannot reach either flag through `fungi` has no documented way to make AmneziaWG
+				# actually carry traffic.
+				--no-harden|--harden|--no-amneziawg|--no-observability|--assume-yes|--dry-run|--staged|--full-tunnel)
 					deploy_args+=("$a") ;;
 				--*=*) case "${a%%=*}" in
-						--clients|--client-names|--node-address|--allowed-signers|--singbox-version|--xray-version|--repo-url|--repo-ref)
+						--clients|--client-names|--node-address|--allowed-signers|--singbox-version|--singbox-sha256|--xray-version|--xray-sha256|--region-exclude|--repo-url|--repo-ref)
 							deploy_args+=("$a") ;;
 						*) fungi_die "deploy: unknown flag '$a'." ;;
 					esac ;;

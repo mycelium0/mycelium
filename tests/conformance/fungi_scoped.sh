@@ -222,6 +222,70 @@ else
 	badln "these still tell a reporter to run \`myceliumctl diag\`, and nothing installs a \`myceliumctl\` on \$PATH (the Go binary is myceliumctl-go under TOOLING_DIR): $(printf '%s' "$docs_ref" | tr '\n' '|' | cut -c1-220). Use \`fungi diag\`."
 fi
 
+# EVERY FLAG A DOCUMENT TELLS THE OPERATOR TO PASS MUST BE ACCEPTED BY THE TOOL IT NAMES.
+#
+# The verb check above has a twin defect, and the twin shipped: the deploy allow-list (added to stop
+# `fungi deploy --revoke alice` silently running a different verb) omitted three flags the documentation
+# instructs operators to pass.
+#
+#   * QUICKSTART "Covered architectures" tells every non-amd64/arm64 operator to pass --singbox-sha256
+#     and --xray-sha256 explicitly. `fungi deploy` refused both. The one-command surface the document
+#     teaches was unusable on the one architecture class the document singles out.
+#   * --region-exclude is the ONLY input that changes what an AmneziaWG client config ROUTES. Without it
+#     compute_client_allowed (control/lib/nb_render_awg.sh) emits the safe-narrow default — tunnel ranges
+#     only, deliberately, because we never silently full-tunnel. Measured on a live node: a served client
+#     config carrying `AllowedIPs = 10.13.13.0/24`. That client completes a handshake, stays up on
+#     PersistentKeepalive, and carries NOT ONE BYTE of user traffic. Every self-report is green.
+#
+# So: derive the flags from the documents, the same way the verbs above are derived. A hand-kept list
+# would only ever hold the flags someone remembered, and the whole finding is that nobody remembered.
+printf '\n'
+qs="$REPO_ROOT/QUICKSTART.md"
+if [ ! -f "$qs" ]; then
+	printf '  SKIP  QUICKSTART.md not found; the documented-flag check did not run.\n'
+else
+	# Flags named in backticks or fences anywhere in QUICKSTART. Exclude the two `fungi`-LEVEL flags the
+	# wrapper consumes itself, and the flags the doc names only to say they belong to another verb.
+	doc_flags="$(grep -ohE -- '--[a-z][a-z0-9-]+' "$qs" | sort -u \
+		| grep -vxE -- '--auto-rotate|--no-arm|--repo-ref|--allowed-signers|--depth|--branch|--tag|--signer|--engine|--params|--state|--out|--update|--node-apply|--rotate-arm|--transport|--domain|--mode|--ack')"
+	W2="$WORK/flags"; mkdir -p "$W2/scripts"
+	cp "$F" "$W2/scripts/fungi"
+	cat >"$W2/scripts/node-bootstrap.sh" <<'STUB2'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${MYC_ARGV_LOG:?}"
+exit 0
+STUB2
+	chmod +x "$W2/scripts/node-bootstrap.sh" "$W2/scripts/fungi"
+	refused=""
+	for fl in $doc_flags; do
+		# Only judge flags scripts/node-bootstrap.sh actually accepts on the converge path. A flag the
+		# actuator does not know is a documentation bug of a different kind, out of scope for this row.
+		grep -qE "^[[:space:]]*(--[a-z0-9-]+\|)*${fl}\)" "$REPO_ROOT/scripts/node-bootstrap.sh" 2>/dev/null || continue
+		grep -qE "^[[:space:]]*${fl}\)" "$REPO_ROOT/scripts/node-bootstrap.sh" 2>/dev/null \
+			|| grep -q -- "$fl)" "$REPO_ROOT/scripts/node-bootstrap.sh" 2>/dev/null || continue
+		# Mode flags must stay refused — that is the other half of this allow-list and is asserted above.
+		case "$fl" in --revoke|--rotate*|--measure*|--update|--node-apply|--awg-*|--hy2-*|--reality-*) continue ;; esac
+		# Try BOTH arities. A valueless flag given a value trips the "unexpected argument" guard, and a
+		# value-taking flag given none trips the actuator's own `${2:?}` — either way the actuator is not
+		# invoked, and a row that only tried one form would report a refusal that is really its own
+		# mistake. (It did, on the first draft: --no-harden and --no-amneziawg, both allow-listed, both
+		# reported as refused because the probe handed them an argument they do not take.)
+		hit=0
+		for form in "$fl" "$fl placeholder"; do
+			: >"$W2/log"
+			# shellcheck disable=SC2086  # deliberate split: the second form is flag + value
+			MYC_ARGV_LOG="$W2/log" bash "$W2/scripts/fungi" deploy $form >/dev/null 2>&1
+			[ -s "$W2/log" ] && { hit=1; break; }
+		done
+		[ "$hit" -eq 1 ] || refused="$refused $fl"
+	done
+	if [ -z "$refused" ]; then
+		ok "every documented converge flag QUICKSTART names is accepted by \`fungi deploy\`"
+	else
+		badln "QUICKSTART tells the operator to pass these to \`fungi deploy\`, and the allow-list refuses them — the actuator is never invoked:$refused. scripts/node-bootstrap.sh accepts each one and none selects a mode, so refusing them breaks a documented path with no safety benefit. --singbox-sha256/--xray-sha256 are what QUICKSTART tells every non-amd64/arm64 operator to pass; --region-exclude is the only way to make an AmneziaWG client carry traffic at all."
+	fi
+fi
+
 # plan delegates to the Go deploy-plan verb (pure preview), not to a live read
 grep -qE 'deploy-plan' "$F" \
 	&& ok "verb 'plan' delegates to myceliumctl deploy-plan (pure preview)" \

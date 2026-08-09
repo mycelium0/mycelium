@@ -135,6 +135,33 @@ case "$probe" in
 	*)         badln "the ERR-trap mechanism did not fire on the very construct that caused the outage (got '$probe'). Then the guard is source text, not behaviour." ;;
 esac
 
+# ---------------------------------------------------------------------------------------------------
+# 4. A CONVERGE THAT DOES NOTHING MUST NOT REPORT SUCCESS.
+#
+# MYC_NB_NO_DISPATCH=1 exists so a test can SOURCE the entrypoint and reach its pure helpers. Executed
+# with the variable set, the guard skipped every flow, control fell off the end of the script, and it
+# exited **0** — measured. That is the worst shape a failure can take here: indistinguishable from a
+# converge that worked. And it is an ordinary exported string, so a CI runner, a drill harness, or a
+# shell that had once run the rotate gate could be carrying it — which would make a from-zero install
+# drill green on a host where nothing whatsoever had been installed.
+printf '\n-- a no-op converge cannot report success --\n'
+out="$(MYC_NB_NO_DISPATCH=1 bash "$ENTRY" --clients probe 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ]; then
+	badln "MYC_NB_NO_DISPATCH=1 with the entrypoint EXECUTED exited 0 having run no flow at all. A converge that silently does nothing and reports success is indistinguishable from one that worked; any drill or CI job carrying that variable would certify an empty host."
+elif printf '%s' "$out" | grep -q 'EXECUTED, not sourced'; then
+	ok "an executed run refuses the sourcing-only seam and says why (rc=$rc)"
+else
+	badln "an executed run under MYC_NB_NO_DISPATCH=1 exited $rc but did not explain itself: '$(printf '%s' "$out" | head -1 | cut -c1-160)'. A refusal nobody can read is one people work around by re-exporting the variable."
+fi
+# ...and the seam must STILL work for the thing it exists for.
+# Clear the positional parameters first: the entrypoint parses "$@" at source time and would die on
+# this gate's own arguments before defining a single function (rotate_rollback_executes.sh:98-101
+# records the same trap).
+srcd="$(MYC_NB_NO_DISPATCH=1 bash -c 'set --; . "$0" >/dev/null 2>&1; command -v flow_bootstrap >/dev/null && echo REACHED' "$ENTRY" 2>/dev/null)"
+[ "$srcd" = "REACHED" ] \
+	&& ok "and sourcing still reaches the entrypoint's functions — the seam is narrowed, not removed" \
+	|| badln "sourcing the entrypoint under MYC_NB_NO_DISPATCH=1 no longer reaches its functions. That seam is the only way a test can drive verify_post_apply and the rotation rollback branch; closing it makes those paths untestable again."
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: a first install can still die on absent state, or die without saying so.\n' >&2
