@@ -28,8 +28,12 @@ works, and which contributions are disqualified on security grounds. The enginee
    work, or an ADR (`docs/adr/`) for a decision. Trivial fixes (typos, a single dangling link) do not.
 2. **Gates-first, inert-before-behaviour.** New capability lands as a typed schema + a conformance
    gate before any behaviour consumes it; everything is **default-off** and additive.
-3. **Run the suite.** `bash tests/run.sh` (the offline conformance gates) and, for Go changes,
-   `make build vet fmt-check test race`. CI runs both on every pull request.
+3. **Run the suite.** `bash tests/run.sh` (the offline conformance gates), `bash control/selftest.sh`,
+   and for Go changes `make build vet fmt-check test race`. CI runs these on every pull request.
+   **A macOS-only run does not settle anything** — BSD and GNU `grep` disagree, and a macOS run has
+   reported a tree clean that Linux reported dirty. Iterate anywhere; conclude on Linux. The full
+   protocol, including how to run against a node without breaking its updates, is
+   [development.md §7.6](docs/development.md).
 4. **Match the surroundings.** Keep the neutral, honest voice (this is software for resilient secure
    connectivity; it makes no anonymity claim and operates no network); English only in the repo.
 5. **Open a pull request.** Fill in the template; link the RP/ADR; confirm the gates pass.

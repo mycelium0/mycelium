@@ -213,7 +213,7 @@ A test goes **in the same change** as the code. Categories:
   throttling, shutdown, flap) with a **measurable recovery SLO** and regression on labelled
   incidents (detector precision/recall).
 
-Minimum per §7.6: every new component — unit + contract; every new contract — contract; every
+Minimum per §7.7: every new component — unit + contract; every new contract — contract; every
 transport adapter — network-degradation conformance + adapter-contract; every detector/rotation change —
 netsim with SLO; every regression bug — regression test; everything that touches user data —
 `no_pii`.

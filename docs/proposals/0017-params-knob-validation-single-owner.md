@@ -146,7 +146,7 @@ At `ba1df32`:
    `nb_harden.sh`, `nb_render_params.sh` and two gates.
 3. `internal/rotate.Plan` now zeroes `To.ToPort` on both act branches, which closes the
    reserved-move bypass — but the change to the rotation loop shipped with **no netsim scenario**,
-   which development.md §7.6 and §14.3 both require.
+   which development.md §7.7 and §14.3 both require.
 4. `front_setup` materialises `node.config.json .front` into a derived
    `$STATE_DIR/front.from-profile.json` — a second file holding the same truth, i.e. the same §2.2
    item 8 violation this RP exists to remove, introduced by the same un-proposed commit.

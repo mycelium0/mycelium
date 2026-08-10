@@ -15,7 +15,11 @@ later. See the LICENSE file in the repository root.
 
 - [ ] Scoped by an RP/ADR (or a trivial fix that needs none).
 - [ ] Gates-first / inert-before-behaviour: new capability is a typed schema + a conformance gate, **default-off**, additive.
-- [ ] `bash tests/run.sh` passes; for Go changes, `make build vet fmt-check test race` passes.
+- [ ] `bash tests/run.sh` and `bash control/selftest.sh` pass; for Go changes,
+      `make build vet fmt-check test race` passes.
+- [ ] The run that you are reporting was on **Linux**, not macOS only (development.md §7.6 —
+      the two disagree, and macOS has called a tree clean that Linux called dirty).
+- [ ] You read the SKIPs. A skipped row exits 0 and counts as a pass in the total.
 - [ ] No node IP / hostname / domain / country / secret / personal contact in the diff or commit messages.
 - [ ] Neutral, honest voice; English only; no anonymity or "operates a network" claim.
 - [ ] Docs/changelog updated if behaviour or canon changed.

@@ -777,7 +777,67 @@ Examples (names are illustrative; updated as implementation progresses):
 - `make netsim SCENARIO=rst_injection|throttle|shutdown|flapping`;
 - `docker compose -f tests/netsim/compose.yml up --build` before the run.
 
-### 7.6. Mandatory rules
+### 7.6. Running the suite — where a result counts
+
+A green suite is a claim about the code. It is only worth what the environment it ran in is worth, and
+this project has now been bitten by every line below. **The authoritative run is on a Linux node.**
+
+**A macOS run does not settle anything.** BSD and GNU `grep` disagree — `\b` in `-E` among them — and on
+2026-08-10 a macOS run reported the tree clean while the node reported the same tree dirty, twice, on
+two different rows of the same gate. macOS is also ~10× slower here (`check_ppn_wording` spawns a
+subprocess per file, so the full suite exceeds ten minutes). Use it to iterate; never to conclude.
+
+**Never run the suite in a node's live checkout.** Use a throwaway clone and delete it afterwards:
+
+```sh
+ssh <node> 'rm -rf /root/myc-test && git clone -q /opt/mycelium /root/myc-test'
+```
+
+A dirty `/opt/mycelium` makes `merge --ff-only` fail, and the node then **silently refuses every
+update** — one of the two causes that stopped this network taking code for days. `rm -rf` the clone when
+you are done; a forgotten one is the same trap one directory over.
+
+**Ship the code by pushing a branch and fetching it**, not by `scp`-ing a patch. `git apply` followed by
+a later `git add -A` leaves changes in the index that `git checkout -- .` will not revert, so the next
+patch fails to apply against a tree that looks clean. It cost two wasted runs.
+
+**Launch detached, or ssh blocks:**
+
+```sh
+ssh <node> 'cd /root/myc-test && chmod +x tests/conformance/*.sh &&
+  (setsid nohup env MYC_REPO_ROOT=$PWD bash tests/run.sh >/root/run.txt 2>&1 </dev/null &)'
+```
+
+Then poll for `^run.sh:` in the output file. Do not pipe `tests/run.sh` into `tail` in the foreground:
+if the call times out you lose the whole transcript, because `tail` had not written anything yet.
+
+**The full set is four commands, not one.** `tests/run.sh` alone leaves the Go half and the control
+tooling unproven:
+
+```sh
+bash tests/run.sh          # conformance gates
+bash control/selftest.sh   # control tooling
+go build ./... && gofmt -l . && go vet ./...
+go test ./... && go test -race ./...
+```
+
+**Read the SKIPs.** A skipped row exits 0 and is indistinguishable from a pass in the total. Every SKIP
+must be one you can name a reason for; an unexplained skip is a row that has quietly stopped testing.
+
+**Redact node output before it reaches a transcript.** Pipe everything through an IPv4 scrubber —
+`sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<addr>/g'` — not a filter for one known line. `ssh` writes
+`Connection to <ip> port 22 …` to stderr on failure, and a `grep -v "port 22"` misses the `closed by
+remote host` variant. A node address in a transcript is the same exposure as one in a commit
+(`no_operator_address_in_tree.sh` guards the tree; nothing guards your terminal).
+
+**Resolve node targets by content, never by line number.** They live in one out-of-band file; editing
+that file shifts the lines and `ssh` then connects to nothing, or worse, to the wrong host.
+
+**`fungi deploy --some-flag X` is not a parse check — it actuates.** To test argument handling, drive the
+entrypoint against a recording stub (`tests/conformance/fungi_scoped.sh` has the harness) or pass
+`--dry-run`. Running it against a live node to "see if the flag is accepted" starts a real converge.
+
+### 7.7. Mandatory rules
 
 - every new component — unit + contract tests;
 - every new contract (config bundle/envelope/telemetry/discovery/adapter) — contract tests;
@@ -914,7 +974,7 @@ Minimum (per transport and broad region, no PII):
 
 - measurements of "what is blocked where" (measurement, not guesswork) — a separate
   subsystem (`measurement/`), feeding policy and incident labelling for detector evaluation
-  (precision/recall, §7.3/§7.6);
+  (precision/recall, §7.3/§7.7);
 - measurements from clients — **only with explicit opt-in**, aggregated and anonymous (§8.5);
 - the measurement dataset is Project Materials under license; third-party ML training on it
   requires written permission (§13).
