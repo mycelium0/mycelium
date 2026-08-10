@@ -55,7 +55,7 @@ resolve_node_address() {
 	# AUTO-DETECT A PUBLIC ADDRESS, and refuse a private one (Audit-0011 #5).
 	#
 	# This used to be `ip -o -4 addr show scope global | head -n1`, and `scope global` INCLUDES RFC1918.
-	# Measured on a live node: that command returns `84.21.173.169 10.13.13.1 10.77.99.5` — the public
+	# Measured on a live node: that command returns `203.0.113.9 10.13.13.1 10.77.99.5` — the public
 	# address, the AmneziaWG gateway and a test interface — and `head -n1` takes whichever the kernel
 	# enumerates first. On a NAT'd VPS the first one IS private, and the loud warning below never fired
 	# because it tests only for the literal placeholder: the node recorded `10.0.0.5`, logged

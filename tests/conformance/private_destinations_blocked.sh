@@ -69,7 +69,14 @@ printf '== private destinations: does every served engine refuse to forward inwa
 # MUST be blocked. Each of these is something a client reached, or could have reached, on a live node.
 MUST_BLOCK="127.0.0.1 127.0.0.53 169.254.169.254 10.0.0.1 172.16.0.1 172.31.255.254 192.168.1.1 100.64.0.1 0.0.0.0 ::1 fe80::1 fc00::1"
 # MUST NOT be blocked — a guard that swallows the ordinary internet is not a guard, it is an outage.
-MUST_PASS="1.1.1.1 8.8.8.8 142.250.185.100 93.184.216.34 2606:4700:4700::1111"
+# Anycast service addresses only. This row used to carry a Google edge address and example.com's old
+# one, both spelled out as literals. (They are not repeated here — a comment quoting an address
+# commits it just as surely as code does, which is exactly how a real node address reached this
+# public repository: inside a comment, quoting a measurement.) Both were third-party infrastructure
+# repository, the second had already gone stale, and neither tested anything the resolvers do not:
+# what must hold is that an ORDINARY PUBLIC address is not swallowed, and an anycast resolver is one
+# while identifying no party. Pinned by no_operator_address_in_tree.sh.
+MUST_PASS="1.1.1.1 8.8.8.8 9.9.9.9 208.67.222.222 2606:4700:4700::1111"
 
 PARAMS="$WORK/params.json"; STATE="$WORK/identities.json"
 jq -n '{

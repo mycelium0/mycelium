@@ -199,7 +199,18 @@ printf '%s\n' 198.51.100.0/24 203.0.113.0/24 | sudo tee /etc/mycelium/region-exc
 sudo /opt/mycelium/scripts/fungi deploy --clients alice --region-exclude /etc/mycelium/region-exclude.txt
 ```
 
-Re-running `deploy` re-renders alice's config in place; re-import it on the client afterwards.
+**On a node that already has an `awg0.conf`, `deploy` will NOT rewrite it** — it refuses to clobber a
+live config, deliberately. So on any node past its first install these two flags are accepted and have
+no effect; the converge warns that it ignored them. To change a client that already exists:
+
+```sh
+sudo /opt/mycelium/scripts/node-bootstrap.sh --awg-issue alice --full-tunnel
+# or: --awg-issue alice --region-exclude /etc/mycelium/region-exclude.txt
+```
+
+Then re-import the config on the device — the file is rewritten in place at
+`/var/lib/mycelium/awg/clients/alice.conf`, and a full-tunnel one carries the line
+`# selective-growth: opt-out (full-tunnel)` so you can tell at a glance which posture it has.
 
 The sing-box and Clash-Meta subscriptions above are unaffected by this — they carry their own routing
 rules and are full-tunnel by default. The asymmetry is real and worth knowing: the same node can hand you

@@ -421,6 +421,26 @@ described accurately rather than minimised. If that is not what you want, say so
 
 ## 8. Open questions (TBD)
 
+### A node operator's address is in this repository's git history
+
+On 2026-08-09 a live node's public IPv4 was committed to two tracked files, inside comments quoting the
+measured output of `ip -o -4 addr show scope global` — the measurement was the evidence for the defect
+being fixed, and it went in verbatim. It was removed from the working tree on 2026-08-10 (replaced with
+`203.0.113.9`, RFC 5737) and `no_operator_address_in_tree.sh` now refuses the whole class on every push.
+
+**It remains reachable in git history**, and rewriting published history is a decision with its own
+costs — every existing clone and every fetched object keeps the old commits, so the rewrite buys less
+than it appears to while breaking anyone who has pulled. The project has faced this trade-off once
+before and chose a guard over a rewrite. That choice is recorded here rather than quietly assumed:
+
+- What is exposed: one node's public IPv4. Not a key, not a credential, not a client identity.
+- What it enables: an observer who reads the history learns that this address runs a Mycelium node.
+- What the guard fixes going forward: nothing of this class can be committed again.
+- What only a history rewrite would fix: the past commits.
+
+If the operator wants the rewrite, it is `git filter-repo` over the two paths plus a force-push and a
+re-signed tip on every node — not a small operation, and it must be done deliberately.
+
 Part of the disclosure infrastructure will be finalised by separate ADRs
 ([development.md §8 "Security"](docs/development.md),
 [contributing.md §7 "Security of contributions"](docs/contributing.md)):

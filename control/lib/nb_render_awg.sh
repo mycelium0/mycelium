@@ -404,6 +404,16 @@ setup_amneziawg() {
 	run install -d -m 0700 "$awg_conf_dir"
 	if [ -f "$awg_conf" ]; then
 		log "awg0.conf already present — leaving it untouched (idempotent; never clobber a live config)."
+		# SAY THAT THE ROUTING FLAGS DID NOTHING. Measured on a live node: `fungi deploy --clients phone
+		# --full-tunnel` exited 0, printed its usual success, and left the client on the safe-narrow
+		# AllowedIPs it already had — because this branch declines to touch a live awg0.conf, which is the
+		# right call, and nothing said the flag had been ignored. The operator had asked for full-tunnel,
+		# been told the deploy succeeded, and still had a client that handshakes and carries nothing.
+		# A flag that is accepted and inert on a path must announce itself there; silence is what makes it
+		# indistinguishable from having worked.
+		if [ "${AWG_FULL_TUNNEL_OPTOUT:-0}" -eq 1 ] || [ -n "${AWG_REGION_EXCLUDE_FILE:-}" ]; then
+			warn "a client-routing flag (--full-tunnel / --region-exclude) was passed, but this node already has an awg0.conf and deploy does not rewrite a live one — SO IT HAD NO EFFECT. Existing clients keep the AllowedIPs they were issued with. To change one: node-bootstrap.sh --awg-issue <name> --full-tunnel (or --region-exclude <file>), then re-import the config on the device."
+		fi
 	else
 		render_awg0 "$awg_conf"
 	fi
