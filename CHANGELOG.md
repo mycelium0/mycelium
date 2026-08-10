@@ -13,6 +13,35 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.77] — 2026-08-11
+
+### Added — the run protocol, written down and then gated
+
+- **`docs/development.md` §7.6, "Running the suite — where a result counts".** The procedure existed only
+  as habit, and every line of the new section is something that cost real time in the last two days:
+  a macOS-only run called a tree clean that the node called dirty (BSD vs GNU `grep` on `\b`, twice, on
+  two rows of the same gate); a `git apply` followed by `git add -A` left an index `git checkout -- .`
+  would not revert, so the next patch failed against an apparently clean tree; a foreground
+  `tests/run.sh | tail` lost its whole transcript when the call timed out; node targets resolved by LINE
+  NUMBER connected to nothing after the file holding them was edited; and `fungi deploy --some-flag X`,
+  used as a "parse check", started a real converge on a live node.
+  It also states the full set — `tests/run.sh` **and** `control/selftest.sh` **and**
+  build/fmt/vet/test/race — and that a SKIP exits 0 and is counted as a pass.
+- **`run_protocol_is_current.sh`** so the protocol cannot rot the way the documents this cycle corrected
+  did. It checks that every script §7.6 names exists, that the runner still prints the `total:` line and
+  `run.sh:` terminator the documented wait-loop polls for, that no gate resolves the repo in a way a
+  scratch-clone run cannot redirect, that the runner still keeps no separate skip tally (so the warning
+  about SKIPs is still true), and that CONTRIBUTING and the PR template do not contradict §7.6 — a
+  contributor reads one of the three, not all three.
+- CONTRIBUTING and the pull-request template now name the full set and the platform caveat.
+
+Two of this gate's own rows were wrong on the first draft and were fixed rather than tuned: it counted
+gates *mentioning* `MYC_REPO_ROOT` (60/102, red about nothing) instead of following the derivation chain
+`REPO_ROOT <- $HERE <- BASH_SOURCE`, and it grepped the runner for "skip" without stripping comments —
+reading the header's prose about which gates skip without Go as evidence of a tally that does not exist.
+That is the defect this suite exists to catch, committed inside the gate that polices the protocol.
+
+
 ## [0.2.76] — 2026-08-10
 
 > Three findings, all mine, all the same class: **something reported success about a thing it had not
