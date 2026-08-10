@@ -13,7 +13,7 @@
 #   `resolve_node_address` auto-detected with `ip -o -4 addr show scope global | head -n1`. `scope global`
 #   INCLUDES RFC1918 — measured on a live node, that command returns three addresses:
 #
-#       84.21.173.169   10.13.13.1   10.77.99.5
+#       203.0.113.9   10.13.13.1   10.77.99.5
 #
 #   the public one, the AmneziaWG gateway, and a test interface. `head -n1` takes whichever the kernel
 #   happens to enumerate first. On a NAT'd VPS the first one is private, and the loud warning at the call
@@ -168,7 +168,7 @@ else
 	badln "resolve_node_address no longer calls _l7_own_public_addr. If it has grown its own idea of what 'public' means, that second definition is unpinned and will drift from the one ss_l7_probe_failsafe.sh guards — which is precisely how \`scope global\` came to be treated as 'public' here while the probe correctly rejected RFC1918."
 fi
 if printf '%s' "$fn" | grep -qE 'scope global'; then
-	badln "resolve_node_address still reads \`ip ... scope global\` directly. That listing INCLUDES RFC1918 — measured on a live node it returns 84.21.173.169, 10.13.13.1 and 10.77.99.5, and \`head -n1\` picks by kernel enumeration order."
+	badln "resolve_node_address still reads \`ip ... scope global\` directly. That listing INCLUDES RFC1918 — measured on a live node it returns 203.0.113.9, 10.13.13.1 and 10.77.99.5, and \`head -n1\` picks by kernel enumeration order."
 else
 	ok "and it does not read \`scope global\` itself (that listing includes RFC1918)"
 fi

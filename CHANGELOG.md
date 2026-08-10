@@ -13,6 +13,51 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.76] — 2026-08-10
+
+> Three findings, all mine, all the same class: **something reported success about a thing it had not
+> done or could not see.** One of them had put a real operator address into a public repository.
+
+### Fixed — a node's address was committed to this repository
+
+- **A live node's public IPv4 was in two tracked files**, inside comments explaining the RFC1918
+  `resolve_node_address` defect, because the measured output of `ip -o -4 addr show scope global` *was*
+  the evidence for that code. It survived review, a 100-gate suite, gitleaks and `check_ppn_wording` —
+  every one of those hunts secrets, framing or contact details, and a node's public address is none of
+  those. It is simply somebody's infrastructure, published. Redacted to `203.0.113.9` (RFC 5737) rather
+  than deleted: the measurement is the whole argument for that code, and a TEST-NET-3 example makes the
+  same argument with nothing real in it. **It remains in git history** — see the note in SECURITY.md.
+- **`no_operator_address_in_tree.sh`.** Audit-0011 recorded, in the project's favour, that "every IPv4
+  literal in the tree is a public well-known or an IETF assignment". That was true when written and
+  **nothing enforced it**, so four days later it stopped being true. Now every IPv4 literal in every
+  tracked file must be a documentation range, an IETF special-purpose block, private/loopback/CGNAT, or
+  one of six named anycast resolvers. IPv6 global unicast is held to the same rule. The gate refuses a
+  scan that examined nothing — a clean report from a scan that ran over zero files is exactly what was
+  believed before.
+- It immediately found two more: `private_destinations_blocked.sh` hard-coded a Google edge address and
+  example.com's old one (already stale) as MUST-PASS targets. Replaced with anycast resolvers, which test
+  the same property — an ordinary public address is not swallowed — while identifying no party. Note
+  documentation ranges could **not** be used here: the engine blocklists legitimately contain them.
+
+### Fixed — a routing flag that was accepted and did nothing
+
+- **`deploy --full-tunnel` on a node that already has an `awg0.conf` had no effect, silently.** Measured:
+  `fungi deploy --clients phone --full-tunnel` exited 0, printed its usual success, and left the client
+  on the safe-narrow `AllowedIPs` it already had. The cause is correct behaviour — that branch refuses to
+  clobber a live config — but nothing said the flag had been ignored, so the operator had asked for a
+  full tunnel, been told the deploy succeeded, and still had a client that handshakes and carries
+  nothing. The converge now warns, names the flag, and gives the verb that does work
+  (`--awg-issue <name> --full-tunnel`). QUICKSTART documents the same path, including the
+  `# selective-growth: opt-out (full-tunnel)` marker that tells the two postures apart at a glance.
+
+### Operational
+
+- All three nodes' AmneziaWG clients now carry `AllowedIPs = 0.0.0.0/0`, re-issued via `--awg-issue`
+  after a snapshot. One of them had been on the tunnel-subnet default — connecting, holding the peer up,
+  and carrying no user traffic — since it was first issued. Nobody chose that; it was a default nothing
+  surfaced.
+
+
 ## [0.2.75] — 2026-08-10
 
 > Two live defects, found by attacking my own answer rather than defending it. The operator objected to
