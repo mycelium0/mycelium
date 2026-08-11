@@ -13,6 +13,43 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.78] — 2026-08-12
+
+### Added — a conclusion is worth what its evidence is worth
+
+`refactoring.md` §2.7 and `development.md` §2.2 item 12 (S1, or S0 for a safety or reachability claim).
+Written after two unfounded conclusions in a row were reported as measured results, in one afternoon:
+
+- A client probe failed against all three nodes and the failure was reported as network filtering. The
+  default route ran through an unrelated local tunnel, so nothing about the nodes had been measured.
+- The correction — "that tunnel is not active" — rested on comparing the egress address for **one**
+  destination. That destination was one the tunnel released directly; the nodes' addresses it captured.
+  A single sample was generalised into a global property.
+
+Neither was resolved by more reasoning. Both were resolved by one cheap experiment built to separate the
+hypotheses — the same probe run back-to-back with the bypass on and off, which reversed the conclusion in
+one minute. Reasoning generates candidates; it never closes them.
+
+The rule is operational, not a slogan: name the instrument; design the experiment so it could fail;
+assert the strong form ("the egress address **equals** the node's address", not "changed" — the weak form
+is satisfied by accident); do not generalise one sample; verify on the platform that will run it (§7.6);
+and state the boundary of what was measured in the same breath as the result, because a scope that is not
+stated is read as universal.
+
+`run_protocol_is_current.sh` gates it: the rule must exist in **both** documents (they have different
+readers — one is read while writing code, the other while auditing it), development.md must **cite**
+refactoring.md rather than restate it (two unlinked copies of one rule is the duplicate-source-of-truth
+defect §2.2 item 8 forbids, committed in prose), and the five operational clauses must survive. Deleting
+the section, dropping the cross-reference, or reducing it to "just verify things" each turns it red.
+
+### Measured
+
+All six sing-box transport families reach all three nodes from an operator workstation and carry traffic
+to a real destination — asserted in the strong form: the observed egress address **equals** the node's
+own address, per family, per node. Scope, stated: one Wi-Fi link, one moment, with the workstation's
+local tunnel explicitly bypassed. It is not a claim about any other network or any other time.
+
+
 ## [0.2.77] — 2026-08-11
 
 ### Added — the run protocol, written down and then gated

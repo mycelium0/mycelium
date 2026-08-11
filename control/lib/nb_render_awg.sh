@@ -816,8 +816,14 @@ _awg_keys_matching() {
 				p="$(awg pubkey <<<"$k" 2>/dev/null || true)"
 				[ -n "$p" ] || continue
 				case " $want " in *" $p "*) printf '%s\n' "$f"; break ;; esac
-			done < <(jq -r '.. | objects | .private_key? // empty' "$f" 2>/dev/null)
-		done < <(find "$root" -type f -size -64k 2>/dev/null)
+			# `|| true` INSIDE the substitution. This sweep deliberately reads EVERY file under the state
+			# roots, so most of what it hands jq is not JSON and jq exits non-zero — expected, and already
+			# handled by the loop simply getting no lines. `2>/dev/null` silences the message but not the
+			# STATUS, so once the entrypoint gained `set -E` + an ERR trap, every non-JSON file in the
+			# state dir made a successful revoke print "UNEXPECTED failure (exit 5) — this is a bug".
+			# Measured on a live node during an awg-revoke that otherwise completed correctly.
+			done < <(jq -r '.. | objects | .private_key? // empty' "$f" 2>/dev/null || true)
+		done < <(find "$root" -type f -size -64k 2>/dev/null || true)
 	done
 }
 
