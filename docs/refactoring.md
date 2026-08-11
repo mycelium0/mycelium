@@ -101,6 +101,60 @@ anonymity or indistinguishability in order to maintain reachability must be an *
 deliberate, and documented degradation policy**, not a silent branch in the code
 (cf. §15.5).
 
+### 2.7. A conclusion is worth what its evidence is worth
+
+Every claim in an audit, a finding, a commit message or a report is either something a **mechanism
+produced** or it is a hypothesis, and it must be labelled as one. "The code reads correctly", "this must
+be why", "it looks like the network is filtering" are hypotheses. They may be stated — they must not be
+stated as results.
+
+This is the same rule §2.1 applies to code, turned on the person doing the auditing. The dominant defect
+this project keeps finding is a component reporting confidently on something it cannot observe; a
+reviewer who explains a symptom without measuring is that defect, in a chair.
+
+**Before a cause is named, the instrument is verified.** Measured, in one afternoon:
+
+- A client probe failed against all three nodes and the failure was explained as network filtering. The
+  default route went through an unrelated tunnel, so nothing about the nodes had been measured at all.
+- The next conclusion — "that tunnel is not active" — rested on comparing the egress address for **one**
+  destination. That destination happened to be one the tunnel released directly; the nodes' addresses it
+  captured. A single-sample probe was generalised into a global property.
+- A gate reported a tree clean on macOS that the same gate reported dirty on Linux (BSD vs GNU `grep`).
+- A gate row went green under a mutation that should have turned it red, because the probe tripped a
+  *different* guard with the same exit code.
+
+None of these was resolved by more reasoning. Each was resolved by one experiment designed to separate
+the hypotheses, and each experiment was cheap. Reasoning is what generates the candidates; it is never
+what closes them.
+
+**The rules that follow from that:**
+
+1. **Name the instrument before the finding.** What produced this number, on what host, at what time,
+   over what path? A result with no instrument named is not reportable.
+2. **Design the experiment to be able to fail.** If the observation is equally consistent with two
+   causes, it has decided nothing. Prefer the single back-to-back comparison that separates them over
+   any amount of further inspection. (Bypass on / bypass off, in the same minute, changed one letter of
+   this project's understanding of its own network.)
+3. **Assert the strong form, not the convenient one.** "The egress address changed" is satisfied by any
+   accident; "the egress address **equals the node's address**" is satisfied only by the thing being
+   claimed. Reach for the assertion an unlucky coincidence cannot pass.
+4. **One sample is not a property.** Before generalising, check whether the sample was special. The
+   probe that decided a tunnel was inactive would have survived any amount of re-reading and died to one
+   second destination.
+5. **Verify on the platform that will run it.** A result from a different libc, shell, or toolchain is a
+   hypothesis about the target, not a measurement of it (development.md §7.6).
+6. **When corrected, re-derive rather than patch the story.** Two explanations in a row were wrong here
+   because each new fact was fitted onto the previous narrative instead of restarting from the
+   observations. Throw the narrative away; keep the measurements.
+7. **State the boundary of what was measured, in the same breath as the result.** "All six transports
+   reach all three nodes" was true of one Wi-Fi link at one moment, bypassing a local tunnel — and
+   useless, even misleading, without that clause. A result whose scope is not stated will be read as
+   universal.
+
+An audit that reports only what it measured, and marks the rest as unmeasured, is more useful than one
+that explains everything. The second kind is how a repository accumulates sentences that were true when
+written and that nothing re-reads.
+
 ---
 
 ## 3. What Constitutes an Architecturally Significant Change

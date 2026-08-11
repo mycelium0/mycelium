@@ -349,6 +349,24 @@ These are not recommendations. Violation is a development defect at severity S0/
     posture + `live_artifact_posture.sh`, in one commit). An advertised obfuscation/shape whose
     render path does not yet exist is likewise forbidden — wire it before enabling its inbound.
 
+12. **Reporting a conclusion the evidence does not carry.** Every claim in a commit message, an audit, a
+    runbook, a gate's output or a status report is either something a **mechanism produced** or it is a
+    hypothesis, and it says which. "The code reads correctly", "this must be why", "the network is
+    filtering it" are hypotheses; they may be written, they may not be written as results. This is the
+    standard the rest of §2.2 applies to code, applied to the person writing about it — a reviewer who
+    explains a symptom without measuring is a component reporting confidently on what it cannot observe,
+    which is the defect class this project spends most of its time removing.
+
+    Concretely, before a cause is named: **name the instrument** (what produced this number, on what
+    host, over what path); **design the experiment so it could fail** — an observation that fits two
+    causes equally has decided nothing, so prefer the one back-to-back comparison that separates them;
+    **assert the strong form** ("the egress address equals the node's address", not "the egress address
+    changed" — the weak form is satisfied by accident); **do not generalise one sample** into a property;
+    **verify on the platform that will run it** (§7.6); and **state the boundary of what was measured in
+    the same breath as the result**, because a scope that is not stated is read as universal. Severity is
+    **S1** when the unfounded conclusion reaches a document others act on, **S0** when it is a safety or
+    reachability claim. See [refactoring.md §2.7](refactoring.md).
+
 #### Permitted (how layers communicate):
 - through **contracts** (config-bundle format, control-plane envelope, telemetry schema,
   transport adapter, discovery API);

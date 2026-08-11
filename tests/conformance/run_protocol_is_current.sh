@@ -168,6 +168,42 @@ for pair in "CONTRIBUTING.md:CONTRIBUTING" ".github/PULL_REQUEST_TEMPLATE.md:the
 	fi
 done
 
+# ---------------------------------------------------------------------------------------------------
+# 5. THE EVIDENCE RULE EXISTS AND IS CROSS-REFERENCED.
+#
+# development.md §2.2 item 12 and refactoring.md §2.7 are one rule written in two places, because the
+# two documents have different readers: one is read while writing code, the other while auditing it. A
+# rule that survives in only one of them is a rule half the project never sees. They were added after
+# two unfounded conclusions in a row were stated as results — a client probe failing was called network
+# filtering when the default route went through an unrelated tunnel, and the follow-up "that tunnel is
+# inactive" rested on a single destination that the tunnel happened to release directly.
+printf '\n-- the evidence rule is present in both documents that carry it --\n'
+REF="$REPO_ROOT/docs/refactoring.md"
+if [ ! -f "$REF" ]; then
+	badln "docs/refactoring.md is missing; it is one of the two homes of the evidence rule"
+else
+	dev_has=0; ref_has=0
+	grep -qE 'Reporting a conclusion the evidence does not carry' "$DEV" && dev_has=1
+	grep -qE '^### 2\.7\..*evidence' "$REF" && ref_has=1
+	if [ "$dev_has" -eq 1 ] && [ "$ref_has" -eq 1 ]; then
+		ok "the rule is in development.md §2.2 and refactoring.md §2.7"
+	else
+		badln "the evidence rule is missing from $( [ "$dev_has" -eq 0 ] && printf 'development.md §2.2 ' )$( [ "$ref_has" -eq 0 ] && printf 'refactoring.md §2.7 ' )— one document's readers would never see it. It was written because two unfounded conclusions in a row were reported as measured results."
+	fi
+	# The two must POINT AT EACH OTHER, or they drift into two different rules with the same name.
+	grep -q 'refactoring.md §2.7' "$DEV" \
+		&& ok "and development.md cites refactoring.md §2.7 rather than restating it" \
+		|| badln "development.md states the evidence rule without citing refactoring.md §2.7. Two unlinked copies of one rule diverge — that is the duplicate-source-of-truth defect §2.2 item 8 forbids, committed in prose."
+	# The operational clauses are the rule. Prose without them is a slogan.
+	miss=""
+	for clause in "name the instrument" "could fail" "strong form" "one sample" "boundary of what"; do
+		grep -qi "$clause" "$DEV" || grep -qi "$clause" "$REF" || miss="$miss '$clause'"
+	done
+	[ -z "$miss" ] \
+		&& ok "and the operational clauses survive (instrument, falsifiable, strong form, one sample, stated boundary)" \
+		|| badln "the evidence rule has been reduced to a slogan — these operational clauses are gone:$miss. 'Verify your conclusions' with no method attached is advice nobody can fail to believe they are following."
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the documented run protocol has drifted from the tree it describes.\n' >&2
