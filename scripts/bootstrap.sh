@@ -201,7 +201,7 @@ if [ -d "$OUT_SUBS" ]; then
 	while IFS= read -r -d '' sub; do
 		log "    - ${sub#"$REPO_ROOT"/}"
 		found=1
-	done < <(find "$OUT_SUBS" -type f -name '*.txt' -print0 2>/dev/null)
+	done < <(find "$OUT_SUBS" -type f -name '*.txt' -print0 2>/dev/null || true)
 	[ "$found" -eq 1 ] || warn "no subscription files found under $OUT_SUBS yet — check the playbook output."
 else
 	warn "subscriptions directory not found: $OUT_SUBS
