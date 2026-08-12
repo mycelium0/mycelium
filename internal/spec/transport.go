@@ -462,6 +462,16 @@ type Vocab struct {
 	// restated: a consumer compares against these numbers; the policy that produced them lives in this
 	// package and nowhere else.
 	ParamsValidation ParamsValidationVocab `json:"params_validation"`
+	// BlockFamilies maps each transport class to the family that blocks WITH it — the equivalence the
+	// RP-0013 ">= 2 independent families" floor is counted over. Emitted because the shell bundle
+	// renderer is the one that actually runs on a node (control/myceliumctl is the shell tool;
+	// myceliumctl-go is installed non-load-bearing), and it must COMPARE this rather than re-derive it
+	// (ADR-0038). Two tools disagreeing about whether a bundle is publishable is exactly the
+	// duplicate-truth defect §2.2 item 8 forbids — measured in Audit-0012, where the Go renderer refused
+	// a single-family bundle and the shell one emitted it at rc=0.
+	BlockFamilies map[string]string `json:"block_families"`
+	// IndependentFamilyFloor is how many distinct block families a served bundle must span.
+	IndependentFamilyFloor int `json:"independent_family_floor"`
 }
 
 // ParamsValidationVocab is the emitted half of the params-knob validation contract. Additive: a shell
@@ -505,6 +515,8 @@ func NewVocab() Vocab {
 		OperatorToggleKeys: OperatorToggleKeys(),
 		ClientFingerprints: ClientFingerprints(),
 		Protos:             TransportRegistry(),
+		BlockFamilies:          blockFamilyVocab(),
+		IndependentFamilyFloor: IndependentFamilyFloor,
 		ParamsValidation: ParamsValidationVocab{
 			Hysteria2HopPorts:           Hysteria2HopPortBounds(),
 			MaxPortFieldDigits:          maxPortFieldDigits,

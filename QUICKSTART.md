@@ -212,9 +212,29 @@ Then re-import the config on the device — the file is rewritten in place at
 `/var/lib/mycelium/awg/clients/alice.conf`, and a full-tunnel one carries the line
 `# selective-growth: opt-out (full-tunnel)` so you can tell at a glance which posture it has.
 
-The sing-box and Clash-Meta subscriptions above are unaffected by this — they carry their own routing
-rules and are full-tunnel by default. The asymmetry is real and worth knowing: the same node can hand you
-one client that routes everything and another that routes nothing.
+The sing-box and Clash-Meta files above are unaffected by this, because they carry no routing at all.
+Checked on the shipped tool: the sing-box file is `{"outbounds": [...]}` — no `route`, no `rules`, no
+`final`, no `inbounds` — and the Clash file is proxies and proxy-groups with no `rules:` and no `mode:`.
+They are **fragments to merge into your client's own config**, not standalone configs, and whatever your
+client routes through them is your client's decision. This section used to say they "carry their own
+routing rules and are full-tunnel by default"; that was false of both files.
+
+### Getting the links onto a phone
+
+Most phone clients import a share link rather than a config file. The node emits them, and this is the
+one command that produces them:
+
+```sh
+sudo /opt/mycelium/control/myceliumctl bundle \
+     --params /var/lib/mycelium/params.json \
+     --state  /var/lib/mycelium/identities.json \
+     --out    /tmp/bundle.json
+jq -r '.endpoints[].link' /tmp/bundle.json     # vless:// hysteria2:// tuic:// ss://
+```
+
+One line per served family, in the schemes phone clients import. Copy them out over your existing SSH
+session — as with everything else here, the node publishes no subscription URL by default, deliberately:
+an always-on public subscription endpoint is both a single point of block and a discovery surface.
 
 **Then actually dial it**, from a different machine, before you trust the node. `deploy` reporting
 success means the node is serving locally; it does not mean your provider's security group, or the
