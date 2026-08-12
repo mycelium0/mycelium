@@ -38,8 +38,19 @@ a file that does not exist. Check what you actually sign with before trusting ei
 > both cheap:
 >
 > ```sh
-> # 1. in the repository, so every downloader has it after the first fetch
-> printf '%s %s\n' "$(git log -1 --format=%GS)" "$(cut -d' ' -f1,2 ~/.ssh/id_rsa.pub)" > allowed_signers
+> # 1. in the repository, so every downloader has it after the first fetch.
+> #    The principal is a LITERAL — your own identifier, whatever you register on the account. It is
+> #    NOT `git log -1 --format=%GS`, which this line used to use: %GS prints a principal only once an
+> #    allowed_signers already exists containing that key, so the command written to CREATE the file
+> #    required the file. Reproduced from an empty repository with a real SSH-signed commit
+> #    (Audit-0012 B4): %GS was empty, the line came out as " ssh-ed25519 AAAA…" with a leading space
+> #    and no principal, `awk 'NF{print $1; exit}'` then yielded `ssh-ed25519` — the key TYPE — and the
+> #    commit verified as `U`, not `G`.
+> printf '%s %s\n' "you@example.org" "$(cut -d' ' -f1,2 ~/.ssh/id_rsa.pub)" > allowed_signers
+>
+> # sanity: the file must parse, and the tip commit must verify against it
+> git -c gpg.ssh.allowedSignersFile=allowed_signers log -1 --format=%G?   # expect: G
+> ssh-keygen -Y find-principals -f allowed_signers -s <(git cat-file commit HEAD | sed -n '/^gpgsig/,/END SSH SIGNATURE/p') 2>/dev/null || true
 >
 > # 2. on the GitHub account as a SIGNING key (Settings -> SSH and GPG keys -> New SSH key ->
 > #    key type "Signing Key"), which makes commits show Verified and gives a second, independent
@@ -84,22 +95,33 @@ git checkout --detach vX.Y.Z
 make dist DIST_REF=vX.Y.Z                  # → dist/mycelium-X.Y.Z.tar.gz + dist/SHA256SUMS
 MYC_REPO_ROOT="$PWD" bash tests/conformance/release_dist_sane.sh
 
+# Steps 4-7 leave the repository, so they pin REPO and use absolute paths throughout, and every `gh`
+# call carries --repo. Measured (Audit-0012 B3): without it, `gh release download` from /tmp/rel fails
+# with "failed to run git: fatal: not a git repository" and never reaches GitHub — and these are exactly
+# the three steps that exist to prove the signed bytes are the published bytes.
+REPO=mycelium0/mycelium
+REPO_DIR="$PWD"          # you are still in the checkout, detached at the tag, from step 3
+
 # 4. wait for the workflow, then DOWNLOAD what it actually published
-mkdir -p /tmp/rel && cd /tmp/rel
-gh release download vX.Y.Z --pattern 'mycelium-*.tar.gz' --pattern 'SHA256SUMS' --clobber
+mkdir -p /tmp/rel
+gh release download vX.Y.Z --repo "$REPO" --dir /tmp/rel \
+  --pattern 'mycelium-*.tar.gz' --pattern 'SHA256SUMS' --clobber
 
 # 5. assert byte equality against the local build. If this differs, DO NOT SIGN — something landed
 #    between the tag and the build, or the workflow built a different ref. Investigate, do not paper over.
-cmp /tmp/rel/SHA256SUMS "$OLDPWD/dist/SHA256SUMS" \
+cmp /tmp/rel/SHA256SUMS "$REPO_DIR/dist/SHA256SUMS" \
   || { echo "published SHA256SUMS != locally built at the tag — STOP"; exit 1; }
 
 # 6. sign the DOWNLOADED copy — the bytes the world will verify — and attach the signature
 ssh-keygen -Y sign -f ~/.ssh/id_rsa -n file /tmp/rel/SHA256SUMS      # → SHA256SUMS.sig
-gh release upload vX.Y.Z /tmp/rel/SHA256SUMS.sig
+gh release upload vX.Y.Z --repo "$REPO" /tmp/rel/SHA256SUMS.sig
 
-# 7. re-verify in SIGNED mode, from the download directory, as a stranger would
-scripts/verify-release.sh /tmp/rel --allowed-signers allowed_signers \
-  --signer "$(awk 'NF{print $1; exit}' allowed_signers)" --tag vX.Y.Z
+# 7. re-verify in SIGNED mode, from the download directory, as a stranger would.
+#    --allowed-signers is ABSOLUTE: verify-release.sh cd's into the directory it is checking, so a
+#    relative key path resolves against /tmp/rel and is not found (Audit-0012 B5).
+scripts/verify-release.sh /tmp/rel \
+  --allowed-signers "$REPO_DIR/allowed_signers" \
+  --signer "$(awk 'NF{print $1; exit}' "$REPO_DIR/allowed_signers")" --tag vX.Y.Z
 ```
 
 `make dist` is reproducible using git's internal zlib: re-running it at the same tag yields a
@@ -117,7 +139,7 @@ known-good *config*; the revision and the spine have already advanced by then
    commit on `main` and push the revert, signed, the normal way (`git revert`, then
    `git merge --no-ff -S` if it went through a branch). Armed nodes converge onto the revert on their
    next tick; that is the fastest lever available and it needs no node access.
-2. **Delete the release, keep the tag.** `gh release delete vX.Y.Z` removes the assets that
+2. **Delete the release, keep the tag.** `gh release delete vX.Y.Z --repo mycelium0/mycelium` removes the assets that
    `QUICKSTART.md` resolves to. Leave the tag in place — deleting a pushed tag rewrites what other
    people already fetched, and a tag that resolves to nothing is worse than one that resolves to a
    known-bad commit you have documented. Add a `## [X.Y.Z] — YANKED` line to CHANGELOG.md saying why.
