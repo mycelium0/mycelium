@@ -94,14 +94,29 @@ render_serve_bundle() {
 	[ -f "$IDENTITIES_JSON" ] || { warn "identities.json missing; skipping bundle render."; return 0; }
 
 	log "rendering served distribution bundle via myceliumctl -> $BUNDLE_CANDIDATE"
+	# Resolved BEFORE the dry-run branch so the preview prints the command that would actually run — a
+	# dry-run showing different arguments from the real call is a preview of something else.
+	local _awg_conf=""
+	_awg_conf="$(ls -1 "$STATE_DIR"/awg/clients/*.conf 2>/dev/null | sort | head -1)"
+	[ -f "${_awg_conf:-/nonexistent}" ] || _awg_conf=""
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "[dry-run] $MYCTL bundle --params $PARAMS_JSON --state $IDENTITIES_JSON --out $BUNDLE_CANDIDATE"
+		log "[dry-run] $MYCTL bundle --params $PARAMS_JSON --state $IDENTITIES_JSON${_awg_conf:+ --awg-client $_awg_conf} --out $BUNDLE_CANDIDATE"
 		log "[dry-run] would serve validated bundle at $BUNDLE_SERVED (fail-closed: keep last-known-good on failure)"
 		return 0
 	fi
 
 	# Render the candidate. A non-zero exit means NOTHING is promoted (fail-closed).
-	if ! "$MYCTL" bundle --params "$PARAMS_JSON" --state "$IDENTITIES_JSON" --out "$BUNDLE_CANDIDATE" 2>/dev/null; then
+	# Pass the AmneziaWG client config when this node has one, so the bundle advertises the second
+	# family the node actually serves (Audit-0012 / plan P4). A fresh node defaults on two REALITY
+	# protos — ONE block family — and the RP-0013 floor correctly refuses to serve a bundle a single
+	# block would empty; AWG is what makes that node genuinely two-family, and it was delivered as a
+	# file and advertised nowhere. Absent (--no-amneziawg, or before the first client is issued), the
+	# flag is omitted and the render is exactly what it was.
+	#
+	# FIRST client by name order, matching the endpoint credential the bundle already embeds: the served
+	# bundle carries ONE client's material, not everyone's.
+	if ! "$MYCTL" bundle --params "$PARAMS_JSON" --state "$IDENTITIES_JSON" \
+		${_awg_conf:+--awg-client "$_awg_conf"} --out "$BUNDLE_CANDIDATE" 2>/dev/null; then
 		rm -f "$BUNDLE_CANDIDATE" 2>/dev/null || true
 		if [ -f "$BUNDLE_SERVED" ]; then
 			warn "bundle render failed; keeping the last-known-good served bundle ($BUNDLE_SERVED) — fail-closed."
