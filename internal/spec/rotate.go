@@ -172,6 +172,17 @@ type RotationLimits struct {
 	MaxPerWindow          int           `json:"max_per_window"`             // max rotations per HALF-OPEN Window (anti-beacon)
 	MaxRollbacksPerWindow int           `json:"max_rollbacks_per_window"`   // rollback budget before the planner latches to hold
 	CooldownAfterRollback time.Duration `json:"cooldown_after_rollback_ns"` // hold-only span after any rollback
+
+	// MaxSuppressionTTL caps the suppression-lease backoff (ADR-0039). The n-th consecutive suppression
+	// of a member lasts MinInterval<<(n-1), and without a ceiling that term grows past any horizon —
+	// producing, in effect, the permanent suppression the lease exists to prevent, while still passing
+	// validation because an expiry is technically present. Zero means "use the 24h default".
+	MaxSuppressionTTL time.Duration `json:"max_suppression_ttl_ns"`
+	// MaxOutstandingSuppressions bounds how much of the node's service surface the loop may remove at
+	// once. Each individual grant can be justified while the sequence is not: one correlated fault — a
+	// bad render, an engine restart — could otherwise suppress every member, one defensible step at a
+	// time. Zero means unbounded, which is only ever right in a test.
+	MaxOutstandingSuppressions int `json:"max_outstanding_suppressions"`
 }
 
 // Validate checks the limits are internally consistent (positive durations, counts >= 1, margin in
