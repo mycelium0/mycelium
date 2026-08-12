@@ -13,6 +13,19 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.81] — 2026-08-12
+
+### Corrected
+
+The 0.2.80 entry and its commit message stated that an earlier draft of
+`suppression_lease_bounded.sh` "lost every row after the first refusal, because a fail-closed `die`
+exited the harness". **That is not true of that gate.** `drive()` runs its whole body in a subshell, so
+a `die` ends only that subshell and `rc=$?` catches it — measured: removing the redundant inner subshell
+changes nothing, twelve rows either way. The truncation happened in a throwaway scratch harness used to
+drive the executor on a node. Two harnesses were conflated and the provenance was written into a commit
+message as measured fact, which is the rule this project put in `refactoring.md` §2.7 the day before.
+The misleading comment is removed from the gate and the correction recorded there.
+
 ## [0.2.80] — 2026-08-12
 
 ### Fixed — the loop could take a transport away and had no move that gave it back
