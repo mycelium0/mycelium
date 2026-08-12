@@ -387,6 +387,53 @@ myc_render_bundle() {
 			}]')"
 	done
 
+	# AMNEZIAWG — the family the node serves and the bundle never advertised (Audit-0012 / plan P4).
+	#
+	# WHY IT BELONGS HERE. A fresh node defaults on {vless_reality_vision, vless_reality_grpc}, both
+	# class reality-tcp, i.e. ONE block family — and the bundle therefore fell below the RP-0013 floor
+	# that exists so a single-family block never takes a client's last path. But that node genuinely
+	# serves two independent families: REALITY and AmneziaWG. The floor was right and the endpoint set
+	# was incomplete: AWG was delivered as a file and advertised nowhere.
+	#
+	# WHY THE LINK IS A CONFIG, NOT A URI. There is no standard share-link scheme for WireGuard-family
+	# transports, and inventing one would produce a Link no client can parse. Endpoint.Link is
+	# documented as "opaque dialable client config (e.g. a vless:// URL)" — opaque, and a CONFIG. So it
+	# carries the wg-quick/awg config verbatim: the exact bytes every client of this family imports, and
+	# the exact bytes a QR encodes. The registry's Scheme for amneziawg stays empty, correctly.
+	#
+	# WHAT IT ADDS TO THE ARTIFACT. That config contains the client's PrivateKey. The bundle already
+	# carries per-client credentials — the UUID inside every vless:// link, the password inside
+	# hysteria2:// — so this is the same class of material, not a new one, and it is material this node
+	# already mints, already stores, and already hands over as a file. It does change WHERE it appears:
+	# from a 0600 file to the served bundle. The bundle vhost binds loopback by default (nb_serve_bundle),
+	# so the exposure surface is unchanged; a node that fronts it publicly was already publishing
+	# credentials.
+	#
+	# OPTIONAL BY CONSTRUCTION. With no --awg-client given, nothing is emitted and the bundle renders
+	# byte-identically to before — so no existing node changes shape on an update.
+	if [ -n "${MYC_BUNDLE_AWG_CONF:-}" ]; then
+		if [ ! -f "$MYC_BUNDLE_AWG_CONF" ]; then
+			myc_die "bundle: --awg-client '$MYC_BUNDLE_AWG_CONF' does not exist. Refusing to render a bundle that silently omits a family the node serves."
+		fi
+		local awg_conf awg_class
+		awg_conf="$(cat "$MYC_BUNDLE_AWG_CONF" 2>/dev/null)"
+		[ -n "$awg_conf" ] || myc_die "bundle: --awg-client '$MYC_BUNDLE_AWG_CONF' is empty."
+		# The class comes from the Go-owned registry, never restated (ADR-0038).
+		awg_class="$(jq -r '.protos[] | select(.proto == "amneziawg") | .class' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}" 2>/dev/null)"
+		[ -n "$awg_class" ] && [ "$awg_class" != null ] 			|| myc_die "bundle: the vocab has no class for amneziawg — refusing to invent one."
+		endpoints_json="$(printf '%s' "$endpoints_json" | jq -c \
+			--arg class "$awg_class" --arg region "$region" --arg link "$awg_conf" \
+			'. + [{
+				tag: "mycelium-amneziawg",
+				transport_class: $class,
+				region: $region,
+				priority: 0,
+				health: "unknown",
+				link: $link
+			}]')"
+		myc_log "bundle: included the AmneziaWG client config as an endpoint (family: $awg_class)."
+	fi
+
 	# Top-level Bundle: version (NetworkStateVersion), endpoints[], generated_at (RFC-3339 UTC).
 	local generated_at bundle
 	generated_at="$(myc_now_utc)"
