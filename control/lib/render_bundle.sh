@@ -405,6 +405,34 @@ myc_render_bundle() {
 	if [ "$(printf '%s' "$bundle" | jq '.endpoints | length')" -lt 1 ]; then
 		myc_die "bundle: zero endpoints rendered (Bundle.Validate requires >=1)."
 	fi
+	# THE INDEPENDENT-FAMILY FLOOR, enforced where the render actually happens (Audit-0012 B7).
+	#
+	# internal/spec/bundle_render.go refuses a bundle spanning fewer than two independent block families
+	# — the RP-0013 precondition for e2e client recovery: a single-family block must never remove a
+	# client's last path. But the node serves through the SHELL tool (nb_install.sh keeps MYCTL as the
+	# shell renderer; myceliumctl-go is installed non-load-bearing), and this renderer had no such
+	# check. Measured: one proto enabled, `bundle` rc=0, one endpoint, published. Two tools named
+	# myceliumctl disagreeing about whether the DEFAULT profile is publishable is the duplicate-truth
+	# defect §2.2 item 8 forbids.
+	#
+	# The equivalence and the threshold are Go-owned and READ from control/vocab.json
+	# (.block_families, .independent_family_floor) — never restated here (ADR-0038). A class whose
+	# family the vocab does not know is a fail-closed refusal, not a silent pass: an unmapped class
+	# would otherwise count as its own family and inflate the total.
+	if command -v jq >/dev/null 2>&1; then
+		_bf_vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+		if [ -f "$_bf_vocab" ]; then
+			_floor="$(jq -r '.independent_family_floor // 2' "$_bf_vocab")"
+			_unmapped="$(printf '%s' "$bundle" | jq -r --slurpfile v "$_bf_vocab" \
+				'[.endpoints[].transport_class | select(($v[0].block_families // {})[.] == null)] | unique | join(" ")')"
+			[ -z "$_unmapped" ] || myc_die "bundle: transport class(es) '$_unmapped' have no block family in the Go-owned vocab — refusing to count independent families from an incomplete map."
+			_fams="$(printf '%s' "$bundle" | jq -r --slurpfile v "$_bf_vocab" \
+				'[.endpoints[].transport_class | ($v[0].block_families // {})[.]] | unique | length')"
+			if [ "${_fams:-0}" -lt "${_floor:-2}" ]; then
+				myc_die "bundle: the served transports span only ${_fams:-0} independent block family, floor is ${_floor:-2} (RP-0013). A single-family block would take this client's last path away. Enable a transport from a different family before serving a bundle."
+			fi
+		fi
+	fi
 	if ! printf '%s' "$bundle" | jq -e '.endpoints | all(.health == "unknown")' >/dev/null 2>&1; then
 		myc_die "bundle: a non-unknown health label leaked (Phase-1 invariant; Bundle.Validate rejects it)."
 	fi

@@ -347,6 +347,7 @@ GATES=(
 	"tests/conformance/suppression_lease_bounded.sh"
 	"tests/conformance/revoke_guarantee_is_earned.sh"
 	"tests/conformance/release_runbook_executes.sh"
+	"tests/conformance/bundle_family_floor_both_renderers.sh"
 	"tests/conformance/promote_paths_converge.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_apply_gated.sh"

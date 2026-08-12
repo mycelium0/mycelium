@@ -203,5 +203,16 @@
       "shadowsocks_port"
     ],
     "hysteria2_hop_interval_pattern": "^[1-9][0-9]{0,4}(ms|s|m|h)$"
-  }
+  },
+  "block_families": {
+    "amneziawg-udp": "amneziawg-udp",
+    "quic-udp": "own-tls-sni",
+    "reality-tcp": "reality-tcp",
+    "shadowsocks-tcp": "shadowsocks-tcp",
+    "shadowtls-tcp": "shadowtls-tcp",
+    "trojan-tls": "own-tls-sni",
+    "ws-tls": "own-tls-sni",
+    "xhttp-tls": "own-tls-sni"
+  },
+  "independent_family_floor": 2
 }
