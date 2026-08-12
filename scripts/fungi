@@ -65,7 +65,13 @@ fungi_status() {
 	local lf="${STATE_DIR:-/var/lib/mycelium}/rotate.leases.json"
 	printf 'suppressed by the rotation loop:\n'
 	if [ ! -f "$lf" ]; then
-		printf '  none (no loop claims on this node)\n'
+		# UNKNOWN, not "none". Nothing writes this file yet (ADR-0040's lease writer is unwired — see
+		# the CHANGELOG for 0.2.82), so its absence means "this surface cannot see" and not "there is
+		# nothing to see". Printing "none" from a missing file is the same shape as a probe reporting
+		# ALIVE because it never ran, which is the defect class this project spends its time removing.
+		printf '  (UNKNOWN: %s does not exist. Nothing writes it yet — the rotation loop still records a\n' "$lf"
+		printf '   suppression as an unbounded entry in the operator overlay, so a transport it removed\n'
+		printf '   will NOT return on its own. Check operator-overrides.json against its rotate-bak.)\n'
 	elif ! command -v jq >/dev/null 2>&1; then
 		printf '  (UNKNOWN: jq unavailable, so %s cannot be read from here)\n' "$lf"
 	elif ! jq -e '(.leases|type)=="array"' "$lf" >/dev/null 2>&1; then

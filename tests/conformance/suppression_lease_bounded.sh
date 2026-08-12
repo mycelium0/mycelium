@@ -186,17 +186,48 @@ else
 fi
 rm -rf "$W"
 
-# --- 7. ordering: leases compose AFTER the descriptor ------------------------------------------------
-printf '\n-- the loop claim outranks the descriptor, or demote cannot actuate --\n'
+# --- 7. WHAT ACTUALLY REMOVES SERVICE TODAY, pinned as a known defect ------------------------------
+#
+# This row used to compare SOURCE LINE NUMBERS of two function calls — and so it certified the
+# composition fix while the composition defect was live. Audit-0012 B2 named it: the layer that was
+# moved after apply_node_profile is the lease layer, which nothing populates; the layer that actually
+# removes service is persist_rotation_to_overlay writing an expiry-free `<proto>_enabled: false` into
+# the OPERATOR overlay, which is merged BEFORE apply_node_profile writes `.[k] = true` unconditionally.
+#
+# So the honest thing this gate can assert today is the defect itself, pinned, with a pointer to the
+# commit that will invert it. A red row would be more dramatic and less useful: this project has an
+# explicit rule that a permanently-red gate is one people learn to skip, and the fix is post-tag work
+# (plan item P6) gated by development.md §2.2 item 4 (S0) — a lease grant is rotation actuation and may
+# only be reachable through the rate-limited, anti-flapped, rollback-capable loop.
+#
+# WHEN P6 LANDS this row must be inverted, not deleted: the demoted proto must stay demoted.
+printf '\n-- what removes service today (pinned defect, inverted by P6) --\n'
 body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$PARAMS_LIB")"
+mo="$(printf '%s' "$body" | grep -n 'merge_operator_overrides "\$tmp"' | tail -1 | cut -d: -f1)"
 np="$(printf '%s' "$body" | grep -n 'apply_node_profile "\$tmp"' | tail -1 | cut -d: -f1)"
 sl="$(printf '%s' "$body" | grep -n 'apply_suppression_leases "\$tmp"' | tail -1 | cut -d: -f1)"
-if [ -z "$np" ] || [ -z "$sl" ]; then
-	badln "could not locate both composition calls in write_params (node_profile=${np:-missing} leases=${sl:-missing}) — this row cannot judge the ordering it exists for"
-elif [ "$sl" -gt "$np" ]; then
-	ok "suppression leases are applied after apply_node_profile (line $sl > $np)"
+# A WRITER is something that GRANTS — not something that reaps. apply_suppression_leases removes
+# expired entries, which is the restore path and must not be mistaken for the producer; an earlier
+# draft of this row did exactly that and reported the mechanism wired because the reaper writes the
+# same file. What counts: a non-test caller of spec.LeaseSet.Grant, or a shell path invoking a
+# `lease grant` verb.
+writers="$(grep -rln '\.Grant(' "$REPO_ROOT"/cmd "$REPO_ROOT"/internal 2>/dev/null \
+	| grep -v '_test\.go$' | grep -v '/spec/lease\.go$' | head -3)"
+writers="$writers$(grep -rln 'lease grant' "$REPO_ROOT"/control "$REPO_ROOT"/scripts 2>/dev/null | head -2)"
+writers="$(printf '%s' "$writers" | sed '/^$/d')"
+
+if [ -z "$mo" ] || [ -z "$np" ] || [ -z "$sl" ]; then
+	badln "could not locate all three composition calls in write_params (merge=${mo:-missing} node_profile=${np:-missing} leases=${sl:-missing}); this row cannot judge what it exists for"
+elif [ "$sl" -gt "$np" ] && [ "$np" -gt "$mo" ]; then
+	ok "composition order is merge($mo) -> node_profile($np) -> leases($sl): a lease outranks the descriptor"
 else
-	badln "leases are applied BEFORE apply_node_profile (line $sl < $np). That function writes \`.[\$k] = true\` for every declared transport and has no branch that writes false, so the claim is silently re-enabled: the demote then validates a byte-identical candidate, the no-op short-circuit fires, and the run logs success for a demote that actuated nothing while spending its rotation budget."
+	badln "composition order is merge($mo), node_profile($np), leases($sl). A claim applied before apply_node_profile is silently re-enabled by its unconditional \`.[\$k] = true\`, which is how demote-active came to actuate nothing and report success."
+fi
+
+if [ -z "$writers" ]; then
+	ok "PINNED DEFECT: nothing writes a lease yet, so the lease layer removes no service — the loop still suppresses via the operator overlay, before apply_node_profile, and a suppression therefore never lapses. Tracked as plan item P6; invert this row in the commit that wires the writer."
+else
+	badln "a lease writer now exists ($(printf '%s' "$writers" | tr '\n' ' ')) — good, and this row is now WRONG. Invert it: assert that a demoted proto stays demoted end to end, driving merge -> node_profile -> leases, and delete this pin."
 fi
 
 printf '\n-- Result --\n'

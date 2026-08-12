@@ -394,13 +394,13 @@ record_converge_ok() {
 	printf '0\n' > "$STATE_DIR/update_consecutive_failures" 2>/dev/null || true
 	printf '0\n' > "$STATE_DIR/update_last_failure_reason" 2>/dev/null || true
 	_write_update_prom 0 0 "$now"
-	return 0
 	# Publish what the loop is holding out of service, on the same beat as the converge stamp. It goes
 	# here rather than only in the rotate path because a suppression must be visible on EVERY converge,
 	# including the ones that changed nothing: a stale claim that outlives its fault is exactly the state
 	# that stood unreported on three live nodes, and it is a converge — not a rotation — that would next
 	# have rendered around it.
 	command -v publish_suppression_leases >/dev/null 2>&1 && publish_suppression_leases || true
+	return 0
 }
 
 setup_observability() {

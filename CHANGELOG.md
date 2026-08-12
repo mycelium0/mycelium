@@ -91,7 +91,7 @@ change, so a clean verdict for a member the node is **not serving** is manufactu
 observed. The loop would have been asserting a fact it cannot establish — the defect class ADR-0039
 exists to close.
 
-So the loop never asserts recovery. Its write is a **lease**: a time-bounded claim that stops applying
+So the loop is not to assert recovery. Its write becomes a **lease**: a time-bounded claim that stops applying
 at its expiry, at which point the same test that produced it runs again against a served member.
 Withdrawing your own claim needs no evidence, which is why expiry is the only one of
 {suppress, restore-on-clean, expire} that fail-closed permits unconditionally.
@@ -143,7 +143,9 @@ listed the demoted proto, demote could not work and reported that it had. Suppre
 
 `mycelium_rotate_suppressed_transports`, `..._oldest_age_seconds`, `..._next_expiry_seconds`, and a
 per-proto `mycelium_rotate_suppressed{proto,evidence}` whose evidence is a closed-vocab integer — no
-error text, no address (§8.5). Published on **every** converge, not only on rotations: a stale claim that
+error text, no address (§8.5). **Corrected in 0.2.82: none of this was reachable.** The publisher call sat
+below a `return 0` and nothing has ever granted a lease, so the series were never emitted. Intended to be
+published on **every** converge, not only on rotations: a stale claim that
 outlives its fault is exactly what stood unreported, and it is a converge that would next render around
 it. Two alerts (`MyceliumTransportSuppressed`, `MyceliumSuppressionNotLapsing` — a suppression older than
 the 24h cap means the reap is not running, not that the fault is stubborn). `fungi status` leads with

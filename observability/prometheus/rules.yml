@@ -256,84 +256,96 @@ groups:
   # "blocked for every client" from "nobody needed it today" (ADR-0039), so alerting on idleness would
   # train people to ignore a page that is usually wrong.
   # ===========================================================================
-  - name: mycelium.suppression
-    rules:
-      - alert: MyceliumTransportSuppressed
-        expr: mycelium_rotate_suppressed_transports > 0
-        for: 30m
-        labels:
-          severity: warning
-          component: rotate
-        annotations:
-          summary: "{{ $labels.instance }} is holding {{ $value }} transport(s) out of service"
-          description: >-
-            The rotation loop found a fault at the node and stopped serving a transport. This is the
-            mechanism working — but the node is offering less than it was asked to, and every client
-            whose only usable family was that one is now failing. mycelium_rotate_suppressed carries the
-            proto and the evidence code (1 listener-fault, 2 render-refused, 3 egress-unreachable);
-            mycelium_rotate_suppression_next_expiry_seconds says when it lapses on its own. Fix the
-            underlying fault — do not clear the lease and leave the fault, or the next term will be twice
-            as long.
-          runbook: "docs/runbooks/node-bootstrap.md"
-
-      - alert: MyceliumSuppressionNotLapsing
-        expr: mycelium_rotate_suppression_oldest_age_seconds > 90000
-        for: 1h
-        labels:
-          severity: warning
-          component: rotate
-        annotations:
-          summary: "A suppression on {{ $labels.instance }} has stood for over 25h"
-          description: >-
-            Every lease expires — the backoff caps at 24h — so a suppression older than that means the
-            reap is not running, not that the fault is stubborn. The transport is being held out of
-            service by a claim nothing is withdrawing, which is precisely the fail-stuck state the lease
-            mechanism replaced. Check that the converge path still calls apply_suppression_leases, and
-            that $STATE_DIR/rotate.leases.json is writable.
-          runbook: "docs/runbooks/node-bootstrap.md"
-
-  - name: mycelium.update
-    rules:
-      - alert: MyceliumUpdateFailing
-        expr: mycelium_update_consecutive_failures >= 3
-        for: 30m
-        labels:
-          severity: warning
-          component: update
-        annotations:
-          summary: "{{ $labels.instance }} has refused {{ $value }} consecutive updates"
-          description: >-
-            The unattended updater is running and REFUSING to apply — the fail-closed behaviour
-            working as designed. But the node is pinned to old code and stays there until someone
-            acts. mycelium_update_last_failure_reason names the cause: 1 = signature verification
-            (the tip of origin/main is not signed by the operator key — almost always a merge made
-            with the GitHub button instead of `git merge --no-ff -S`); 2 = fast-forward refused (the
-            checkout on the node is dirty, usually because it was used as a build or test host);
-            3 = validate refused the rendered config; 4 = post-apply rollback; 9 = unclassified, read
-            the journal. Fix the CAUSE. Never disarm the check to clear the alert.
-          runbook: "docs/runbooks/node-bootstrap.md"
-
-      - alert: MyceliumUpdateStalled
-        expr: >-
-          (time() - mycelium_update_last_success_timestamp_seconds > 86400)
-          or absent(mycelium_update_last_success_timestamp_seconds)
-        for: 1h
-        labels:
-          severity: warning
-          component: update
-        annotations:
-          summary: "{{ $labels.instance }} has not completed an update in over 24h"
-          description: >-
-            No successful converge in a day. This covers the cases MyceliumUpdateFailing cannot see,
-            because they produce no failures to count: the timer is dead or was never enabled, the
-            unit is masked, the node was never armed, or the updater is not running at all. The
-            `absent()` arm is the important half — a node that reports nothing is exactly the one a
-            threshold over a missing series passes in silence.
-          runbook: "docs/runbooks/node-bootstrap.md"
-
   # ===========================================================================
-  # Collector self-health — keep the operator from trusting a blind dashboard.
+  # DISABLED UNTIL THE LEASE WRITER IS WIRED (Audit-0012 B2, corrected in 0.2.82).
+  #
+  # Both alerts below query series that NOTHING EMITS. `internal/spec/lease.go` has no non-test caller —
+  # no lease has ever been granted — so `mycelium_rotate_suppressed_transports` is never written, and an
+  # alert on an absent series is a permanently-silent alarm that reads as "all clear". That is worse than
+  # no alert: it is a surface asserting a mechanism works.
+  #
+  # They are kept, commented, rather than deleted, because they are correct for the mechanism and belong
+  # in the same commit that wires the writer (plan item P6). Uncomment there, with the gate that drives
+  # planner decision -> grant -> render -> expiry -> return.
   # ===========================================================================
+  # - name: mycelium.suppression
+  #   rules:
+  #     - alert: MyceliumTransportSuppressed
+  #       expr: mycelium_rotate_suppressed_transports > 0
+  #       for: 30m
+  #       labels:
+  #         severity: warning
+  #         component: rotate
+  #       annotations:
+  #         summary: "{{ $labels.instance }} is holding {{ $value }} transport(s) out of service"
+  #         description: >-
+  #           The rotation loop found a fault at the node and stopped serving a transport. This is the
+  #           mechanism working — but the node is offering less than it was asked to, and every client
+  #           whose only usable family was that one is now failing. mycelium_rotate_suppressed carries the
+  #           proto and the evidence code (1 listener-fault, 2 render-refused, 3 egress-unreachable);
+  #           mycelium_rotate_suppression_next_expiry_seconds says when it lapses on its own. Fix the
+  #           underlying fault — do not clear the lease and leave the fault, or the next term will be twice
+  #           as long.
+  #         runbook: "docs/runbooks/node-bootstrap.md"
+
+  #     - alert: MyceliumSuppressionNotLapsing
+  #       expr: mycelium_rotate_suppression_oldest_age_seconds > 90000
+  #       for: 1h
+  #       labels:
+  #         severity: warning
+  #         component: rotate
+  #       annotations:
+  #         summary: "A suppression on {{ $labels.instance }} has stood for over 25h"
+  #         description: >-
+  #           Every lease expires — the backoff caps at 24h — so a suppression older than that means the
+  #           reap is not running, not that the fault is stubborn. The transport is being held out of
+  #           service by a claim nothing is withdrawing, which is precisely the fail-stuck state the lease
+  #           mechanism replaced. Check that the converge path still calls apply_suppression_leases, and
+  #           that $STATE_DIR/rotate.leases.json is writable.
+  #         runbook: "docs/runbooks/node-bootstrap.md"
+
+  # - name: mycelium.update
+  #   rules:
+  #     - alert: MyceliumUpdateFailing
+  #       expr: mycelium_update_consecutive_failures >= 3
+  #       for: 30m
+  #       labels:
+  #         severity: warning
+  #         component: update
+  #       annotations:
+  #         summary: "{{ $labels.instance }} has refused {{ $value }} consecutive updates"
+  #         description: >-
+  #           The unattended updater is running and REFUSING to apply — the fail-closed behaviour
+  #           working as designed. But the node is pinned to old code and stays there until someone
+  #           acts. mycelium_update_last_failure_reason names the cause: 1 = signature verification
+  #           (the tip of origin/main is not signed by the operator key — almost always a merge made
+  #           with the GitHub button instead of `git merge --no-ff -S`); 2 = fast-forward refused (the
+  #           checkout on the node is dirty, usually because it was used as a build or test host);
+  #           3 = validate refused the rendered config; 4 = post-apply rollback; 9 = unclassified, read
+  #           the journal. Fix the CAUSE. Never disarm the check to clear the alert.
+  #         runbook: "docs/runbooks/node-bootstrap.md"
+
+  #     - alert: MyceliumUpdateStalled
+  #       expr: >-
+  #         (time() - mycelium_update_last_success_timestamp_seconds > 86400)
+  #         or absent(mycelium_update_last_success_timestamp_seconds)
+  #       for: 1h
+  #       labels:
+  #         severity: warning
+  #         component: update
+  #       annotations:
+  #         summary: "{{ $labels.instance }} has not completed an update in over 24h"
+  #         description: >-
+  #           No successful converge in a day. This covers the cases MyceliumUpdateFailing cannot see,
+  #           because they produce no failures to count: the timer is dead or was never enabled, the
+  #           unit is masked, the node was never armed, or the updater is not running at all. The
+  #           `absent()` arm is the important half — a node that reports nothing is exactly the one a
+  #           threshold over a missing series passes in silence.
+  #         runbook: "docs/runbooks/node-bootstrap.md"
+
+  # # ===========================================================================
+  # # Collector self-health — keep the operator from trusting a blind dashboard.
+  # # ===========================================================================
   - name: mycelium.monitoring
     rules:
       - alert: BlackboxExporterDown
