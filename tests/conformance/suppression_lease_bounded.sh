@@ -86,9 +86,16 @@ drive() {
 		. "$PARAMS_LIB" >/dev/null 2>&1 || exit 2
 		jq -n --arg a "$KEY" --arg b "$OKEY" '{($a): true, ($b): true}' >"$W/params.json"
 		[ "$body" = NONE ] || printf '%s\n' "$body" >"$W/rotate.leases.json"
-		# The call is subshelled so a fail-closed `die` cannot take the harness with it — an earlier
-		# draft of this gate lost every row after the first refusal for exactly that reason.
-		( apply_suppression_leases "$W/params.json" ) >/dev/null 2>&1
+		# `die` is already isolated: drive() runs its whole body in the subshell above, so a fail-closed
+		# exit ends that subshell and `rc=$?` catches it. Measured — removing the redundant inner
+		# subshell that used to be here changes nothing, 12 rows either way.
+		#
+		# CORRECTION, recorded rather than quietly dropped: the commit that introduced this gate claimed
+		# an earlier draft of it "lost every row after the first refusal". That truncation happened in a
+		# throwaway scratch harness used to drive the executor on a node, NOT here. Two harnesses were
+		# conflated and the provenance went into a commit message as measured fact. The rule it breaks is
+		# this project's own (refactoring.md §2.7): a conclusion is worth what its evidence is worth.
+		apply_suppression_leases "$W/params.json" >/dev/null 2>&1
 	)
 	rc=$?
 	printf '%s|%s|%s|%s' "$rc" \
