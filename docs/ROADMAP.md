@@ -287,6 +287,18 @@ on one node.
   today a rotation is operator-triggered, not yet driven by survivability signal.
 - **Node-local diagnosis.** The node classifies its own channel as a **node-local** signal;
   *publishing* it as advisory network weather is Phase 3.
+- **The boundary of that diagnosis, made binding**
+  ([ADR-0039](adr/0039-client-vantage-reachability-signal.md), 2026-08-12). A node **cannot** determine
+  whether a client can reach it over a given transport — the L7 probe is loopback by design
+  ([ADR-0036](adr/0036-node-local-l7-liveness-probe.md)), so it answers "is my listener serving", never
+  "can a client get here". The rotation loop had been consuming that verdict for the second question.
+  It may now suppress a served transport only on faults it observes **at the node**, must never infer
+  client-side impairment, and must not read absence of traffic as impairment — silence and "nobody needed
+  that family today" are indistinguishable. Holding only suspicion, it reports and **preserves diversity**
+  rather than reducing it (the ≥2-independent-families floor,
+  [RP-0013](proposals/0013-phase3-e2e-client-recovery.md)). Measured on three live nodes 2026-08-11: a
+  loopback-only fault produced a correct unattended rotation on the way down, and a `clean` verdict one
+  minute later for a transport that was no longer served at all.
 
 **Stack.** Go control agent ([ADR-0012](adr/0012-go-primary-control-plane-language.md)): the pure
 `internal/detect` + `internal/tune` + `internal/measure` + `internal/rotate` spine, `myceliumd`
@@ -345,6 +357,18 @@ the Commune boundary), per [ADR-0037](adr/0037-federation-transport-substrate.md
   [ADR-0029](adr/0029-community-federated-ingress.md) Decision 5, with the capability classes of
   [ADR-0026](adr/0026-anastomosis-bridges-and-safe-defaults.md) Decision 3). Cross-*Commune* Anastomosis Bridges stay
   **inert** here — they light up in Phase 5.
+- **The client-vantage reachability signal — the half of the weather shape that reports INWARD**
+  ([ADR-0039](adr/0039-client-vantage-reachability-signal.md)). Phase 2 established that a node cannot
+  observe whether a client can reach it, and forbade it from pretending otherwise. This is where that gap
+  closes: a client that came up over one family reports, over that already-open session, that another
+  family did not — and the node learns something no probe of its own can produce. It is **not a new
+  mechanism**: it is the inbound direction of the class-aggregate shape already adopted in
+  [ADR-0030](adr/0030-advisory-network-awareness.md) and bounded by
+  [ADR-0017](adr/0017-network-weather-data-contract.md) — per-**class** outcome only, k-floored, no client
+  identifier, no per-client history, no always-on channel. Without it the node's picture of its own
+  reachability stays permanently one-sided, and the rotation loop stays deliberately deaf to the failure
+  mode that matters most to a user. Ships with the alert half, not only the metric: a family that a
+  population stops reaching is an operator event, not a silent statistic.
 - **Per-Commune coordinator** (Headscale / Nebula-lighthouse pattern; the operator's OWN, never a
   global authority): node registry, config distribution, block-intelligence aggregation within the
   Commune, serving the best ingress to a client by geography/health.

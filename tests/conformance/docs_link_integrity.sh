@@ -118,12 +118,43 @@ if [ -s "$WORK/resolved" ]; then
 	fi
 fi
 
+# ---------------------------------------------------------------------------------------------------
+# EVERY ADR IS IN THE INDEX. An unindexed decision record is one nobody finds.
+#
+# docs/adr/README.md is the only enumeration of what has been decided. It was silently one behind when
+# this row was written — ADR-0038 had shipped and was never listed — so the index had already begun
+# doing what this project keeps catching documents doing: staying true as of the day it was written.
+# Link integrity cannot notice this, because a document nobody links to breaks no link.
+adr_dir="$REPO_ROOT/docs/adr"
+if [ ! -d "$adr_dir" ] || [ ! -f "$adr_dir/README.md" ]; then
+	printf '  SKIP  docs/adr/README.md not present; the index check did not run.\n'
+else
+	missing=""; n=0
+	for f in "$adr_dir"/[0-9]*.md; do
+		[ -f "$f" ] || continue
+		n=$((n + 1))
+		id="$(basename "$f" | cut -d- -f1)"
+		grep -q "^| \[$id\]" "$adr_dir/README.md" || missing="$missing $id"
+	done
+	unindexed=0
+	if [ "$n" -lt 5 ]; then
+		printf '  FAIL  only %d ADR file(s) were seen — the scan is not reaching docs/adr/, so a clean result here means nothing.\n' "$n"
+		unindexed=1
+	elif [ -z "$missing" ]; then
+		printf '  ok    all %d ADRs appear in docs/adr/README.md\n' "$n"
+	else
+		printf '  FAIL  these ADRs exist but are absent from docs/adr/README.md:%s. The index is the only enumeration of what this project has decided; a record that is not in it is one nobody finds, and link integrity cannot catch it because an unlinked document breaks no link.\n' "$missing"
+		unindexed=$(printf '%s' "$missing" | wc -w | tr -d ' ')
+	fi
+fi
+
 printf '\n-- Result --\n'
 printf 'checked %d relative link(s) across %d tracked document(s).\n' "$checked" "$(printf '%s\n' "$docs" | grep -c '')"
-if [ "$broken" -ne 0 ] || [ "$unpublished" -ne 0 ]; then
+if [ "$broken" -ne 0 ] || [ "$unpublished" -ne 0 ] || [ "${unindexed:-0}" -ne 0 ]; then
 	[ "$broken" -ne 0 ]      && printf 'FAIL: %d link(s) point at a path that does not exist.\n' "$broken" >&2
 	[ "$unpublished" -ne 0 ] && printf 'FAIL: %d link(s) point at an UNTRACKED path — a reader of the published repo cannot follow them (docs/audits/ and docs/research/ are local-only by design; cite the code or an ADR instead).\n' "$unpublished" >&2
+	[ "${unindexed:-0}" -ne 0 ] && printf 'FAIL: %d ADR(s) are absent from docs/adr/README.md — the only enumeration of what this project has decided.\n' "$unindexed" >&2
 	exit 1
 fi
-printf 'PASS: every relative link in a tracked document resolves to a tracked path.\n'
+printf 'PASS: every relative link resolves to a tracked path, and every ADR is in the index.\n'
 exit 0
