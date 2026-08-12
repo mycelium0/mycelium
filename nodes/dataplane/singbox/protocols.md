@@ -41,8 +41,12 @@ Notes on the table:
   fed from `group_vars` and should differ across a network. `tcp/443` is reserved for the Vision
   inbound because port 443 maximises indistinguishability from ordinary HTTPS.
 - **`users` are filled at deploy.** Every VLESS/TUIC/Trojan/Hysteria2/ShadowTLS inbound ships with
-  `users: []`; identities (UUIDs/passwords) are issued and revoked by the control plane
-  (`myceliumctl`) without redeploying the node. Shadowsocks-2022 uses a single server `password`.
+  `users: []`; identities are issued and revoked by the control plane (`myceliumctl`) without
+  redeploying the node — **for the UUID-keyed families only** (VLESS, and TUIC, whose password falls
+  back to the client's own UUID). Hysteria2, ShadowTLS, Trojan and Shadowsocks-2022 authenticate every
+  client against one node-wide secret, so revoking a UUID does not retire that person there
+  ([ADR-0040 §2.1](../../../docs/adr/0040-a-fungi-serves-several-people.md)). The registry marks them
+  `shared_secret_auth` and `--revoke` refuses to claim a removal it has not made.
 - **ShadowTLS is a pair.** The public `shadowtls-v3-in` inbound performs the TLS-like outer
   handshake against the donor (`handshake.server`) and forwards the decrypted stream over `detour`
   to the loopback-only `shadowtls-shadowsocks-in`. The inner Shadowsocks inbound has **no

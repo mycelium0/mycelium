@@ -97,7 +97,10 @@ under a **gitignored** path (`state/`, `secrets/`, `out/`, or `server.json` itse
   file. (The remaining per-protocol passwords and the `clash_api` secret are injected at render time
   from the identity/secrets state, not carried as sentinels in this template.)
 - `users[]` arrays (shipped empty) ← one object per identity from the identity state, so identities
-  are issued and revoked **without redeploying the node**.
+  are issued and revoked **without redeploying the node** — on the UUID-keyed families. Hysteria2,
+  ShadowTLS, Trojan and Shadowsocks build their users as `(.password // $pw)` with a node-wide `$pw`,
+  so a revoked person keeps that credential and keeps access
+  ([ADR-0040 §2.1](../../../docs/adr/0040-a-fungi-serves-several-people.md)).
 
 Disabled protocols (their `group_vars` toggle set `false`) are dropped from the rendered config and
 their ports are never opened by the hardening role. The full SENTINEL ⇄ source ⇄ toggle mapping is

@@ -13,6 +13,53 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.82] — 2026-08-13
+
+### Added — ADR-0040: a fungi serves several independent people
+
+The corpus had never decided this. Searched across the vision set, the ADR set, THREAT-MODEL,
+ARCHITECTURE, GLOSSARY, ROADMAP, README, SECURITY, QUICKSTART and development.md, there was no statement
+either way — and four defects Audit-0012 measured are consequences of that silence rather than four
+separate mistakes. Each is correct if a fungi serves one person and wrong if it serves several: a shared
+node-wide credential, a planner shaped around one active transport, no typed ingress/egress role despite
+the observability asymmetry, and a loop free to take away a channel that is carrying somebody's traffic.
+Nobody chose single-tenancy; code written without the question in view answered it by default, four
+times, in four files.
+
+ADR-0040 decides it and derives all four consequences, including the honest re-scoping of ADR-0010's
+"no per-user attribution" — which was true **only because** the credentials are node-wide. Distinguishable
+is not attributable: holding a credential per person is what makes revocation possible; recording who
+used what and when is what stays forbidden.
+
+### Fixed — `--revoke` claimed a removal it had not made
+
+`flow_revoke` logged *"the client's UUID is gone from every inbound on BOTH engines"*. Literally true,
+and read as "this person no longer has access." On hysteria2, shadowsocks, shadowtls and trojan it is
+false: those build their user list as `(.password // $pw)` with `$pw` a node-wide secret, so the revoked
+person keeps the credential. Measured on a live node — two clients' emitted subscriptions are
+**byte-identical** on those families. TUIC is not affected (`(.password // .id)` falls back to that
+client's own UUID) and neither are the VLESS families.
+
+On a node serving any of the four, `--revoke` now refuses the claim, names the families, names the person
+as **still admitted**, writes a `REVOKE_INCOMPLETE` marker, and exits non-zero — the pattern
+`nb_render_awg.sh`'s awg-revoke already used, whose header reads *"THE GUARANTEE IS EARNED, NOT PRINTED"*.
+The default profile (REALITY only) is unaffected and still prints the clean guarantee.
+
+The family set is **declared** in the Go registry as `ProtoDescriptor.SharedSecretAuth` and read from
+`control/vocab.json` — never restated in shell (ADR-0038). Declared rather than inferred for the same
+reason `ServesUDP` is: it is a property of how the renderer builds the user list, not of the class, and
+inferring it is how it stayed invisible.
+
+Four documents asserting the opposite are corrected, and `phase0-acceptance-ledger.md` D4 is rescored
+**DONE → PARTIAL** in all three places it appeared.
+
+`revoke_guarantee_is_earned.sh` drives the predicate against the shipped registry: the declared set must
+equal the set the renderer actually builds with a node-wide `$pw` (derived from the renderer, not
+restated), tuic must not be in it, the default profile must stay clean, a disabled family must not be
+named, and no document may still promise a clean revoke. The document sweep is sentence-aware — a
+correction has to be able to quote the sentence it corrects.
+
+
 ## [0.2.81] — 2026-08-12
 
 ### Corrected

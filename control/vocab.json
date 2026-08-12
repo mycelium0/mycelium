@@ -66,7 +66,8 @@
       "scheme": "vless",
       "engine": "sing-box",
       "exposure": 1,
-      "serves_udp": false
+      "serves_udp": false,
+      "shared_secret_auth": false
     },
     {
       "proto": "vless-reality-grpc",
@@ -77,7 +78,8 @@
       "scheme": "vless",
       "engine": "sing-box",
       "exposure": 1,
-      "serves_udp": false
+      "serves_udp": false,
+      "shared_secret_auth": false
     },
     {
       "proto": "vless-reality-xhttp",
@@ -88,7 +90,8 @@
       "scheme": "vless",
       "engine": "sing-box",
       "exposure": 1,
-      "serves_udp": false
+      "serves_udp": false,
+      "shared_secret_auth": false
     },
     {
       "proto": "vless-xhttp-tls",
@@ -99,7 +102,8 @@
       "scheme": "vless",
       "engine": "xray",
       "exposure": 3,
-      "serves_udp": false
+      "serves_udp": false,
+      "shared_secret_auth": false
     },
     {
       "proto": "vless-ws-tls",
@@ -110,7 +114,8 @@
       "scheme": "vless",
       "engine": "sing-box",
       "exposure": 3,
-      "serves_udp": false
+      "serves_udp": false,
+      "shared_secret_auth": false
     },
     {
       "proto": "hysteria2",
@@ -121,7 +126,8 @@
       "scheme": "hysteria2",
       "engine": "sing-box",
       "exposure": 4,
-      "serves_udp": true
+      "serves_udp": true,
+      "shared_secret_auth": true
     },
     {
       "proto": "tuic",
@@ -132,7 +138,8 @@
       "scheme": "tuic",
       "engine": "sing-box",
       "exposure": 4,
-      "serves_udp": true
+      "serves_udp": true,
+      "shared_secret_auth": false
     },
     {
       "proto": "shadowsocks",
@@ -143,7 +150,8 @@
       "scheme": "ss",
       "engine": "sing-box",
       "exposure": 6,
-      "serves_udp": true
+      "serves_udp": true,
+      "shared_secret_auth": true
     },
     {
       "proto": "shadowtls",
@@ -154,7 +162,8 @@
       "scheme": "ss",
       "engine": "sing-box",
       "exposure": 2,
-      "serves_udp": false
+      "serves_udp": false,
+      "shared_secret_auth": true
     },
     {
       "proto": "trojan",
@@ -165,7 +174,8 @@
       "scheme": "trojan",
       "engine": "sing-box",
       "exposure": 3,
-      "serves_udp": false
+      "serves_udp": false,
+      "shared_secret_auth": true
     },
     {
       "proto": "amneziawg",
@@ -176,7 +186,8 @@
       "scheme": "",
       "engine": "amneziawg",
       "exposure": 5,
-      "serves_udp": true
+      "serves_udp": true,
+      "shared_secret_auth": false
     }
   ],
   "params_validation": {
