@@ -106,6 +106,22 @@ type ProtoDescriptor struct {
 	// it in the udp family), so deriving the set from class names silently omitted it — and the set is
 	// what decides whether a hysteria2 hop range would swallow another family.
 	ServesUDP bool `json:"serves_udp"`
+	// SharedSecretAuth is whether this proto authenticates every client against ONE node-wide secret
+	// rather than per-person material. DECLARED for the same reason ServesUDP is: it is a property of
+	// how the renderer builds the user list, not of the class, and inferring it was how it stayed
+	// invisible.
+	//
+	// It exists because a node cannot revoke one person from a family whose credential everyone holds.
+	// Measured on a live node (Audit-0012): two clients' emitted subscriptions are byte-identical on
+	// hysteria2, shadowsocks and shadowtls. In control/lib/render_singbox.sh the four families below
+	// build users as `(.password // $pw)` with $pw a node-wide key, while tuic uses
+	// `(.password // .id)` — falling back to that client's own UUID — and the vless families key on the
+	// UUID directly.
+	//
+	// ADR-0040 §2.1 decides this must change: a fungi serves several people, so credentials are
+	// per-person. Until that RP lands, this flag is what lets `--revoke` refuse to claim a person was
+	// removed when they were not, instead of printing a guarantee it has not established.
+	SharedSecretAuth bool `json:"shared_secret_auth"`
 }
 
 // transportRegistry is the ordered canonical proto table. The order of the
@@ -119,11 +135,11 @@ var transportRegistry = []ProtoDescriptor{
 	{Proto: "vless-reality-xhttp", Class: TransportClassRealityTCP, EnableKey: "vless_reality_xhttp_enabled", PortKey: "vless_reality_xhttp_port", DefaultPort: 2096, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureBorrowedTLS},
 	{Proto: "vless-xhttp-tls", Class: TransportClassXHTTPTLS, EnableKey: "vless_xhttp_tls_enabled", PortKey: "vless_xhttp_tls_port", DefaultPort: 2087, Scheme: "vless", Engine: EngineXray, Exposure: ExposureOwnCertTLS},
 	{Proto: "vless-ws-tls", Class: TransportClassWSTLS, EnableKey: "vless_ws_tls_enabled", PortKey: "vless_ws_tls_port", DefaultPort: 2089, Scheme: "vless", Engine: EngineSingBox, Exposure: ExposureOwnCertTLS},
-	{Proto: "hysteria2", Class: TransportClassQUICUDP, EnableKey: "hysteria2_enabled", PortKey: "hysteria2_port", DefaultPort: 8444, Scheme: "hysteria2", Engine: EngineSingBox, Exposure: ExposureQUIC, ServesUDP: true},
+	{Proto: "hysteria2", Class: TransportClassQUICUDP, EnableKey: "hysteria2_enabled", PortKey: "hysteria2_port", DefaultPort: 8444, Scheme: "hysteria2", Engine: EngineSingBox, Exposure: ExposureQUIC, ServesUDP: true, SharedSecretAuth: true},
 	{Proto: "tuic", Class: TransportClassQUICUDP, EnableKey: "tuic_enabled", PortKey: "tuic_port", DefaultPort: 8445, Scheme: "tuic", Engine: EngineSingBox, Exposure: ExposureQUIC, ServesUDP: true},
-	{Proto: "shadowsocks", Class: TransportClassShadowsocksTCP, EnableKey: "shadowsocks_enabled", PortKey: "shadowsocks_port", DefaultPort: 8388, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureNoCover, ServesUDP: true},
-	{Proto: "shadowtls", Class: TransportClassShadowTLSTCP, EnableKey: "shadowtls_enabled", PortKey: "shadowtls_port", DefaultPort: 8446, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureCoveredTLS},
-	{Proto: "trojan", Class: TransportClassTrojanTLS, EnableKey: "trojan_enabled", PortKey: "trojan_port", DefaultPort: 8447, Scheme: "trojan", Engine: EngineSingBox, Exposure: ExposureOwnCertTLS},
+	{Proto: "shadowsocks", Class: TransportClassShadowsocksTCP, EnableKey: "shadowsocks_enabled", PortKey: "shadowsocks_port", DefaultPort: 8388, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureNoCover, ServesUDP: true, SharedSecretAuth: true},
+	{Proto: "shadowtls", Class: TransportClassShadowTLSTCP, EnableKey: "shadowtls_enabled", PortKey: "shadowtls_port", DefaultPort: 8446, Scheme: "ss", Engine: EngineSingBox, Exposure: ExposureCoveredTLS, SharedSecretAuth: true},
+	{Proto: "trojan", Class: TransportClassTrojanTLS, EnableKey: "trojan_enabled", PortKey: "trojan_port", DefaultPort: 8447, Scheme: "trojan", Engine: EngineSingBox, Exposure: ExposureOwnCertTLS, SharedSecretAuth: true},
 	{Proto: "amneziawg", Class: TransportClassAmneziaWGUDP, EnableKey: "", PortKey: "", DefaultPort: 0, Scheme: "", Engine: EngineAmneziaWG, Exposure: ExposureObfuscatedUDP, ServesUDP: true},
 }
 
