@@ -243,6 +243,55 @@ groups:
   # and resets both on success. These alerts are what make that publication mean anything: a metric
   # nobody alerts on is the same silence with more disk writes.
   # ===========================================================================
+  # ===========================================================================
+  # Suppression leases — the loop removing part of what this node offers (ADR-0039).
+  #
+  # A suppression is the rotation loop taking a transport out of service on evidence of a fault AT THE
+  # NODE. It is bounded by design: every lease carries an expiry, so a member returns on its own. What
+  # must never happen again is the 2026-08-11 measurement — three live nodes suppressed a transport,
+  # correctly, and NOTHING said so; the operator's first sign would have been a client failing on a
+  # family the node had quietly stopped serving.
+  #
+  # Note what is deliberately NOT alerted on: a family nobody is connecting to. A node cannot distinguish
+  # "blocked for every client" from "nobody needed it today" (ADR-0039), so alerting on idleness would
+  # train people to ignore a page that is usually wrong.
+  # ===========================================================================
+  - name: mycelium.suppression
+    rules:
+      - alert: MyceliumTransportSuppressed
+        expr: mycelium_rotate_suppressed_transports > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: rotate
+        annotations:
+          summary: "{{ $labels.instance }} is holding {{ $value }} transport(s) out of service"
+          description: >-
+            The rotation loop found a fault at the node and stopped serving a transport. This is the
+            mechanism working — but the node is offering less than it was asked to, and every client
+            whose only usable family was that one is now failing. mycelium_rotate_suppressed carries the
+            proto and the evidence code (1 listener-fault, 2 render-refused, 3 egress-unreachable);
+            mycelium_rotate_suppression_next_expiry_seconds says when it lapses on its own. Fix the
+            underlying fault — do not clear the lease and leave the fault, or the next term will be twice
+            as long.
+          runbook: "docs/runbooks/node-bootstrap.md"
+
+      - alert: MyceliumSuppressionNotLapsing
+        expr: mycelium_rotate_suppression_oldest_age_seconds > 90000
+        for: 1h
+        labels:
+          severity: warning
+          component: rotate
+        annotations:
+          summary: "A suppression on {{ $labels.instance }} has stood for over 25h"
+          description: >-
+            Every lease expires — the backoff caps at 24h — so a suppression older than that means the
+            reap is not running, not that the fault is stubborn. The transport is being held out of
+            service by a claim nothing is withdrawing, which is precisely the fail-stuck state the lease
+            mechanism replaced. Check that the converge path still calls apply_suppression_leases, and
+            that $STATE_DIR/rotate.leases.json is writable.
+          runbook: "docs/runbooks/node-bootstrap.md"
+
   - name: mycelium.update
     rules:
       - alert: MyceliumUpdateFailing

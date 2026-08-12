@@ -56,6 +56,30 @@ resolve_myctl_go() {
 # READ-ONLY status probe: report what the node is running; never start/stop/restart/mutate anything.
 fungi_status() {
 	local svc state
+	# WHAT THE LOOP HAS TAKEN AWAY, FIRST. A suppression means this node is serving less than it was
+	# asked to, and on 2026-08-11 that happened on three live nodes with nothing reporting it — the
+	# operator's first sign would have been a client failing on a family the node had quietly stopped
+	# offering. It leads the output because it is the one line that changes what the rest of this report
+	# means. UNKNOWN when the file cannot be read: this surface reports what it cannot observe rather
+	# than implying all-clear.
+	local lf="${STATE_DIR:-/var/lib/mycelium}/rotate.leases.json"
+	printf 'suppressed by the rotation loop:\n'
+	if [ ! -f "$lf" ]; then
+		printf '  none (no loop claims on this node)\n'
+	elif ! command -v jq >/dev/null 2>&1; then
+		printf '  (UNKNOWN: jq unavailable, so %s cannot be read from here)\n' "$lf"
+	elif ! jq -e '(.leases|type)=="array"' "$lf" >/dev/null 2>&1; then
+		printf '  (UNKNOWN: %s is unreadable or malformed — the served set cannot be accounted for)\n' "$lf"
+	else
+		local now rows
+		now="$(date -u +%s)"
+		rows="$(jq -r --argjson now "$now" '.leases[]? | select((.expires_at|fromdateiso8601) > $now)
+			| "  \(.proto)  evidence=\(.evidence)  lapses in \(((.expires_at|fromdateiso8601) - $now)/60|floor)m  (term #\(.count))"' "$lf" 2>/dev/null)"
+		if [ -z "$rows" ]; then printf '  none in force\n'
+		else printf '%s\n' "$rows"
+			printf '  each lapses on its own — fix the fault, do not just clear the claim (ADR-0039)\n'
+		fi
+	fi
 	printf 'services:\n'
 	if command -v systemctl >/dev/null 2>&1; then
 		for svc in sing-box xray myceliumd; do
