@@ -13,6 +13,88 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.80] — 2026-08-12
+
+### Fixed — the loop could take a transport away and had no move that gave it back
+
+Measured on three live nodes on 2026-08-11. A deliberate loopback-only fault against each node's active
+transport produced textbook behaviour on the way down — `clean → throttled → shutdown`,
+`impaired_streak` to `flip_confirmations=3`, an unattended rotation applied, the inbound removed, then a
+correct `in-cooldown` refusal to rotate again. Then the fault was removed, the verdict returned to
+`clean` within a minute, and **the transport stayed suppressed on all three**, with no metric, no alert
+and no line in any status output. The closed `RotationAction` set has `demote-active` and no inverse;
+`revert_rotation_overlay` runs only on a *failed* apply.
+
+**Restoring "when the verdict goes clean" would have been worse than the disease.** `internal/measure`
+seeds every registry member `ConnStateClean` at construction and the daemon restarts on every spine
+change, so a clean verdict for a member the node is **not serving** is manufacturable rather than
+observed. The loop would have been asserting a fact it cannot establish — the defect class ADR-0039
+exists to close.
+
+So the loop never asserts recovery. Its write is a **lease**: a time-bounded claim that stops applying
+at its expiry, at which point the same test that produced it runs again against a served member.
+Withdrawing your own claim needs no evidence, which is why expiry is the only one of
+{suppress, restore-on-clean, expire} that fail-closed permits unconditionally.
+
+`internal/spec/lease.go` makes the bad states **unrepresentable** rather than merely guarded:
+
+- `Value == false ⇒ ExpiresAt` set and after `Since`. A permanent suppression cannot be constructed,
+  by any call site, however reached.
+- `SuppressionEvidence` is a closed set containing **only things the node observes about itself**
+  (`listener-fault`, `render-refused`, `egress-unreachable`). There is deliberately no member for "no
+  traffic arrived" or "clients report it blocked" — a node cannot produce those (ADR-0039), so their
+  absence from the enum is what makes "suppressed because nobody connected today" impossible to say.
+- `TransportDirection` separates **ingress** (client → node: the loopback probe proves the listener
+  serves, never that a client's network reaches it) from **egress** (node → elsewhere: the node *is* the
+  client, so its probe is end-to-end evidence). `egress-unreachable` paired with an ingress member is a
+  category error and is refused.
+
+### Anti-flap — the main risk, and what bounds it
+
+- **Exponential backoff.** The n-th consecutive suppression of a member lasts `MinInterval << (n-1)`,
+  capped by the new `MaxSuppressionTTL`. Under a fixed term an intermittent fault costs a suppress /
+  restore pair every cycle forever; doubling makes a persistent problem *converge* to the cap while a
+  one-off fault still gets a short term and a prompt retry. The cap is load-bearing, not cosmetic —
+  without it the term passes any horizon and the lease becomes a permanent suppression that `Validate`
+  cannot catch, because an expiry is technically present. Asserted: with the shipped defaults at most
+  **two** terms begin inside any hour.
+- **The count survives expiry**, or an hourly fault is suppressed for thirty minutes forever and the
+  backoff accomplishes nothing.
+- **`MaxOutstandingSuppressions`** bounds how much service one correlated fault can remove. Each grant
+  can be individually justified while the sequence is not: a bad render or an engine restart could
+  otherwise suppress every member, one defensible step at a time. A **renewal** does not count against
+  it, or a member at the cap could never have its term extended and would return to service still broken.
+- **A member carrying live traffic is never suppressed.** The node cannot see the clients on it; taking
+  it away to react to a fault they are visibly not experiencing breaks the working channel of everyone
+  using it.
+- **The independent-family floor (RP-0013) is never breached**, whatever the evidence.
+
+### Fixed — `demote-active` could not actuate, and said it had
+
+`apply_node_profile` writes `.[$k] = true` for every transport the descriptor declares and has **no
+branch that writes false**, and it runs after the overlay merge. A rotation delta applied earlier was
+silently re-enabled: the demote then validated a candidate byte-identical to what was already running,
+the no-op short-circuit fired, and the run logged success — *"sibling already serving (no restart)"* —
+for a demote that actuated nothing, while spending its rotation budget. On any node whose descriptor
+listed the demoted proto, demote could not work and reported that it had. Suppression leases now compose
+**last**, and because they are time-bounded, outranking the operator's descriptor cannot become permanent.
+
+### Added — a suppression is never silent
+
+`mycelium_rotate_suppressed_transports`, `..._oldest_age_seconds`, `..._next_expiry_seconds`, and a
+per-proto `mycelium_rotate_suppressed{proto,evidence}` whose evidence is a closed-vocab integer — no
+error text, no address (§8.5). Published on **every** converge, not only on rotations: a stale claim that
+outlives its fault is exactly what stood unreported, and it is a converge that would next render around
+it. Two alerts (`MyceliumTransportSuppressed`, `MyceliumSuppressionNotLapsing` — a suppression older than
+the 24h cap means the reap is not running, not that the fault is stubborn). `fungi status` leads with
+what the loop has taken away, and reports UNKNOWN when it cannot read that state rather than implying
+all-clear.
+
+Deliberately **not** alerted on: a family nobody is connecting to. A node cannot distinguish "blocked for
+every client" from "nobody needed it today", so alerting on idleness would train people to ignore a page
+that is usually wrong.
+
+
 ## [0.2.79] — 2026-08-12
 
 ### Added — ADR-0039: client-vantage reachability is not node-observable

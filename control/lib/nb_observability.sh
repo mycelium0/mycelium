@@ -275,6 +275,71 @@ myc_update_reason_code() {
 	esac
 }
 
+# publish_suppression_leases — publish what the rotation loop has taken OUT of service (ADR-0039).
+#
+# WHY THIS IS NOT OPTIONAL. A suppression is the loop removing part of the node's service surface. It
+# was measured happening on three live nodes on 2026-08-11 and NOTHING reported it: no metric, no alert,
+# no line in `fungi status`. The operator's first sign would have been a client failing on a family the
+# node had silently stopped serving. A mechanism that can reduce what a node offers must publish that it
+# did — the alerting is what turns a time-bounded claim from "quietly degraded" into "visibly degraded,
+# with a deadline".
+#
+# CLOSED VOCAB, NO TEXT (§8.5). Protos are registry members, not free text, so a label is safe; the
+# evidence is emitted as an integer code rather than its string, for the same reason the update reason is:
+# an error string can carry a path or an address, and this file is read by node_exporter.
+#   evidence code: 0 none · 1 listener-fault · 2 render-refused · 3 egress-unreachable · 9 other
+myc_suppression_evidence_code() {
+	case "${1:-}" in
+		listener-fault)      printf '1' ;;
+		render-refused)      printf '2' ;;
+		egress-unreachable)  printf '3' ;;
+		"")                  printf '0' ;;
+		*)                   printf '9' ;;
+	esac
+}
+
+publish_suppression_leases() {
+	local leases="${LEASE_FILE:-$STATE_DIR/rotate.leases.json}" dir out now
+	dir="$NODE_EXPORTER_TEXTFILE_DIR"; [ -d "$dir" ] || dir="$STATE_DIR"
+	out="$dir/mycelium_suppression.prom"
+	now="$(date -u +%s)"
+
+	local n=0 oldest=0 soonest=0 rows=""
+	if [ -f "$leases" ] && have jq && jq -e '(.leases | type) == "array"' "$leases" >/dev/null 2>&1; then
+		local line proto since expires ev code age left
+		while IFS='|' read -r proto since expires ev; do
+			[ -n "$proto" ] || continue
+			[ "$expires" -gt "$now" ] 2>/dev/null || continue
+			n=$((n + 1))
+			age=$((now - since)); [ "$age" -gt "$oldest" ] && oldest="$age"
+			left=$((expires - now))
+			[ "$soonest" -eq 0 ] || [ "$left" -lt "$soonest" ] && soonest="$left"
+			code="$(myc_suppression_evidence_code "$ev")"
+			rows="${rows}mycelium_rotate_suppressed{proto=\"$proto\",evidence=\"$code\"} 1
+"
+		done <<EOF
+$(jq -r '.leases[]? | "\(.proto)|\((.since // "1970-01-01T00:00:00Z") | fromdateiso8601)|\((.expires_at // "1970-01-01T00:00:00Z") | fromdateiso8601)|\(.evidence // "")"' "$leases" 2>/dev/null)
+EOF
+	fi
+
+	{
+		printf '# HELP mycelium_rotate_suppressed_transports Transports the rotation loop currently holds OUT of service under a time-bounded lease; 0 = the node is serving everything it was asked to.\n'
+		printf '# TYPE mycelium_rotate_suppressed_transports gauge\n'
+		printf 'mycelium_rotate_suppressed_transports %s\n' "$n"
+		printf '# HELP mycelium_rotate_suppression_oldest_age_seconds Age of the longest-standing suppression in force; 0 = none.\n'
+		printf '# TYPE mycelium_rotate_suppression_oldest_age_seconds gauge\n'
+		printf 'mycelium_rotate_suppression_oldest_age_seconds %s\n' "$oldest"
+		printf '# HELP mycelium_rotate_suppression_next_expiry_seconds Seconds until the next suppression lapses and its transport returns; 0 = none outstanding.\n'
+		printf '# TYPE mycelium_rotate_suppression_next_expiry_seconds gauge\n'
+		printf 'mycelium_rotate_suppression_next_expiry_seconds %s\n' "$soonest"
+		printf '# HELP mycelium_rotate_suppressed Per-transport suppression, evidence as a closed-vocab code: 1 listener-fault, 2 render-refused, 3 egress-unreachable, 9 other.\n'
+		printf '# TYPE mycelium_rotate_suppressed gauge\n'
+		printf '%s' "$rows"
+	} >"$out.tmp" 2>/dev/null && { chmod 0644 "$out.tmp" 2>/dev/null || true; mv -f "$out.tmp" "$out" 2>/dev/null || true; }
+	rm -f "$out.tmp" 2>/dev/null || true
+	return 0
+}
+
 # _write_update_prom CONSEC REASON_CODE LAST_SUCCESS — publish the whole update-outcome block atomically.
 # One writer for all three series, so a partial update can never leave the success timestamp fresh next
 # to a stale failure count; the two disagreeing is exactly the state that hides a stall.
@@ -330,6 +395,12 @@ record_converge_ok() {
 	printf '0\n' > "$STATE_DIR/update_last_failure_reason" 2>/dev/null || true
 	_write_update_prom 0 0 "$now"
 	return 0
+	# Publish what the loop is holding out of service, on the same beat as the converge stamp. It goes
+	# here rather than only in the rotate path because a suppression must be visible on EVERY converge,
+	# including the ones that changed nothing: a stale claim that outlives its fault is exactly the state
+	# that stood unreported on three live nodes, and it is a converge — not a rotation — that would next
+	# have rendered around it.
+	command -v publish_suppression_leases >/dev/null 2>&1 && publish_suppression_leases || true
 }
 
 setup_observability() {

@@ -214,6 +214,84 @@ remember_harden_posture() {
 	chmod 0644 "$STATE_DIR/harden.posture" 2>/dev/null || true
 }
 
+# apply_suppression_leases <params_tmp> — ADR-0039: apply the loop's OWN, time-bounded claims about
+# which members must not be served, and reap the ones whose term has run out.
+#
+# WHY THIS EXISTS AND WHY IT IS LAST
+#   The rotation loop can take a member out of service. Until 0.2.80 it could not put one back: the
+#   closed RotationAction set has demote-active and no inverse, and revert_rotation_overlay runs only on
+#   a FAILED apply. Measured on three live nodes on 2026-08-11 — a deliberate loopback-only fault
+#   produced a correct unattended demote, and the member was still suppressed long after the fault
+#   cleared, with no metric, no alert and no line anywhere saying so.
+#
+#   Restoring "when the verdict goes clean" would be worse than the disease: internal/measure seeds
+#   every registry member Clean at construction, so a clean verdict for a member the node is NOT SERVING
+#   is manufacturable rather than observed. So the loop never asserts recovery. Its write is a LEASE
+#   with a term; when the term ends the claim simply stops applying and the member returns to whatever
+#   the operator asked for. Withdrawing your own claim needs no evidence.
+#
+#   It runs AFTER apply_node_profile because that function writes `.[$k] = true` for every declared
+#   transport unconditionally — see the ordering note at the call site.
+#
+# Fail-closed: a malformed lease file is operator/loop state that MUST NOT be guessed at. It dies rather
+# than render a node whose served set nobody can account for. An ABSENT file means "no claims" and is
+# the normal case on every node that has never rotated.
+apply_suppression_leases() {
+	local params="$1" leases="${LEASE_FILE:-$STATE_DIR/rotate.leases.json}"
+	[ -f "$leases" ] || return 0
+	have jq || die "params: jq is required to apply suppression leases."
+	# The same vocab resolution apply_node_profile uses — one spelling, not a second opinion about where
+	# the Go-owned registry lives.
+	local vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	[ -f "$vocab" ] || die "params: suppression leases are present but the Go-owned vocab.json is missing ($vocab) — refusing to guess which params key a proto toggles."
+
+	jq -e 'type == "object" and (.version | type) == "number" and (.leases | type) == "array"' \
+		"$leases" >/dev/null 2>&1 \
+		|| die "params: $leases is present but malformed — refusing to render a served set that cannot be accounted for. Remove it to clear all loop claims, or fix it."
+
+	# The clock is read ONCE and passed in, so the in-force set cannot change between the reap and the
+	# apply — a lease expiring mid-function would otherwise be neither reaped nor applied.
+	local now; now="$(date -u +%s)"
+
+	# Every lease MUST carry an expiry (spec.SuppressionLease rule L4). A lease without one is a
+	# permanent suppression, which is the state this whole mechanism exists to make impossible; if one
+	# reaches here the Go writer has been bypassed and the safe reading is "do not trust this file".
+	if jq -e '[.leases[] | select((.expires_at // "") == "")] | length > 0' "$leases" >/dev/null 2>&1; then
+		die "params: $leases contains a suppression with no expiry — a permanent claim. The lease writer refuses to emit one (ADR-0039), so this file did not come from it."
+	fi
+
+	local in_force expired
+	in_force="$(jq -r --argjson now "$now" \
+		'[.leases[] | select((.expires_at | fromdateiso8601) > $now) | .proto] | .[]' "$leases" 2>/dev/null || true)"
+	expired="$(jq -r --argjson now "$now" \
+		'[.leases[] | select((.expires_at | fromdateiso8601) <= $now) | .proto] | .[]' "$leases" 2>/dev/null || true)"
+
+	local p key
+	for p in $in_force; do
+		key="$(jq -r --arg t "$p" '.protos[] | select(.proto == $t) | .enable_key' "$vocab" 2>/dev/null)"
+		[ -n "$key" ] && [ "$key" != "null" ] \
+			|| die "params: suppression lease names '$p', which has no enable_key in the Go-owned vocab — refusing to act on a claim about a member no renderer knows."
+		jq --arg k "$key" '.[$k] = false' "$params" >"$params.sl" \
+			&& mv "$params.sl" "$params" \
+			|| { rm -f "$params.sl"; die "params: failed to apply the suppression lease for '$p'."; }
+	done
+	[ -n "$in_force" ] && log "params: suppression leases in force — not serving:$(printf ' %s' $in_force) (loop claims, each with a term; ADR-0039)."
+
+	# REAPING IS THE RESTORE PATH. Rewrite the file without the expired entries; the members they named
+	# are simply not suppressed above, so they return with the next render. Nothing here asserts they
+	# are healthy — the next tick tests them the same way it tested them the first time.
+	if [ -n "$expired" ]; then
+		log "params: suppression leases EXPIRED — returning to service:$(printf ' %s' $expired). Their term ran out; this is not a claim that they recovered."
+		if [ "${DRY_RUN:-0}" -eq 0 ]; then
+			jq --argjson now "$now" '.leases |= map(select((.expires_at | fromdateiso8601) > $now))' \
+				"$leases" >"$leases.reap" \
+				&& mv "$leases.reap" "$leases" && chmod 600 "$leases" \
+				|| { rm -f "$leases.reap"; warn "params: could not reap expired suppression leases from $leases — they are already not applied, but the file will keep listing them."; }
+		fi
+	fi
+	return 0
+}
+
 # apply_node_profile <params_tmp> — ADR-0034 / RP-0011 chunk B2: translate a node-local node.config.json
 # descriptor's declared transports[] into params enable-key toggles and set them ON, additively on top of
 # the defaults + operator overrides. The enable_key for each transport is looked up from the Go-owned
@@ -448,6 +526,19 @@ write_params() {
 	# operator overrides). ABSENT on every node that has not adopted it -> no-op -> params render
 	# byte-identically (zero blast radius under auto-pull). Read-only on the descriptor; fail-closed.
 	apply_node_profile "$tmp"
+	# SUPPRESSION LEASES COMPOSE LAST (ADR-0039). This ordering is the fix for a measured defect, not a
+	# preference: apply_node_profile writes `.[$k] = true` for every transport the descriptor declares
+	# and has NO branch that writes false, so a rotation delta applied earlier was silently re-enabled
+	# here. The demote then validated a candidate that was byte-identical to what was already running,
+	# the no-op short-circuit fired, and the run logged success — "sibling already serving (no restart)"
+	# — for a demote that had actuated nothing, while spending its rotation budget. On any node whose
+	# descriptor listed the demoted proto, `demote-active` could not work and said it had.
+	#
+	# The loop's claim is therefore applied AFTER the operator's, and it is a LEASE: time-bounded, so
+	# outranking the descriptor cannot become permanent. When it expires the member returns to whatever
+	# the operator asked for, with nothing having to assert that it is healthy again — which the node
+	# could not do anyway (ADR-0039).
+	apply_suppression_leases "$tmp"
 	# Optional two-hop egress overlay (ADR-0029): a node acting as an in-region INGRESS for an
 	# out-of-region egress drops a local-only two_hop.json into STATE_DIR; merge it into params so the
 	# renderer (render_singbox.sh) emits the upstream outbound + auth_user route. Node-local + never
