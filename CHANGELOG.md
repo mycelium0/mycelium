@@ -13,6 +13,53 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.79] — 2026-08-12
+
+### Added — ADR-0039: client-vantage reachability is not node-observable
+
+The question a node cannot answer, written down, because acting as though it could is what the rotation
+loop was doing. [ADR-0036](docs/adr/0036-node-local-l7-liveness-probe.md) fixes the L7 probe as **pure
+loopback, no external packet** — deliberately, since an outward probe would manufacture the very
+third-party fingerprint this project refuses to create. The consequence was never recorded: that probe
+answers *"is my listener serving"*, never *"can a client reach me"*. Different questions, different
+failure modes, identical evidence at the node.
+
+Measured on three live nodes on 2026-08-11 rather than reasoned: a deliberate loopback-only fault
+produced a correct unattended rotation on the way down — verdict `clean → throttled → shutdown`,
+`impaired_streak` to `flip_confirmations=3`, inbound removed — and then, one minute after the fault
+cleared, a `clean` verdict **for a transport that was no longer served at all**. `internal/measure`
+seeds every registry member `ConnStateClean` at construction, so a clean verdict for an unserved member
+is manufacturable, not observed.
+
+**The constraint is binding now.** A node may suppress a served transport only on faults it observes *at
+the node* — loopback L7 verdict, engine liveness, bind state, render/validate refusal. It must never
+infer client-side impairment, and must not read **absence of traffic** as impairment: silence and
+"nobody needed that family today" are indistinguishable and demand opposite responses. Holding only
+suspicion, it reports and **preserves diversity** rather than reducing it — the ≥2-independent-families
+floor of RP-0013 means a client blocked on one family is served by another, so wrongly removing a family
+that works for somebody else costs more than leaving one standing that some clients cannot use.
+
+Corollary, recorded because it was violated: a node serves a **set** of transports for clients with
+different constraints. There is no single "active member" whose health stands for the node's. The
+singleton in the rotation planner is a defect against this ADR and against ADR-0034.
+
+**The signal is scheduled for Phase 3.** The only direct evidence of client-vantage reachability
+originates at a client — the inbound half of the class-aggregate weather shape already adopted in
+ADR-0030 and bounded by ADR-0017, which ships inert today (RP-0011 AC-2 is PARTIAL for exactly this
+reason). Per-class outcome only, k-floored, no client identifier, no per-client history, no always-on
+channel: a report rides an already-open session or does not happen. Two weaker sources are recorded with
+their limits — per-inbound traffic disappearance against the node's own baseline (the sing-box Clash API
+exposes `inboundTag` per connection; verified present on a live node) is evidence and not proof, and
+another node dialling in settles "listener broken" while saying nothing about the client's path.
+
+### Fixed — the ADR index had already gone stale
+
+`docs/adr/README.md` is the only enumeration of what this project has decided, and ADR-0038 had shipped
+without ever being listed. `docs_link_integrity.sh` now fails when any ADR file is absent from the index
+and refuses a scan that saw fewer than five ADR files. Link integrity could never have caught this: a
+document nobody links to breaks no link.
+
+
 ## [0.2.78] — 2026-08-12
 
 ### Added — a conclusion is worth what its evidence is worth
