@@ -248,8 +248,22 @@ type RotationState struct {
 	WindowStart       time.Time `json:"window_start"`        // start of the current rate-limit window
 	RotationsInWindow int       `json:"rotations_in_window"` // promotions counted in the current window
 	RollbacksInWindow int       `json:"rollbacks_in_window"` // rollbacks counted in the current window
-	ImpairedStreak    int       `json:"impaired_streak"`     // consecutive impaired verdicts for the active member
-	HoldUntil         time.Time `json:"hold_until"`          // planner emits only "none" until this instant (latch)
+	// ImpairedStreak is the streak of the member THIS plan is about — a projection of ImpairedStreaks,
+	// kept because the shell executor, the metrics and rotate_state.json readers on live nodes all
+	// consume it. It is written by the planner, never authoritative on its own.
+	ImpairedStreak int `json:"impaired_streak"`
+	// ImpairedStreaks is the per-member hysteresis counter, keyed by proto.
+	//
+	// A node serves a SET of transports for people with different constraints (ADR-0040 §2.2), so one
+	// counter cannot serve them: an impairment on member A would advance the very streak that authorises
+	// demoting member B, and B would be taken out of service on evidence about something else. With one
+	// served member the map holds one entry and behaves exactly as the scalar did.
+	//
+	// ABSENT on a node that has not yet run a version that writes it — an empty map is the correct
+	// migration: every member starts at zero and re-earns its streak, which costs at most
+	// FlipConfirmations ticks and can never authorise a demote it has not earned.
+	ImpairedStreaks map[string]int `json:"impaired_streaks,omitempty"`
+	HoldUntil       time.Time      `json:"hold_until"` // planner emits only "none" until this instant (latch)
 }
 
 // RotationPlan is the planner's decision: either a hold (Act=false, with a concrete HeldBecause and

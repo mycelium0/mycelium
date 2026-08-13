@@ -105,6 +105,13 @@
 #                               import only {fmt, sort, time, internal/detect|rotate|spec|tune} — no
 #                               socket/file/process/clock (AC-6: no new probe surface; AC-4: advisory
 #                               input only, never actuates). OFFLINE
+#   * rotate_judges_a_set.sh  — the planner judges the SET of transports a node serves (ADR-0040 2.2/2.3),
+#                               driven through `rotate-plan`: an impairment on one member accrues no
+#                               streak on a healthy sibling, the subject is deterministic, a clean set
+#                               holds naming a real member, a legacy Active-only producer still acts, a
+#                               populated `served` makes Active ignored rather than merged, an unset or
+#                               out-of-vocabulary direction is refused, and internal/measure really emits
+#                               the set. SKIPs without a Go toolchain. OFFLINE
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
@@ -350,6 +357,7 @@ GATES=(
 	"tests/conformance/bundle_family_floor_both_renderers.sh"
 	"tests/conformance/promote_paths_converge.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
+	"tests/conformance/rotate_judges_a_set.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/rotate_apply_executes.sh"
 	"tests/conformance/rotate_rollback_executes.sh"

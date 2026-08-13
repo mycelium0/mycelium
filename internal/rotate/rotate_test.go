@@ -615,3 +615,175 @@ func TestPlanNeverEmitsAPortMoveWhileRotatePortIsReserved(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------------------------------
+// ADR-0040 2.2 / 2.3 — the planner judges a SET, each member with its own streak and its own direction.
+//
+// A node serves several people with different constraints, so no single member's health stands for the
+// node. Before this, one counter served every member: an impairment on A advanced the very streak that
+// authorised demoting B, and B was taken out of service on evidence about something else. These tests
+// are the arithmetic of that.
+// ---------------------------------------------------------------------------------------------------
+
+func member(proto string, w float64, st spec.ConnState, dir spec.TransportDirection) ServedMember {
+	c := cand(proto, w, true)
+	c.Action = spec.RotationActionNone
+	reason := spec.ReasonNone
+	if st != spec.ConnStateClean {
+		reason = spec.ReasonHandshakeTimeout
+	}
+	return ServedMember{Member: c, Verdict: vdt(st, reason), Direction: dir}
+}
+
+// TestSetImpairmentDoesNotCrossMembers is the defect this change exists to remove.
+func TestSetImpairmentDoesNotCrossMembers(t *testing.T) {
+	in := base()
+	in.Active = spec.RotationCandidate{}
+	in.ActiveVerdict = spec.Verdict{}
+	in.State = spec.RotationState{}
+	in.Served = []ServedMember{
+		member("vless-reality-vision", 0.2, spec.ConnStateBlocked, spec.DirectionIngress),
+		member("hysteria2", 0.9, spec.ConnStateClean, spec.DirectionIngress),
+	}
+	p := mustPlan(t, in)
+
+	if got := p.NextState.ImpairedStreaks["hysteria2"]; got != 0 {
+		t.Errorf("the CLEAN member accrued a streak of %d. One member impairment must never advance the counter that authorises demoting another - that is how a healthy transport was taken out of service on evidence about a different one.", got)
+	}
+	if got := p.NextState.ImpairedStreaks["vless-reality-vision"]; got != 1 {
+		t.Errorf("the impaired member streak is %d, want 1", got)
+	}
+	if p.From.Proto != "vless-reality-vision" {
+		t.Errorf("the plan is about %q; it must be about the impaired member", p.From.Proto)
+	}
+}
+
+// TestSetPicksTheLongestStreak: with two impaired members the subject is deterministic, because a pure
+// planner whose decision depends on map order is not reproducible and cannot be audited.
+func TestSetPicksTheLongestStreak(t *testing.T) {
+	in := base()
+	in.Active = spec.RotationCandidate{}
+	in.ActiveVerdict = spec.Verdict{}
+	in.State = spec.RotationState{ImpairedStreaks: map[string]int{"hysteria2": 2}}
+	in.Served = []ServedMember{
+		member("vless-reality-vision", 0.2, spec.ConnStateBlocked, spec.DirectionIngress),
+		member("hysteria2", 0.2, spec.ConnStateBlocked, spec.DirectionIngress),
+	}
+	for i := 0; i < 5; i++ {
+		p := mustPlan(t, in)
+		if p.From.Proto != "hysteria2" {
+			t.Fatalf("run %d picked %q; the member with the longer streak must be the subject", i, p.From.Proto)
+		}
+	}
+}
+
+// TestSetHoldsWhenEveryMemberIsClean - a healthy set selects nothing, and the hold names a real member.
+func TestSetHoldsWhenEveryMemberIsClean(t *testing.T) {
+	in := base()
+	in.Active = spec.RotationCandidate{}
+	in.ActiveVerdict = spec.Verdict{}
+	in.State = spec.RotationState{}
+	in.Served = []ServedMember{
+		member("vless-reality-vision", 0.9, spec.ConnStateClean, spec.DirectionIngress),
+		member("hysteria2", 0.9, spec.ConnStateClean, spec.DirectionIngress),
+	}
+	p := mustPlan(t, in)
+	if p.Act {
+		t.Fatal("a set with no impaired member produced an act")
+	}
+	if p.Reason != spec.RotationReasonClean {
+		t.Errorf("reason %q, want %q", p.Reason, spec.RotationReasonClean)
+	}
+	if p.From.Proto == "" {
+		t.Error("the hold names no member; a plan that says nothing about what it held on is not auditable")
+	}
+	if len(p.NextState.ImpairedStreaks) != 0 {
+		t.Errorf("clean members left streaks behind: %v", p.NextState.ImpairedStreaks)
+	}
+}
+
+// TestServedNormalisesFromLegacyInput - a producer that has not been updated keeps working unchanged,
+// and its single member is treated as ingress, which is what a served inbound is.
+func TestServedNormalisesFromLegacyInput(t *testing.T) {
+	in := base()
+	p := mustPlan(t, in)
+	if !p.Act {
+		t.Fatalf("the legacy single-member input stopped acting: %s / %s", p.Reason, p.HeldBecause)
+	}
+	if got := p.NextState.ImpairedStreaks[in.Active.Proto]; got != in.Limits.FlipConfirmations {
+		t.Errorf("legacy streak did not carry into the per-member map: %d, want %d", got, in.Limits.FlipConfirmations)
+	}
+}
+
+// TestServedIgnoresLegacyFieldsWhenPopulated - two half-populated sources is the duplicate-truth defect
+// this change removes, so Active must be ignored rather than merged.
+func TestServedIgnoresLegacyFieldsWhenPopulated(t *testing.T) {
+	in := base()
+	in.Active = cand("tuic", 0.9, true)
+	in.ActiveVerdict = vdt(spec.ConnStateClean, spec.ReasonNone)
+	in.State = spec.RotationState{}
+	in.Served = []ServedMember{member("vless-reality-vision", 0.2, spec.ConnStateBlocked, spec.DirectionIngress)}
+	p := mustPlan(t, in)
+	if p.From.Proto == "tuic" {
+		t.Fatal("the planner read the legacy Active while Served was populated - two sources for one truth")
+	}
+	if p.From.Proto != "vless-reality-vision" {
+		t.Errorf("subject is %q, want the served impaired member", p.From.Proto)
+	}
+}
+
+// TestServedRefusesAnUnknownDirection - direction is the machine-checkable half of ADR-0039: what the
+// node may conclude about a member depends on which way it faces, so an unset one is fail-closed.
+func TestServedRefusesAnUnknownDirection(t *testing.T) {
+	in := base()
+	in.Served = []ServedMember{member("vless-reality-vision", 0.2, spec.ConnStateBlocked, "")}
+	if _, err := Plan(in); err == nil {
+		t.Fatal("a served member with no direction was accepted. Direction decides what evidence may justify suppressing it; unset must fail closed, not default.")
+	}
+	in.Served[0].Direction = spec.TransportDirection("sideways")
+	if _, err := Plan(in); err == nil {
+		t.Fatal("an out-of-vocabulary direction was accepted")
+	}
+}
+
+// TestStreaksDropWhenAMemberLeavesTheSet - a stale streak would let a returning member be demoted the
+// moment it reappears, on evidence gathered while it was not being served.
+func TestStreaksDropWhenAMemberLeavesTheSet(t *testing.T) {
+	in := base()
+	in.Active = spec.RotationCandidate{}
+	in.ActiveVerdict = spec.Verdict{}
+	in.State = spec.RotationState{ImpairedStreaks: map[string]int{"hysteria2": 3, "vless-reality-vision": 1}}
+	in.Served = []ServedMember{member("vless-reality-vision", 0.2, spec.ConnStateBlocked, spec.DirectionIngress)}
+	p := mustPlan(t, in)
+	if _, still := p.NextState.ImpairedStreaks["hysteria2"]; still {
+		t.Error("a member no longer in the served set kept its streak. It would be demoted the instant it returned, on evidence gathered while nobody was served by it.")
+	}
+}
+
+// TestScalarStreakMigratesToTheIncumbentOnly is the upgrade every live node performs exactly once: the
+// state file holds a scalar and no map, while the updated producer starts sending the whole set.
+func TestScalarStreakMigratesToTheIncumbentOnly(t *testing.T) {
+	in := base()
+	in.State = spec.RotationState{ImpairedStreak: 2} // no map: written by a spine that had none
+	in.Served = []ServedMember{
+		member("vless-reality-vision", 0.2, spec.ConnStateBlocked, spec.DirectionIngress),
+		member("hysteria2", 0.2, spec.ConnStateBlocked, spec.DirectionIngress),
+	}
+	p := mustPlan(t, in)
+	// in.Active is vless-reality-vision in base(); the scalar was that member streak and nobody else.
+	if got := p.NextState.ImpairedStreaks["vless-reality-vision"]; got != 3 {
+		t.Errorf("the incumbent streak is %d, want 3. Dropping the scalar makes an upgrading node wait another full hysteresis cycle before it may act - on a node whose transport is failing at that moment.", got)
+	}
+	if got := p.NextState.ImpairedStreaks["hysteria2"]; got != 1 {
+		t.Errorf("a non-incumbent member came out at %d, want 1. The scalar belonged to one member; spreading it authorises acting on the others a cycle early, on evidence never gathered about them.", got)
+	}
+
+	// And an incumbent that is NOT in the served set hands its streak to nobody.
+	in.Active = cand("tuic", 0.9, true)
+	p = mustPlan(t, in)
+	for proto, n := range p.NextState.ImpairedStreaks {
+		if n != 1 {
+			t.Errorf("%s inherited a streak of %d from an incumbent outside the served set", proto, n)
+		}
+	}
+}

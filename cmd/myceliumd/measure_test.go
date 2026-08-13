@@ -621,12 +621,22 @@ func TestPathSignalMarkerDrivesThrottledCollapse(t *testing.T) {
 	}
 }
 
+// isZeroRotationState reports whether st carries no state. RotationState gained a per-member streak MAP
+// (ADR-0040 §2.2 — one counter cannot serve a set of members), and a struct containing a map is not
+// comparable with ==, so the zero check is explicit. A nil or empty map both count as zero: an absent
+// map is exactly what a node whose state predates the field has.
+func isZeroRotationState(st spec.RotationState) bool {
+	return st.LastRotateAt.IsZero() && st.WindowStart.IsZero() &&
+		st.RotationsInWindow == 0 && st.RollbacksInWindow == 0 &&
+		st.ImpairedStreak == 0 && len(st.ImpairedStreaks) == 0 && st.HoldUntil.IsZero()
+}
+
 func TestLoadRotationState(t *testing.T) {
 	// Empty path / missing file / malformed -> zero state (safe default), never an error.
-	if st := loadRotationState(""); st != (spec.RotationState{}) {
+	if st := loadRotationState(""); !isZeroRotationState(st) {
 		t.Errorf("empty path: got %+v, want zero", st)
 	}
-	if st := loadRotationState(filepath.Join(t.TempDir(), "absent.json")); st != (spec.RotationState{}) {
+	if st := loadRotationState(filepath.Join(t.TempDir(), "absent.json")); !isZeroRotationState(st) {
 		t.Errorf("missing file: got %+v, want zero", st)
 	}
 	dir := t.TempDir()
