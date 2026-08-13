@@ -808,6 +808,18 @@ converge_node_tail() {
 		warn "  stale is the step named above. Fix it and re-run '$0 --node-apply'."
 		return 1
 	fi
+	# PUBLISH WHAT THE LOOP IS HOLDING OUT OF SERVICE — on EVERY converge, which is what this tail is.
+	#
+	# This call used to live in record_converge_ok, and record_converge_ok is reached only from
+	# flow_update. Measured on a live node: `fungi apply` completed rc=0 and mycelium_update.prom was not
+	# touched, so a node converged by deploy or apply — i.e. every node before its first unattended
+	# update — never published the series at all. The CHANGELOG said "published on every converge"; the
+	# apply path was not one of them.
+	#
+	# It belongs here rather than there: the suppression state is a property of a CONVERGE, while
+	# record_converge_ok stamps the success of an UPDATE. One fact, one place that knows it.
+	command -v publish_suppression_leases >/dev/null 2>&1 && publish_suppression_leases || true
+
 	return 0
 }
 

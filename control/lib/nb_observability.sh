@@ -399,7 +399,9 @@ record_converge_ok() {
 	# including the ones that changed nothing: a stale claim that outlives its fault is exactly the state
 	# that stood unreported on three live nodes, and it is a converge — not a rotation — that would next
 	# have rendered around it.
-	command -v publish_suppression_leases >/dev/null 2>&1 && publish_suppression_leases || true
+	# The suppression publish lives in converge_node_tail, not here: this function stamps the success of
+	# an UPDATE and is reached only from flow_update, while a suppression is a property of every
+	# CONVERGE. Measured — `fungi apply` never reached this function at all.
 	return 0
 }
 
