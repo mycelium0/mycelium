@@ -551,6 +551,7 @@ jq -n --arg priv "$PRIV" --arg pub "$PUB" --arg sid "$SID" '{
 	short_ids: [$sid],
 	tls_sni: "tls.example.invalid",
 	vless_reality_vision_enabled: true,
+	hysteria2_enabled: true, hysteria2_port: 8444, hysteria2_password: "x",
 	two_hop: {
 		tag: "to-egress", server: "203.0.113.10", server_port: 443,
 		uuid: "00000000-0000-4000-8000-000000000000",
