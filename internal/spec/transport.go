@@ -508,13 +508,13 @@ type ParamsValidationVocab struct {
 // (encoding/json with this struct's fixed field order is stable).
 func NewVocab() Vocab {
 	return Vocab{
-		Version:            NetworkStateVersion,
-		TransportClasses:   TransportClasses(),
-		RegionBuckets:      RegionBuckets(),
-		HealthValues:       HealthValues(),
-		OperatorToggleKeys: OperatorToggleKeys(),
-		ClientFingerprints: ClientFingerprints(),
-		Protos:             TransportRegistry(),
+		Version:                NetworkStateVersion,
+		TransportClasses:       TransportClasses(),
+		RegionBuckets:          RegionBuckets(),
+		HealthValues:           HealthValues(),
+		OperatorToggleKeys:     OperatorToggleKeys(),
+		ClientFingerprints:     ClientFingerprints(),
+		Protos:                 TransportRegistry(),
 		BlockFamilies:          blockFamilyVocab(),
 		IndependentFamilyFloor: IndependentFamilyFloor,
 		ParamsValidation: ParamsValidationVocab{
