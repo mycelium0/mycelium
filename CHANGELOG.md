@@ -15,6 +15,71 @@ truth for the version is `internal/spec.Version`.
 
 ## [0.2.82] — 2026-08-13
 
+
+### Fixed — the release runbook could not be executed as written
+
+Three defects, all on the steps added to close Audit-0011 #15 (*the signed bytes are the published
+bytes*), and all on a lane that has never run:
+
+- Steps 4-7 `cd` out of the repository and every `gh` call lacked `--repo`, so from there
+  `gh release download` fails with *"failed to run git: fatal: not a git repository"* and never reaches
+  GitHub. Now `--repo` throughout, absolute paths, and an explicit `$REPO_DIR` rather than `$OLDPWD` —
+  which survives exactly one `cd`.
+- The command that **creates** `allowed_signers` derived its principal from `git log -1 --format=%GS`,
+  which prints a principal only once an `allowed_signers` already contains that key. Reproduced from an
+  empty repository: the line came out with a leading space and no principal, `awk 'NF{print $1; exit}'`
+  yielded `ssh-ed25519` — the key *type* — and the commit verified as `U`. Now a literal principal, with
+  a sanity check beside it. This is the single command that closes the project's only deferred blocker.
+- `verify-release.sh` cd'd into the directory it checks before testing `--allowed-signers`, so a
+  **relative** key path — the shape both documents prescribe — resolved against the wrong directory and
+  was "not found". Measured A/B: absolute → *"integrity AND authenticity verified"*; relative → *"file
+  not found"*. The obvious recovery is to drop the flag, which falls back to the one mode this project
+  says cannot tell a substituted release from a genuine one.
+
+`release_runbook_executes.sh` runs these rather than reading them: it executes the key recipe in a
+throwaway repo with a real signed commit and asserts the principal and a `G` verification, and drives
+the verifier with a relative key path from outside `$DIR`.
+
+### Fixed — the independent-family floor was enforced only where it does not run
+
+RP-0013's floor — a served bundle must span ≥2 independent block families, so a single-family block
+never takes a client's last path — lived in `internal/spec/bundle_render.go` and **not** in
+`control/lib/render_bundle.sh`. The shell renderer is the one that runs (`nb_install.sh` keeps `MYCTL`
+as the shell tool). Measured: one proto enabled, `bundle` rc=0, one endpoint, served — while QUICKSTART
+told the reader the node refuses exactly that.
+
+The equivalence (class → block family) and the threshold are now emitted by Go into `control/vocab.json`
+as `.block_families` and `.independent_family_floor`, and the shell **compares** rather than re-deriving
+(ADR-0038). A class the map does not know is a fail-closed refusal, not a silent pass — an unmapped
+class would count as its own family and inflate the total, so the gap failed open exactly where a new
+transport is most likely to be added.
+
+**And the endpoint set was incomplete, which is why the floor looked wrong.** A fresh node defaults on
+two REALITY protos — both `reality-tcp`, one family — yet genuinely serves two independent families,
+because AmneziaWG is served and was advertised nowhere: it was delivered as a file only. `bundle` gains
+`--awg-client`, and the converge passes it when a client config exists. There is no standard share-link
+scheme for WireGuard-family transports, and inventing one would produce a `Link` no client can parse —
+`Endpoint.Link` is documented as an *opaque dialable client config*, so it carries the config verbatim,
+the exact bytes every client of that family imports. The registry's `Scheme` for amneziawg stays empty,
+correctly. Optional by construction: with no `--awg-client`, the bundle renders byte-identically to
+before.
+
+That config contains the client's `PrivateKey`. The bundle already carries per-client credentials — the
+UUID inside every `vless://`, the password inside `hysteria2://` — so this is the same class of material,
+already minted and stored by this node and already handed over as a file; what changes is that it now
+also appears in the served artifact, whose vhost binds loopback by default.
+
+Five fixtures across three gates and `control/selftest.sh` were **single-family** and had been silently
+exercising a bundle no node may serve. They now span two families.
+
+### Fixed — QUICKSTART described subscriptions it does not emit
+
+*"They carry their own routing rules and are full-tunnel by default"* was false of both files: the
+sing-box artifact is `{"outbounds": [...]}` — no `route`, no `rules`, no `final` — and the Clash file is
+proxies and groups with no `rules:`. They are fragments to merge, and the section now says so. It also
+gains the one command that produces phone-importable share links, which appeared in no operator-facing
+document: `myceliumctl bundle` piped through `jq -r '.endpoints[].link'`.
+
 ### Added — ADR-0040: a fungi serves several independent people
 
 The corpus had never decided this. Searched across the vision set, the ADR set, THREAT-MODEL,
