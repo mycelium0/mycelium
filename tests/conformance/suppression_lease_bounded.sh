@@ -186,6 +186,27 @@ else
 fi
 rm -rf "$W"
 
+# --- 6b. IT IS PUBLISHED ON EVERY CONVERGE, not only after an unattended update -----------------
+#
+# The publish call first lived in record_converge_ok, which is reached ONLY from flow_update. Measured
+# on a live node: `fungi apply` completed rc=0 and mycelium_update.prom was never touched — so a node
+# converged by deploy or apply, which is every node before its first unattended update, published the
+# series never. The CHANGELOG said "on every converge"; the apply path was not one of them.
+#
+# So the call belongs to converge_node_tail, the shared tail EVERY converge path runs. This row asserts
+# that, and that it is not ALSO in record_converge_ok — two callers would be two owners of one fact.
+printf '\n-- the publish is on the converge path, and on exactly one of them --\n'
+tail_body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$PARAMS_LIB" | awk '/^converge_node_tail\(\)/,/^}/')"
+obs_lib="$REPO_ROOT/control/lib/nb_observability.sh"
+obs_rc="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$obs_lib" | awk '/^record_converge_ok\(\)/,/^}/')"
+
+printf '%s' "$tail_body" | grep -q 'publish_suppression_leases' \
+	&& ok "converge_node_tail publishes the suppression state — the tail every converge path runs" \
+	|| badln "converge_node_tail does not publish. If the call sits in record_converge_ok instead, it is reached only from flow_update, and a node converged by deploy or apply never emits the series — measured exactly that on a live node."
+printf '%s' "$obs_rc" | grep -q 'publish_suppression_leases' \
+	&& badln "record_converge_ok publishes too. Two callers for one fact is two owners (§2.2 item 8) — and the update path would emit a second, differently-timed sample of the same state." \
+	|| ok "and record_converge_ok does not — one fact, one place that knows it"
+
 # --- 7. WHAT ACTUALLY REMOVES SERVICE TODAY, pinned as a known defect ------------------------------
 #
 # This row used to compare SOURCE LINE NUMBERS of two function calls — and so it certified the
