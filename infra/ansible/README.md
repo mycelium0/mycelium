@@ -235,8 +235,16 @@ client_names:
 ```sh
 ansible-playbook playbook.yml --tags singbox   # or --tags xray
 ```
-`bob`'s UUID and passwords are dropped from `identity.json` and `config.json`; the node no longer
-accepts that identity (revocation without redeploying the node — acceptance criterion in proposal §7).
+`bob`'s UUID is dropped from `identity.json` and `config.json`, which retires him on every family that
+keys on it — the VLESS families and TUIC.
+
+**It does not retire him on hysteria2, shadowsocks, shadowtls or trojan.** Those authenticate every
+client against ONE node-wide secret, so bob keeps the credential he already holds and keeps access.
+Measured on a live node (Audit-0012): two clients' emitted subscriptions are byte-identical on those
+families. This page previously said "the node no longer accepts that identity", which was true of the
+UUID and false of the person. Per-person credentials are decided in
+[ADR-0040 §2.1](../../docs/adr/0040-a-fungi-serves-several-people.md) and not yet implemented; until
+then `--revoke` refuses to claim the removal on a node serving any of those four and exits non-zero.
 
 **On-node alternative:** the copied control tooling can manage the roster directly. The
 authoritative roster, however, is `client_names` — the next playbook run reconciles the node to

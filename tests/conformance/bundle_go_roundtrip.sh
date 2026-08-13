@@ -75,7 +75,8 @@ jq -n '{
 	grpc_service_name: "grpc.health.v1.Health", xhttp_path: "/",
 	ss_password: "x", trojan_password: "x", hysteria2_password: "x", shadowtls_password: "x",
 	vless_reality_vision_enabled: true, vless_reality_vision_port: 443,
-	vless_reality_grpc_enabled:   true, vless_reality_grpc_port:   8443
+	vless_reality_grpc_enabled:   true, vless_reality_grpc_port:   8443,
+	hysteria2_enabled: true, hysteria2_port: 8444
 }' > "$PARAMS"
 jq -n '{ version: 1, clients: [ { name: "alice", id: "a1b2c3d4-e5f6-7890-abcd-ef0123456789", created: "2026-01-01T00:00:00Z" } ] }' > "$STATE"
 

@@ -387,6 +387,53 @@ myc_render_bundle() {
 			}]')"
 	done
 
+	# AMNEZIAWG — the family the node serves and the bundle never advertised (Audit-0012 / plan P4).
+	#
+	# WHY IT BELONGS HERE. A fresh node defaults on {vless_reality_vision, vless_reality_grpc}, both
+	# class reality-tcp, i.e. ONE block family — and the bundle therefore fell below the RP-0013 floor
+	# that exists so a single-family block never takes a client's last path. But that node genuinely
+	# serves two independent families: REALITY and AmneziaWG. The floor was right and the endpoint set
+	# was incomplete: AWG was delivered as a file and advertised nowhere.
+	#
+	# WHY THE LINK IS A CONFIG, NOT A URI. There is no standard share-link scheme for WireGuard-family
+	# transports, and inventing one would produce a Link no client can parse. Endpoint.Link is
+	# documented as "opaque dialable client config (e.g. a vless:// URL)" — opaque, and a CONFIG. So it
+	# carries the wg-quick/awg config verbatim: the exact bytes every client of this family imports, and
+	# the exact bytes a QR encodes. The registry's Scheme for amneziawg stays empty, correctly.
+	#
+	# WHAT IT ADDS TO THE ARTIFACT. That config contains the client's PrivateKey. The bundle already
+	# carries per-client credentials — the UUID inside every vless:// link, the password inside
+	# hysteria2:// — so this is the same class of material, not a new one, and it is material this node
+	# already mints, already stores, and already hands over as a file. It does change WHERE it appears:
+	# from a 0600 file to the served bundle. The bundle vhost binds loopback by default (nb_serve_bundle),
+	# so the exposure surface is unchanged; a node that fronts it publicly was already publishing
+	# credentials.
+	#
+	# OPTIONAL BY CONSTRUCTION. With no --awg-client given, nothing is emitted and the bundle renders
+	# byte-identically to before — so no existing node changes shape on an update.
+	if [ -n "${MYC_BUNDLE_AWG_CONF:-}" ]; then
+		if [ ! -f "$MYC_BUNDLE_AWG_CONF" ]; then
+			myc_die "bundle: --awg-client '$MYC_BUNDLE_AWG_CONF' does not exist. Refusing to render a bundle that silently omits a family the node serves."
+		fi
+		local awg_conf awg_class
+		awg_conf="$(cat "$MYC_BUNDLE_AWG_CONF" 2>/dev/null)"
+		[ -n "$awg_conf" ] || myc_die "bundle: --awg-client '$MYC_BUNDLE_AWG_CONF' is empty."
+		# The class comes from the Go-owned registry, never restated (ADR-0038).
+		awg_class="$(jq -r '.protos[] | select(.proto == "amneziawg") | .class' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}" 2>/dev/null)"
+		[ -n "$awg_class" ] && [ "$awg_class" != null ] 			|| myc_die "bundle: the vocab has no class for amneziawg — refusing to invent one."
+		endpoints_json="$(printf '%s' "$endpoints_json" | jq -c \
+			--arg class "$awg_class" --arg region "$region" --arg link "$awg_conf" \
+			'. + [{
+				tag: "mycelium-amneziawg",
+				transport_class: $class,
+				region: $region,
+				priority: 0,
+				health: "unknown",
+				link: $link
+			}]')"
+		myc_log "bundle: included the AmneziaWG client config as an endpoint (family: $awg_class)."
+	fi
+
 	# Top-level Bundle: version (NetworkStateVersion), endpoints[], generated_at (RFC-3339 UTC).
 	local generated_at bundle
 	generated_at="$(myc_now_utc)"
@@ -404,6 +451,34 @@ myc_render_bundle() {
 	# every class in the closed vocab.
 	if [ "$(printf '%s' "$bundle" | jq '.endpoints | length')" -lt 1 ]; then
 		myc_die "bundle: zero endpoints rendered (Bundle.Validate requires >=1)."
+	fi
+	# THE INDEPENDENT-FAMILY FLOOR, enforced where the render actually happens (Audit-0012 B7).
+	#
+	# internal/spec/bundle_render.go refuses a bundle spanning fewer than two independent block families
+	# — the RP-0013 precondition for e2e client recovery: a single-family block must never remove a
+	# client's last path. But the node serves through the SHELL tool (nb_install.sh keeps MYCTL as the
+	# shell renderer; myceliumctl-go is installed non-load-bearing), and this renderer had no such
+	# check. Measured: one proto enabled, `bundle` rc=0, one endpoint, published. Two tools named
+	# myceliumctl disagreeing about whether the DEFAULT profile is publishable is the duplicate-truth
+	# defect §2.2 item 8 forbids.
+	#
+	# The equivalence and the threshold are Go-owned and READ from control/vocab.json
+	# (.block_families, .independent_family_floor) — never restated here (ADR-0038). A class whose
+	# family the vocab does not know is a fail-closed refusal, not a silent pass: an unmapped class
+	# would otherwise count as its own family and inflate the total.
+	if command -v jq >/dev/null 2>&1; then
+		_bf_vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+		if [ -f "$_bf_vocab" ]; then
+			_floor="$(jq -r '.independent_family_floor // 2' "$_bf_vocab")"
+			_unmapped="$(printf '%s' "$bundle" | jq -r --slurpfile v "$_bf_vocab" \
+				'[.endpoints[].transport_class | select(($v[0].block_families // {})[.] == null)] | unique | join(" ")')"
+			[ -z "$_unmapped" ] || myc_die "bundle: transport class(es) '$_unmapped' have no block family in the Go-owned vocab — refusing to count independent families from an incomplete map."
+			_fams="$(printf '%s' "$bundle" | jq -r --slurpfile v "$_bf_vocab" \
+				'[.endpoints[].transport_class | ($v[0].block_families // {})[.]] | unique | length')"
+			if [ "${_fams:-0}" -lt "${_floor:-2}" ]; then
+				myc_die "bundle: the served transports span only ${_fams:-0} independent block family, floor is ${_floor:-2} (RP-0013). A single-family block would take this client's last path away. Enable a transport from a different family before serving a bundle."
+			fi
+		fi
 	fi
 	if ! printf '%s' "$bundle" | jq -e '.endpoints | all(.health == "unknown")' >/dev/null 2>&1; then
 		myc_die "bundle: a non-unknown health label leaked (Phase-1 invariant; Bundle.Validate rejects it)."

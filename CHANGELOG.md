@@ -13,6 +13,118 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.82] — 2026-08-13
+
+
+### Fixed — the release runbook could not be executed as written
+
+Three defects, all on the steps added to close Audit-0011 #15 (*the signed bytes are the published
+bytes*), and all on a lane that has never run:
+
+- Steps 4-7 `cd` out of the repository and every `gh` call lacked `--repo`, so from there
+  `gh release download` fails with *"failed to run git: fatal: not a git repository"* and never reaches
+  GitHub. Now `--repo` throughout, absolute paths, and an explicit `$REPO_DIR` rather than `$OLDPWD` —
+  which survives exactly one `cd`.
+- The command that **creates** `allowed_signers` derived its principal from `git log -1 --format=%GS`,
+  which prints a principal only once an `allowed_signers` already contains that key. Reproduced from an
+  empty repository: the line came out with a leading space and no principal, `awk 'NF{print $1; exit}'`
+  yielded `ssh-ed25519` — the key *type* — and the commit verified as `U`. Now a literal principal, with
+  a sanity check beside it. This is the single command that closes the project's only deferred blocker.
+- `verify-release.sh` cd'd into the directory it checks before testing `--allowed-signers`, so a
+  **relative** key path — the shape both documents prescribe — resolved against the wrong directory and
+  was "not found". Measured A/B: absolute → *"integrity AND authenticity verified"*; relative → *"file
+  not found"*. The obvious recovery is to drop the flag, which falls back to the one mode this project
+  says cannot tell a substituted release from a genuine one.
+
+`release_runbook_executes.sh` runs these rather than reading them: it executes the key recipe in a
+throwaway repo with a real signed commit and asserts the principal and a `G` verification, and drives
+the verifier with a relative key path from outside `$DIR`.
+
+### Fixed — the independent-family floor was enforced only where it does not run
+
+RP-0013's floor — a served bundle must span ≥2 independent block families, so a single-family block
+never takes a client's last path — lived in `internal/spec/bundle_render.go` and **not** in
+`control/lib/render_bundle.sh`. The shell renderer is the one that runs (`nb_install.sh` keeps `MYCTL`
+as the shell tool). Measured: one proto enabled, `bundle` rc=0, one endpoint, served — while QUICKSTART
+told the reader the node refuses exactly that.
+
+The equivalence (class → block family) and the threshold are now emitted by Go into `control/vocab.json`
+as `.block_families` and `.independent_family_floor`, and the shell **compares** rather than re-deriving
+(ADR-0038). A class the map does not know is a fail-closed refusal, not a silent pass — an unmapped
+class would count as its own family and inflate the total, so the gap failed open exactly where a new
+transport is most likely to be added.
+
+**And the endpoint set was incomplete, which is why the floor looked wrong.** A fresh node defaults on
+two REALITY protos — both `reality-tcp`, one family — yet genuinely serves two independent families,
+because AmneziaWG is served and was advertised nowhere: it was delivered as a file only. `bundle` gains
+`--awg-client`, and the converge passes it when a client config exists. There is no standard share-link
+scheme for WireGuard-family transports, and inventing one would produce a `Link` no client can parse —
+`Endpoint.Link` is documented as an *opaque dialable client config*, so it carries the config verbatim,
+the exact bytes every client of that family imports. The registry's `Scheme` for amneziawg stays empty,
+correctly. Optional by construction: with no `--awg-client`, the bundle renders byte-identically to
+before.
+
+That config contains the client's `PrivateKey`. The bundle already carries per-client credentials — the
+UUID inside every `vless://`, the password inside `hysteria2://` — so this is the same class of material,
+already minted and stored by this node and already handed over as a file; what changes is that it now
+also appears in the served artifact, whose vhost binds loopback by default.
+
+Five fixtures across three gates and `control/selftest.sh` were **single-family** and had been silently
+exercising a bundle no node may serve. They now span two families.
+
+### Fixed — QUICKSTART described subscriptions it does not emit
+
+*"They carry their own routing rules and are full-tunnel by default"* was false of both files: the
+sing-box artifact is `{"outbounds": [...]}` — no `route`, no `rules`, no `final` — and the Clash file is
+proxies and groups with no `rules:`. They are fragments to merge, and the section now says so. It also
+gains the one command that produces phone-importable share links, which appeared in no operator-facing
+document: `myceliumctl bundle` piped through `jq -r '.endpoints[].link'`.
+
+### Added — ADR-0040: a fungi serves several independent people
+
+The corpus had never decided this. Searched across the vision set, the ADR set, THREAT-MODEL,
+ARCHITECTURE, GLOSSARY, ROADMAP, README, SECURITY, QUICKSTART and development.md, there was no statement
+either way — and four defects Audit-0012 measured are consequences of that silence rather than four
+separate mistakes. Each is correct if a fungi serves one person and wrong if it serves several: a shared
+node-wide credential, a planner shaped around one active transport, no typed ingress/egress role despite
+the observability asymmetry, and a loop free to take away a channel that is carrying somebody's traffic.
+Nobody chose single-tenancy; code written without the question in view answered it by default, four
+times, in four files.
+
+ADR-0040 decides it and derives all four consequences, including the honest re-scoping of ADR-0010's
+"no per-user attribution" — which was true **only because** the credentials are node-wide. Distinguishable
+is not attributable: holding a credential per person is what makes revocation possible; recording who
+used what and when is what stays forbidden.
+
+### Fixed — `--revoke` claimed a removal it had not made
+
+`flow_revoke` logged *"the client's UUID is gone from every inbound on BOTH engines"*. Literally true,
+and read as "this person no longer has access." On hysteria2, shadowsocks, shadowtls and trojan it is
+false: those build their user list as `(.password // $pw)` with `$pw` a node-wide secret, so the revoked
+person keeps the credential. Measured on a live node — two clients' emitted subscriptions are
+**byte-identical** on those families. TUIC is not affected (`(.password // .id)` falls back to that
+client's own UUID) and neither are the VLESS families.
+
+On a node serving any of the four, `--revoke` now refuses the claim, names the families, names the person
+as **still admitted**, writes a `REVOKE_INCOMPLETE` marker, and exits non-zero — the pattern
+`nb_render_awg.sh`'s awg-revoke already used, whose header reads *"THE GUARANTEE IS EARNED, NOT PRINTED"*.
+The default profile (REALITY only) is unaffected and still prints the clean guarantee.
+
+The family set is **declared** in the Go registry as `ProtoDescriptor.SharedSecretAuth` and read from
+`control/vocab.json` — never restated in shell (ADR-0038). Declared rather than inferred for the same
+reason `ServesUDP` is: it is a property of how the renderer builds the user list, not of the class, and
+inferring it is how it stayed invisible.
+
+Four documents asserting the opposite are corrected, and `phase0-acceptance-ledger.md` D4 is rescored
+**DONE → PARTIAL** in all three places it appeared.
+
+`revoke_guarantee_is_earned.sh` drives the predicate against the shipped registry: the declared set must
+equal the set the renderer actually builds with a node-wide `$pw` (derived from the renderer, not
+restated), tuic must not be in it, the default profile must stay clean, a disabled family must not be
+named, and no document may still promise a clean revoke. The document sweep is sentence-aware — a
+correction has to be able to quote the sentence it corrects.
+
+
 ## [0.2.81] — 2026-08-12
 
 ### Corrected
@@ -44,7 +156,7 @@ change, so a clean verdict for a member the node is **not serving** is manufactu
 observed. The loop would have been asserting a fact it cannot establish — the defect class ADR-0039
 exists to close.
 
-So the loop never asserts recovery. Its write is a **lease**: a time-bounded claim that stops applying
+So the loop is not to assert recovery. Its write becomes a **lease**: a time-bounded claim that stops applying
 at its expiry, at which point the same test that produced it runs again against a served member.
 Withdrawing your own claim needs no evidence, which is why expiry is the only one of
 {suppress, restore-on-clean, expire} that fail-closed permits unconditionally.
@@ -96,7 +208,9 @@ listed the demoted proto, demote could not work and reported that it had. Suppre
 
 `mycelium_rotate_suppressed_transports`, `..._oldest_age_seconds`, `..._next_expiry_seconds`, and a
 per-proto `mycelium_rotate_suppressed{proto,evidence}` whose evidence is a closed-vocab integer — no
-error text, no address (§8.5). Published on **every** converge, not only on rotations: a stale claim that
+error text, no address (§8.5). **Corrected in 0.2.82: none of this was reachable.** The publisher call sat
+below a `return 0` and nothing has ever granted a lease, so the series were never emitted. Intended to be
+published on **every** converge, not only on rotations: a stale claim that
 outlives its fault is exactly what stood unreported, and it is a converge that would next render around
 it. Two alerts (`MyceliumTransportSuppressed`, `MyceliumSuppressionNotLapsing` — a suppression older than
 the 24h cap means the reap is not running, not that the fault is stubborn). `fungi status` leads with

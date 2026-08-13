@@ -257,7 +257,7 @@ apply_suppression_leases() {
 	# permanent suppression, which is the state this whole mechanism exists to make impossible; if one
 	# reaches here the Go writer has been bypassed and the safe reading is "do not trust this file".
 	if jq -e '[.leases[] | select((.expires_at // "") == "")] | length > 0' "$leases" >/dev/null 2>&1; then
-		die "params: $leases contains a suppression with no expiry — a permanent claim. The lease writer refuses to emit one (ADR-0039), so this file did not come from it."
+		die "params: $leases contains a suppression with no expiry — a permanent claim. spec.SuppressionLease.Validate refuses to construct one (ADR-0039 / ADR-0040), and NOTHING currently writes this file at all, so whatever produced it did not come from this codebase."
 	fi
 
 	local in_force expired

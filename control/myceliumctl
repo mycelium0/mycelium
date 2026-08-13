@@ -378,6 +378,11 @@ cmd_bundle() {
 			--params) params="${2:?--params needs a value}"; shift 2 ;;
 			--state)  state="${2:?--state needs a value}"; shift 2 ;;
 			--out)    out="${2:?--out needs a value}"; shift 2 ;;
+			# --awg-client PATH — include the AmneziaWG client config as an endpoint. OPTIONAL: without
+			# it the bundle renders exactly as before. A fresh node defaults on two REALITY protos, which
+			# are ONE block family, so its bundle falls below the RP-0013 floor — while the node in fact
+			# serves REALITY and AmneziaWG. This is how the second family reaches the artifact.
+			--awg-client) MYC_BUNDLE_AWG_CONF="${2:?--awg-client needs a path}"; export MYC_BUNDLE_AWG_CONF; shift 2 ;;
 			-h|--help) usage; return 0 ;;
 			*) myc_die "bundle: unknown argument: $1" ;;
 		esac

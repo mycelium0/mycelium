@@ -1007,6 +1007,47 @@ flow_revoke() {
 		# the xray inbound of every xray-serving node until someone happened to run --node-apply, while
 		# this very line logged that it was "gone from every inbound". Revocation must reach both engines.
 		converge_node_tail
+		# THE GUARANTEE IS EARNED, NOT PRINTED (ADR-0040 §2.1; the pattern is nb_render_awg.sh's
+		# awg-revoke, ported).
+		#
+		# Dropping the UUID retires this person on every family that keys on it — the vless families and
+		# tuic, whose renderer falls back to `(.password // .id)`, i.e. that client's own UUID. It does
+		# NOT retire them on a family whose users are built as `(.password // $pw)` with $pw a node-wide
+		# secret: hysteria2, shadowsocks, shadowtls and trojan. Measured on a live node (Audit-0012): two
+		# clients' emitted subscriptions are byte-identical on those families, so the revoked person
+		# keeps the credential and keeps access.
+		#
+		# The sentence this replaced said the UUID was "gone from every inbound on BOTH engines". That
+		# was literally true and read as "this person no longer has access", which is the shape
+		# development.md §2.2 item 12 forbids: a conclusion the evidence does not carry. So on a node
+		# serving any of those families we refuse the claim, name them, name the person as still
+		# admitted, and exit non-zero — the operator finds out here rather than from whoever was
+		# supposed to lose access.
+		#
+		# The family set is READ from the Go-owned registry (.protos[].shared_secret_auth), never
+		# restated here (ADR-0038): one owner for "which families share a secret", and a family added
+		# later is covered without touching this file.
+		local _shared_served=""
+		if command -v jq >/dev/null 2>&1; then
+			local _vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+			if [ -f "$_vocab" ] && [ -f "$PARAMS_JSON" ]; then
+				_shared_served="$(jq -r --slurpfile p "$PARAMS_JSON" \
+					'[.protos[] | select(.shared_secret_auth == true)
+					   | select(.enable_key != "" and ($p[0][.enable_key] == true))
+					   | .proto] | join(" ")' "$_vocab" 2>/dev/null)"
+			fi
+		fi
+		if [ -n "$_shared_served" ]; then
+			warn "revoke: '$REVOKE_NAME' is removed from the UUID-keyed families, and is STILL ADMITTED on:$(printf ' %s' $_shared_served)"
+			warn "revoke: those families authenticate every client against ONE node-wide secret, so dropping a UUID does not"
+			warn "revoke:   retire this person there. They keep the credential they already hold."
+			warn "revoke: to actually cut them off today, either stop serving those families (fungi transport disable <proto>)"
+			warn "revoke:   or re-mint the node's secrets, which invalidates EVERY client and requires re-issuing all subscriptions."
+			warn "revoke: per-person credentials are decided in ADR-0040 §2.1 and not yet implemented."
+			printf '%s\n' $_shared_served > "$STATE_DIR/REVOKE_INCOMPLETE" 2>/dev/null || true
+			return 1
+		fi
+		rm -f "$STATE_DIR/REVOKE_INCOMPLETE" 2>/dev/null || true
 		log "revoked '$REVOKE_NAME'; config re-rendered + sing-box reloaded + xray engine + firewall converged + served bundle refreshed — the client's UUID is gone from every inbound on BOTH engines. Other clients' links are unchanged."
 	else
 		warn "post-apply verification failed after revoke; rolling back."

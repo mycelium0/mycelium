@@ -147,3 +147,14 @@ func DemoteKeepsIndependentFallback(served, issuedBaseline []string, demote stri
 	}
 	return len(fams) >= 2, fams
 }
+
+// blockFamilyVocab is the emitted form of blockFamily: every class in the closed vocabulary mapped to
+// the family it blocks with. It exists so the shell bundle renderer — the one that runs on a node —
+// compares against the same equivalence the Go renderer enforces, instead of restating it (ADR-0038).
+func blockFamilyVocab() map[string]string {
+	out := make(map[string]string, len(TransportClasses()))
+	for _, c := range TransportClasses() {
+		out[string(c)] = string(blockFamily(c))
+	}
+	return out
+}

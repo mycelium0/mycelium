@@ -551,6 +551,7 @@ jq -n --arg priv "$PRIV" --arg pub "$PUB" --arg sid "$SID" '{
 	short_ids: [$sid],
 	tls_sni: "tls.example.invalid",
 	vless_reality_vision_enabled: true,
+	hysteria2_enabled: true, hysteria2_port: 8444, hysteria2_password: "x",
 	two_hop: {
 		tag: "to-egress", server: "203.0.113.10", server_port: 443,
 		uuid: "00000000-0000-4000-8000-000000000000",
@@ -908,13 +909,15 @@ jq --arg p "$C07_ADV_PATH" '
 	{ engine, node_address: "c07a.example.invalid", region_bucket: "bucket-c07a",
 	  reality_private_key, reality_public_key, short_ids, donor_sni, donor_host,
 	  tls_sni, grpc_service_name, xhttp_path: $p,
-	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096 }
+	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096,
+	  hysteria2_enabled: true, hysteria2_port: 8444, hysteria2_password: "x" }
 ' "$SB_PARAMS" > "$C07_PARAMS_A"
 jq --arg p "$C07_ADV_PATH" '
 	{ engine, node_address: "c07b.example.invalid", region_bucket: "bucket-c07b",
 	  reality_private_key, reality_public_key, short_ids, donor_sni, donor_host,
 	  tls_sni, grpc_service_name, xhttp_path: $p,
-	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096 }
+	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096,
+	  hysteria2_enabled: true, hysteria2_port: 8444, hysteria2_password: "x" }
 ' "$SB_PARAMS" > "$C07_PARAMS_B"
 "$CTL" bundle --params "$C07_PARAMS_A" --state "$STATE" --out "$C07_BUNDLE_A" 2>/dev/null
 "$CTL" bundle --params "$C07_PARAMS_B" --state "$STATE" --out "$C07_BUNDLE_B" 2>/dev/null

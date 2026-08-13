@@ -40,6 +40,20 @@ else sumc() { shasum -a 256 -c "$@"; }; fi
 
 fail() { echo "verify-release: FAIL: $*" >&2; exit 1; }
 
+# RESOLVE THE KEY PATH BEFORE MOVING (Audit-0012 B5). This script cd's into the directory it is
+# checking, and the allowed-signers check happens after — so a RELATIVE --allowed-signers resolved
+# against $DIR rather than against the caller's cwd, and the file was "not found" for a maintainer or a
+# downloader who had done everything right. Both documents prescribe exactly that shape
+# (docs/RELEASING.md step 7, QUICKSTART step 1). The obvious recovery is to drop --allowed-signers,
+# which falls back to the one mode this project says cannot tell a substituted release from a genuine
+# one — so the failure pushes the user toward the weaker check.
+#
+# Measured: DIR=rel with a relative key path -> "FAIL: --allowed-signers file not found", rc=1; the same
+# call with an absolute path -> "integrity AND authenticity verified", rc=0.
+case "${ALLOWED:-}" in
+	""|/*) : ;;                       # unset, or already absolute
+	*) ALLOWED="$PWD/$ALLOWED" ;;
+esac
 cd "$DIR" || fail "cannot enter directory: $DIR"
 
 # 1. integrity (always)
