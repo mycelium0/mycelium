@@ -61,6 +61,41 @@ type PlanInput struct {
 	// disabling one always can. Empty means "unknown", and unknown fails closed: not knowing what was
 	// issued is not permission to remove something.
 	IssuedBaseline []string `json:"issued_baseline,omitempty"`
+
+	// Served is the set of members this node is actually serving, each with its OWN verdict and its own
+	// direction. A node serves a set for people with different constraints (ADR-0040 §2.2): there is no
+	// single member whose health stands for the node, and judging one while the others are invisible is
+	// what let a healthy-looking node hide an impaired member.
+	//
+	// EMPTY means "this producer has not been updated yet", and Plan normalises it from Active/
+	// ActiveVerdict so an older measure daemon keeps working unchanged. When it is populated, Active and
+	// ActiveVerdict are IGNORED — one source of truth after normalisation, never two.
+	Served []ServedMember `json:"served,omitempty"`
+}
+
+// ServedMember is one transport this node serves, with the evidence the node holds about it.
+type ServedMember struct {
+	Member  spec.RotationCandidate `json:"member"`  // the member itself (weight, promote flag, path signals)
+	Verdict spec.Verdict           `json:"verdict"` // this node's own detector verdict for THIS member
+	// Direction is what the node can observe about it (ADR-0040 §2.3). Ingress: the client dials in, so
+	// the loopback probe establishes that the LISTENER serves and never that a client's network reaches
+	// it. Egress: the node dials out, so its own probe is end-to-end evidence for that exact path.
+	// Recorded per member rather than derived, because the same proto can serve in either role.
+	Direction spec.TransportDirection `json:"direction"`
+}
+
+// Validate is fail-closed on the member, its verdict, and its direction.
+func (m ServedMember) Validate() error {
+	if err := m.Member.Validate(); err != nil {
+		return err
+	}
+	if err := m.Verdict.Validate(); err != nil {
+		return err
+	}
+	if !m.Direction.Valid() {
+		return fmt.Errorf("served member %q: unknown direction %q", m.Member.Proto, m.Direction)
+	}
+	return nil
 }
 
 // impaired reports whether a connectivity state warrants considering a rotation (anything but a
@@ -77,11 +112,26 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	if err := in.Limits.Validate(); err != nil {
 		return spec.RotationPlan{}, fmt.Errorf("rotate plan: %w", err)
 	}
-	if err := in.Active.Validate(); err != nil {
-		return spec.RotationPlan{}, fmt.Errorf("rotate plan active: %w", err)
+	// NORMALISE THE SET FIRST, so everything below reads exactly one source (ADR-0040 §2.2).
+	//
+	// A producer that has not been updated sends Active/ActiveVerdict and no Served; it becomes a
+	// one-member set with direction ingress, which is what a served inbound is, and the planner behaves
+	// exactly as it did. A producer that sends Served has Active/ActiveVerdict ignored — never merged,
+	// because two half-populated sources is the duplicate-truth defect this change exists to remove.
+	served := in.Served
+	if len(served) == 0 {
+		if err := in.Active.Validate(); err != nil {
+			return spec.RotationPlan{}, fmt.Errorf("rotate plan active: %w", err)
+		}
+		if err := in.ActiveVerdict.Validate(); err != nil {
+			return spec.RotationPlan{}, fmt.Errorf("rotate plan active verdict: %w", err)
+		}
+		served = []ServedMember{{Member: in.Active, Verdict: in.ActiveVerdict, Direction: spec.DirectionIngress}}
 	}
-	if err := in.ActiveVerdict.Validate(); err != nil {
-		return spec.RotationPlan{}, fmt.Errorf("rotate plan active verdict: %w", err)
+	for i := range served {
+		if err := served[i].Validate(); err != nil {
+			return spec.RotationPlan{}, fmt.Errorf("rotate plan served member %d: %w", i, err)
+		}
 	}
 	for i := range in.Ranked {
 		if err := in.Ranked[i].Validate(); err != nil {
@@ -99,19 +149,82 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		ns.RotationsInWindow = 0
 		ns.RollbacksInWindow = 0
 	}
-	if impaired(in.ActiveVerdict.State) {
-		// Saturate at FlipConfirmations so a long hold/latch cannot grow the streak without bound.
-		ns.ImpairedStreak = in.State.ImpairedStreak + 1
-		if ns.ImpairedStreak > in.Limits.FlipConfirmations {
-			ns.ImpairedStreak = in.Limits.FlipConfirmations
+	// PER-MEMBER HYSTERESIS. Each served member carries its own streak, so an impairment on one can
+	// never advance the counter that authorises demoting another (ADR-0040 §2.2). A member that clears
+	// resets only itself; a member that disappears from the served set drops out of the map rather than
+	// leaving a stale streak that would let it be demoted the moment it returns.
+	// MIGRATION OFF THE SCALAR. A node whose rotate_state.json predates the map carries `impaired_streak`
+	// and nothing else, and dropping it is not free: every member would re-earn its streak from zero, so
+	// the first upgraded tick silently delays every rotation by FlipConfirmations ticks — on a node whose
+	// transport is failing right now. It is attributable, because the scalar was BY CONSTRUCTION the
+	// streak of the one member the old planner judged: the incumbent. So credit it to that member, and
+	// only when the map is genuinely absent.
+	//
+	// This is the one place the legacy Active is read while Served is populated, and it is read as
+	// PROVENANCE (whose counter was this?), never as evidence. An incumbent that is not in the served set
+	// carries no counter forward — attributing a stranger's streak to a served member would authorise
+	// acting on it a full cycle early.
+	scalarOwner := ""
+	if in.State.ImpairedStreaks == nil {
+		if in.Active.Proto != "" {
+			scalarOwner = in.Active.Proto
+		} else if len(served) == 1 {
+			scalarOwner = served[0].Member.Proto
 		}
+	}
+	ns.ImpairedStreaks = make(map[string]int, len(served))
+	for i := range served {
+		m := served[i]
+		if !impaired(m.Verdict.State) {
+			continue
+		}
+		// Saturate at FlipConfirmations so a long hold/latch cannot grow a streak without bound.
+		n := in.State.ImpairedStreaks[m.Member.Proto] + 1
+		if m.Member.Proto == scalarOwner {
+			n = in.State.ImpairedStreak + 1
+		}
+		if n > in.Limits.FlipConfirmations {
+			n = in.Limits.FlipConfirmations
+		}
+		ns.ImpairedStreaks[m.Member.Proto] = n
+	}
+
+	// WHICH MEMBER THIS PLAN IS ABOUT. Deterministic, because the planner is pure and its decision must
+	// be reproducible: the impaired member with the longest streak, ties broken by registry order (the
+	// same order the candidate choice uses). A healthy set selects nothing and holds.
+	regOrder := registryOrder()
+	subject := -1
+	for i := range served {
+		if !impaired(served[i].Verdict.State) {
+			continue
+		}
+		if subject == -1 {
+			subject = i
+			continue
+		}
+		a, b := served[i], served[subject]
+		sa, sb := ns.ImpairedStreaks[a.Member.Proto], ns.ImpairedStreaks[b.Member.Proto]
+		if sa > sb || (sa == sb && regOrder[a.Member.Proto] < regOrder[b.Member.Proto]) {
+			subject = i
+		}
+	}
+	active := in.Active
+	activeVerdict := in.ActiveVerdict
+	if subject >= 0 {
+		active = served[subject].Member
+		activeVerdict = served[subject].Verdict
+		ns.ImpairedStreak = ns.ImpairedStreaks[active.Proto]
 	} else {
+		// Nothing impaired: report the first member as the subject so a hold names something real, and
+		// zero the projection.
+		active = served[0].Member
+		activeVerdict = served[0].Verdict
 		ns.ImpairedStreak = 0
 	}
 
 	hold := func(reason spec.RotationReason, because string) (spec.RotationPlan, error) {
 		p := spec.RotationPlan{
-			Act: false, From: in.Active, Reason: reason, HeldBecause: because,
+			Act: false, From: active, Reason: reason, HeldBecause: because,
 			NextState: ns, DecidedAt: in.Now,
 		}
 		p.To.Action = spec.RotationActionNone
@@ -122,7 +235,7 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	}
 
 	// Guard 1 — never rotate a healthy channel.
-	if !impaired(in.ActiveVerdict.State) {
+	if !impaired(activeVerdict.State) {
 		return hold(spec.RotationReasonClean, "active member is clean/healthy")
 	}
 	// Guard 2 — rollback latch / explicit hold window.
@@ -158,7 +271,7 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	bestIdx, anyBetterByMargin := -1, false
 	for i := range in.Ranked {
 		c := in.Ranked[i]
-		if c.Proto == in.Active.Proto {
+		if c.Proto == active.Proto {
 			continue
 		}
 		// Never rotate ONTO a member this node's own L7 probe reports client-DEAD — a co-failed sibling
@@ -179,7 +292,7 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		if c.PathCollapse {
 			continue
 		}
-		if c.Weight < in.Active.Weight+in.Limits.MinWeightMargin {
+		if c.Weight < active.Weight+in.Limits.MinWeightMargin {
 			continue
 		}
 		anyBetterByMargin = true
@@ -212,11 +325,11 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		// Gated on the INTERSECTION floor, never the served set — see DemoteKeepsIndependentFallback for
 		// the config that satisfies a served-set floor while stranding every client already holding one.
 		served := make([]string, 0, len(in.Ranked)+1)
-		served = append(served, in.Active.Proto)
+		served = append(served, active.Proto)
 		for i := range in.Ranked {
 			served = append(served, in.Ranked[i].Proto)
 		}
-		if ok, fams := spec.DemoteKeepsIndependentFallback(served, in.IssuedBaseline, in.Active.Proto); ok {
+		if ok, fams := spec.DemoteKeepsIndependentFallback(served, in.IssuedBaseline, active.Proto); ok {
 			// An ACT plan spends the budget, whatever the action. The promote branch below does this and
 			// the demote branch did not, which meant the anti-beacon limits applied to one kind of
 			// rotation and not the other: LastRotateAt never advanced so the cooldown never bit,
@@ -227,11 +340,11 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 			ns.LastRotateAt = in.Now
 			ns.RotationsInWindow++
 			ns.ImpairedStreak = 0
-			to := in.Active
+			to := active
 			to.Action = spec.RotationActionDemoteActive
 			to.ToPort = 0
 			p := spec.RotationPlan{
-				Act: true, From: in.Active, To: to,
+				Act: true, From: active, To: to,
 				Reason:      spec.RotationReasonDegradedActive,
 				HeldBecause: fmt.Sprintf("the active member is confirmed impaired and no sibling beats it by the margin; ceasing to serve it leaves %d independent families that issued clients still hold, and their urltest group selects one", len(fams)),
 				NextState:   ns, DecidedAt: in.Now,
@@ -270,7 +383,7 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	ns.RotationsInWindow++
 	ns.ImpairedStreak = 0
 	p := spec.RotationPlan{
-		Act: true, From: in.Active, To: to,
+		Act: true, From: active, To: to,
 		Reason: spec.RotationReasonDegradedActive, NextState: ns, DecidedAt: in.Now,
 	}
 	if err := p.Validate(); err != nil {

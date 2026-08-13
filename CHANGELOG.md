@@ -13,6 +13,57 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.84] — 2026-08-14
+
+### Added — the rotation planner judges the set a node serves, not one member of it
+
+[ADR-0040](docs/adr/0040-a-fungi-serves-several-people.md) §2.2 and §2.3, and the first of the four
+consequences to reach running code.
+
+`rotate.PlanInput` gained `Served []ServedMember` — every transport this node is serving, each with **its
+own** verdict and a typed `Direction` (ingress/egress). `spec.RotationState` gained `ImpairedStreaks`,
+one hysteresis counter per member.
+
+What that removes: there was one impairment counter for the whole node. An impairment on member A
+advanced the very streak that authorises acting on member B, so B could be rotated on evidence gathered
+about something else entirely. A node serves several people with different constraints, so no single
+member's health is the node's health — and the transport that is failing for one person is carrying
+another person's traffic right now.
+
+`Direction` is fail-closed: unset and out-of-vocabulary are refused rather than defaulted. It is the
+machine-checkable half of [ADR-0039](docs/adr/0039-client-vantage-reachability-signal.md) — a node's
+loopback probe is end-to-end evidence for an egress member (the node *is* the client) and is only ever
+evidence about the listener for an ingress one. That asymmetry existed in `internal/spec/lease.go` and
+nothing reaching the planner could express it.
+
+The subject of a plan is now selected, not assumed: the impaired member with the longest streak, ties by
+registry order. A pure planner whose decision depends on map iteration order cannot be reproduced from a
+captured input, so the tiebreak is stated rather than incidental.
+
+**Compatibility, both directions.** A producer that sends no `served` is normalised into a one-member
+ingress set and behaves exactly as before — a node running an older spine keeps rotating. When `served`
+is populated the legacy `Active`/`ActiveVerdict` are **ignored, not merged**; two half-populated sources
+for one truth is the defect being removed (§2.2 item 8). `Active` is still emitted as a projection,
+because captured plan inputs and the `rotate-plan` CLI read it.
+
+**The state migration, which is the part that touches live nodes.** `rotate_state.json` out there holds
+a scalar `impaired_streak` and no map. Dropping it would make an upgrading node wait another full
+hysteresis cycle before it may act — on a node whose transport is failing at that moment. The scalar was,
+by construction, the streak of the one member the old planner judged, so it is credited to that member
+and to no other. An incumbent outside the served set hands its streak to nobody.
+
+`internal/measure` emits the set. That is the half worth naming: a set-valued planner nothing feeds would
+be the third inert mechanism found in this tree, and the gate drives the producer rather than reading it.
+
+Nothing here actuates. The planner stays pure — `rotator_pure_planner.sh` unchanged, allowlist unchanged,
+clock still a parameter — and today's executor only *enables* the target, so a wider set cannot take a
+working channel away from anyone. The guard that will make that true once suppression can remove a
+member (ADR-0040 §2.4) lands with the lease writer.
+
+New gate `rotate_judges_a_set.sh` drives the shipped planner through `rotate-plan` over crafted served
+sets. Three mutations turn it red: collapsing the set to its first member, making `Direction.Valid()`
+accept anything, and stopping the producer from emitting the set.
+
 ## [0.2.83] — 2026-08-13
 
 ### Fixed — "published on every converge" was true of one converge path out of three

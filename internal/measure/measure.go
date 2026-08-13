@@ -276,6 +276,7 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 	// (with no move); the rest become the ranked candidate pool.
 	var active spec.RotationCandidate
 	ranked := make([]spec.RotationCandidate, 0, len(a.order))
+	served := make([]rotate.ServedMember, 0, len(a.order))
 	for _, ref := range a.order {
 		m := a.members[ref]
 		c := spec.RotationCandidate{
@@ -312,6 +313,23 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 				c.PathCollapse = true
 			}
 		}
+		// THE SERVED SET (ADR-0040 §2.2). Every member this assembler knows is a listener this node is
+		// serving right now — that is what a fungi is: several people on several transports at once, not
+		// one "active" channel with five spares. So each member goes into the set with its OWN verdict,
+		// and the planner judges the set instead of judging the incumbent and calling that the node.
+		//
+		// Direction is INGRESS for every member here, and that is a statement about this plane rather than
+		// a default: the assembler is fed by the node's own reachability probes against its own listeners,
+		// which is the ingress case ADR-0040 §2.3 defines — the node terminates it, and its probe can
+		// establish that the listener serves, never that a given person's network reaches it. When an
+		// egress member (an upstream, a peer, a cover path) acquires a plane, it enters the set with
+		// DirectionEgress and a different admissible-evidence set; there is no such member today, and
+		// declaring one here would be asserting an observation nothing makes.
+		sm := rotate.ServedMember{Member: c, Verdict: a.verdicts[ref], Direction: spec.DirectionIngress}
+		if ref == activeRef {
+			sm.Member.Action = spec.RotationActionNone
+		}
+		served = append(served, sm)
 		if ref == activeRef {
 			c.Action = spec.RotationActionNone // the incumbent carries no move
 			active = c
@@ -323,9 +341,15 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 	// margin selection over the pool, so this order is presentational, not load-bearing.
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].Weight > ranked[j].Weight })
 
+	// Active/ActiveVerdict are still emitted, and are now a PROJECTION of the set rather than the truth:
+	// the planner ignores them whenever Served is populated (one source after normalisation, never two).
+	// They stay because a node running an older spine, an operator reading a captured plan input, and the
+	// `rotate-plan` CLI all consume them — removing the field would break readers to make a point the
+	// comment makes better.
 	return rotate.PlanInput{
 		Active:        active,
 		ActiveVerdict: a.verdicts[activeRef],
+		Served:        served,
 		Ranked:        ranked,
 		Limits:        a.limits,
 		State:         state,

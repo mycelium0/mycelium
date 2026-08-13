@@ -639,3 +639,47 @@ func TestStatusObservations(t *testing.T) {
 		t.Error("k=3 floor on a 2-member class must fail-closed (ErrAggregationFloor), got a digest")
 	}
 }
+
+// TestTickEmitsServedSet — the producer half of ADR-0040 §2.2. The set-valued planner is only worth
+// having if something feeds it; a planner that judges a set nobody sends is the inert-mechanism defect
+// this project has now shipped twice, so this test is what makes the plumbing a fact rather than a claim.
+func TestTickEmitsServedSet(t *testing.T) {
+	a := newAsm(t)
+	at := t0.Add(time.Minute)
+	// The active member fails, the sibling succeeds — two members, two DIFFERENT verdicts.
+	snap := []spec.TransportHealth{health(activeRef, 0, 8, at), health(candRef, 8, 0, at)}
+	in, err := a.Tick(snap, activeRef, spec.RotationState{}, at, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if len(in.Served) != 2 {
+		t.Fatalf("Served has %d members, want 2. Every listener this node serves belongs in the set; a set that holds only the incumbent is the singleton defect under a new name.", len(in.Served))
+	}
+	byProto := map[string]rotate.ServedMember{}
+	for _, m := range in.Served {
+		byProto[m.Member.Proto] = m
+	}
+	for _, p := range []string{activeProto, candProto} {
+		m, ok := byProto[p]
+		if !ok {
+			t.Fatalf("%s is served but missing from the set", p)
+		}
+		if m.Direction != spec.DirectionIngress {
+			t.Errorf("%s direction is %q, want ingress. This plane probes the node's OWN listeners, which is the ingress case; a member typed egress here would be claiming end-to-end evidence the probe does not have (ADR-0040 2.3).", p, m.Direction)
+		}
+		if err := m.Validate(); err != nil {
+			t.Errorf("%s: the emitted member does not validate: %v", p, err)
+		}
+	}
+	// The verdicts must be PER MEMBER, not the incumbent's copied across.
+	if byProto[activeProto].Verdict.State == byProto[candProto].Verdict.State {
+		t.Errorf("both members carry state %q after a tick where one failed every probe and the other succeeded every probe. One verdict stamped onto the whole set is exactly the truth the set exists to stop collapsing.", byProto[activeProto].Verdict.State)
+	}
+	if byProto[activeProto].Verdict.TransportRef != activeRef || byProto[candProto].Verdict.TransportRef != candRef {
+		t.Error("a member carries another member's verdict")
+	}
+	// And the legacy projection still agrees with the set, since old readers consume it.
+	if in.Active.Proto != activeProto || in.ActiveVerdict.TransportRef != activeRef {
+		t.Errorf("the Active projection drifted from the incumbent: %+v", in.Active)
+	}
+}
