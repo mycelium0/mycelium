@@ -13,6 +13,28 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.83] — 2026-08-13
+
+### Fixed — "published on every converge" was true of one converge path out of three
+
+Found by running one of the four cheap experiments the remediation plan lists, rather than by reading:
+`ls $STATE_DIR/rotate.leases.json` after a real rotation, then a real `fungi apply` on a live node.
+
+0.2.82 moved the suppression publisher above the `return 0` that made it unreachable, and proved it
+writes by driving `record_converge_ok` in a harness. That proof was necessary and not sufficient.
+`record_converge_ok` is reached **only from `flow_update`** — measured: `fungi apply` completed rc=0 and
+`mycelium_update.prom` was never touched. So a node converged by `deploy` or `apply`, which is every
+node before its first unattended update, published the series never.
+
+The call now lives in `converge_node_tail`, the shared tail every converge path runs, and **not** in
+`record_converge_ok` — two callers would be two owners of one fact (§2.2 item 8), and the update path
+would emit a second, differently-timed sample of the same state. Verified on a live node: with the
+metric file deleted, one `fungi apply` recreates it.
+
+`suppression_lease_bounded.sh` gains a row asserting both halves. Removing the call from the tail turns
+it red; adding it back to `record_converge_ok` as well turns it red too.
+
+
 ## [0.2.82] — 2026-08-13
 
 
