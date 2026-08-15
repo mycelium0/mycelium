@@ -36,6 +36,9 @@
 #   6. Direction is fail-closed: unset and out-of-vocabulary are refused rather than defaulted.
 #   7. The producer emits the set — driven, not grepped, via the internal/measure unit that asserts it.
 #      A set-valued planner with no producer would be the inert mechanism this project has shipped twice.
+#   8. A plan can CHANGE what it is about: a subject the node is not steering to is never answered by
+#      promoting a third member, and the resulting hold spends no cooldown. Measured live before it was
+#      written — three nodes rotating every 30 minutes, for ever, changing nothing.
 #
 # SKIP-IF-NO-GO: like bundle_go_roundtrip.sh, this needs a Go toolchain to run the real planner. Absent,
 # it SKIPs rather than passing vacuously — the jq-only host lane has no planner to drive.
@@ -275,6 +278,55 @@ if ( cd "$REPO_ROOT" && GOCACHE="$WORK/gocache" GOFLAGS=-mod=mod \
 else
 	badln "the measure daemon does not emit the set: $(tail -3 "$WORK/prod" | tr '\n' ' '). A set-valued planner nothing feeds is a mechanism that reads as working and does nothing — the exact shape of the two inert mechanisms already found in this tree."
 fi
+
+# ---------------------------------------------------------------------------------------------------
+# 8. A PLAN MUST BE ABLE TO CHANGE WHAT IT IS ABOUT.
+#
+# Measured on all three live nodes on 2026-08-15, and reproduced by replaying their own captured
+# rotate_plan_input.json with the clock advanced past the cooldown: the subject was a member the node was
+# NOT steering to, the plan promoted a third member, the apply logged "candidate identical to the live
+# config", and it repeated every 30 minutes from at least 2026-08-14T20:34. An act, every cooldown, for
+# ever, that changed nothing — and each one spent LastRotateAt, so a real fault arriving in between had
+# to wait out a cooldown bought by a no-op.
+#
+# Promoting C steers traffic off the INCUMBENT onto C. Before the planner judged a set, the subject was
+# always the incumbent and that answered it. Once the subject can be somebody else, it does not.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- a plan must be able to change what it is about --\n'
+# active (the incumbent) is vless-reality-vision and CLEAN; the impaired member is somebody else; and a
+# healthy, promoted candidate sits in `ranked`, which is exactly the shape that used to produce an act.
+input "$WORK/h.json" "$(printf '%s' "$ZERO" | jq -c '. + {impaired_streaks: {"hysteria2": 3}}')" \
+	"$(jq -nc --argjson a "$(member vless-reality-vision 0.99 clean ingress)" \
+	   --argjson b "$(member hysteria2 0.05 blocked ingress)" '[$a,$b]')" 3
+out="$(plan "$WORK/h.json")"
+subj="$(printf '%s' "$out" | jq -r '.from.proto')"
+act="$(printf '%s' "$out" | jq -r '.act')"
+action="$(printf '%s' "$out" | jq -r '.to.action')"
+if [ "$subj" != "hysteria2" ]; then
+	badln "the subject is '$subj', not the impaired member — this row cannot judge what it exists for"
+elif [ "$act" = "true" ] && [ "$action" = "promote-sibling" ]; then
+	badln "the plan promotes '$(printf '%s' "$out" | jq -r '.to.proto')' while it is about '$subj', which the node is not steering to. The promotion leaves the subject exactly as it was, so it is the subject again on the next tick: an act every cooldown, for ever, changing nothing. Measured on three live nodes."
+elif [ "$act" = "true" ] && [ "$action" != "demote-active" ]; then
+	badln "the only act available for a non-incumbent subject is ceasing to serve it; got '$action'"
+else
+	ok "a subject the node is not steering to is never answered by promoting a third member"
+fi
+
+# The cooldown is the harm, and it is separate from the churn: every act sets LastRotateAt, so a real
+# fault a minute later waits out a hold bought by a move that did nothing.
+lr="$(printf '%s' "$out" | jq -r '.next_state.last_rotate_at')"
+case "$lr" in
+	0001-01-01*) ok "and the hold leaves LastRotateAt untouched — no cooldown is spent on a move that changes nothing" ;;
+	*) badln "the plan advanced LastRotateAt to '$lr'. That is the cooldown a genuine fault needs, spent on a subject the plan could not act on." ;;
+esac
+
+# And the ordinary case must still work: an impaired INCUMBENT with a better sibling still promotes.
+input "$WORK/i.json" "$(printf '%s' "$ZERO" | jq -c '. + {impaired_streaks: {"vless-reality-vision": 1}}')" \
+	"$(jq -nc --argjson a "$(member vless-reality-vision 0.2 blocked ingress)" '[$a]')"
+out="$(plan "$WORK/i.json")"
+[ "$(printf '%s' "$out" | jq -r '.act')" = "true" ] && [ "$(printf '%s' "$out" | jq -r '.to.action')" = "promote-sibling" ] \
+	&& ok "while an impaired INCUMBENT with a better sibling still promotes — the guard did not disarm the ordinary case" \
+	|| badln "an impaired incumbent no longer promotes (act=$(printf '%s' "$out" | jq -r '.act') reason=$(printf '%s' "$out" | jq -r '.reason')). The guard was meant to remove an answer that cannot help, not the one that can."
 
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then

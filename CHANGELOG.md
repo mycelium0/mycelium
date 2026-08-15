@@ -13,6 +13,57 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.86] — 2026-08-15
+
+### Fixed — three live nodes were rotating every 30 minutes, for ever, changing nothing
+
+Found by looking at the network after 0.2.85 deployed, not by a test. All three nodes had been emitting
+`rotation (LIVE, armed): rotate <X> -> <Y>` every ~30 minutes — the `MinInterval` cooldown, exactly —
+continuously since at least 2026-08-14T20:34, with a constant `.from`, a `.to` alternating between two
+healthy members, and **every single apply logging "candidate identical to the live config"**. A no-op,
+recorded as a rotation, roughly fifty times a day per node.
+
+**The mechanism.** Promoting a sibling is the move that steers traffic **off the incumbent** and onto
+that sibling. Before the planner judged a set ([ADR-0040](docs/adr/0040-a-fungi-serves-several-people.md)
+§2.2, shipped in 0.2.84) the subject of a plan was always the incumbent, so a promote always answered it.
+Once the subject is selected from the whole served set it can be **somebody else** — and then the
+promotion leaves the subject exactly as it was: still impaired, still the longest streak, still the
+subject on the next tick. Measured: subject ≠ incumbent on all three nodes.
+
+Guard 6 is now skipped entirely when the subject is not the member being steered to. The only move that
+is *about* the subject is ceasing to serve it, which is already gated on the ADR-0039 evidence rule and
+the RP-0013 family floor; if neither permits it, the plan holds — and **a hold does not advance
+`LastRotateAt`**. That second half matters as much as the first: every act spends the cooldown, so a
+genuine fault arriving between two phantom rotations had to wait out a hold bought by a move that did
+nothing.
+
+**Verified by replay, not by argument.** Each node's own captured `rotate_plan_input.json`, with the
+clock advanced past its cooldown, run through both revisions:
+
+| | deployed `2dec88e` | with the fix |
+|---|---|---|
+| node A | `act:true` promote-sibling, cooldown spent | `act:false` no-better-candidate, `LastRotateAt` untouched |
+| node B | `act:true` promote-sibling, cooldown spent | `act:false` no-better-candidate, `LastRotateAt` untouched |
+| node C | `act:true` promote-sibling | `act:false` no-better-candidate |
+
+**A correction worth recording.** The first hypothesis — "`measure.config.json` is never regenerated, so
+`active_ref` names a dead member" — was wrong, and three independent refutation passes killed it by
+measurement: that file *is* rewritten on every rotation, `active_ref` is a live clean member on all
+three, and `MaxPerWindow` is not consumed because **that guard does not exist** (`RotationsInWindow` is
+incremented and compared against nothing outside tests). What is frozen is `members[]` *inside* the file
+and `reach.config.json` — so a freshness check on the file the loop names reports "fine". What is spent
+is `LastRotateAt`. The phenomenon was real and the causal story was not; `docs/refactoring.md` §2.7.
+
+**Still open, and deliberately not in this change.** The withdrawn member remains in the served set,
+because nothing re-derives that set outside the operator verbs and the daemon freezes its member list,
+assembler and reach `Monitor` at startup. It is now harmless — a permanent, quiet hold with a stated
+reason — but it still occupies the subject slot, and subject ties are broken by registry order, so on one
+node a real impairment on a lower-priority member could be masked. That is a separate change: derive the
+served set in the render transaction and let the daemon adopt it without a restart.
+
+`rotate_judges_a_set.sh` gains the row. Removing the guard turns two of its assertions red: the plan
+promotes a third member while being about another, and it advances `LastRotateAt`.
+
 ## [0.2.85] — 2026-08-14
 
 ### Added — the rotation loop can now actually stop serving a member, for a bounded term
