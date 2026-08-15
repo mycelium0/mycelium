@@ -844,6 +844,11 @@ converge_node_tail() {
 			failed="$failed hysteria2-hop-redirect(posture-off)"
 		fi
 	fi
+	# THE PLANE MUST MEASURE WHAT THIS NODE SERVES. Placed in the shared tail rather than beside the
+	# renderer so every converge path re-derives it — deploy, apply, and the unattended update alike. It
+	# is subshell-wrapped like its neighbours: a fail-closed die inside it must not cancel the rest of
+	# the tail.
+	( converge_measure_membership ) || failed="$failed measure-membership"
 	( render_serve_bundle ) || failed="$failed served-bundle"
 	if [ -n "$failed" ]; then
 		warn "convergence INCOMPLETE — step(s) failed:$failed"

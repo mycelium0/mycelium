@@ -119,6 +119,11 @@
 #                               a spent budget; the term backs off; the renderer stops serving it; expiry
 #                               and `release` both give it back; a hold or promote plan grants nothing.
 #                               SKIPs without a Go toolchain. OFFLINE
+#   * served_set_is_what_is_served.sh — the MEASURE plane judges the transports the node actually serves:
+#                               the member set and reach anchors are derived from params on every
+#                               converge, a proto the node stopped serving leaves both, the incumbent
+#                               pointer survives when still served and is re-seeded when not, and the tail
+#                               never arms a plane nobody enabled. OFFLINE
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
@@ -365,6 +370,7 @@ GATES=(
 	"tests/conformance/promote_paths_converge.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_judges_a_set.sh"
+	"tests/conformance/served_set_is_what_is_served.sh"
 	"tests/conformance/suppression_lease_wired.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/rotate_apply_executes.sh"
