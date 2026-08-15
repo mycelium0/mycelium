@@ -149,7 +149,20 @@ generate_measure_configs() {
 		|| die "measure: failed to enumerate enabled members from params/vocab."
 	n="$(printf '%s' "$members" | jq 'length' 2>/dev/null || echo 0)"
 	[ "$n" -ge 1 ] || die "measure: no enabled sing-box transports in params — nothing to measure (enable at least one <proto>_enabled)."
+	# THE INCUMBENT IS PRESERVED WHEN IT IS STILL A MEMBER. Resetting it to members[0] unconditionally was
+	# survivable while this ran only from an operator verb; it is not once the converge tail calls it,
+	# because the rotation executor moves this pointer (update_measure_active_ref) and a converge would
+	# silently move it back. Only a pointer that no longer names a served member is re-seeded.
 	active="$(printf '%s' "$members" | jq -r '.[0].ref')"
+	if [ -f "$measure_cfg" ]; then
+		local _prev
+		_prev="$(jq -r '.active_ref // ""' "$measure_cfg" 2>/dev/null)"
+		if [ -n "$_prev" ] && printf '%s' "$members" | jq -e --arg r "$_prev" 'any(.[]; .ref == $r)' >/dev/null 2>&1; then
+			active="$_prev"
+		elif [ -n "$_prev" ]; then
+			log "measure: the recorded incumbent '$_prev' is no longer a served member; re-seeding it to '$active'."
+		fi
+	fi
 	# L7 cadence cross-check (Audit-0007 S3): the daemon folds a marker only while it is younger than
 	# MAX_AGE; the probe refreshes it every INTERVAL +/- JITTER. If MAX_AGE is shorter than the worst-case
 	# gap between two probe completions, a marker can expire BEFORE the next one lands -> the L7 signal
@@ -246,6 +259,49 @@ generate_measure_configs() {
 		members: [ .[] | { ref: .ref, proto: .proto, action: "promote-sibling", from_port: .port, to_port: 0 } ]
 	}' >"$measure_cfg.tmp" && mv -f "$measure_cfg.tmp" "$measure_cfg"
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."
+}
+
+# converge_measure_membership — re-derive the served member set on every converge, and make the running
+# daemon adopt it.
+#
+# WHY THIS EXISTS. `measure.config.json` names which transports the MEASURE plane probes and judges, and
+# it was written by operator verbs only (`--measure-configure`, `--measure-enable`). The rotation loop can
+# change what a node serves without either verb running, so the two drifted — and the drift is not inert.
+# MEASURED on all three live nodes, 2026-08-15: a member the node had stopped serving was still in
+# `members[]` and still anchored in `reach.config.json`, so its loopback probe failed for ever, it was
+# permanently the most-impaired member, and it won subject selection on every tick. The node acted every
+# thirty minutes, for days, on a transport it was not serving.
+#
+# Note what the stale artefact is NOT: `measure.config.json` itself is rewritten on every rotation
+# (update_measure_active_ref), so its mtime is always minutes old. What froze was the members[] array
+# INSIDE it. A freshness check on the file would have reported "fine" throughout.
+#
+# The daemon reads members once, at startup (cmd/myceliumd: the assembler and the reach Monitor are built
+# there), so writing a corrected config is not enough — it is restarted, and ONLY when the content
+# actually changed. The MEASURE plane is advisory and carries no client traffic; a restart reseeds the
+# tuner weights and costs the node a few minutes of having no opinion, which is the cheaper half of the
+# trade against judging a member it does not serve.
+converge_measure_membership() {
+	local measure_cfg reach_cfg before_m before_r
+	measure_cfg="$(_measure_cfg)"; reach_cfg="$(_measure_reach_cfg)"
+	# Nothing to converge on a node that has never configured the plane: this must not be the step that
+	# switches MEASURE on. It ships disabled and stays that way until an operator enables it.
+	[ -f "$measure_cfg" ] || return 0
+	before_m="$(jq -cS '.members' "$measure_cfg" 2>/dev/null)"
+	before_r="$(jq -cS '[.targets[]?.address] | sort' "$reach_cfg" 2>/dev/null)"
+	generate_measure_configs >/dev/null || return 1
+	local after_m after_r
+	after_m="$(jq -cS '.members' "$measure_cfg" 2>/dev/null)"
+	after_r="$(jq -cS '[.targets[]?.address] | sort' "$reach_cfg" 2>/dev/null)"
+	if [ "$before_m" = "$after_m" ] && [ "$before_r" = "$after_r" ]; then
+		return 0
+	fi
+	log "measure: the served member set changed — the plane now measures exactly what this node serves."
+	[ "${DRY_RUN:-0}" -eq 0 ] || { log "[dry-run] would restart mycelium-measure.service to adopt the new member set."; return 0; }
+	systemctl is-active --quiet mycelium-measure.service 2>/dev/null || return 0
+	run systemctl restart mycelium-measure.service \
+		|| { warn "measure: could not restart mycelium-measure.service to adopt the new member set; it keeps probing the previous one until it is restarted."; return 1; }
+	return 0
 }
 
 # ---------------------------------------------------------------------------

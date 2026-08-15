@@ -13,6 +13,45 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.87] — 2026-08-15
+
+### Fixed — the MEASURE plane judged a transport the node had stopped serving
+
+The other half of 0.2.86, and the half that removes the cause rather than the symptom. 0.2.86 stopped the
+planner answering an unactionable subject with a promotion; measured on a live node afterwards, the loop
+simply changed shape — `rotate shadowtls -> shadowtls`, a demote, refused by the lease writer for the
+right reason (*"shadowtls is not something this node's connection-table observer can see"*), still once
+per cooldown. Correct behaviour, same cadence. The subject was still a member the node was not serving.
+
+`measure.config.json` names which transports the plane probes and judges, and it was written by operator
+verbs only — `--measure-configure` and `--measure-enable`. The rotation loop changes what a node serves
+without either running, so the two drifted, and nothing compared them.
+
+**Note what the stale artefact was not.** The file itself is rewritten on every rotation
+(`update_measure_active_ref` stamps `.active_ref`), so its mtime was always minutes old. What froze was
+the `members[]` array *inside* it, and `reach.config.json` beside it. A freshness check on the file the
+loop names would have reported "fine" throughout — which is why the new gate compares content against
+params and never a timestamp.
+
+`converge_measure_membership` re-derives the member set and the reach anchors from the params that
+produced the rendered engine config, in `converge_node_tail` — the shared tail every converge path runs,
+so deploy, apply and the unattended update all re-derive it. It restarts the MEASURE daemon **only when
+the content changed**, because the daemon reads its member list once at startup; the plane is advisory
+and carries no client traffic, so the cost is a few minutes of the node having no opinion.
+
+`generate_measure_configs` no longer resets `active_ref` to `members[0]` unconditionally. That was
+survivable while it ran from an operator verb; from the converge tail it would have silently undone every
+rotation the executor made. A pointer that still names a served member is kept; one that does not is
+re-seeded, with a line saying so.
+
+The tail does **not** arm a plane nobody enabled: a node with no measure config gains none. MEASURE ships
+disabled on purpose, and a converge that switched it on would turn an operator decision into a side
+effect.
+
+New gate `served_set_is_what_is_served.sh`. Three mutations turn it red: removing the call from
+`converge_node_tail`, restoring the unconditional `active_ref` reset, and dropping the `enable_key`
+filter from the derivation.
+
 ## [0.2.86] — 2026-08-15
 
 ### Fixed — three live nodes were rotating every 30 minutes, for ever, changing nothing
