@@ -235,3 +235,28 @@ func (v *Verdict) Validate() error {
 	}
 	return nil
 }
+
+// EvidenceForReason maps a detector reason to the suppression evidence it can carry, or EvidenceUnknown
+// when it carries none. This is the ADR-0039 boundary written as a total function over the closed set, so
+// adding a reason forces a decision here rather than defaulting into "the node may withdraw the member".
+//
+// The dividing line is WHOSE FAULT THE SIGNAL IS ABOUT, not how alarming it is:
+//
+//   - The reach prober dials 127.0.0.1:<port> and the L7 probe handshakes against the node's own
+//     listener. A timeout, a refusal or a failed own-cert handshake is a statement about THIS NODE not
+//     serving — sound evidence, in either direction.
+//   - connection-reset and throughput-collapse come from the passive nft observer watching real client
+//     flows. They are observed at the node and they are nonetheless statements about the PATH, and for an
+//     ingress member the node cannot tell an interfered path from one client's bad network. Withdrawing
+//     the member on that basis disconnects everyone else to react to a fault they may not share. The loop
+//     may still rotate onto a sibling — that adds a path, it takes none away.
+//   - degraded-window is a mixed success/failure window: the listener is serving, less well. "Serving
+//     less well" is not "not serving", and the honest reaction is a lower weight, which the tuner already
+//     applies.
+func EvidenceForReason(r DetectReason) SuppressionEvidence {
+	switch r {
+	case ReasonHandshakeTimeout, ReasonUnreachable, ReasonActiveProbeFailure:
+		return EvidenceListenerFault
+	}
+	return EvidenceUnknown
+}

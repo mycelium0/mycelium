@@ -36,7 +36,8 @@
 #   4. NODE-LOCAL: the region never opens an off-node transmit (a network client — curl/wget/nc/ssh/dns/
 #      python/...) — the counts stay on the node; the only sink is the local $STATE_DIR marker.
 #   5. AGGREGATE-ONLY MARKER: the marker JSON the region writes carries ONLY the allowlisted keys
-#      {observed_at, checked, reset}; `reset` is a list of closed-vocab class refs, never an IP/peer.
+#      {observed_at, checked, reset, collapse, carrying, carrying_observed}; each list holds closed-vocab
+#      class refs, never an IP/peer.
 #   6. FAIL-SAFE + ADVISORY: the arm + probe entrypoints guard on `have nft && have jq || return 0`, and
 #      the region actuates nothing — no systemctl / render / promote / rotate / node-apply / engine.
 #   7. RUNTIME PROOF PRESENT: the Go fold + end-to-end tests that prove the marker actually drives
@@ -220,13 +221,20 @@ marker_lines="$(printf '%s\n' "$region_nc" | grep -E "printf '\\{")"
 if [ -z "$marker_lines" ]; then
 	badln "no marker-writer of the known 'printf \"{...}\"' shape in the observer region — the marker's keys cannot be read, so the aggregate-only invariant is UNVERIFIED; re-confirm this gate against the new writer shape"
 else
-	# Allowlist: {observed_at, checked, reset, collapse}. `collapse` (increment 2) is a closed-vocab class-ref
-	# list, identical in shape to `reset`, never an IP/peer/host — the check still fails closed on any other key.
-	badkeys="$(printf '%s\n' "$marker_lines" | grep -oE '"[a-z_]+":' | tr -d '":' | sort -u | grep -vxE 'observed_at|checked|reset|collapse' || true)"
+	# Allowlist: {observed_at, checked, reset, collapse, carrying, carrying_observed}. Every one of these is
+	# a closed-vocab class-ref list, identical in shape to `reset`, never an IP/peer/host.
+	#
+	# `carrying` and `carrying_observed` (ADR-0040 §2.4) are the count of WHETHER anyone is on a member, and
+	# they are aggregate for the same reason the rest are: a ref, present or absent. The node learns that a
+	# listener has at least one live session — not who, not from where, not for how long. That is the
+	# minimum needed to refuse to disconnect people, and deliberately less than anything attributable.
+	# `carrying_observed` is separate because "observed, and idle" and "cannot observe" must not look alike
+	# downstream; it names refs, so it stays inside the same aggregate boundary.
+	badkeys="$(printf '%s\n' "$marker_lines" | grep -oE '"[a-z_]+":' | tr -d '":' | sort -u | grep -vxE 'observed_at|checked|reset|collapse|carrying|carrying_observed' || true)"
 	if [ -n "$badkeys" ]; then
-		badln "the observer marker carries a key outside the aggregate allowlist {observed_at,checked,reset,collapse}: $(printf '%s' "$badkeys" | tr '\n' ' ')"
+		badln "the observer marker carries a key outside the aggregate allowlist {observed_at,checked,reset,collapse,carrying,carrying_observed}: $(printf '%s' "$badkeys" | tr '\n' ' ')"
 	else
-		ok "the observer marker carries only the aggregate keys {observed_at, checked, reset, collapse} (no IP/peer/host field)"
+		ok "the observer marker carries only the aggregate keys {observed_at, checked, reset, collapse, carrying, carrying_observed} (no IP/peer/host field)"
 	fi
 fi
 

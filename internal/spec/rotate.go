@@ -91,6 +91,12 @@ const (
 	RotationReasonNoBetterCandidate RotationReason = "no-better-candidate"
 	// RotationReasonTargetNotPromoted — the best candidate is not tuner-promoted yet (hold).
 	RotationReasonTargetNotPromoted RotationReason = "target-not-promoted"
+	// RotationReasonEvidenceNotPermitted — the member is confirmed impaired and withdrawing it is the only
+	// move left, but the node's evidence cannot carry that conclusion for a member in this role
+	// (ADR-0039). Distinct from no-better-candidate on purpose: that one says the node looked and found
+	// nowhere better, this one says the node is not entitled to take this away from the people on it.
+	// They call for different operator actions, so they must not share a name in the metrics.
+	RotationReasonEvidenceNotPermitted RotationReason = "evidence-not-permitted"
 )
 
 // IsValid reports whether the reason is one of the canonical members (the zero value is invalid).
@@ -98,7 +104,8 @@ func (r RotationReason) IsValid() bool {
 	switch r {
 	case RotationReasonDegradedActive, RotationReasonClean, RotationReasonStreakTooShort,
 		RotationReasonInCooldown, RotationReasonRollbackHold,
-		RotationReasonNoBetterCandidate, RotationReasonTargetNotPromoted:
+		RotationReasonNoBetterCandidate, RotationReasonTargetNotPromoted,
+		RotationReasonEvidenceNotPermitted:
 		return true
 	default:
 		return false
@@ -277,6 +284,45 @@ type RotationPlan struct {
 	HeldBecause string            `json:"held_because"` // human-readable hold note (empty when Act=true)
 	NextState   RotationState     `json:"next_state"`   // state to persist after applying this decision
 	DecidedAt   time.Time         `json:"decided_at"`   // RFC 3339, UTC
+
+	// Suppress is the planner's proposal that the subject be WITHDRAWN for a bounded term, and it is
+	// present only when the node's own evidence can carry that conclusion. Nil means "act, but do not take
+	// this member away from anyone" — the ordinary case for a member faulted by a signal about the path
+	// rather than about this node.
+	//
+	// It is a PROPOSAL, not a decision. spec.LeaseSet.Grant still refuses it if the member is carrying
+	// traffic, if the outstanding-suppression budget is spent, or if the node would drop below its
+	// independent-family floor — three facts a pure planner cannot observe. Splitting it this way keeps
+	// the ADR-0039 evidence rule where it can be driven by a value table, and the node-state refusals
+	// where the node state is.
+	Suppress *SuppressionProposal `json:"suppress,omitempty"`
+}
+
+// SuppressionProposal is the planner's half of a suppression: which member, in which role, on what
+// evidence. Everything here is something the planner knows from its own input.
+type SuppressionProposal struct {
+	Proto     string              `json:"proto"`
+	Direction TransportDirection  `json:"direction"`
+	Evidence  SuppressionEvidence `json:"evidence"`
+}
+
+// Validate is fail-closed, and enforces the ADR-0039 pairing at the point the proposal is made rather
+// than only where it is granted — a proposal that could never be granted is a plan that reads as an
+// intention to withdraw a member and silently is not one.
+func (s SuppressionProposal) Validate() error {
+	if s.Proto == "" {
+		return fmt.Errorf("%w: suppression proposal proto", ErrEmptyField)
+	}
+	if _, ok := ClassForProto(s.Proto); !ok {
+		return fmt.Errorf("suppression proposal: unknown proto %q", s.Proto)
+	}
+	if !s.Direction.Valid() {
+		return fmt.Errorf("suppression proposal: unknown direction %q for %s", s.Direction, s.Proto)
+	}
+	if !s.Evidence.permittedFor(s.Direction) {
+		return fmt.Errorf("%w: %q cannot suppress the %s member %s", ErrLeaseEvidence, s.Evidence, s.Direction, s.Proto)
+	}
+	return nil
 }
 
 // Validate checks the plan's internal consistency: a known reason; when acting, a valid closed-set
@@ -313,6 +359,17 @@ func (p *RotationPlan) Validate() error {
 		}
 		if p.HeldBecause == "" {
 			return fmt.Errorf("%w: rotation plan held_because (a hold must state its cause)", ErrEmptyField)
+		}
+		if p.Suppress != nil {
+			return fmt.Errorf("rotation plan holds but proposes suppressing %s — a hold changes nothing, and a proposal on a hold would be actuated by any executor that read the field without reading .act", p.Suppress.Proto)
+		}
+	}
+	if p.Suppress != nil {
+		if err := p.Suppress.Validate(); err != nil {
+			return fmt.Errorf("rotation plan suppression: %w", err)
+		}
+		if p.Suppress.Proto != p.From.Proto {
+			return fmt.Errorf("rotation plan proposes suppressing %q while the plan is about %q — the withdrawal must name the member the evidence is about", p.Suppress.Proto, p.From.Proto)
 		}
 	}
 	return nil

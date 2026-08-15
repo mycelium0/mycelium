@@ -257,52 +257,49 @@ groups:
   # train people to ignore a page that is usually wrong.
   # ===========================================================================
   # ===========================================================================
-  # DISABLED UNTIL THE LEASE WRITER IS WIRED (Audit-0012 B2, corrected in 0.2.82).
+  # ENABLED. These two were commented out from 0.2.82 until the writer existed, because both query series
+  # that nothing emitted: `internal/spec/lease.go` had no non-test caller, so no lease had ever been
+  # granted, and an alert on an absent series is a permanently-silent alarm that reads as "all clear" —
+  # worse than no alert, because it is a surface asserting a mechanism works.
   #
-  # Both alerts below query series that NOTHING EMITS. `internal/spec/lease.go` has no non-test caller —
-  # no lease has ever been granted — so `mycelium_rotate_suppressed_transports` is never written, and an
-  # alert on an absent series is a permanently-silent alarm that reads as "all clear". That is worse than
-  # no alert: it is a surface asserting a mechanism works.
-  #
-  # They are kept, commented, rather than deleted, because they are correct for the mechanism and belong
-  # in the same commit that wires the writer (plan item P6). Uncomment there, with the gate that drives
-  # planner decision -> grant -> render -> expiry -> return.
+  # `myceliumctl-go lease grant` is that caller, reached from rotate_apply_live, and
+  # suppression_lease_wired.sh drives planner decision -> grant -> render -> expiry -> return.
   # ===========================================================================
-  # - name: mycelium.suppression
-  #   rules:
-  #     - alert: MyceliumTransportSuppressed
-  #       expr: mycelium_rotate_suppressed_transports > 0
-  #       for: 30m
-  #       labels:
-  #         severity: warning
-  #         component: rotate
-  #       annotations:
-  #         summary: "{{ $labels.instance }} is holding {{ $value }} transport(s) out of service"
-  #         description: >-
-  #           The rotation loop found a fault at the node and stopped serving a transport. This is the
-  #           mechanism working — but the node is offering less than it was asked to, and every client
-  #           whose only usable family was that one is now failing. mycelium_rotate_suppressed carries the
-  #           proto and the evidence code (1 listener-fault, 2 render-refused, 3 egress-unreachable);
-  #           mycelium_rotate_suppression_next_expiry_seconds says when it lapses on its own. Fix the
-  #           underlying fault — do not clear the lease and leave the fault, or the next term will be twice
-  #           as long.
-  #         runbook: "docs/runbooks/node-bootstrap.md"
+  - name: mycelium.suppression
+    rules:
+      - alert: MyceliumTransportSuppressed
+        expr: mycelium_rotate_suppressed_transports > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: rotate
+        annotations:
+          summary: "{{ $labels.instance }} is holding {{ $value }} transport(s) out of service"
+          description: >-
+            The rotation loop found a fault at the node and stopped serving a transport. This is the
+            mechanism working — but the node is offering less than it was asked to, and every client
+            whose only usable family was that one is now failing. mycelium_rotate_suppressed carries the
+            proto and the evidence code (1 listener-fault, 2 render-refused, 3 egress-unreachable);
+            mycelium_rotate_suppression_next_expiry_seconds says when it lapses on its own. Fix the
+            underlying fault — do not clear the lease and leave the fault, or the next term will be twice
+            as long.
+          runbook: "docs/runbooks/node-bootstrap.md"
 
-  #     - alert: MyceliumSuppressionNotLapsing
-  #       expr: mycelium_rotate_suppression_oldest_age_seconds > 90000
-  #       for: 1h
-  #       labels:
-  #         severity: warning
-  #         component: rotate
-  #       annotations:
-  #         summary: "A suppression on {{ $labels.instance }} has stood for over 25h"
-  #         description: >-
-  #           Every lease expires — the backoff caps at 24h — so a suppression older than that means the
-  #           reap is not running, not that the fault is stubborn. The transport is being held out of
-  #           service by a claim nothing is withdrawing, which is precisely the fail-stuck state the lease
-  #           mechanism replaced. Check that the converge path still calls apply_suppression_leases, and
-  #           that $STATE_DIR/rotate.leases.json is writable.
-  #         runbook: "docs/runbooks/node-bootstrap.md"
+      - alert: MyceliumSuppressionNotLapsing
+        expr: mycelium_rotate_suppression_oldest_age_seconds > 90000
+        for: 1h
+        labels:
+          severity: warning
+          component: rotate
+        annotations:
+          summary: "A suppression on {{ $labels.instance }} has stood for over 25h"
+          description: >-
+            Every lease expires — the backoff caps at 24h — so a suppression older than that means the
+            reap is not running, not that the fault is stubborn. The transport is being held out of
+            service by a claim nothing is withdrawing, which is precisely the fail-stuck state the lease
+            mechanism replaced. Check that the converge path still calls apply_suppression_leases, and
+            that $STATE_DIR/rotate.leases.json is writable.
+          runbook: "docs/runbooks/node-bootstrap.md"
 
   # - name: mycelium.update
   #   rules:

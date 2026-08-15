@@ -97,6 +97,8 @@ func run(args []string) error {
 		return cmdFingerprintPlan(rest)
 	case "rotate-record":
 		return cmdRotateRecord(rest)
+	case "lease":
+		return cmdLease(rest)
 	case "share-link":
 		return cmdShareLink(rest)
 	case "bundle":
@@ -1560,6 +1562,8 @@ Commands:
   rotate-plan FILE|-                           plan a node-local transport rotation: PlanInput JSON -> RotationPlan JSON (RP-0012)
   fingerprint-plan FILE|-                      plan a node-local client-fingerprint rotation: FingerprintPlanInput JSON -> FingerprintPlan JSON (RP-0015 B)
   rotate-record FILE|-                         fold an apply outcome into the rotation state: {state,limits,rolled_back,now} -> RotationState JSON (RP-0012)
+  lease grant|release|reap|list ...            the ONE writer for time-bounded suppression leases (ADR-0040 2.4);
+                                               grant needs --plan --leases --limits --marker --refs --enabled
   share-link --proto P FILE|-                  render the dialable client share-link for a transport from LinkParams JSON (RP-0008 P3)
   bundle --params F --state F [--out F|-]       render a node's distribution Bundle JSON from params + identities (RP-0008 P3)
   link-outbound --tag T LINK                    parse a client share-link into a sing-box client outbound JSON (RP-0008 P3)

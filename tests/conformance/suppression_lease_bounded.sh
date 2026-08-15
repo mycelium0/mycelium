@@ -98,10 +98,11 @@ drive() {
 		apply_suppression_leases "$W/params.json" >/dev/null 2>&1
 	)
 	rc=$?
-	printf '%s|%s|%s|%s' "$rc" \
+	printf '%s|%s|%s|%s|%s' "$rc" \
 		"$(jq -r --arg k "$KEY" '.[$k]' "$W/params.json" 2>/dev/null)" \
 		"$(jq -r --arg k "$OKEY" '.[$k]' "$W/params.json" 2>/dev/null)" \
-		"$( [ -f "$W/rotate.leases.json" ] && jq '.leases|length' "$W/rotate.leases.json" 2>/dev/null || printf 'n/a')"
+		"$( [ -f "$W/rotate.leases.json" ] && jq '.leases|length' "$W/rotate.leases.json" 2>/dev/null || printf 'n/a')" \
+		"$( [ -f "$W/rotate.leases.json.rejected" ] && printf 'quarantined' || printf 'no' )"
 	rm -rf "$W"
 }
 
@@ -120,7 +121,7 @@ esac
 # --- 2. THE FIX: expiry returns the member and reaps the record ------------------------------------
 r="$(drive "$(lease -7200 -60)")"
 case "$r" in
-	0\|true\|true\|0) ok "an EXPIRED lease returns the member AND is reaped — the restore path, with nothing asserting recovery" ;;
+	0\|true\|true\|0\|no) ok "an EXPIRED lease returns the member AND is reaped — the restore path, with nothing asserting recovery" ;;
 	0\|false\|*) badln "an expired lease still suppresses (got $r). This is the measured defect returning: a transport removed on 2026-08-11 was still gone after the fault cleared, because the loop had no move that gave it back." ;;
 	*) badln "expiry handling is wrong (rc|proto|other|remaining = $r); expected 0|true|true|0" ;;
 esac
@@ -129,22 +130,48 @@ esac
 perm="$(printf '{"version":1,"leases":[{"proto":"%s","direction":"ingress","evidence":"listener-fault","since":"%s","count":1}]}' "$PROTO" "$(iso $((NOW - 60)))")"
 r="$(drive "$perm")"
 case "$r" in
-	7\|*) ok "a lease with NO expiry is refused fail-closed — a permanent suppression is unrepresentable, not merely discouraged" ;;
-	*) badln "a lease with no expiry was accepted (got $r). That is a claim nothing ever withdraws — the exact state the lease mechanism exists to remove, reintroduced." ;;
+	0\|true\|true\|*\|quarantined) ok "a lease with NO expiry is refused — the member is served, the file is quarantined, the converge continues" ;;
+	*\|false\|*) badln "a lease with no expiry was APPLIED (got $r). That is a claim nothing ever withdraws — the exact state the lease mechanism exists to remove, reintroduced." ;;
+	*) badln "a lease with no expiry produced $r; expected the member served and the file quarantined." ;;
 esac
 
-# --- 4. malformed state and unknown members are refused, not guessed at -----------------------------
+# --- 4. a bad file is quarantined, and the converge is NOT wedged -----------------------------------
+#
+# THIS ROW WAS INVERTED, and the inversion is the point. It used to require rc=7 — `die` — which is the
+# fail-closed reflex applied to the wrong subject. A die here stops EVERY converge on the node: the one
+# that would repair the file, the unattended update, the next render. Weigh the two failures. Serving a
+# member the loop wanted withdrawn offers one possibly-broken transport, and a client's urltest group
+# moves off it unaided. Refusing to converge freezes the whole node for everyone, indefinitely, with no
+# recovery that does not need a human on the box.
+#
+# So the guard now quarantines and continues — loudly, leaving the rejected file in place. What must
+# never happen is the silent version: applying a claim nobody can account for, or dropping the evidence.
 r="$(drive 'not json at all')"
-case "$r" in 7\|*) ok "malformed lease state is refused rather than rendered around" ;;
-	*) badln "a malformed lease file did not fail closed (got $r) — the node would render a served set nobody can account for" ;; esac
+case "$r" in
+	0\|true\|true\|*\|quarantined) ok "malformed lease state is quarantined and the render continues with no loop claims" ;;
+	7\|*) badln "a malformed lease file still fails the converge (got $r). Every converge on the node then stops, including the one that would fix the file and the unattended update — the failure mode is far worse than the one being guarded against." ;;
+	*) badln "a malformed lease file produced $r; expected the members served and the file quarantined" ;;
+esac
 r="$(drive "$(lease -60 3600 'no-such-proto')")"
 case "$r" in 7\|*) ok "a lease naming a proto outside the registry is refused" ;;
 	*) badln "a lease for an unknown proto was accepted (got $r); the closed-set anchor is gone" ;; esac
 
+# The ADR-0039 category error, in the artefact rather than on the path: egress-only evidence paired with
+# an ingress member. spec.SuppressionLease.Validate refuses to construct it, so a file containing one was
+# hand-edited or written by a spine that predates the rule — and the renderer is the last place to catch
+# it before a member is withdrawn on a conclusion this node may not draw.
+bad_ev="$(printf '{"version":1,"leases":[{"proto":"%s","direction":"ingress","evidence":"egress-unreachable","since":"%s","expires_at":"%s","count":1}]}' "$PROTO" "$(iso $((NOW - 60)))" "$(iso $((NOW + 3600)))")"
+r="$(drive "$bad_ev")"
+case "$r" in
+	0\|true\|true\|*\|quarantined) ok "an ingress member with egress-only evidence is refused at the point of use, not only at the writer" ;;
+	*\|false\|*) badln "an ingress member was suppressed on egress-unreachable evidence (got $r) — the node is the client only for an EGRESS member; for an ingress one it cannot tell its own fault from the client's network (ADR-0039)." ;;
+	*) badln "the evidence/direction pairing produced $r; expected the member served and the file quarantined" ;;
+esac
+
 # --- 5. absent file is a no-op ---------------------------------------------------------------------
 r="$(drive NONE)"
 case "$r" in
-	0\|true\|true\|n/a) ok "no lease file is a no-op — a node that has never rotated renders byte-identically" ;;
+	0\|true\|true\|n/a\|no) ok "no lease file is a no-op — a node that has never rotated renders byte-identically" ;;
 	*) badln "an absent lease file changed the render (got $r); every node that has never rotated would drift" ;;
 esac
 
@@ -207,48 +234,151 @@ printf '%s' "$obs_rc" | grep -q 'publish_suppression_leases' \
 	&& badln "record_converge_ok publishes too. Two callers for one fact is two owners (§2.2 item 8) — and the update path would emit a second, differently-timed sample of the same state." \
 	|| ok "and record_converge_ok does not — one fact, one place that knows it"
 
-# --- 7. WHAT ACTUALLY REMOVES SERVICE TODAY, pinned as a known defect ------------------------------
+# --- 7. THE COMPOSITION, DRIVEN: a suppressed member STAYS suppressed ------------------------------
 #
-# This row used to compare SOURCE LINE NUMBERS of two function calls — and so it certified the
-# composition fix while the composition defect was live. Audit-0012 B2 named it: the layer that was
-# moved after apply_node_profile is the lease layer, which nothing populates; the layer that actually
-# removes service is persist_rotation_to_overlay writing an expiry-free `<proto>_enabled: false` into
-# the OPERATOR overlay, which is merged BEFORE apply_node_profile writes `.[k] = true` unconditionally.
+# THIS ROW WAS A PIN, and this is the commit that inverts it. It used to compare SOURCE LINE NUMBERS of
+# three function calls — and so it certified the composition fix while the defect was live. Audit-0012 B2
+# named it: the layer moved after apply_node_profile was the lease layer, which nothing populated; what
+# actually removed service was persist_rotation_to_overlay writing an expiry-free `<proto>_enabled:false`
+# into the OPERATOR overlay, merged BEFORE apply_node_profile writes `.[k] = true` unconditionally.
 #
-# So the honest thing this gate can assert today is the defect itself, pinned, with a pointer to the
-# commit that will invert it. A red row would be more dramatic and less useful: this project has an
-# explicit rule that a permanently-red gate is one people learn to skip, and the fix is post-tag work
-# (plan item P6) gated by development.md §2.2 item 4 (S0) — a lease grant is rotation actuation and may
-# only be reachable through the rate-limited, anti-flapped, rollback-capable loop.
-#
-# WHEN P6 LANDS this row must be inverted, not deleted: the demoted proto must stay demoted.
-printf '\n-- what removes service today (pinned defect, inverted by P6) --\n'
-body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$PARAMS_LIB")"
-mo="$(printf '%s' "$body" | grep -n 'merge_operator_overrides "\$tmp"' | tail -1 | cut -d: -f1)"
-np="$(printf '%s' "$body" | grep -n 'apply_node_profile "\$tmp"' | tail -1 | cut -d: -f1)"
-sl="$(printf '%s' "$body" | grep -n 'apply_suppression_leases "\$tmp"' | tail -1 | cut -d: -f1)"
-# A WRITER is something that GRANTS — not something that reaps. apply_suppression_leases removes
-# expired entries, which is the restore path and must not be mistaken for the producer; an earlier
-# draft of this row did exactly that and reported the mechanism wired because the reaper writes the
-# same file. What counts: a non-test caller of spec.LeaseSet.Grant, or a shell path invoking a
-# `lease grant` verb.
+# Now there is a writer, so the assertion can be the behaviour: run the three composition steps in the
+# order write_params runs them, over a node descriptor that DECLARES the suppressed proto — the exact
+# shape where the old ordering silently re-enabled it — and require the member to still be off at the end.
+printf '\n-- the composition, end to end --\n'
+
+compose() { # compose <lease-json|NONE> -> "<rc>|<enabled-of-PROTO>|<enabled-of-OTHER>"
+	local body="$1" W rc
+	W="$(mktemp -d "${TMPDIR:-/tmp}/myc.compose.XXXXXX")" || return 1
+	(
+		export REPO_ROOT ARTIFACT_ROOT="$REPO_ROOT" STATE_DIR="$W" DRY_RUN=0
+		log() { :; }; warn() { :; }; die() { exit 7; }
+		have() { command -v "$1" >/dev/null 2>&1; }; run() { "$@"; }
+		# shellcheck source=/dev/null
+		. "$PARAMS_LIB" >/dev/null 2>&1 || exit 2
+		OPERATOR_OVERRIDES="$W/overrides.json"
+		jq -n --arg a "$KEY" --arg b "$OKEY" '{($a): false, ($b): false}' >"$W/params.json"
+		printf '{}\n' >"$W/overrides.json"
+		# The descriptor DECLARES both protos — the shape in which apply_node_profile's unconditional
+		# `.[k] = true` used to undo the loop's claim.
+		jq -n --arg a "$PROTO" --arg b "$OTHER" '{transports: [$a, $b]}' >"$W/node.config.json"
+		[ "$body" = NONE ] || printf '%s\n' "$body" >"$W/rotate.leases.json"
+		merge_operator_overrides "$W/params.json" >/dev/null 2>&1
+		apply_node_profile "$W/params.json"        >/dev/null 2>&1
+		apply_suppression_leases "$W/params.json"  >/dev/null 2>&1
+	)
+	rc=$?
+	# `.[$k] // "absent"` would be wrong here and wrong in the one way that matters: jq's // yields the
+	# right-hand side for FALSE as well as null, so a correctly-suppressed member reads as "absent".
+	printf '%s|%s|%s' "$rc" \
+		"$(jq -r --arg k "$KEY" 'if has($k) then .[$k] else "absent" end' "$W/params.json" 2>/dev/null)" \
+		"$(jq -r --arg k "$OKEY" 'if has($k) then .[$k] else "absent" end' "$W/params.json" 2>/dev/null)"
+	rm -rf "$W"
+}
+
+base="$(compose NONE)"
+case "$base" in
+	*\|true\|true) ok "with no lease, the descriptor enables both protos (the baseline the claim must beat)" ;;
+	*) printf '  SKIP  the descriptor did not enable both protos in this harness (got %s); the ordering row below is inconclusive rather than green.\n' "$base" ;;
+esac
+r="$(compose "$(lease -60 3600)")"
+case "$r" in
+	0\|false\|true) ok "and a lease in force SURVIVES the descriptor: $PROTO stays out of service, $OTHER keeps serving" ;;
+	0\|true\|*) badln "the descriptor re-enabled the suppressed member (got $r). apply_node_profile writes \`.[\$k] = true\` for every declared transport and has no branch that writes false, so a claim applied before it is silently undone — which is how demote-active came to actuate nothing and report success." ;;
+	*) badln "the composition produced $r; expected 0|false|true" ;;
+esac
+
+# AND THE WRITER EXISTS. The pin above was self-inverting: it went red the moment a writer appeared,
+# which is what brought this row into being. Keep asserting it, so the wiring cannot quietly come out
+# again — a lease layer with no producer is a mechanism that reads as working and does nothing.
 writers="$(grep -rln '\.Grant(' "$REPO_ROOT"/cmd "$REPO_ROOT"/internal 2>/dev/null \
 	| grep -v '_test\.go$' | grep -v '/spec/lease\.go$' | head -3)"
-writers="$writers$(grep -rln 'lease grant' "$REPO_ROOT"/control "$REPO_ROOT"/scripts 2>/dev/null | head -2)"
-writers="$(printf '%s' "$writers" | sed '/^$/d')"
+callers="$(grep -rln 'lease grant' "$REPO_ROOT"/control "$REPO_ROOT"/scripts 2>/dev/null | head -2)"
+[ -n "$writers" ] \
+	&& ok "a non-test caller of spec.LeaseSet.Grant exists ($(printf '%s' "$writers" | tr '\n' ' '))" \
+	|| badln "nothing calls spec.LeaseSet.Grant outside its own package and tests. The lease layer would then remove no service at all, and every surface describing it would be describing a mechanism with no producer."
+[ -n "$callers" ] \
+	&& ok "and the shell executor drives it ($(printf '%s' "$callers" | tr '\n' ' '))" \
+	|| badln "no shell path invokes \`lease grant\`. The Go verb existing is not the same as the loop reaching it — the executor would still be writing the operator overlay, which is the unbounded write this replaces."
 
-if [ -z "$mo" ] || [ -z "$np" ] || [ -z "$sl" ]; then
-	badln "could not locate all three composition calls in write_params (merge=${mo:-missing} node_profile=${np:-missing} leases=${sl:-missing}); this row cannot judge what it exists for"
-elif [ "$sl" -gt "$np" ] && [ "$np" -gt "$mo" ]; then
-	ok "composition order is merge($mo) -> node_profile($np) -> leases($sl): a lease outranks the descriptor"
+# ONE SUPPRESSION PATH, not two (§2.2 item 4, S0), ESTABLISHED BY RUNNING THE EXECUTOR.
+#
+# The overlay write may still ENABLE a promoted sibling — additive, it takes nothing from anyone — but it
+# must no longer be how a member is WITHDRAWN, or the loop has two ways to remove service and only one of
+# them expires. An earlier draft of this row grepped a few lines around the call and asked whether
+# `_suppress` appeared nearby, which is the source-text assertion this project keeps catching itself
+# making: it passes on code that reads right and says nothing about which branch runs.
+#
+# So: source the real library, stub every helper to record that it was called, and run rotate_apply_live
+# over two real plans. What is asserted is the TRACE.
+printf '\n-- which write path the executor actually takes --\n'
+APPLY_LIB="$REPO_ROOT/control/lib/nb_rotate_apply.sh"
+if [ ! -f "$APPLY_LIB" ]; then
+	badln "control/lib/nb_rotate_apply.sh is missing; the executor cannot be driven"
 else
-	badln "composition order is merge($mo), node_profile($np), leases($sl). A claim applied before apply_node_profile is silently re-enabled by its unconditional \`.[\$k] = true\`, which is how demote-active came to actuate nothing and report success."
-fi
+trace_apply() { # trace_apply <plan-json> -> the space-joined call trace
+	local plan_body="$1" W
+	W="$(mktemp -d "${TMPDIR:-/tmp}/myc.exec.XXXXXX")" || return 1
+	printf '%s\n' "$plan_body" >"$W/plan.json"
+	(
+		export STATE_DIR="$W" DRY_RUN=0 TRACE="$W/trace"
+		PARAMS_JSON="$W/params.json"; SINGBOX_CONFIG="$W/config.json"
+		printf '{}\n' >"$PARAMS_JSON"
+		log() { :; }; warn() { :; }; die() { printf 'die ' >>"$TRACE"; exit 7; }
+		have() { command -v "$1" >/dev/null 2>&1; }; run() { "$@"; }
+		# shellcheck source=/dev/null
+		. "$APPLY_LIB" >/dev/null 2>&1 || exit 2
+		# Every helper the live path reaches, stubbed to record itself. The two that matter are
+		# rotate_lease_grant and persist_rotation_to_overlay; the rest exist so the function can run.
+		apply_rotation_to_params() { :; }
+		render_candidate() { printf '{}\n' >"$1"; }
+		validate_config() { return 0; }
+		persist_rotation_state_preapply() { :; }
+		persist_rotation_state() { :; }
+		update_measure_active_ref() { :; }
+		write_params() { :; }
+		promote_config() { :; }
+		install_singbox_unit() { :; }
+		apply_singbox() { return 0; }
+		verify_post_apply() { return 0; }
+		converge_node_tail() { :; }
+		rotate_lease_grant() { printf 'lease_grant ' >>"$TRACE"; return 0; }
+		rotate_lease_release() { printf 'lease_release ' >>"$TRACE"; return 0; }
+		persist_rotation_to_overlay() { printf 'overlay ' >>"$TRACE"; }
+		revert_rotation_overlay() { printf 'revert_overlay ' >>"$TRACE"; }
+		rotate_apply_live "$W/plan.json" >/dev/null 2>&1
+	)
+	cat "$W/trace" 2>/dev/null
+	rm -rf "$W"
+}
 
-if [ -z "$writers" ]; then
-	ok "PINNED DEFECT: nothing writes a lease yet, so the lease layer removes no service — the loop still suppresses via the operator overlay, before apply_node_profile, and a suppression therefore never lapses. Tracked as plan item P6; invert this row in the commit that wires the writer."
-else
-	badln "a lease writer now exists ($(printf '%s' "$writers" | tr '\n' ' ')) — good, and this row is now WRONG. Invert it: assert that a demoted proto stays demoted end to end, driving merge -> node_profile -> leases, and delete this pin."
+mkplan() { # mkplan <action> <with-suppress:yes|no>
+	local action="$1" sup="$2"
+	jq -nc --arg a "$action" --arg p "$PROTO" --arg o "$OTHER" --argjson s "$( [ "$sup" = yes ] && printf 'true' || printf 'false' )" '
+		{act:true, reason:"degraded-active",
+		 from:{proto:$p, class:"reality-tcp", action:"none", from_port:0, to_port:0, promoted:true, weight:0.2},
+		 to:{proto:(if $a == "demote-active" then $p else $o end), class:"reality-tcp", action:$a,
+		     from_port:0, to_port:0, promoted:true, weight:0.9},
+		 next_state:{}, decided_at:"2026-01-01T00:00:00Z"}
+		| if $s then .suppress = {proto:$p, direction:"ingress", evidence:"listener-fault"} else . end'
+}
+
+t_dem="$(trace_apply "$(mkplan demote-active yes)")"
+case "$t_dem" in
+	*lease_grant*) : ;;
+	*) badln "a demote plan carrying .suppress never reached rotate_lease_grant (trace: '${t_dem:-<empty>}'). The withdrawal would then be written by whatever else runs, without a term." ;;
+esac
+case "$t_dem" in
+	*overlay*) badln "a demote plan ALSO wrote the operator overlay (trace: '$t_dem'). Two write paths for one suppression is the state §2.2 item 4 forbids, and only one of them expires — the overlay entry outlives the lease and the member never comes back." ;;
+	*lease_grant*) ok "a demote goes through the lease writer and does NOT touch the operator overlay (trace: $t_dem)" ;;
+esac
+
+t_pro="$(trace_apply "$(mkplan promote-sibling no)")"
+case "$t_pro" in
+	*lease_grant*) badln "a PROMOTE plan granted a suppression lease (trace: '$t_pro'). Promoting adds a path and takes none away; a lease there would withdraw a member nothing found fault with." ;;
+	*overlay*) ok "and a promote still persists its enable through the overlay, where a durable operator-visible enable belongs (trace: $t_pro)" ;;
+	*) badln "a promote plan took neither path (trace: '${t_pro:-<empty>}') — the rotation would report success having persisted nothing." ;;
+esac
 fi
 
 printf '\n-- Result --\n'

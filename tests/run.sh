@@ -112,6 +112,13 @@
 #                               populated `served` makes Active ignored rather than merged, an unset or
 #                               out-of-vocabulary direction is refused, and internal/measure really emits
 #                               the set. SKIPs without a Go toolchain. OFFLINE
+#   * suppression_lease_wired.sh — planner decision -> grant -> render -> expiry -> return, run end to end
+#                               against the shipped planner and `lease grant`: the proposal is made only
+#                               on node-self evidence, the grant refuses a member carrying traffic, one
+#                               the observer cannot see, a stale/absent marker, a broken family floor and
+#                               a spent budget; the term backs off; the renderer stops serving it; expiry
+#                               and `release` both give it back; a hold or promote plan grants nothing.
+#                               SKIPs without a Go toolchain. OFFLINE
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
@@ -358,6 +365,7 @@ GATES=(
 	"tests/conformance/promote_paths_converge.sh"
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_judges_a_set.sh"
+	"tests/conformance/suppression_lease_wired.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/rotate_apply_executes.sh"
 	"tests/conformance/rotate_rollback_executes.sh"

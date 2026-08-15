@@ -281,11 +281,18 @@ revert_rotation_overlay() {
 # config is untouched; revert the overlay and regenerate params (subshell so write_params' internal die is
 # caught), drop the candidate, die fail-closed.
 rotate_abort_revert() {
-	local candidate="$1" msg="$2"
-	revert_rotation_overlay
+	local candidate="$1" msg="$2" suppressed="${3:-}"
+	# UNDO WHAT WAS ACTUALLY DONE. A demote writes a lease and never touches the overlay, so reverting the
+	# overlay here would restore a file nobody wrote while leaving the member withdrawn for its full term —
+	# a rollback that reads as complete and leaves the failure in place.
+	if [ -n "$suppressed" ]; then
+		rotate_lease_release "$suppressed" || true
+	else
+		revert_rotation_overlay
+	fi
 	( write_params ) || warn "rotation: write_params failed while reverting; params.json may still hold the rotated values — operator attention needed (overlay snapshot: $(_rotate_overlay_bak))."
 	rm -f "$candidate" 2>/dev/null || true
-	die "rotation: $msg; reverted overlay (fail-closed; nothing promoted)."
+	die "rotation: $msg; reverted ${suppressed:+the suppression of $suppressed}${suppressed:-the overlay} (fail-closed; nothing promoted)."
 }
 
 # --- between-tick rotation state ---------------------------------------------------------------------
@@ -451,6 +458,114 @@ update_measure_active_ref() {
 }
 
 # --- LIVE executor (armed + --apply-rotation + DRY_RUN=0 only) ----------------------------------------
+# ---------------------------------------------------------------------------------------------------
+# SUPPRESSION LEASES — the one path by which this loop may STOP SERVING a member (ADR-0040 2.4).
+#
+# WHAT THIS REPLACES. A demote used to write `<proto>_enabled=false` into the operator-overrides overlay:
+# permanent, with no term, in the same field the operator uses for their own durable choices. So the
+# loop temporary reaction and the operator lasting decision shared one slot with neither owning the
+# answer, and a member the loop took away one afternoon was still gone months later with nothing on the
+# node recording why. A lease always expires, lives in its own file, and reaping it IS the restore path.
+#
+# WHY THE PREDICATE IS IN GO. Every refusal -- the evidence/direction pairing, the carrying-traffic
+# guard, the independent-family floor, the outstanding budget, the backoff term -- is a predicate, and
+# ADR-0038 puts predicates in Go with the shell comparing rather than re-deriving. This function only
+# assembles paths and reports the verdict.
+#
+# NO GO BINARY, NO SUPPRESSION. Deliberate: there is no shell fallback, because a fallback would be a
+# second implementation of spec.LeaseSet.Grant, it would drift, and the drift would show up as a member
+# withdrawn from people the guard existed to protect. A node with no spine simply cannot demote.
+# ---------------------------------------------------------------------------------------------------
+
+# _rotate_lease_file — where the loop claims live. One spelling, shared with the renderer and the publisher.
+_rotate_lease_file() { printf '%s' "${LEASE_FILE:-$STATE_DIR/rotate.leases.json}"; }
+
+# _rotate_lease_limits FILE — write the RotationLimits the measure plane is running under into FILE.
+# Read from the measure config rather than restated here: the planner decision and the lease term must be
+# sized by the SAME numbers, or the backoff is computed against limits no plan ever used.
+_rotate_lease_limits() {
+	local out="$1" cfg="$STATE_DIR/measure.config.json"
+	[ -f "$cfg" ] || return 1
+	jq -e '.limits' "$cfg" >"$out" 2>/dev/null || return 1
+	return 0
+}
+
+# _rotate_lease_refs FILE — write {proto: ref} joining plan protos to the observer node-local refs.
+_rotate_lease_refs() {
+	local out="$1" cfg="$STATE_DIR/measure.config.json"
+	[ -f "$cfg" ] || return 1
+	jq -e '[.members[]? | {(.proto): .ref}] | add // {}' "$cfg" >"$out" 2>/dev/null || return 1
+	return 0
+}
+
+# _rotate_lease_enabled — comma-separated protos this node currently SERVES, from params through the
+# Go-owned vocab. The family floor is counted over what is served; deriving it from anything else would
+# let a suppression pass a floor computed against a set the node is not actually offering.
+_rotate_lease_enabled() {
+	local vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	[ -f "$vocab" ] && [ -f "$PARAMS_JSON" ] || return 1
+	jq -r --slurpfile p "$PARAMS_JSON" \
+		'[.protos[] | select(.enable_key != "" and ($p[0][.enable_key] == true)) | .proto] | join(",")' \
+		"$vocab" 2>/dev/null
+}
+
+# rotate_lease_grant PLAN [--dry-run] — ask the Go writer to withdraw the plan subject for a bounded term.
+# 0 = granted (or would be); 1 = REFUSED, which is a normal outcome and never a failure of the converge.
+rotate_lease_grant() {
+	local plan="$1" dry="${2:-}"
+	local spine="${SPINE_BIN:-${TOOLING_DIR:-/usr/local/lib/mycelium}/bin/myceliumctl-go}"
+	local proto; proto="$(jq -r '.suppress.proto // empty' "$plan" 2>/dev/null)"
+	[ -n "$proto" ] || { warn "rotation: asked to grant a lease for a plan that proposes no suppression — refusing (fail-closed)."; return 1; }
+	if [ ! -x "$spine" ]; then
+		warn "rotation: the Go spine ($spine) is absent, so this node cannot grant a suppression lease and will NOT withdraw '$proto'. There is no shell fallback on purpose: a second implementation of the grant guards would drift from the one that is tested, and the drift would surface as somebody losing a working channel."
+		return 1
+	fi
+	local wd; wd="$(mktemp -d "${TMPDIR:-/tmp}/myc.lease.XXXXXX")" || return 1
+	local rc=1
+	if _rotate_lease_limits "$wd/limits.json" && _rotate_lease_refs "$wd/refs.json"; then
+		local enabled; enabled="$(_rotate_lease_enabled)"
+		if [ -n "$enabled" ]; then
+			local -a argv=( lease grant
+				--plan "$plan" --leases "$(_rotate_lease_file)"
+				--limits "$wd/limits.json" --refs "$wd/refs.json"
+				--marker "$STATE_DIR/path_signal.json" --enabled "$enabled" )
+			[ "$dry" = "--dry-run" ] && argv+=( --dry-run )
+			if "$spine" "${argv[@]}" >"$wd/out" 2>"$wd/err"; then
+				log "rotation: $(cat "$wd/out")"
+				rc=0
+			else
+				log "rotation: the suppression of '$proto' was REFUSED — $(head -3 "$wd/err" | tr '\n' ' ')"
+				rc=1
+			fi
+		else
+			warn "rotation: could not resolve which protos this node serves — refusing to compute a family floor against an unknown served set."
+		fi
+	else
+		warn "rotation: $STATE_DIR/measure.config.json does not yield limits + member refs; the lease writer cannot be driven and '$proto' stays served."
+	fi
+	rm -rf "$wd" 2>/dev/null || true
+	return "$rc"
+}
+
+# rotate_lease_release PROTO — withdraw the loop claim immediately. The rollback path for a suppression:
+# a demote that failed post-apply verification must not leave the member suppressed for its full term.
+rotate_lease_release() {
+	local proto="$1"
+	local spine="${SPINE_BIN:-${TOOLING_DIR:-/usr/local/lib/mycelium}/bin/myceliumctl-go}"
+	[ -x "$spine" ] || { warn "rotation: cannot release the lease on '$proto' — no Go spine. It will return when its term expires."; return 1; }
+	local wd; wd="$(mktemp -d "${TMPDIR:-/tmp}/myc.lease.XXXXXX")" || return 1
+	local rc=1
+	if _rotate_lease_limits "$wd/limits.json"; then
+		if "$spine" lease release --leases "$(_rotate_lease_file)" --limits "$wd/limits.json" --proto "$proto" >"$wd/out" 2>&1; then
+			log "rotation: $(cat "$wd/out")"; rc=0
+		else
+			warn "rotation: could not release the lease on '$proto': $(head -2 "$wd/out" | tr '\n' ' '). It returns when its term expires."
+		fi
+	fi
+	rm -rf "$wd" 2>/dev/null || true
+	return "$rc"
+}
+
 rotate_apply_live() {
 	local plan="$1" from to
 	from="$(jq -r '.from.proto // "?"' "$plan")"
@@ -470,6 +585,22 @@ rotate_apply_live() {
 		die "rotation: candidate failed 'sing-box check' (fail-closed; nothing changed)."
 	fi
 	rm -f "$tmp_params" 2>/dev/null || true
+	# THE WITHDRAWAL GUARD, asked while nothing is persisted yet. A demote takes the member away from
+	# EVERYONE on it, and three of the reasons it may not are facts about this node right now: somebody is
+	# on it, the outstanding-suppression budget is spent, or the node would drop below its
+	# independent-family floor. Asking here means a refusal costs nothing — Phase A's whole contract is
+	# that a bad rotation touches no persisted state.
+	local _suppress; _suppress="$(jq -r '.suppress.proto // empty' "$plan" 2>/dev/null)"
+	if [ -n "$_suppress" ] && ! rotate_lease_grant "$plan" --dry-run; then
+		rm -f "$candidate" 2>/dev/null || true
+		# The attempt IS spent, deliberately. Without persisting the state the planner re-derives the same
+		# act plan on the next 90-second tick and re-refuses, forever — a refusal loop that logs a warning
+		# every ninety seconds and never converges. Spending the cooldown makes the node back off and
+		# re-confirm, which is what every other anti-flap guard here does.
+		persist_rotation_state "$plan"
+		log "rotation: HELD — the plan would cease serving '$_suppress' and this node may not (see the refusal above). Nothing changed; the attempt is spent, so the next attempt waits out the cooldown."
+		return 0
+	fi
 	# Phase B — PERSIST via the overlay (snapshot taken), regenerate params, re-render + re-validate the
 	# AUTHORITATIVE config. Every die-capable step is SUBSHELL-wrapped so a failure is catchable and the
 	# overlay is reverted (rotate_abort_revert) — a bare `if ! write_params` cannot trap write_params' die.
@@ -480,15 +611,28 @@ rotate_apply_live() {
 	# Without it, a rotation that fails after this point returned with rotate_state.json unchanged and
 	# the planner re-derived the same act plan 90 seconds later, forever.
 	persist_rotation_state_preapply "$plan"
-	persist_rotation_to_overlay "$plan"
+	# ONE ACTUATION PER KIND, and they are not the same kind. A promote ENABLES a member: additive, it
+	# takes nothing from anyone, and the operator overlay is where a durable enable belongs. A demote
+	# WITHDRAWS one, and that is the loop's own time-bounded claim — it goes in the lease file, never in
+	# the operator's namespace, so the two owners can never disagree about one field again.
+	if [ -n "$_suppress" ]; then
+		if ! rotate_lease_grant "$plan"; then
+			# It was permitted seconds ago in Phase A and is not now. Refusing here is the fail-closed
+			# reading: something changed under us, and the state is already advanced so the loop backs off.
+			log "rotation: the suppression of '$_suppress' was refused at the persist step after passing the pre-check; nothing withdrawn."
+			return 0
+		fi
+	else
+		persist_rotation_to_overlay "$plan"
+	fi
 	if ! ( write_params ); then
-		rotate_abort_revert "$candidate" "write_params failed after the overlay update"
+		rotate_abort_revert "$candidate" "write_params failed after the persist step" "$_suppress"
 	fi
 	if ! ( render_candidate "$candidate" ); then
-		rotate_abort_revert "$candidate" "post-persist render failed"
+		rotate_abort_revert "$candidate" "post-persist render failed" "$_suppress"
 	fi
 	if ! validate_config "$candidate"; then
-		rotate_abort_revert "$candidate" "post-persist candidate failed 'sing-box check'"
+		rotate_abort_revert "$candidate" "post-persist candidate failed 'sing-box check'" "$_suppress"
 	fi
 	# No-op short-circuit: the sibling is already the live config -> keep the overlay + state, no restart
 	# (an always-on PPN must not drop client connections for a no-op).
@@ -523,7 +667,13 @@ rotate_apply_live() {
 	fi
 	warn "rotation: post-apply verification FAILED; rolling back config + overlay (fail-closed)."
 	rollback_config
-	revert_rotation_overlay
+	if [ -n "$_suppress" ]; then
+		# A demote that failed verification must not leave the member withdrawn for its full term: the
+		# claim was made on the strength of an apply that did not work.
+		rotate_lease_release "$_suppress" || true
+	else
+		revert_rotation_overlay
+	fi
 	( write_params ) || warn "rotation: write_params failed during rollback; params.json may still hold the rotated values — operator attention needed."
 	apply_singbox || warn "rotation: could not restart sing-box onto the restored config — operator attention needed."
 	verify_post_apply || warn "rotation: service still unhealthy after rollback — operator attention needed."
