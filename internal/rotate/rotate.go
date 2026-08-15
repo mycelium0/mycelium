@@ -42,6 +42,13 @@ func DefaultRotationLimits() spec.RotationLimits {
 		MaxPerWindow:          2,
 		MaxRollbacksPerWindow: 1,
 		CooldownAfterRollback: time.Hour,
+		// The two bounds on SUPPRESSION, absent until now — and both guards read zero as UNLIMITED, so
+		// their absence was not a missing feature but a disabled one. Without the cap the backoff doubles
+		// past any horizon and the lease becomes the permanent suppression the mechanism exists to
+		// prevent; without the budget a correlated fault suppresses the whole node one member at a time,
+		// every grant individually justified.
+		MaxSuppressionTTL:          24 * time.Hour,
+		MaxOutstandingSuppressions: 2,
 	}
 }
 
@@ -210,15 +217,18 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	}
 	active := in.Active
 	activeVerdict := in.ActiveVerdict
+	activeDirection := spec.DirectionIngress
 	if subject >= 0 {
 		active = served[subject].Member
 		activeVerdict = served[subject].Verdict
+		activeDirection = served[subject].Direction
 		ns.ImpairedStreak = ns.ImpairedStreaks[active.Proto]
 	} else {
 		// Nothing impaired: report the first member as the subject so a hold names something real, and
 		// zero the projection.
 		active = served[0].Member
 		activeVerdict = served[0].Verdict
+		activeDirection = served[0].Direction
 		ns.ImpairedStreak = 0
 	}
 
@@ -324,12 +334,30 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 		//
 		// Gated on the INTERSECTION floor, never the served set — see DemoteKeepsIndependentFallback for
 		// the config that satisfies a served-set floor while stranding every client already holding one.
-		served := make([]string, 0, len(in.Ranked)+1)
-		served = append(served, active.Proto)
+		// servedProtos, not `served`: the set above is []ServedMember and this is the flat proto list
+		// DemoteKeepsIndependentFallback takes. Two things named the same in one function is how the
+		// wrong one gets read.
+		servedProtos := make([]string, 0, len(in.Ranked)+1)
+		servedProtos = append(servedProtos, active.Proto)
 		for i := range in.Ranked {
-			served = append(served, in.Ranked[i].Proto)
+			servedProtos = append(servedProtos, in.Ranked[i].Proto)
 		}
-		if ok, fams := spec.DemoteKeepsIndependentFallback(served, in.IssuedBaseline, active.Proto); ok {
+		if ok, fams := spec.DemoteKeepsIndependentFallback(servedProtos, in.IssuedBaseline, active.Proto); ok {
+			// THE EVIDENCE GATE, and it comes before the budget is spent because a demote the node may not
+			// make should cost nothing. Demoting is the one action that takes a served member away from
+			// everyone on it, so the node has to be entitled to the conclusion: a fault it observed about
+			// ITSELF (ADR-0039). A member faulted only by the passive path observer is impaired in a way
+			// the node cannot attribute — interference, or one client's network — and withdrawing it would
+			// disconnect everybody else to react to something they may not be experiencing.
+			//
+			// Promoting a sibling is not gated this way and must not be: it ADDS a path.
+			ev := spec.EvidenceForReason(activeVerdict.Reason)
+			prop := spec.SuppressionProposal{Proto: active.Proto, Direction: activeDirection, Evidence: ev}
+			if err := prop.Validate(); err != nil {
+				return hold(spec.RotationReasonEvidenceNotPermitted,
+					fmt.Sprintf("ceasing to serve %s is the only move left, but %q is not evidence this node may withdraw a %s member on (%v)",
+						active.Proto, activeVerdict.Reason, activeDirection, err))
+			}
 			// An ACT plan spends the budget, whatever the action. The promote branch below does this and
 			// the demote branch did not, which meant the anti-beacon limits applied to one kind of
 			// rotation and not the other: LastRotateAt never advanced so the cooldown never bit,
@@ -348,6 +376,11 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 				Reason:      spec.RotationReasonDegradedActive,
 				HeldBecause: fmt.Sprintf("the active member is confirmed impaired and no sibling beats it by the margin; ceasing to serve it leaves %d independent families that issued clients still hold, and their urltest group selects one", len(fams)),
 				NextState:   ns, DecidedAt: in.Now,
+				// The withdrawal is BOUNDED, and this is where that becomes true: the executor grants a
+				// lease with a term instead of writing a permanent `false` into the operator's overlay,
+				// where the loop's temporary reaction and the operator's durable choice used to share one
+				// field with neither owning the answer.
+				Suppress: &prop,
 			}
 			if err := p.Validate(); err != nil {
 				return spec.RotationPlan{}, fmt.Errorf("rotate plan (demote) invalid: %w", err)

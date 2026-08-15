@@ -214,5 +214,14 @@
     "ws-tls": "own-tls-sni",
     "xhttp-tls": "own-tls-sni"
   },
-  "independent_family_floor": 2
+  "independent_family_floor": 2,
+  "transport_directions": [
+    "ingress",
+    "egress"
+  ],
+  "suppression_evidence": [
+    "listener-fault",
+    "render-refused",
+    "egress-unreachable"
+  ]
 }

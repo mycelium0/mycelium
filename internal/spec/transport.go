@@ -472,6 +472,12 @@ type Vocab struct {
 	BlockFamilies map[string]string `json:"block_families"`
 	// IndependentFamilyFloor is how many distinct block families a served bundle must span.
 	IndependentFamilyFloor int `json:"independent_family_floor"`
+	// TransportDirections and SuppressionEvidence are the closed sets a suppression lease is written in.
+	// Emitted for the same reason the block families are: the shell re-checks a lease file it did not
+	// write — hand-edited, restored from a backup, produced by an older spine — and a hand-kept copy of
+	// these two lists in a shell case statement would drift from the Go rule the moment either grows.
+	TransportDirections []TransportDirection  `json:"transport_directions"`
+	SuppressionEvidence []SuppressionEvidence `json:"suppression_evidence"`
 }
 
 // ParamsValidationVocab is the emitted half of the params-knob validation contract. Additive: a shell
@@ -517,6 +523,8 @@ func NewVocab() Vocab {
 		Protos:                 TransportRegistry(),
 		BlockFamilies:          blockFamilyVocab(),
 		IndependentFamilyFloor: IndependentFamilyFloor,
+		TransportDirections:    ValidDirections(),
+		SuppressionEvidence:    ValidEvidence(),
 		ParamsValidation: ParamsValidationVocab{
 			Hysteria2HopPorts:           Hysteria2HopPortBounds(),
 			MaxPortFieldDigits:          maxPortFieldDigits,

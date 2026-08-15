@@ -202,7 +202,7 @@ generate_measure_configs() {
 	if [ -f "$STATE_DIR/rotate_limits.json" ] && jq -e . "$STATE_DIR/rotate_limits.json" >/dev/null 2>&1; then
 		limits="$(jq -c . "$STATE_DIR/rotate_limits.json")"
 	else
-		limits='{"flip_confirmations":3,"min_weight_margin":0.1,"min_interval_ns":1800000000000,"window_ns":3600000000000,"max_per_window":2,"max_rollbacks_per_window":1,"cooldown_after_rollback_ns":3600000000000}'
+		limits='{"flip_confirmations":3,"min_weight_margin":0.1,"min_interval_ns":1800000000000,"window_ns":3600000000000,"max_per_window":2,"max_rollbacks_per_window":1,"cooldown_after_rollback_ns":3600000000000,"max_suppression_ttl_ns":86400000000000,"max_outstanding_suppressions":2}'
 	fi
 	# PostConnectCollapse arm state, DURABLE across config regen / auto-update: enabled iff the env says so OR
 	# a node-local arm SENTINEL is present (mirrors the rotate-live.enabled sentinel). So an operator who armed
@@ -386,9 +386,50 @@ _collapse_classes() {
 	printf '%s\n' "$decports" | jq -R . | jq -s -c --argjson pm "$pm" '[ .[] | $pm[.] // empty ] | unique' 2>/dev/null || printf '[]'
 }
 
+# _carrying_classes PORTMAP -> JSON array of served class refs with at least one live client session.
+#
+# WHY IT EXISTS. ADR-0040 2.4: the loop may not take away a channel that is working for somebody. A
+# suppression removes a member from EVERYONE, and the node holds no per-user attribution by design, so it
+# cannot see whose sessions it would be ending. The only honest guard is a count: is anyone on this
+# listener right now.
+#
+# ESTABLISHED sockets on the served port, with loopback remotes discarded -- the same skeleton
+# _collapse_classes uses, and the loopback discard is what keeps the node own reach/L7 probes from
+# counting as a client. One socket is enough: erring toward "somebody is on it" costs a delayed
+# suppression, erring the other way costs somebody their working connection.
+#
+# WHAT IT CANNOT SEE, stated because the consumer has to fail closed on it: /proc/net/tcp is TCP, and
+# PATHSIG_TCP_SELECT covers only the TCP inbounds. hysteria2, tuic and AmneziaWG are UDP and have no
+# connection table -- this function is SILENT about them, which is not the same as reporting them idle.
+# The marker therefore also carries `carrying_observed`, the refs this observer can speak about at all,
+# and the lease writer treats anything outside that list as carrying (myceliumctl-go lease grant).
+_carrying_classes() {
+	local pm="$1"
+	[ -r /proc/net/tcp ] || { printf '[]'; return 0; }
+	local ports; ports="$(printf '%s' "$pm" | jq -r 'keys[]?' 2>/dev/null)" || ports=""
+	[ -n "$ports" ] || { printf '[]'; return 0; }
+	local p hexmap=""
+	for p in $ports; do hexmap="$hexmap$(printf '%04X' "$p" 2>/dev/null):$p "; done
+	local files="/proc/net/tcp"; [ -r /proc/net/tcp6 ] && files="$files /proc/net/tcp6"
+	local decports; decports="$(awk -v hexmap="$hexmap" '
+		BEGIN { n = split(hexmap, H, " "); for (i=1;i<=n;i++) { if (H[i]!="") { split(H[i], hp, ":"); dec[toupper(hp[1])] = hp[2] } } }
+		FNR == 1 { next }
+		{
+			split($2, la, ":"); lp = toupper(la[2])
+			if (!(lp in dec)) next
+			if ($4 != "01") next
+			split($3, ra, ":"); rip = ra[1]
+			if (rip == "0100007F" || rip == "00000000000000000000000001000000") next
+			E[dec[lp]]++
+		}
+		END { for (d in E) if (E[d] > 0) print d }' $files 2>/dev/null)" || decports=""
+	[ -n "$decports" ] || { printf '[]'; return 0; }
+	printf '%s\n' "$decports" | jq -R . | jq -s -c --argjson pm "$pm" '[ .[] | $pm[.] // empty ] | unique' 2>/dev/null || printf '[]'
+}
+
 # measure_pathsig_probe [MARKER] — read the RST/SYN counter deltas since the last window, threshold, and write
 # the path-signal marker (default $STATE_DIR/path_signal.json = {observed_at, checked, reset:[REFS], collapse:
-# [REFS]}). A ref in `reset` (ConnectReset, increment 1) names a served class whose inbound-RST rate this
+# [REFS], carrying:[REFS], carrying_observed:[REFS]}). A ref in `reset` (ConnectReset, increment 1) names a served class whose inbound-RST rate this
 # window was >= PATHSIG_RST_FLOOR AND >= PATHSIG_RST_RATIO_NUM/DEN of its new-connection rate. A ref in
 # `collapse` (PostConnectCollapse, increment 2) names a class whose ESTABLISHED served sockets show the
 # send-queue-stall signature (see _collapse_classes). The first read after (re)arm only baselines (no delta
@@ -416,7 +457,12 @@ measure_pathsig_probe() {
 	( umask 077; printf '%s\n' "$cur" >"$statef.tmp" ) 2>/dev/null && mv -f "$statef.tmp" "$statef" 2>/dev/null || true
 	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	if [ "$last" = "{}" ]; then
-		printf '{"observed_at":"%s","checked":0,"reset":[],"collapse":[]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
+		# carrying_observed is [] here on purpose: the first read after (re)arm has no window, so the
+		# observer can speak about NOTHING yet. An empty `carrying` with an empty `carrying_observed` reads
+		# as "nobody is known to be idle", which is what fails the lease writer closed. Writing carrying:[]
+		# with a populated observed list would read as "nobody is on anything" and permit suppressing a
+		# member full of clients.
+		printf '{"observed_at":"%s","checked":0,"reset":[],"collapse":[],"carrying":[],"carrying_observed":[]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
 		return 0   # first read after (re)arm: baseline only (no delta, no /proc window yet)
 	fi
 	# PostConnectCollapse (increment 2) — computed alongside the RST signal, written to the same marker. It is
@@ -460,8 +506,23 @@ measure_pathsig_probe() {
 			| ($pm[$port] // empty))
 		| unique')" || reset=""
 	[ -n "$reset" ] || reset="[]"
+	# WHO IS ON WHAT (ADR-0040 2.4). `carrying` is the refs with a live client session; `carrying_observed`
+	# is the refs this observer can speak about AT ALL -- every TCP inbound in the portmap, and only those.
+	# The two are separate fields because "observed, and idle" and "cannot observe" must not look alike to
+	# the lease writer: the first permits a suppression, the second must forbid one.
+	local carrying observed
+	carrying="$(_carrying_classes "$portmap" 2>/dev/null)" || carrying="[]"
+	[ -n "$carrying" ] || carrying="[]"
+	if [ -r /proc/net/tcp ]; then
+		observed="$(printf '%s' "$portmap" | jq -c '[.[]] | unique' 2>/dev/null)" || observed="[]"
+	else
+		# No connection table means no member is observable, whatever the portmap says.
+		observed="[]"
+	fi
+	[ -n "$observed" ] || observed="[]"
 	local n; n="$(printf '%s' "$cur" | jq '[keys[]|select(startswith("rst_"))]|length' 2>/dev/null || echo 0)"
-	printf '{"observed_at":"%s","checked":%s,"reset":%s,"collapse":%s}\n' "$ts" "${n:-0}" "$reset" "$collapse" >"$marker.tmp" 2>/dev/null \
+	printf '{"observed_at":"%s","checked":%s,"reset":%s,"collapse":%s,"carrying":%s,"carrying_observed":%s}\n' \
+		"$ts" "${n:-0}" "$reset" "$collapse" "$carrying" "$observed" >"$marker.tmp" 2>/dev/null \
 		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
 	local hit=0
 	if [ "$reset" != "[]" ]; then

@@ -13,6 +13,95 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.85] — 2026-08-14
+
+### Added — the rotation loop can now actually stop serving a member, for a bounded term
+
+[ADR-0040](docs/adr/0040-a-fungi-serves-several-people.md) §2.4. The suppression-lease mechanism shipped
+in 0.2.80 complete, unit-tested and documented — and **inert**: `spec.LeaseSet.Grant` had no non-test
+caller, so no lease had ever been granted, while a CHANGELOG entry, two Prometheus alerts, a `fungi`
+status line and a renderer all described it as how the loop takes a member out of service. Every unit
+test passed, because every unit worked.
+
+**`myceliumctl-go lease grant|release|reap|list`** is the writer, and `rotate_apply_live` calls it. What
+it replaces: a demote used to write `<proto>_enabled=false` into the operator's overrides overlay —
+permanent, with no term, in the same field the operator uses for their own durable choices, so an
+operator repair and a stale loop reaction shared one slot with neither owning the answer. A member the
+loop took away one afternoon was still gone months later with nothing on the node recording why.
+
+There is deliberately **no shell fallback**. A second implementation of the grant guards would drift from
+the one that is tested, and the drift would surface as somebody losing a working channel. A node with no
+spine cannot demote.
+
+**The guard the design turns on.** A suppression removes a member from *everyone*, and the node holds no
+per-user attribution by design — so before withdrawing anything it has to answer "is somebody on this
+right now", and it must fail closed when it cannot. The passive nft observer already counted ESTABLISHED
+sockets per served port with loopback remotes discarded; it now publishes `carrying` and, separately,
+`carrying_observed` — the members it can speak about **at all**. The two are separate fields because
+"observed, and idle" and "cannot observe" must not look alike: `/proc/net/tcp` has no row for hysteria2,
+tuic or AmneziaWG, so an absent UDP member would otherwise read as empty and be suppressed with every one
+of its clients still on it. A missing marker, a stale one, an unjoinable ref and an unobservable family
+all resolve to *carrying*, and the refusal says which.
+
+**Stated limitation:** the loop therefore cannot withdraw a UDP family at all today. That is honest
+rather than restrictive — a node that cannot see who is on a transport has no business taking it away —
+and it is the reason to arm the observer, not to weaken the guard.
+
+**The planner proposes, the writer decides.** `RotationPlan.Suppress` carries proto, direction and
+evidence; `spec.EvidenceForReason` maps a detector reason to what it can carry, as a total function over
+the closed set. Loopback-probe faults (handshake-timeout, unreachable, active-probe-failure) are
+statements about **this node** and are sound. connection-reset and throughput-collapse come from watching
+real client flows: observed at the node, and still statements about the *path*, which for an ingress
+member the node cannot separate from one client's bad network. The demote branch now holds with the new
+`evidence-not-permitted` reason rather than withdrawing a member on them. Promoting a sibling is not
+gated this way and must not be — it adds a path.
+
+**Bounds that were disabled, not missing.** `MaxSuppressionTTL` and `MaxOutstandingSuppressions` were
+absent from `DefaultRotationLimits()` and from the shipped shell literal, and *both guards read zero as
+unlimited*. Now 24h and 2.
+
+### Fixed — the writer emitted a timestamp its own consumer cannot parse
+
+Found by `suppression_lease_wired.sh` on its first end-to-end run, which is the entire reason that gate
+drives the renderer rather than the writer alone. `Grant` stamped RFC3339 with nanoseconds; the shell
+renderer decides in-force with jq `fromdateiso8601`, which takes `%Y-%m-%dT%H:%M:%SZ` and nothing else.
+The parse failed, the error was swallowed by `2>/dev/null || true`, the in-force set came out empty — and
+the member was served as though no lease existed, while the writer reported success. Fixed on both sides:
+whole-second stamps at the source, and an explicit shape check at the point of use, because a
+fail-**open** silence in the one function whose job is to remove service is worse than the malformed file
+it was tolerating.
+
+### Fixed — a bad lease file wedged every converge on the node
+
+`apply_suppression_leases` used to `die`. That stops the converge that would repair the file, the
+unattended update, and every later render — for everyone, indefinitely, with no recovery that does not
+need a human on the box. Weighed against it: serving a member the loop wanted withdrawn offers one
+possibly-broken transport, and a client's urltest group moves off it unaided. The file is now quarantined
+to `rotate.leases.json.rejected` with a loud warning and the render continues with no loop claims. The
+closed sets (`transport_directions`, `suppression_evidence`) are emitted into `control/vocab.json` and
+re-checked at the point of use, so an ingress member paired with egress-only evidence is refused in the
+artefact and not only on the path.
+
+### Changed — the two suppression alerts are enabled
+
+They were commented out in 0.2.82 because both queried series nothing emitted, and an alert on an absent
+series is a permanently-silent alarm that reads as "all clear".
+
+### Tests
+
+`suppression_lease_wired.sh` (new) drives planner decision → grant → render → expiry → return end to end
+against the shipped binaries: the proposal is made only on node-self evidence; the grant refuses a member
+carrying traffic, one the observer cannot see, a stale or absent marker, a broken family floor and a spent
+budget; the term doubles; the renderer stops serving it; expiry and `release` both give it back; a hold
+plan and a promote plan grant nothing.
+
+`suppression_lease_bounded.sh` §7 was a **pinned known defect** waiting for exactly this commit, and is
+inverted here: it now drives `merge_operator_overrides → apply_node_profile → apply_suppression_leases`
+over a descriptor that declares the suppressed proto, and runs `rotate_apply_live` itself with every
+helper stubbed to record its own name — so which write path the executor takes is a measured trace rather
+than a grep around a line number. Two rows there were also inverted: a malformed file must now be
+quarantined rather than fatal.
+
 ## [0.2.84] — 2026-08-14
 
 ### Added — the rotation planner judges the set a node serves, not one member of it

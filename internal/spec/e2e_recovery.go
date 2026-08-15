@@ -148,6 +148,20 @@ func DemoteKeepsIndependentFallback(served, issuedBaseline []string, demote stri
 	return len(fams) >= 2, fams
 }
 
+// BlockFamilyForProto is the exported single-proto lookup: which block family this proto belongs to, and
+// whether the registry knows it at all. Exported because the lease writer counts the families a node
+// would still serve after a suppression, and RP-0013's floor is over FAMILIES — two REALITY members are
+// one family, so a node serving only those two has one, and suppressing either leaves a client blocked
+// on REALITY with nowhere left. Unknown is reported rather than defaulted: a proto counted as its own
+// family would inflate the total and let a suppression through the floor that exists to stop it.
+func BlockFamilyForProto(proto string) (string, bool) {
+	d, ok := descriptorForProto(proto)
+	if !ok {
+		return "", false
+	}
+	return string(blockFamily(d.Class)), true
+}
+
 // blockFamilyVocab is the emitted form of blockFamily: every class in the closed vocabulary mapped to
 // the family it blocks with. It exists so the shell bundle renderer — the one that runs on a node —
 // compares against the same equivalence the Go renderer enforces, instead of restating it (ADR-0038).

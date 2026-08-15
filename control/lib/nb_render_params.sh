@@ -245,9 +245,40 @@ apply_suppression_leases() {
 	local vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
 	[ -f "$vocab" ] || die "params: suppression leases are present but the Go-owned vocab.json is missing ($vocab) — refusing to guess which params key a proto toggles."
 
-	jq -e 'type == "object" and (.version | type) == "number" and (.leases | type) == "array"' \
-		"$leases" >/dev/null 2>&1 \
-		|| die "params: $leases is present but malformed — refusing to render a served set that cannot be accounted for. Remove it to clear all loop claims, or fix it."
+	# A BAD LEASE FILE MUST NOT WEDGE THE CONVERGE. This used to die, and dying here stops every converge
+	# on the node — including the one that would fix the file, including auto-update. Weigh the two
+	# failures: serving a member that should have been withdrawn offers one possibly-broken transport, and
+	# a client urltest group moves off it by itself; refusing to converge freezes the whole node for
+	# everyone, indefinitely, with no path back that does not need a human on the box.
+	#
+	# So: quarantine the file, say so loudly, and render with NO loop claims. The direction is the same one
+	# ADR-0040 2.4 argues for everywhere else — when in doubt, do not take somebody working access away.
+	# The loop re-grants on the next tick if the fault is real, and the quarantined copy is still there
+	# tomorrow for whoever asks what happened.
+	_quarantine_leases() {
+		local why="$1" bad="$leases.rejected"
+		mv -f "$leases" "$bad" 2>/dev/null || rm -f "$leases" 2>/dev/null || true
+		warn "params: the suppression-lease file was REJECTED ($why). It is quarantined at $bad and this render applies NO loop claims — every member the loop had withdrawn is being served again. Nothing here says they are healthy; the loop re-tests them and re-claims if the fault is real."
+	}
+	if ! jq -e 'type == "object" and (.version | type) == "number" and (.leases | type) == "array"' \
+		"$leases" >/dev/null 2>&1; then
+		_quarantine_leases "not a lease set: expected an object with a numeric .version and an array .leases"
+		return 0
+	fi
+	# THE CLOSED SETS, re-checked at the point of USE. spec.SuppressionLease.Validate already refuses an
+	# unknown direction and an evidence/direction pairing the node may not conclude — but that runs in the
+	# WRITER, and this file is a file: it can be hand-edited, restored from an old backup, or written by a
+	# spine older than the rule. Re-asking here is not distrust of the writer, it is the difference between
+	# a guard on the path and a guard on the artefact.
+	if jq -e --slurpfile v "$vocab" '
+		[ .leases[]
+		  | select( ((.direction // "") as $d | ($v[0].transport_directions // ["ingress","egress"]) | index($d) | not)
+		            or ((.evidence // "") as $e | ($v[0].suppression_evidence // ["listener-fault","render-refused","egress-unreachable"]) | index($e) | not)
+		            or ((.direction == "ingress") and (.evidence == "egress-unreachable")) ) ]
+		| length > 0' "$leases" >/dev/null 2>&1; then
+		_quarantine_leases "a lease carries a direction or an evidence outside the closed vocabulary, or pairs egress-only evidence with an ingress member — the ADR-0039 category error"
+		return 0
+	fi
 
 	# The clock is read ONCE and passed in, so the in-force set cannot change between the reap and the
 	# apply — a lease expiring mid-function would otherwise be neither reaped nor applied.
@@ -257,7 +288,20 @@ apply_suppression_leases() {
 	# permanent suppression, which is the state this whole mechanism exists to make impossible; if one
 	# reaches here the Go writer has been bypassed and the safe reading is "do not trust this file".
 	if jq -e '[.leases[] | select((.expires_at // "") == "")] | length > 0' "$leases" >/dev/null 2>&1; then
-		die "params: $leases contains a suppression with no expiry — a permanent claim. spec.SuppressionLease.Validate refuses to construct one (ADR-0039 / ADR-0040), and NOTHING currently writes this file at all, so whatever produced it did not come from this codebase."
+		_quarantine_leases "a suppression carries no expiry — a permanent claim, which spec.SuppressionLease.Validate refuses to construct and \`myceliumctl-go lease grant\` therefore cannot have written"
+		return 0
+	fi
+
+	# AND EVERY EXPIRY MUST BE PARSEABLE BY THE THING THAT READS IT. `fromdateiso8601` takes
+	# %Y-%m-%dT%H:%M:%SZ and nothing else — no fractional seconds, no offset. Below, a jq error is
+	# swallowed by `2>/dev/null || true` and yields an EMPTY in-force set, so an unparseable timestamp
+	# silently means "nothing is suppressed": fail-OPEN, in the one function whose whole job is to remove
+	# service. Measured — the Go writer emitted nanoseconds and this applied no claim at all while
+	# reporting success. Checked here explicitly so the failure is loud and the file is quarantined.
+	if jq -e '[.leases[] | select((.expires_at // "") | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$") | not)] | length > 0' \
+		"$leases" >/dev/null 2>&1; then
+		_quarantine_leases "an expiry is not whole-second RFC3339 (jq fromdateiso8601 takes %Y-%m-%dT%H:%M:%SZ and nothing else); an unparseable one would silently read as 'nothing is suppressed'"
+		return 0
 	fi
 
 	local in_force expired

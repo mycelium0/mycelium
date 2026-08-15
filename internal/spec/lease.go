@@ -355,12 +355,20 @@ func (s LeaseSet) Grant(req GrantRequest, now time.Time, lim RotationLimits) (Le
 	}
 
 	count := req.History.LastCount + 1
+	// WHOLE SECONDS, and this is a contract with the consumer rather than tidiness. The renderer that
+	// applies a lease is shell, and it decides in-force with jq `fromdateiso8601`, which parses
+	// "2026-08-14T00:14:00Z" and REFUSES "2026-08-14T00:14:00.050849802Z". A nanosecond timestamp
+	// therefore produced an unparseable field, an empty in-force set, and a member that was never
+	// withdrawn — while every Go test passed and the writer reported success. Measured by
+	// suppression_lease_wired.sh on the first end-to-end run, which is the entire reason that gate drives
+	// the renderer instead of the writer alone.
+	stamp := now.UTC().Truncate(time.Second)
 	lease := SuppressionLease{
 		Proto:     req.Proto,
 		Direction: req.Direction,
 		Evidence:  req.Evidence,
-		Since:     now.UTC(),
-		ExpiresAt: now.UTC().Add(NextTTL(count, lim)),
+		Since:     stamp,
+		ExpiresAt: stamp.Add(NextTTL(count, lim)),
 		Count:     count,
 	}
 	if err := lease.Validate(); err != nil {
