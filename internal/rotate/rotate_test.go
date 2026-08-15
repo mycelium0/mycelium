@@ -787,3 +787,86 @@ func TestScalarStreakMigratesToTheIncumbentOnly(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------------------------------
+// A PLAN MUST BE ABLE TO CHANGE WHAT IT IS ABOUT.
+//
+// Measured on all three live nodes on 2026-08-15: the subject was a member the node was NOT steering to,
+// the plan promoted a third member, the apply logged "candidate identical to the live config", and the
+// whole thing repeated every 30 minutes from at least 2026-08-14T20:34 — an act, every cooldown, for
+// ever, that changed nothing and spent the cooldown a real fault would have needed.
+// ---------------------------------------------------------------------------------------------------
+
+// TestPromoteIsNotAnAnswerToANonIncumbentSubject is that loop, as a value.
+func TestPromoteIsNotAnAnswerToANonIncumbentSubject(t *testing.T) {
+	in := base()
+	in.Active = cand("vless-reality-vision", 0.99, true) // the incumbent, healthy
+	in.ActiveVerdict = vdt(spec.ConnStateClean, spec.ReasonNone)
+	in.State = spec.RotationState{ImpairedStreaks: map[string]int{"hysteria2": 3}}
+	in.Served = []ServedMember{
+		member("vless-reality-vision", 0.99, spec.ConnStateClean, spec.DirectionIngress),
+		member("hysteria2", 0.05, spec.ConnStateBlocked, spec.DirectionIngress),
+	}
+	// A healthy sibling that easily clears the margin — the shape that used to produce a promote.
+	in.Ranked = []spec.RotationCandidate{cand("tuic", 0.99, true)}
+	p := mustPlan(t, in)
+
+	if p.From.Proto != "hysteria2" {
+		t.Fatalf("subject is %q, want the impaired member", p.From.Proto)
+	}
+	if p.Act && p.To.Action == spec.RotationActionPromoteSibling {
+		t.Fatalf("the plan promotes %q while it is about %q. Promoting steers traffic off the INCUMBENT; when the subject is somebody else the move leaves it exactly as it was, so it is the subject again next tick — an act every cooldown, for ever, that changes nothing.", p.To.Proto, p.From.Proto)
+	}
+	if p.Act {
+		// The only act permitted here is the one that is ABOUT the subject.
+		if p.To.Action != spec.RotationActionDemoteActive || p.To.Proto != "hysteria2" {
+			t.Fatalf("the only act available for a non-incumbent subject is ceasing to serve it; got %s on %s", p.To.Action, p.To.Proto)
+		}
+	}
+}
+
+// TestANonActionableSubjectDoesNotSpendTheCooldown is the harm, separated from the churn: every act sets
+// LastRotateAt, so an act that changes nothing still makes the next REAL fault wait out Guard 4.
+func TestANonActionableSubjectDoesNotSpendTheCooldown(t *testing.T) {
+	in := base()
+	in.Active = cand("vless-reality-vision", 0.99, true)
+	in.ActiveVerdict = vdt(spec.ConnStateClean, spec.ReasonNone)
+	in.State = spec.RotationState{ImpairedStreaks: map[string]int{"hysteria2": 3}}
+	in.Served = []ServedMember{
+		member("vless-reality-vision", 0.99, spec.ConnStateClean, spec.DirectionIngress),
+		member("hysteria2", 0.05, spec.ConnStateBlocked, spec.DirectionIngress),
+	}
+	in.Ranked = []spec.RotationCandidate{cand("tuic", 0.99, true)}
+	in.IssuedBaseline = nil // nothing known to be issued -> the demote is refused, fail-closed
+
+	// Twenty cooldowns, feeding the state back exactly as the loop does.
+	st := in.State
+	acts := 0
+	for i := 0; i < 20; i++ {
+		in.State = st
+		in.Now = t0.Add(time.Duration(i) * in.Limits.MinInterval)
+		p := mustPlan(t, in)
+		if p.Act {
+			acts++
+		}
+		if !p.NextState.LastRotateAt.IsZero() {
+			t.Fatalf("tick %d advanced LastRotateAt on a plan that could not change its subject. That is the cooldown a real fault needs, spent on nothing.", i)
+		}
+		st = p.NextState
+	}
+	if acts != 0 {
+		t.Errorf("%d acts over 20 cooldowns with an unactionable subject, want 0", acts)
+	}
+}
+
+// TestPromoteStillWorksWhenTheSubjectIsTheIncumbent — the guard must not disarm the ordinary case.
+func TestPromoteStillWorksWhenTheSubjectIsTheIncumbent(t *testing.T) {
+	in := base() // base() has Active impaired and a promoted sibling that beats it
+	p := mustPlan(t, in)
+	if !p.Act || p.To.Action != spec.RotationActionPromoteSibling {
+		t.Fatalf("an impaired INCUMBENT with a better sibling no longer promotes: act=%v reason=%s held=%s", p.Act, p.Reason, p.HeldBecause)
+	}
+	if p.NextState.LastRotateAt.IsZero() {
+		t.Error("a real act did not advance LastRotateAt; the cooldown would never bind")
+	}
+}

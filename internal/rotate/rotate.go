@@ -215,6 +215,21 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 			subject = i
 		}
 	}
+	// WHO THE NODE IS CURRENTLY STEERING TO. This is the SECOND and last thing read out of the legacy
+	// Active field while Served is populated, and like the streak migration it is read as PROVENANCE —
+	// "which member does this node treat as the one in use" — never as evidence about anyone's health.
+	//
+	// It exists because promote-sibling is defined relative to it: promoting C is the move that steers
+	// traffic OFF the incumbent and onto C. When the subject is somebody else, that move cannot touch the
+	// subject, and emitting it anyway is how a node rotates every cooldown for ever without changing
+	// anything. Measured on all three live nodes on 2026-08-15: subject != incumbent on each, a
+	// promote-sibling act every ~30 minutes since at least 2026-08-14T20:34, and every single apply
+	// logging "candidate identical to the live config" — a no-op recorded as a rotation.
+	incumbent := in.Active.Proto
+	if incumbent == "" && len(served) == 1 {
+		// A legacy producer sends one member and no separate incumbent: that member IS the incumbent.
+		incumbent = served[0].Member.Proto
+	}
 	active := in.Active
 	activeVerdict := in.ActiveVerdict
 	activeDirection := spec.DirectionIngress
@@ -277,9 +292,24 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	// reading it, a guard that never runs cannot.
 
 	// Guard 6 — pick the best closed-set candidate that beats the incumbent by the margin.
+	//
+	// SKIPPED ENTIRELY WHEN THE SUBJECT IS NOT THE INCUMBENT, because then no promotion is an answer.
+	// Promoting C steers traffic off the incumbent onto C; if the plan is about some other member S, the
+	// move leaves S exactly as it was — still impaired, still the longest streak, still the subject on the
+	// next tick. The result is an act every cooldown, for ever, that changes nothing.
+	//
+	// This became reachable when the planner started judging the SET (ADR-0040 §2.2): before that the
+	// subject was always the incumbent by construction, and a promote did answer it. Falling through to
+	// the demote branch is right rather than merely safe — ceasing to serve S is the only move that is
+	// ABOUT S, and it is already gated on the evidence rule and the independent-family floor. If neither
+	// permits it, the honest outcome is a hold, and a hold does not advance LastRotateAt: nothing happened,
+	// so no cooldown is spent and a real fault arriving a minute later is not made to wait.
 	order := registryOrder()
 	bestIdx, anyBetterByMargin := -1, false
 	for i := range in.Ranked {
+		if active.Proto != incumbent {
+			break
+		}
 		c := in.Ranked[i]
 		if c.Proto == active.Proto {
 			continue
@@ -374,7 +404,7 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 			p := spec.RotationPlan{
 				Act: true, From: active, To: to,
 				Reason:      spec.RotationReasonDegradedActive,
-				HeldBecause: fmt.Sprintf("the active member is confirmed impaired and no sibling beats it by the margin; ceasing to serve it leaves %d independent families that issued clients still hold, and their urltest group selects one", len(fams)),
+				HeldBecause: fmt.Sprintf("%s is confirmed impaired and no promotion is an answer to it; ceasing to serve it leaves %d independent families that issued clients still hold, and their urltest group selects one", active.Proto, len(fams)),
 				NextState:   ns, DecidedAt: in.Now,
 				// The withdrawal is BOUNDED, and this is where that becomes true: the executor grants a
 				// lease with a term instead of writing a permanent `false` into the operator's overlay,
@@ -386,6 +416,13 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 				return spec.RotationPlan{}, fmt.Errorf("rotate plan (demote) invalid: %w", err)
 			}
 			return p, nil
+		}
+		if active.Proto != incumbent {
+			// Say which of the two situations this is. "No better candidate" would be false here — the
+			// planner never looked, because looking could not have helped.
+			return hold(spec.RotationReasonNoBetterCandidate,
+				fmt.Sprintf("this plan is about %s, which is not the member being steered to (%s), so no promotion is an answer to it; and ceasing to serve %s would not leave two independent families that issued clients hold",
+					active.Proto, incumbent, active.Proto))
 		}
 		return hold(spec.RotationReasonNoBetterCandidate, "no closed-set candidate beats the incumbent by the margin, and ceasing to serve the incumbent would not leave two independent families that issued clients hold")
 	}
