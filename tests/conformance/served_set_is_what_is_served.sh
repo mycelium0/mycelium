@@ -200,6 +200,37 @@ printf '%s' "$tail_body" | grep -q 'converge_measure_membership' \
 	&& ok "and converge_node_tail invokes it, so every converge path re-derives the set" \
 	|| badln "converge_node_tail does not call converge_measure_membership. The derivation would then run only from the operator verbs it already ran from, and the drift this gate exists for returns unchanged."
 
+# --- THE COUNTER TABLE IS RECONCILED, NOT MERELY REACTED TO ------------------------------------------
+#
+# MEASURED within an hour of the first fix: on a node whose member set had NOT changed this converge, the
+# nft counter table still carried counters for 2 of its 4 served TCP classes — it went stale at some
+# earlier point and no later converge had any reason to notice. The first draft reinstalled on the CHANGE
+# EVENT, which cannot repair a state it did not witness arriving. The trigger has to be the STATE:
+# coverage short of the served set.
+printf '\n-- the observer counter table is reconciled against the served set --\n'
+lib_nc="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$MEASURE_LIB")"
+recon="$(printf '%s' "$lib_nc" | awk '/^converge_measure_membership\(\)/,/^}/')"
+if printf '%s' "$recon" | grep -qE 'pathsig_reconcile_coverage|pathsig_nft_apply'; then
+	ok "the converge reconciles the counter table"
+else
+	badln "converge_measure_membership does not reconcile the counter table. It is installed once at --measure-enable, so a transport enabled later has no counter and the observer reports an all-clear over the rest — measured on a live node, 2 of 4 served classes unwatched."
+fi
+# The nft READ must live inside the observer region (pathsig_passive_observer.sh requires every nft
+# invocation to sit where the passivity checks can see it), so the converge calls a pathsig function
+# rather than running nft itself. The first draft ran nft here and that gate caught it.
+printf '%s' "$recon" | grep -q 'nft ' \
+	&& badln "converge_measure_membership invokes nft directly. Every nft call belongs inside the pathsig region where the passivity checks cover it — a call out here escapes them." \
+	|| ok "and does it through a pathsig function rather than invoking nft outside the observer region"
+# The trigger must be the coverage gap, not the membership change: a `pathsig_nft_apply` reachable only
+# after the members[] comparison would repair nothing on a node whose set is stable and whose table is not.
+before_line="$(printf '%s' "$recon" | grep -n 'before_m=' | head -1 | cut -d: -f1)"
+apply_line="$(printf '%s' "$recon" | grep -nE 'pathsig_reconcile_coverage|pathsig_nft_apply' | head -1 | cut -d: -f1)"
+if [ -n "$before_line" ] && [ -n "$apply_line" ] && [ "$apply_line" -lt "$before_line" ]; then
+	ok "and reconciles on the coverage GAP, before any member-set comparison — so a stable set with a stale table is still repaired"
+else
+	badln "the counter-table reinstall sits after the member-set comparison (apply=${apply_line:-missing}, compare=${before_line:-missing}), so it fires only on a CHANGE. A node whose set is stable and whose table went stale earlier is never repaired — measured exactly that."
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the plane can judge a transport this node is not serving.\n' >&2

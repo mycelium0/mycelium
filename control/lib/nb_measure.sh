@@ -333,6 +333,21 @@ converge_measure_membership() {
 	# Nothing to converge on a node that has never configured the plane: this must not be the step that
 	# switches MEASURE on. It ships disabled and stays that way until an operator enables it.
 	[ -f "$measure_cfg" ] || return 0
+	# THE COUNTER TABLE IS RECONCILED AGAINST THE SERVED SET, not against a change event.
+	#
+	# An earlier draft reinstalled it only when the member list changed, which is the wrong trigger and was
+	# measured to be so within the hour: on a node whose set had NOT changed this converge, the table still
+	# carried counters for 2 of 4 served TCP classes — it had gone stale at some earlier point and no later
+	# converge had any reason to notice. A reconciler that only reacts to transitions cannot repair a state
+	# it did not witness arriving.
+	#
+	# The nft read itself lives in pathsig_reconcile_coverage, inside the observer region, because
+	# pathsig_passive_observer.sh requires every nft invocation to sit there where the passivity checks can
+	# see it. That gate caught this call the first time it was written out here.
+	if command -v pathsig_reconcile_coverage >/dev/null 2>&1; then
+		pathsig_reconcile_coverage || true
+	fi
+
 	before_m="$(jq -cS '.members' "$measure_cfg" 2>/dev/null)"
 	before_r="$(jq -cS '[.targets[]?.address] | sort' "$reach_cfg" 2>/dev/null)"
 	generate_measure_configs >/dev/null || return 1
@@ -343,12 +358,6 @@ converge_measure_membership() {
 		return 0
 	fi
 	log "measure: the served member set changed — the plane now measures exactly what this node serves."
-	# The nft counter table is derived from the SAME served set and was installed only at --measure-enable,
-	# so it went stale in step with the member list. Reinstall it here, where the change is already known.
-	# Idempotent (delete + recreate) and fail-safe: absent nft/jq is a no-op, and it never adds a verdict.
-	if command -v pathsig_nft_apply >/dev/null 2>&1; then
-		pathsig_nft_apply || warn "measure: could not reinstall the path-signal counter table; the observer stays blind to any newly served TCP class until it is."
-	fi
 	[ "${DRY_RUN:-0}" -eq 0 ] || { log "[dry-run] would restart mycelium-measure.service to adopt the new member set."; return 0; }
 	systemctl is-active --quiet mycelium-measure.service 2>/dev/null || return 0
 	run systemctl restart mycelium-measure.service \
@@ -400,6 +409,31 @@ _pathsig_tcp_ports() {
 # listeners only, so the loopback inner SS of a ShadowTLS detour is excluded (it is not a served family,
 # and its outer layer is counted on its own port).
 #
+# pathsig_reconcile_coverage — reinstall the counter table when it does not cover the served TCP set.
+#
+# The table is installed once, at --measure-enable, and a transport enabled later gets no counter: the
+# observer is then blind to it while reporting an all-clear over the rest. MEASURED 2026-08-16: one node
+# carried counters for 2 of its 4 served TCP classes and logged exactly that.
+#
+# Triggered by the STATE (coverage short of the served set), never by a change event — a reconciler hung
+# off a transition repairs only the transitions it witnesses, which is the bug this replaced.
+#
+# Fail-safe: absent nft/jq/table is a no-op. It only counts; it never adds a verdict or a rule of anyone
+# else's. Idempotent, because pathsig_nft_apply deletes and recreates.
+pathsig_reconcile_coverage() {
+	have nft && have jq || return 0
+	local want have_ missing
+	want="$(_pathsig_tcp_ports 2>/dev/null | tr ' ' '\n' | sed '/^$/d' | sort -u)"
+	[ -n "$want" ] || return 0
+	have_="$(nft -j list counters table $PATHSIG_NFT_TABLE 2>/dev/null \
+		| jq -r '[.nftables[].counter? | select(.name != null) | .name] | map(select(startswith("rst_")) | ltrimstr("rst_"))[]' 2>/dev/null | sort -u)"
+	missing="$(printf '%s\n' "$want" | grep -Fxv -f <(printf '%s\n' "$have_") 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+	[ -n "$missing" ] || return 0
+	warn "path-signal: the counter table has no counter for served port(s) $missing — the observer was blind to them while reporting an all-clear over the rest. Reinstalling."
+	pathsig_nft_apply || { warn "path-signal: could not reinstall the counter table; those classes stay unwatched and the marker's .unobserved names them."; return 1; }
+	return 0
+}
+
 # pathsig_nft_apply — install the passive per-port RST/SYN counters (idempotent: delete + recreate). No-op
 # (fail-safe) if nft/jq/config absent or there are no served TCP ports.
 pathsig_nft_apply() {

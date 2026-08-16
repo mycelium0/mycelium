@@ -13,6 +13,27 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.91] — 2026-08-17
+
+### Fixed — a reconciler that only reacts to a change cannot repair a state it did not witness
+
+0.2.90 added `unobserved` to the observer marker, and it earned its keep within the hour: deployed to the
+network, one node reported `["shadowsocks","shadowtls"]` — two served classes its nft counter table has no
+counter for, previously hidden behind *"within threshold across all N observed served TCP class(es)"*.
+
+And it exposed a hole in the same change. The counter-table reinstall was hung off the **member-set
+change event**, so on that node — whose set had not changed this converge — nothing repaired a table that
+had gone stale at some earlier point. A reconciler triggered by a transition repairs only the transitions
+it witnesses; the trigger has to be the **state**.
+
+`converge_measure_membership` now compares the counters present against the served TCP ports and
+reinstalls when coverage is short, before it looks at the member list at all. It says which ports were
+unwatched when it does.
+
+The gate row asserts the ordering, not just the presence of the call: a reinstall placed after the
+member-set comparison would fire only on a change, and would have passed a row that merely grepped for
+`pathsig_nft_apply`.
+
 ## [0.2.90] — 2026-08-16
 
 ### Fixed — a signal that may not withdraw a member could still remove its replacement
