@@ -13,6 +13,41 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.89] — 2026-08-16
+
+### Fixed — every converge on a node without hysteria2 port hopping failed its firewall step
+
+Found by doing what §2.2 item 13 now requires: deploying explicitly to each node instead of waiting for
+auto-update. `fungi apply` ended the same way on two of three nodes, on every run:
+
+```
+error: UNEXPECTED failure (exit 1) at nb_harden.sh:325
+error:   while running: sed 's/^-A PREROUTING //'
+error: This is a bug, not a refusal — a fail-closed refusal prints a reason.
+error: The node may be PARTLY converged; re-run after the fix.
+```
+
+`reconcile_hy2_hop_nat` drops its own previously-installed redirect rules by piping
+`iptables -t nat -S PREROUTING` through `grep -F myc-hy2-hop`. **No match is the ordinary state** — a
+node with no hop range has no rule of ours — and `grep` exits 1 for it. Under the entrypoint's
+`set -Eeuo pipefail` that becomes the pipeline's status and trips the ERR trap. Reproduced directly on a
+node: the pipeline returns 1 with nothing to match. Both loops (iptables and ip6tables) now tolerate it.
+
+The cost was not cosmetic: `harden_ufw` never completed, so the firewall step of every converge on those
+nodes was marked failed and its remaining work did not run.
+
+### Tests
+
+A row in `hy2_hop_redirect_kept.sh` drives `reconcile_hy2_hop_nat` under the same shell options and ERR
+trap the entrypoint sets, against an iptables reporting no matching rule.
+
+**Two drafts of this row could not fail, and that is worth recording.** The first asserted the function's
+return code — but the failing command lives inside the process substitution the loop reads from, so its
+subshell dies alone: an `exit` in the trap ends that subshell, the `while` sees EOF, and the function
+returns 0. The second added `set -E` and still asserted the return code. Only the third observes what the
+operator actually saw — that the trap **fired** — by having it append `$BASH_COMMAND` to a file. Removing
+the fix now turns it red, naming `sed 's/^-A PREROUTING //'`: the same command the live nodes printed.
+
 ## [0.2.88] — 2026-08-16
 
 ### Fixed — the suite reported green while CI was red on four consecutive merges

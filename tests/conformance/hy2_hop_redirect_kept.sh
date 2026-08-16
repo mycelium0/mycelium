@@ -250,6 +250,57 @@ seed() { # RANGE_OR_EMPTY  LISTEN_PORT
 	exit "$fail"
 ) || fail=1
 
+# --- NO MATCH IS NOT AN ERROR ------------------------------------------------------------------------
+#
+# MEASURED on two of three live nodes, 2026-08-15: every `fungi apply` ended with
+#   "UNEXPECTED failure (exit 1) at nb_harden.sh:325 ... while running: sed 's/^-A PREROUTING //'"
+#   "This is a bug, not a refusal" / "The node may be PARTLY converged"
+# on every run. The cause is the ordinary state: a node with no hop range has no rule of ours to drop,
+# `grep -F myc-hy2-hop` exits 1, and under `set -euo pipefail` that becomes the pipeline's status and
+# trips the ERR trap — so the converge's firewall step failed, silently and permanently, on a condition
+# that is not an error.
+#
+# Driven rather than read: the function is run under the SAME shell options and ERR trap the entrypoint
+# sets, against an iptables that reports no matching rule.
+printf '\n-- reconciling with nothing to reconcile is not a failure --\n'
+W="$(mktemp -d "${TMPDIR:-/tmp}/myc.hop.XXXXXX")" || exit 2
+cat >"$W/iptables" <<'STUB'
+#!/usr/bin/env bash
+# An iptables whose nat/PREROUTING contains no rule of ours — the ordinary state on a node with no range.
+case " $* " in
+	*" -S "*) printf -- '-P PREROUTING ACCEPT\n-A PREROUTING -j SOMETHING-ELSE\n'; exit 0 ;;
+esac
+exit 0
+STUB
+chmod +x "$W/iptables"; cp "$W/iptables" "$W/ip6tables"
+
+# THE TRAP MUST LEAVE A TRACE ON DISK, not an exit status. The failing command lives inside the process
+# substitution the loop reads from, so its subshell dies alone: an `exit` in the trap ends that subshell,
+# the `while` simply sees EOF, and the function returns 0. An earlier draft of this row asserted the
+# return code and therefore passed whatever the code did — the mutation that removes the fix did not turn
+# it red on macOS OR on Linux, which is how it was caught. What is observable, and what the operator
+# actually saw on two live nodes, is that the ERR trap FIRED.
+(
+	PATH="$W:$PATH"; export PATH
+	set -Eeuo pipefail
+	trap 'printf "%s\n" "$BASH_COMMAND" >>"'"$W"'/erred"' ERR
+	STATE_DIR="$W"; PARAMS_JSON="$W/params.json"; DRY_RUN=1
+	printf '{"hysteria2_port":8444}\n' >"$PARAMS_JSON"
+	log() { :; }; warn() { :; }; die() { exit 91; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	run() { :; }
+	# shellcheck source=/dev/null
+	. "$LIB" >/dev/null 2>&1 || exit 92
+	reconcile_hy2_hop_nat
+) >/dev/null 2>&1
+fired="$( [ -f "$W/erred" ] && head -2 "$W/erred" | tr '\n' ' ' || printf '' )"
+rm -rf "$W"
+if [ -z "$fired" ]; then
+	ok "reconciling on a node with no rule of ours to drop trips nothing — no match is not an error"
+else
+	badln "the ERR trap fired while there was simply nothing to reconcile (\`$fired\`). \`grep -F myc-hy2-hop\` exits 1 when it matches nothing, pipefail makes that the pipeline's status, and the entrypoint's trap reports \"UNEXPECTED failure (bug, not a refusal)\" and marks the node PARTLY converged. Measured on two of three live nodes, on every single \`fungi apply\`."
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the hysteria2 hop range is advertised without the rule that makes it real, or its absence goes unnoticed.\n' >&2
