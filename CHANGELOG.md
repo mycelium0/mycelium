@@ -13,6 +13,49 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.88] — 2026-08-16
+
+### Fixed — the suite reported green while CI was red on four consecutive merges
+
+Both true at once, and that is the finding. `tests/run.sh` returned 108/108 on every one of those
+merges, and CI failed on every one of them. The suite had **no coverage of the blocking shellcheck
+step**: `ci_lint_strict.sh` parses the workflow, asserts that the linter is blocking and that its
+calibration (`-s bash -e SC2034 -S warning`) was not widened — and never invokes it. A gate on a
+linter's *configuration* is not a gate on the linter, which is this project's own recurring defect
+committed by the gate whose subject is a linter.
+
+`ci_lint_strict.sh` now RUNS shellcheck, with the flags and the file list **derived from the workflow
+step it already parses** rather than restated, so CI and the local suite cannot drift. It is clean over
+151 tracked shell files. Re-introducing the exact defect CI had been reporting turns it red; on a host
+without shellcheck it SKIPs and says plainly that the blocking linter was not exercised.
+
+The defect itself: `grant()` in `suppression_lease_wired.sh` forwarded `"$@"` that no caller passes
+(SC2120). shellcheck is right — a helper advertising arguments nobody supplies is a reader trap.
+
+### Fixed — go.mod pinned a Go patch release with five known stdlib vulnerabilities
+
+`go 1.25` resolved to go1.25.12 on the runner, which govulncheck reports as affected by GO-2026-6218
+(net/url), GO-2026-6090 (crypto/tls), GO-2026-6089 and GO-2026-5026 (net/http) and GO-2026-5972
+(encoding/asn1) — all fixed in go1.25.13. Pinned to `go 1.25.13`. Nodes build with go1.26.5 from
+`control/engines.manifest.json` and are unaffected either way.
+
+### Added — development.md §2.2 item 13: done means the gates are green and the network is on it
+
+Two halves of one prohibition, both violated the same day and both measured.
+
+*The suite is not proof of what it does not run.* Every blocking CI check gets a local gate that runs
+it, and "done" is not claimed before CI is green **on the merge commit** — by looking. A red `main` is
+S1 the moment a second change lands on top, because the second author can no longer tell which failure
+is theirs.
+
+*A change is not deployed until the whole population is on it, and re-armed.* Auto-update is a
+convenience, not a deployment: it lands at its own cadence and nothing reports the gap. Measured — three
+nodes sat a release behind `main` while the work was described as shipped, and one carried an arm
+sentinel (`collapse-armed.enabled`) the other two did not, drift nobody had noticed. After any change
+that reaches a node: deploy explicitly to every node, verify uniformity by measurement (versions,
+checkout rev, arm sentinels, enabled services), re-establish the arm state deliberately, and name any
+node that could not be reached in the same breath as the result.
+
 ## [0.2.87] — 2026-08-15
 
 ### Fixed — the MEASURE plane judged a transport the node had stopped serving

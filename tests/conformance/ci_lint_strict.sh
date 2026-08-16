@@ -22,6 +22,9 @@
 # WHAT IT CHECKS
 #   1. NO SILENT PASS: no step in the lint job whose name says "blocking" may end in `|| true`, `|| :`,
 #      or carry continue-on-error. The advisory steps may — they say so in their names.
+#   3. AND THE LINTER IS ACTUALLY RUN, here, with the flags and file list parsed out of that same job —
+#      because rows 1 and 2 read the workflow and neither of them runs anything, which is how a green
+#      108/108 suite coexisted with four red CI runs in a single day.
 #   2. THE CALIBRATION IS NOT WIDENED: the shellcheck invocation keeps `-S warning` and the two exclusions
 #      it was measured against (`-s bash`, `-e SC2034`). Adding a THIRD exclusion, or dropping to a looser
 #      severity, is how a blocking linter quietly becomes a decorative one — so a new `-e` fails here and
@@ -163,6 +166,45 @@ EOF
 		|| badln "the lint file set no longer derives from git ls-files — a hand-maintained list goes stale silently"
 fi
 
+# --- 3. AND IT IS ACTUALLY RUN HERE -----------------------------------------------------------------
+#
+# THIS ROW EXISTS BECAUSE ITS ABSENCE COST FOUR RED MERGES IN ONE DAY. Rows 1 and 2 read the workflow and
+# assert that the linter is blocking and that its calibration was not widened. Neither of them RUNS it.
+# So `tests/run.sh` reported 108/108 green while CI was red on every one of those merges, and the green
+# was true: the suite simply did not cover what the blocking linter covers. That is this project's own
+# recurring defect — a gate that asserts configuration rather than behaviour — committed by the gate whose
+# subject is a linter.
+#
+# The invocation is DERIVED from the workflow, never restated: the flags and the file list come out of the
+# step this gate already parses, so a change to CI moves this row with it and the two cannot drift.
+printf '\n-- and the linter actually runs, here, over the same files --\n'
+if ! command -v shellcheck >/dev/null 2>&1; then
+	printf '  SKIP  shellcheck is not installed on this host, so the blocking linter was NOT exercised.\n'
+	printf '        This is the gap that let four red merges through: install shellcheck, or treat a green\n'
+	printf '        suite as silent about shell lint until CI reports.\n'
+elif [ -z "$sc" ]; then
+	printf '  SKIP  no shellcheck invocation was parsed out of the workflow; row 2 already failed on that.\n'
+else
+	# The flags, exactly as the workflow spells them — parsed, not restated.
+	sc_flags="$(printf '%s' "$sc" | grep -oE '\-(s|e|S) [A-Za-z0-9,]+' | tr '\n' ' ')"
+	# The same file set the job lints: every tracked *.sh, plus the two tracked bash scripts with no suffix.
+	if ! command -v git >/dev/null 2>&1 || ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+		printf '  SKIP  not a git checkout; the file list the job lints cannot be reproduced.\n'
+	else
+		sc_files="$(git -C "$REPO_ROOT" ls-files '*.sh')"
+		for extra in control/myceliumctl scripts/fungi; do
+			[ -f "$REPO_ROOT/$extra" ] && sc_files="$sc_files
+$extra"
+		done
+		sc_out="$(cd "$REPO_ROOT" && printf '%s\n' "$sc_files" | sed '/^$/d' | xargs shellcheck $sc_flags 2>&1)"
+		if [ -z "$sc_out" ]; then
+			ok "shellcheck $sc_flags is clean over $(printf '%s\n' "$sc_files" | sed '/^$/d' | wc -l | tr -d ' ') tracked shell files"
+		else
+			badln "shellcheck reports findings that CI will block on: $(printf '%s' "$sc_out" | grep -E '^In |SC[0-9]+' | head -6 | tr '\n' ' ')"
+			printf '%s\n' "$sc_out" | head -30 | sed 's/^/        /'
+		fi
+	fi
+fi
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the blocking linters can be bypassed, have been widened, or no longer see every shell file.\n' >&2

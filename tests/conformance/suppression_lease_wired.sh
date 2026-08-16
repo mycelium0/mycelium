@@ -123,9 +123,12 @@ planinput() {
 		issued_baseline: ["vless-reality-vision","amneziawg","hysteria2"]}'
 }
 
-grant() { # grant [extra args...] -> writes $W/grant.out / $W/grant.err, sets GRANT_RC
+grant() { # grant -> writes $W/grant.out / $W/grant.err, sets GRANT_RC
+	# No pass-through: every row drives the fixed shape and varies the FIXTURE (marker, leases, limits)
+	# rather than the flags. An unused "$@" here is what SC2120 reports, and the blocking shellcheck step
+	# in CI is right to — a helper advertising arguments nobody passes is a reader trap.
 	ctl lease grant --plan "$W/plan.json" --leases "$W/leases.json" --limits "$W/limits.json" \
-		--marker "$W/marker.json" --refs "$W/refs.json" --enabled "$ENABLED" --now "$NOW" "$@" \
+		--marker "$W/marker.json" --refs "$W/refs.json" --enabled "$ENABLED" --now "$NOW" \
 		>"$W/grant.out" 2>"$W/grant.err"
 	GRANT_RC=$?
 }

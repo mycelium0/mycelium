@@ -367,6 +367,34 @@ These are not recommendations. Violation is a development defect at severity S0/
     **S1** when the unfounded conclusion reaches a document others act on, **S0** when it is a safety or
     reachability claim. See [refactoring.md §2.7](refactoring.md).
 
+13. **Calling work done while any gate that guards it is red, or while the network is not on it.** Two
+    halves of one prohibition, both violated in a single day in August 2026 and both measured.
+
+    **The suite is not proof of what it does not run.** `tests/run.sh` reported 108/108 green while CI
+    was red on four consecutive merges. The green was TRUE — the suite simply had no coverage of the
+    blocking shellcheck step, because `ci_lint_strict.sh` parsed the workflow and asserted the linter's
+    flags without ever invoking it. A gate that checks a linter's *configuration* is not a gate on the
+    linter. So: **every blocking CI check has a local gate that RUNS it**, and "done" is not claimed
+    before CI is green on the merge commit — checked, by looking, not assumed because the local run
+    passed. A red CI on `main` is an S1 the moment a second change is merged on top of it, because the
+    second author now cannot tell which failure is theirs.
+
+    **A change is not deployed until the whole population is on it, and re-armed.** Auto-update is a
+    convenience, not a deployment: it lands at its own cadence, so waiting on it leaves nodes on
+    different revisions for an unbounded window, and *nothing reports that*. Measured: three nodes sat a
+    release behind `main` while the work was described as shipped, and one carried an arm sentinel
+    (`collapse-armed.enabled`) the other two did not — drift nobody had noticed. So, after any change
+    that reaches a node: **deploy it explicitly to every node** (`reset --hard origin/main` + refresh
+    tooling + `--node-apply`, never `--update`), then **verify uniformity by measurement** — same
+    `myceliumctl-go`/`myceliumd` version, same checkout rev, same arm sentinels, same enabled services —
+    and **re-establish the arm state deliberately**, because a sentinel that is present on one node and
+    absent on another is a posture that nobody chose. State any node you could not reach, by name, in
+    the same breath as the result.
+
+    Severity **S1** for either half. See §7.6 (conclude on the platform that will run it) and item 12
+    (a conclusion is worth what its evidence is worth) — this item is those two applied to the moment of
+    calling something finished.
+
 #### Permitted (how layers communicate):
 - through **contracts** (config-bundle format, control-plane envelope, telemetry schema,
   transport adapter, discovery API);
