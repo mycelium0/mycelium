@@ -124,6 +124,11 @@
 #                               converge, a proto the node stopped serving leaves both, the incumbent
 #                               pointer survives when still served and is re-seeded when not, and the tail
 #                               never arms a plane nobody enabled. OFFLINE
+#   * collapse_gated.sh        — the PostConnectCollapse arm is an instrument, not a touched file: the
+#                               sentinel is never tracked, collapse_arm REFUSES without an explicit drill
+#                               acknowledgement, both verbs are reachable from the entrypoint, the default
+#                               is disarmed, the generator derives it from the sentinel, and .loops.collapse
+#                               is declarable and reconciled by LoopDrift. OFFLINE
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
@@ -371,6 +376,7 @@ GATES=(
 	"tests/conformance/rotate_closed_set_only.sh"
 	"tests/conformance/rotate_judges_a_set.sh"
 	"tests/conformance/served_set_is_what_is_served.sh"
+	"tests/conformance/collapse_gated.sh"
 	"tests/conformance/suppression_lease_wired.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/rotate_apply_executes.sh"

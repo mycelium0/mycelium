@@ -793,3 +793,92 @@ func TestAssembleFpTickRealFold(t *testing.T) {
 		t.Error("transport-wide: must reset, not fault")
 	}
 }
+
+// TestCollapseArmGatesTheFold is the behavioural half of "disarmed means disarmed" (§2.2 item 13: the arm
+// state is a posture somebody CHOSE, so it must be checkable rather than remembered). It drives the real
+// per-tick composition twice over the SAME non-empty collapse marker, once disarmed and once armed, and
+// requires the two to differ in exactly the documented way.
+//
+// Worth having because the arm is a single assignment in assembleTick guarding a map that is otherwise
+// nil. Nothing else in the tree distinguishes "the observer saw nothing" from "the observer saw it and
+// the daemon was told to ignore it" — and on a network with no client traffic those look identical from
+// outside, which is how a sentinel sat on one node for four weeks without anybody being able to say what
+// it was doing.
+func TestCollapseArmGatesTheFold(t *testing.T) {
+	run := func(t *testing.T, armed bool) (spec.ConnState, spec.DetectReason, bool) {
+		t.Helper()
+		dir := t.TempDir()
+		cfg := goodMeasureConfig()
+		cfg.Members = []measureMember{
+			{Ref: "vless-reality-vision", Proto: "vless-reality-vision", Action: "promote-sibling"},
+			{Ref: "vless-reality-grpc", Proto: "vless-reality-grpc", Action: "promote-sibling"},
+		}
+		cfg.ActiveRef = "vless-reality-vision"
+		cfg.PathCollapseEnabled = armed
+		cfg.PathCollapseMinGenerations = 2
+		marker := filepath.Join(dir, "path_signal.json")
+		cfg.PathSignalPath = marker
+		cfg.PathMaxAgeMS = 5 * 60 * 1000
+		asm, err := cfg.buildAssembler(t0)
+		if err != nil {
+			t.Fatalf("buildAssembler: %v", err)
+		}
+		l7gate := newL7GenerationGate(effectiveL7MinGenerations(cfg.L7MinDeadGenerations))
+		pathgate := newL7GenerationGate(effectiveL7MinGenerations(cfg.PathMinResetGenerations))
+		collapsegate := newL7GenerationGate(effectiveL7MinGenerations(cfg.PathCollapseMinGenerations))
+
+		var st spec.ConnState
+		var reason spec.DetectReason
+		var flagged bool
+		// Three generations, each naming the SAME class — past PathCollapseMinGenerations, so an armed
+		// daemon has no excuse left not to have folded it.
+		for i := 0; i < 3; i++ {
+			now := t0.Add(time.Duration(i+1) * time.Minute)
+			body := fmt.Sprintf(`{"observed_at":"%s","checked":2,"reset":[],"collapse":["vless-reality-vision"]}`,
+				now.UTC().Format(time.RFC3339Nano))
+			if err := os.WriteFile(marker, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			snap := []spec.TransportHealth{
+				health("vless-reality-vision", 6, 0, now), // L4 healthy on both: only the collapse signal can fault
+				health("vless-reality-grpc", 6, 0, now),
+			}
+			out, err := assembleTick(asm, snap, cfg, now, spec.RotationState{}, l7gate, pathgate, collapsegate)
+			if err != nil {
+				t.Fatalf("assembleTick gen %d: %v", i, err)
+			}
+			var in rotate.PlanInput
+			if err := json.Unmarshal(out, &in); err != nil {
+				t.Fatalf("unmarshal gen %d: %v", i, err)
+			}
+			st, reason = in.ActiveVerdict.State, in.ActiveVerdict.Reason
+			flagged = false
+			for _, m := range in.Served {
+				if m.Member.Proto == "vless-reality-vision" && m.Member.PathCollapse {
+					flagged = true
+				}
+			}
+		}
+		return st, reason, flagged
+	}
+
+	t.Run("disarmed", func(t *testing.T) {
+		st, reason, flagged := run(t, false)
+		if reason == spec.ReasonThroughputCollapse {
+			t.Errorf("a DISARMED daemon folded the collapse signal into the verdict (%s/%s). Shadow means observed and not acted on; if it actuates while disarmed, the arm sentinel is decorative and nobody can say what a node is doing.", st, reason)
+		}
+		if flagged {
+			t.Error("a DISARMED daemon marked the member PathCollapse, which excludes it from the promotion candidate pool — an actuation by another name")
+		}
+	})
+
+	t.Run("armed", func(t *testing.T) {
+		st, reason, flagged := run(t, true)
+		if reason != spec.ReasonThroughputCollapse {
+			t.Errorf("an ARMED daemon did NOT fold three generations of collapse into the verdict: got %s/%s. Then arming buys nothing and the sentinel is a placebo — which is indistinguishable from correct behaviour on a node with no traffic, and therefore has to be asserted here.", st, reason)
+		}
+		if !flagged {
+			t.Error("an ARMED daemon did not mark the member PathCollapse")
+		}
+	})
+}

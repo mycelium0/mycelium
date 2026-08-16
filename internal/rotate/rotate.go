@@ -306,41 +306,68 @@ func Plan(in PlanInput) (spec.RotationPlan, error) {
 	// so no cooldown is spent and a real fault arriving a minute later is not made to wait.
 	order := registryOrder()
 	bestIdx, anyBetterByMargin := -1, false
-	for i := range in.Ranked {
-		if active.Proto != incumbent {
-			break
+
+	// THE PATH-SIGNAL FLAGS ARE A PREFERENCE, NOT AN EXCLUSION.
+	//
+	// Both passive path signals — ConnectReset (RP-0014 chunk B) and PostConnectCollapse (increment 2) —
+	// map to EvidenceUnknown in spec.EvidenceForReason, because for an INGRESS member the node cannot
+	// separate an interfered path from one client's bad network (ADR-0039). That already stops them
+	// WITHDRAWING a member. It did not stop them removing one from the promotion pool, which costs the same
+	// people the same access by a different route: the healthy sibling that would have taken over is passed
+	// over, the impaired incumbent keeps serving, and — because the exclusion sat above the margin test —
+	// the hold was reported as "no better candidate" when a better candidate had been found and discarded.
+	//
+	// Measured before this was changed: 15-43 ConnectReset hits per 24h per node, on healthy serving
+	// transports, on a network with zero established client sessions.
+	//
+	// The original reasoning was not wrong, only too strong: an on-path element resetting several classes at
+	// once does make a co-reset sibling a worse target. So it is ranked worse — considered only when no
+	// unflagged candidate qualifies — rather than struck out. That is a strict preference with no threshold
+	// to calibrate, which matters: there is no measured basis anywhere in this tree for a penalty constant,
+	// and inventing one would be a number nobody could defend.
+	//
+	// L7Dead keeps its hard exclusion. That one is the node observing its OWN listener fail its own
+	// handshake — node-self evidence, admissible in either direction, and the case Audit-0007 S2 is about.
+	pathFlagged := func(c spec.RotationCandidate) bool { return c.PathReset || c.PathCollapse }
+
+	// scan runs the candidate choice over one preference tier. It reports the best index it found and
+	// whether anything in that tier beat the incumbent by the margin.
+	scan := func(includeFlagged bool) (int, bool) {
+		best, better_ := -1, false
+		for i := range in.Ranked {
+			c := in.Ranked[i]
+			if c.Proto == active.Proto {
+				continue
+			}
+			if c.L7Dead {
+				continue
+			}
+			if !includeFlagged && pathFlagged(c) {
+				continue
+			}
+			if c.Weight < active.Weight+in.Limits.MinWeightMargin {
+				continue
+			}
+			better_ = true
+			if !c.Promoted {
+				continue
+			}
+			if best == -1 || better(c, in.Ranked[best], order) {
+				best = i
+			}
 		}
-		c := in.Ranked[i]
-		if c.Proto == active.Proto {
-			continue
-		}
-		// Never rotate ONTO a member this node's own L7 probe reports client-DEAD — a co-failed sibling
-		// (e.g. a second REALITY member sharing the same broken dest as the failing active). Excluded
-		// BEFORE the margin/promote checks so a dead candidate neither becomes the target nor sets
-		// anyBetterByMargin (which would mislabel the hold as "target not promoted"). Audit-0007 S2.
-		if c.L7Dead {
-			continue
-		}
-		// Likewise never rotate ONTO a member whose served client flows the passive path-level observer
-		// reports meeting RSTs (RP-0014 chunk B) — a co-reset sibling (an on-path element resetting several
-		// classes at once) is no safer a target than an L7-dead one.
-		if c.PathReset {
-			continue
-		}
-		// And never rotate ONTO a member whose established served flows the observer reports in a downstream
-		// post-connect throughput collapse (RP-0014 chunk B increment 2) — a co-collapsing sibling is no safer.
-		if c.PathCollapse {
-			continue
-		}
-		if c.Weight < active.Weight+in.Limits.MinWeightMargin {
-			continue
-		}
-		anyBetterByMargin = true
-		if !c.Promoted {
-			continue
-		}
-		if bestIdx == -1 || better(c, in.Ranked[bestIdx], order) {
-			bestIdx = i
+		return best, better_
+	}
+
+	if active.Proto == incumbent {
+		bestIdx, anyBetterByMargin = scan(false)
+		if bestIdx == -1 {
+			// Nothing clean qualifies. A path-flagged sibling is a worse answer than a clean one and a
+			// better answer than staying on a member the node has confirmed impaired, so it is reached
+			// here and nowhere earlier.
+			var flaggedBetter bool
+			bestIdx, flaggedBetter = scan(true)
+			anyBetterByMargin = anyBetterByMargin || flaggedBetter
 		}
 	}
 	if bestIdx == -1 {

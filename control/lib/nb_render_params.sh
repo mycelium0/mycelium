@@ -790,12 +790,16 @@ _report_loop_drift() {
 	# update_unit_template_shape refuses any tracked reference to it precisely so that nothing claims one
 	# by accident. Its declared value is passed straight through, so it can never register as drift here.
 	# When that unit gains a real owner, give it a predicate too and this line becomes a probe.
-	local u r=false m=false
+	local u r=false m=false c=false
 	u="$(jq -r '.loops.update // false' "$cfg" 2>/dev/null)"; [ "$u" = "true" ] || u=false
 	command -v rotate_loop_running  >/dev/null 2>&1 && rotate_loop_running  && r=true
 	command -v measure_loop_running >/dev/null 2>&1 && measure_loop_running && m=true
+	# The collapse arm is a sentinel FILE, so "actually armed" is its presence — the same read the daemon
+	# config generator makes. It is reconciled here for the reason the field exists: it was the one arm in
+	# this tree nothing could compare across the population, and it was the one that drifted.
+	[ -f "$STATE_DIR/collapse-armed.enabled" ] && c=true
 	local out
-	out="$("$spine" loop-drift --profile "$cfg" --update="$u" --rotate="$r" --measure="$m" 2>/dev/null)" && return 0
+	out="$("$spine" loop-drift --profile "$cfg" --update="$u" --rotate="$r" --measure="$m" --collapse="$c" 2>/dev/null)" && return 0
 	[ -n "$out" ] || return 0
 	warn "node.config.json disagrees with what this node is running:"
 	printf '%s\n' "$out" | while IFS= read -r _l; do [ -n "$_l" ] && warn "  $_l"; done

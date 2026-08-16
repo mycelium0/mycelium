@@ -13,6 +13,70 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.90] — 2026-08-16
+
+### Fixed — a signal that may not withdraw a member could still remove its replacement
+
+The one that costs access. `internal/rotate/rotate.go` excluded a promotion candidate on three flags
+*before* recording that anything beat the incumbent by the margin:
+
+```
+if c.L7Dead       { continue }
+if c.PathReset    { continue }
+if c.PathCollapse { continue }
+anyBetterByMargin = true
+```
+
+ConnectReset and PostConnectCollapse both map to `EvidenceUnknown` in `spec.EvidenceForReason`, because
+for an ingress member the node cannot separate an interfered path from one client's bad network
+(ADR-0039). That already stopped them **withdrawing** a member. It did not stop them removing one from the
+**promotion pool** — which costs the same people the same access by another route: the healthy sibling
+that would have taken over is passed over, the confirmed-impaired incumbent keeps serving, and because
+the exclusion sat above the margin test the hold was reported as *"no better candidate"* when a better
+candidate had been found and discarded.
+
+Established by running the planner, not by reading it: the new table was written to **fail on the
+previous revision**, and it did, for both flags.
+
+Both are now a **strict preference**: a path-flagged candidate is considered only when no unflagged one
+qualifies. A preference rather than a penalty constant on purpose — there is no measured basis anywhere
+in this tree for such a constant, and inventing one would be a number nobody could defend. `L7Dead` keeps
+its hard exclusion: that is the node observing its own listener fail its own handshake.
+
+Two tests that pinned the old rule are **retired in place, not deleted**, each carrying the argument for
+why the assertion it made was wrong.
+
+Measured context: 15–43 ConnectReset hits per 24h per node, on healthy serving transports, on a network
+with zero established client sessions.
+
+### Fixed — the observer reported an all-clear over classes it has no counter for
+
+The nft counter table is installed once, at `--measure-enable`, and nothing reinstalled it when the
+served set changed. Measured: one node carried counters for 2 of its 4 served TCP classes while logging
+*"within threshold across all 2 observed served TCP class(es)"* — true, and read as complete coverage.
+
+The marker now carries `unobserved`, the served classes with no counter, and the all-clear says so
+instead of totalling only what it watches. `converge_measure_membership` reinstalls the counter table
+when the member set changes, in the same place it already knows the set changed.
+
+### Added — the collapse arm is an instrument, not a touched file
+
+`--collapse-arm` / `--collapse-disarm`, `.loops.collapse` in the node profile, and
+`tests/conformance/collapse_gated.sh`.
+
+PostConnectCollapse was the only arm in this tree with no verb, no gate and no status surface — a `touch`
+in a comment — and the only one that drifted: present on one node of three since 2026-07-19, chosen by
+nobody, visible to nothing. Its two siblings each have a verb. That is a mechanism, not a coincidence.
+
+`collapse_arm` **refuses without an explicit drill acknowledgement**. The drill is defined in
+`tests/e2e/README.md` and its silence proof needs real served traffic — heavy-download including a GRO
+client, and lossy-but-alive mobile. Measured on all three nodes: zero established non-loopback sockets on
+any served port, so that proof cannot be run there at all. An empty predicate coming back empty is not
+evidence, and reporting it as one is §2.2 item 12.
+
+Arming stays a node-local sentinel; `.loops.collapse` is a *request* that `LoopDrift` reconciles against
+it and reports on every converge — so a population can be diffed rather than remembered.
+
 ## [0.2.89] — 2026-08-16
 
 ### Fixed — every converge on a node without hysteria2 port hopping failed its firewall step

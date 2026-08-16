@@ -91,6 +91,17 @@ type LoopsConfig struct {
 	Update  bool `json:"update"`  // the signed auto-pull update timer
 	Rotate  bool `json:"rotate"`  // the RP-0012 auto-rotation loop (still triple-gated + armed separately)
 	Measure bool `json:"measure"` // the RP-0010 MEASURE advisory daemon
+	// Collapse is the PostConnectCollapse arm (RP-0014 chunk B increment 2). Declared here for one measured
+	// reason: it was the only arm sentinel in this tree with no verb, no gate and no status surface, and it
+	// was the only one that drifted — present on one node of three, since 2026-07-19, chosen by nobody and
+	// visible to nothing. That is a mechanism rather than a coincidence, and the same reasoning
+	// LoopDrift's own comment gives applies: a posture that cannot be compared across a population is one
+	// that diverges silently.
+	//
+	// Like every field here it is a REQUEST, never a switch — arming stays a node-local sentinel
+	// ($STATE_DIR/collapse-armed.enabled) so no committable file can turn on a signal that faults a
+	// transport. What this field buys is that the request and the reality can be reconciled and reported.
+	Collapse bool `json:"collapse"`
 }
 
 // WeatherSlot is the reserved, inert ADR-0030 weather opt-in. It MUST stay off in this phase; Validate
@@ -264,5 +275,6 @@ func LoopDrift(requested, actual LoopsConfig) []string {
 	check("update", requested.Update, actual.Update)
 	check("rotate", requested.Rotate, actual.Rotate)
 	check("measure", requested.Measure, actual.Measure)
+	check("collapse", requested.Collapse, actual.Collapse)
 	return out
 }
