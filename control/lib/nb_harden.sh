@@ -334,13 +334,19 @@ reconcile_hy2_hop_nat() {
 		[ -n "$line" ] || continue
 		# shellcheck disable=SC2086
 		run iptables -t nat -D PREROUTING $line 2>/dev/null || true
-	done < <(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //')
+		# `|| true` on the grep, and it is not cosmetic. NO MATCH IS THE ORDINARY STATE: a node with no hop
+		# range configured has no rule of ours to drop, grep exits 1, and under `set -euo pipefail` the
+		# pipeline's status becomes 1 and the ERR trap fires — reporting "UNEXPECTED failure (bug, not a
+		# refusal)" and aborting the converge's firewall step. MEASURED on two of three live nodes: every
+		# `fungi apply` ended "The node may be PARTLY converged", on every run, for a condition that is
+		# not an error at all.
+	done < <(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //' || true)
 	if have ip6tables; then
 		while IFS= read -r line; do
 			[ -n "$line" ] || continue
 			# shellcheck disable=SC2086
 			run ip6tables -t nat -D PREROUTING $line 2>/dev/null || true
-		done < <(ip6tables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //')
+		done < <(ip6tables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | sed 's/^-A PREROUTING //' || true)
 	fi
 	[ -n "$want" ] || { log "hysteria2 port hopping: not configured; no redirect installed."; return 0; }
 	case "$lstn" in ''|*[!0-9]*) warn "hysteria2 port hopping: hysteria2_port is not a number ('$lstn') — refusing to install a redirect."; return 0 ;; esac
