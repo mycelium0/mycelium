@@ -1744,6 +1744,7 @@ func cmdLoopDrift(args []string) error {
 	update := fs.Bool("update", false, "the update loop is actually running")
 	rotate := fs.Bool("rotate", false, "the rotate loop is actually running")
 	measure := fs.Bool("measure", false, "the measure loop is actually running")
+	collapse := fs.Bool("collapse", false, "the PostConnectCollapse arm sentinel is actually present")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1758,7 +1759,7 @@ func cmdLoopDrift(args []string) error {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("loop-drift: %s is not a valid node profile: %w", *profile, err)
 	}
-	drift := spec.LoopDrift(p.Loops, spec.LoopsConfig{Update: *update, Rotate: *rotate, Measure: *measure})
+	drift := spec.LoopDrift(p.Loops, spec.LoopsConfig{Update: *update, Rotate: *rotate, Measure: *measure, Collapse: *collapse})
 	for _, d := range drift {
 		fmt.Println(d)
 	}

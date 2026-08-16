@@ -330,6 +330,8 @@ while [ "$#" -gt 0 ]; do
 		--apply-rotation)  ROTATE_APPLY=1; shift ;;
 		--rotate-arm)      MODE="rotate-arm"; shift ;;
 		--rotate-disarm)   MODE="rotate-disarm"; shift ;;
+		--collapse-arm)    MODE="collapse-arm"; shift ;;
+		--collapse-disarm) MODE="collapse-disarm"; shift ;;
 		--rotate-enable-loop)  MODE="rotate-enable-loop"; shift ;;
 		--rotate-disable-loop) MODE="rotate-disable-loop"; shift ;;
 		--fp-rotate)         MODE="fp-rotate"; shift ;;
@@ -1181,6 +1183,8 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		measure-enable)    measure_enable ;;
 		measure-disable)   measure_disable ;;
 		measure-configure) generate_measure_configs ;;
+		collapse-arm)     collapse_arm ;;
+		collapse-disarm)  collapse_disarm ;;
 		l7-probe)          measure_l7_probe ;;
 		l7-probe-awg)      measure_l7_probe_amneziawg ;;
 		l7-probe-xhttp)    measure_l7_probe_xhttp ;;

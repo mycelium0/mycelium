@@ -329,23 +329,31 @@ func TestPlanRotatesPastL7DeadToLiveSibling(t *testing.T) {
 	}
 }
 
-// TestPlanExcludesPathResetCandidate: a candidate whose served client flows the node's passive path-level
-// observer reports meeting RSTs (PathReset=true, RP-0014 chunk B) is excluded from the pool exactly like an
-// L7-dead sibling — the planner never rotates ONTO a co-reset target, even one that beats the margin.
-func TestPlanExcludesPathResetCandidate(t *testing.T) {
+// TestPathResetCandidateIsALastResortNotAnExclusion.
+//
+// RETIRED ASSERTION, recorded rather than deleted. This test used to require that a PathReset candidate is
+// "excluded from the pool exactly like an L7-dead sibling" and that the plan HOLDS with no-better-candidate.
+// That was wrong in one specific way and the difference matters: L7Dead is the node observing its OWN
+// listener fail its OWN handshake — node-self evidence. ConnectReset is the passive observer watching served
+// client flows, and spec.EvidenceForReason maps it to EvidenceUnknown precisely because for an ingress member
+// the node cannot separate an interfered path from one client's bad network (ADR-0039).
+//
+// Holding rather than promoting leaves the people on the confirmed-impaired incumbent exactly where they
+// were, in order to avoid a target the node is not entitled to condemn. Measured before this changed: 15-43
+// ConnectReset hits per 24h per node, on healthy serving transports, on a network with zero established
+// client sessions. The signal still RANKS — see TestACleanSiblingIsPreferredToAPathFlaggedOne — it just no
+// longer strikes the only exit out.
+func TestPathResetCandidateIsALastResortNotAnExclusion(t *testing.T) {
 	in := base()
 	reset := cand("vless-reality-grpc", 0.9, true) // beats the 0.2 incumbent by the 0.1 margin AND is promoted
 	reset.PathReset = true
 	in.Ranked = []spec.RotationCandidate{reset}
-	p, err := Plan(in)
-	if err != nil {
-		t.Fatal(err)
+	p := mustPlan(t, in)
+	if !p.Act {
+		t.Fatalf("held (%s: %s) with a promoted, margin-beating sibling available. The incumbent is confirmed impaired; refusing the only exit because a signal the node may not condemn it on flagged it leaves everyone on the broken member.", p.Reason, p.HeldBecause)
 	}
-	if p.Act {
-		t.Fatalf("must not rotate onto a path-reset sibling, rotated to %q", p.To.Proto)
-	}
-	if p.Reason != spec.RotationReasonNoBetterCandidate {
-		t.Fatalf("an excluded path-reset candidate must hold no-better-candidate, got %q", p.Reason)
+	if p.To.Proto != "vless-reality-grpc" {
+		t.Errorf("rotated to %q, want the only sibling", p.To.Proto)
 	}
 }
 
@@ -363,23 +371,19 @@ func TestPlanRotatesPastPathResetToLiveSibling(t *testing.T) {
 	}
 }
 
-// TestPlanExcludesPathCollapseCandidate: a candidate whose established served flows the observer reports in a
-// downstream throughput collapse (PathCollapse=true, RP-0014 chunk B increment 2) is excluded from the pool
-// like a path-reset sibling — never rotate ONTO a co-collapsing target, even one that beats the margin.
-func TestPlanExcludesPathCollapseCandidate(t *testing.T) {
+// TestPathCollapseCandidateIsALastResortNotAnExclusion — the same retirement, for the same reason, on the
+// increment-2 signal. See TestPathResetCandidateIsALastResortNotAnExclusion for the argument.
+func TestPathCollapseCandidateIsALastResortNotAnExclusion(t *testing.T) {
 	in := base()
 	collapse := cand("vless-reality-grpc", 0.9, true)
 	collapse.PathCollapse = true
 	in.Ranked = []spec.RotationCandidate{collapse}
-	p, err := Plan(in)
-	if err != nil {
-		t.Fatal(err)
+	p := mustPlan(t, in)
+	if !p.Act {
+		t.Fatalf("held (%s: %s) with a promoted, margin-beating sibling available", p.Reason, p.HeldBecause)
 	}
-	if p.Act {
-		t.Fatalf("must not rotate onto a path-collapse sibling, rotated to %q", p.To.Proto)
-	}
-	if p.Reason != spec.RotationReasonNoBetterCandidate {
-		t.Fatalf("an excluded path-collapse candidate must hold no-better-candidate, got %q", p.Reason)
+	if p.To.Proto != "vless-reality-grpc" {
+		t.Errorf("rotated to %q, want the only sibling", p.To.Proto)
 	}
 }
 
@@ -868,5 +872,104 @@ func TestPromoteStillWorksWhenTheSubjectIsTheIncumbent(t *testing.T) {
 	}
 	if p.NextState.LastRotateAt.IsZero() {
 		t.Error("a real act did not advance LastRotateAt; the cooldown would never bind")
+	}
+}
+
+// TestPathFlaggedSiblingIsNotSilentlyRemovedFromThePool is STEP 2 of the collapse-arm decision, and it is
+// written to FAIL on the revision that introduced it. That is the point: it establishes, by running the
+// planner rather than by reading it, that the pool-exclusion seam is live.
+//
+// THE SEAM. internal/rotate/rotate.go excludes a candidate on three flags before it records that anything
+// beat the incumbent by the margin:
+//
+//	if c.L7Dead       { continue }   // node-observed listener fault — sound, stays
+//	if c.PathReset    { continue }
+//	if c.PathCollapse { continue }
+//	anyBetterByMargin = true
+//
+// ConnectReset and PostConnectCollapse both map to EvidenceUnknown (spec.EvidenceForReason), so neither
+// may WITHDRAW a member — ADR-0039: the node cannot separate an interfered path from one client's bad
+// network. But nothing stopped them removing a member from the PROMOTION pool, which is a subtraction by
+// another name: the healthy sibling that would have taken over is passed over, and because the exclusion
+// happens before anyBetterByMargin the hold is then reported as "no better candidate" when a better
+// candidate was found and discarded.
+//
+// Measured before this was written: 15-43 ConnectReset hits per 24h per node, on healthy serving
+// transports, on a network with zero established client sessions.
+func TestPathFlaggedSiblingIsNotSilentlyRemovedFromThePool(t *testing.T) {
+	cases := []struct {
+		name string
+		flag func(*spec.RotationCandidate)
+	}{
+		{"connect-reset", func(c *spec.RotationCandidate) { c.PathReset = true }},
+		{"post-connect-collapse", func(c *spec.RotationCandidate) { c.PathCollapse = true }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base()
+			// One sibling, healthy, promoted, and well past the margin — the shape that must produce an act.
+			sib := cand("vless-reality-grpc", 0.99, true)
+			tc.flag(&sib)
+			in.Ranked = []spec.RotationCandidate{sib}
+
+			clean := mustPlan(t, in)
+			if clean.Reason == spec.RotationReasonTargetNotPromoted {
+				t.Fatalf("fixture wrong: the hold is %q, so the exclusion is not what this row is measuring", clean.Reason)
+			}
+			if clean.Act {
+				if clean.To.Proto != "vless-reality-grpc" {
+					t.Errorf("acted onto %q rather than the only sibling", clean.To.Proto)
+				}
+				return
+			}
+			t.Errorf("a %s-flagged sibling was removed from the promotion pool: the plan holds with reason %q (%s).\n"+
+				"That signal maps to EvidenceUnknown, so it may not withdraw a member — yet here it prevents a healthy "+
+				"sibling being promoted, which costs the same people the same access by a different route. And because "+
+				"the exclusion happens BEFORE anyBetterByMargin, the hold names the wrong cause: a better candidate WAS "+
+				"found and discarded.\n"+
+				"The fix is a weight penalty, not a `continue`. L7Dead stays a hard exclusion — that one is the node "+
+				"observing its own listener.", tc.name, clean.Reason, clean.HeldBecause)
+		})
+	}
+}
+
+// TestACleanSiblingIsPreferredToAPathFlaggedOne is the other half of the preference: making the flags a
+// preference rather than an exclusion must not make them meaningless. A co-reset sibling IS a worse target
+// — an on-path element resetting several classes at once is real — so it is taken only when nothing clean
+// qualifies.
+func TestACleanSiblingIsPreferredToAPathFlaggedOne(t *testing.T) {
+	in := base()
+	flagged := cand("vless-reality-grpc", 0.99, true) // heavier, and therefore the winner on weight alone
+	flagged.PathReset = true
+	clean := cand("hysteria2", 0.95, true)
+	in.Ranked = []spec.RotationCandidate{flagged, clean}
+
+	p := mustPlan(t, in)
+	if !p.Act {
+		t.Fatalf("no act with a clean, promoted, margin-beating sibling available: %s / %s", p.Reason, p.HeldBecause)
+	}
+	if p.To.Proto != "hysteria2" {
+		t.Errorf("rotated onto %q, the path-flagged member, while a clean one qualified. The flags must still RANK — a sibling whose served flows are meeting RSTs is a worse target, just not an inadmissible one.", p.To.Proto)
+	}
+}
+
+// TestTheHoldNamesTheRightCauseWhenOnlyFlaggedCandidatesExist — the exclusion used to sit above the margin
+// test, so a discarded-but-qualifying candidate produced "no better candidate". A hold that misnames its
+// own cause sends the operator to look at the wrong thing.
+func TestTheHoldNamesTheRightCauseWhenOnlyFlaggedCandidatesExist(t *testing.T) {
+	in := base()
+	// Margin-beating, path-flagged, and NOT tuner-promoted: it qualifies on weight and cannot be the target,
+	// which is exactly the state "target-not-promoted" exists to name.
+	c := cand("vless-reality-grpc", 0.99, false)
+	c.PathCollapse = true
+	in.Ranked = []spec.RotationCandidate{c}
+
+	p := mustPlan(t, in)
+	if p.Act {
+		t.Fatalf("acted onto a candidate the tuner has not promoted: %+v", p.To)
+	}
+	if p.Reason != spec.RotationReasonTargetNotPromoted {
+		t.Errorf("the hold reads %q; a margin-beating candidate WAS found and was only unusable because the tuner has not promoted it. Reporting %q instead sends the operator looking for a candidate that exists.",
+			p.Reason, spec.RotationReasonNoBetterCandidate)
 	}
 }

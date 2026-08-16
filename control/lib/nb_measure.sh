@@ -261,6 +261,52 @@ generate_measure_configs() {
 	log "measure: wrote $reach_cfg + $measure_cfg ($n member(s), active=$active; reach probes own listeners — node-local, not client-vantage)."
 }
 
+# collapse_arm / collapse_disarm — the ONLY writers of the PostConnectCollapse arm sentinel.
+#
+# It existed as a bare `touch` in a comment: the one arm in this tree with no verb, no conformance gate and
+# no status surface, and the one that drifted — present on one node of three since 2026-07-19, chosen by
+# nobody. Its two siblings (--rotate-arm, --fp-rotate-arm) each have a verb; this closes the gap.
+#
+# Arming is deliberately NOT reachable from a committable file. node.config.json .loops.collapse is a
+# REQUEST that _report_loop_drift reconciles against this sentinel and reports; the sentinel itself is
+# written only here, on the node, by a human running the verb.
+#
+# The refusal below is the point of the verb. tests/e2e/README.md defines the drill in three steps, and its
+# silence proof requires real served traffic (heavy-download including a GRO client, and lossy-but-alive
+# mobile). A silence proof on a node with no client sessions establishes only that an empty predicate is
+# empty — development.md §2.2 item 12 forbids reporting that as a property. So the verb states the
+# precondition and makes the operator confirm they met it, rather than pretending a touch(1) is a decision.
+collapse_arm() {
+	need_root
+	local s; s="$(_collapse_sentinel)"
+	if [ -f "$s" ]; then log "collapse: already armed ($s)."; return 0; fi
+	if [ "${MYC_COLLAPSE_DRILL_DONE:-}" != "yes" ]; then
+		warn "collapse: REFUSING to arm. PostConnectCollapse ships disarmed until the three-step drill in"
+		warn "  tests/e2e/README.md passes ON THIS NODE: parse proof, fire proof, and a SILENCE proof under"
+		warn "  real served traffic — healthy heavy-download including a GRO client, and lossy-but-alive"
+		warn "  mobile traffic (netem loss, not a black-hole). The silence half is the one that matters: it"
+		warn "  is what separates a signal that fires on interference from one that fires on a bad mobile"
+		warn "  link, and it CANNOT be run on a node with no client sessions — an empty predicate coming"
+		warn "  back empty is not evidence about anything."
+		warn "  Having done all three, re-run with MYC_COLLAPSE_DRILL_DONE=yes."
+		return 1
+	fi
+	( umask 077; : >"$s" ) || die "collapse: could not write the arm sentinel $s."
+	log "collapse: ARMED on this node ($s). Declare it in node.config.json .loops.collapse so the population can be compared; _report_loop_drift reconciles the two on every converge."
+	log "collapse: re-run --measure-configure (or converge) so the daemon config carries path_collapse_enabled=true."
+	return 0
+}
+
+collapse_disarm() {
+	need_root
+	local s; s="$(_collapse_sentinel)"
+	[ -f "$s" ] || { log "collapse: already disarmed."; return 0; }
+	rm -f "$s" || die "collapse: could not remove the arm sentinel $s."
+	log "collapse: DISARMED. The observer keeps writing the marker's collapse list in shadow; the daemon stops folding it into a verdict."
+	log "collapse: re-run --measure-configure (or converge) so the daemon config carries path_collapse_enabled=false."
+	return 0
+}
+
 # converge_measure_membership — re-derive the served member set on every converge, and make the running
 # daemon adopt it.
 #
@@ -297,6 +343,12 @@ converge_measure_membership() {
 		return 0
 	fi
 	log "measure: the served member set changed — the plane now measures exactly what this node serves."
+	# The nft counter table is derived from the SAME served set and was installed only at --measure-enable,
+	# so it went stale in step with the member list. Reinstall it here, where the change is already known.
+	# Idempotent (delete + recreate) and fail-safe: absent nft/jq is a no-op, and it never adds a verdict.
+	if command -v pathsig_nft_apply >/dev/null 2>&1; then
+		pathsig_nft_apply || warn "measure: could not reinstall the path-signal counter table; the observer stays blind to any newly served TCP class until it is."
+	fi
 	[ "${DRY_RUN:-0}" -eq 0 ] || { log "[dry-run] would restart mycelium-measure.service to adopt the new member set."; return 0; }
 	systemctl is-active --quiet mycelium-measure.service 2>/dev/null || return 0
 	run systemctl restart mycelium-measure.service \
@@ -576,9 +628,21 @@ measure_pathsig_probe() {
 		observed="[]"
 	fi
 	[ -n "$observed" ] || observed="[]"
+	# WHAT THIS OBSERVER CANNOT SEE, named rather than left out of the total. The nft counter table is
+	# installed once, at --measure-enable, and NOTHING reinstalls it when the served set changes: enabling a
+	# transport later leaves it with no counter, so the observer is blind to it while reporting an all-clear
+	# "across all N observed served TCP class(es)" — technically true and read as complete coverage. MEASURED
+	# 2026-08-16: one node carried counters for 2 of its 4 served TCP classes and said exactly that.
+	#
+	# The gap is emitted, not merely logged: a consumer that needs to know whether silence is evidence has to
+	# be able to ask, and a log line is not something the lease writer or a gate can read.
+	local unobserved
+	unobserved="$(jq -nc --argjson cur "$cur" --argjson pm "$portmap" '
+		[ $pm | to_entries[] | select((($cur["rst_" + .key]) // null) == null) | .value ] | unique' 2>/dev/null)" || unobserved="[]"
+	[ -n "$unobserved" ] || unobserved="[]"
 	local n; n="$(printf '%s' "$cur" | jq '[keys[]|select(startswith("rst_"))]|length' 2>/dev/null || echo 0)"
-	printf '{"observed_at":"%s","checked":%s,"reset":%s,"collapse":%s,"carrying":%s,"carrying_observed":%s}\n' \
-		"$ts" "${n:-0}" "$reset" "$collapse" "$carrying" "$observed" >"$marker.tmp" 2>/dev/null \
+	printf '{"observed_at":"%s","checked":%s,"reset":%s,"collapse":%s,"carrying":%s,"carrying_observed":%s,"unobserved":%s}\n' \
+		"$ts" "${n:-0}" "$reset" "$collapse" "$carrying" "$observed" "$unobserved" >"$marker.tmp" 2>/dev/null \
 		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
 	local hit=0
 	if [ "$reset" != "[]" ]; then
@@ -590,7 +654,11 @@ measure_pathsig_probe() {
 		hit=1
 	fi
 	[ "$hit" -eq 1 ] && return 1
-	log "path-signal: inbound-RST + send-queue-stall rates within threshold across all $n observed served TCP class(es)."
+	if [ "$unobserved" != "[]" ]; then
+		warn "path-signal: rates within threshold across the $n class(es) this observer covers — but it has NO COUNTER for $(printf '%s' "$unobserved" | jq -r 'join(",")' 2>/dev/null): those are served and unwatched. Silence about them is not evidence. Re-run --measure-enable (or converge) to reinstall the counter table over the current served set."
+	else
+		log "path-signal: inbound-RST + send-queue-stall rates within threshold across all $n served TCP class(es) — and the counter table covers every one of them."
+	fi
 	return 0
 }
 
