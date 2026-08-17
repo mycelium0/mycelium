@@ -133,6 +133,12 @@
 #                               reacts to: the SIGPIPE mechanism is demonstrated by running it, no
 #                               self-directed `openssl s_client` is piped into another command, and the
 #                               node-side --self-rst drill that measures the RST delta exists. OFFLINE
+#   * tls_material_is_engine_readable.sh — the cert the engine must open is made readable by the engine on
+#                               EVERY converge, not only on the run that generated it: the already-present
+#                               branch reconciles ownership + mode, the empty branch still generates and
+#                               reconciles, and an operator-placed cert is never replaced. Found by the
+#                               from-zero drill, where sing-box restart-looped on `permission denied` after
+#                               `sing-box check` had passed. OFFLINE
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
@@ -382,6 +388,7 @@ GATES=(
 	"tests/conformance/served_set_is_what_is_served.sh"
 	"tests/conformance/collapse_gated.sh"
 	"tests/conformance/probe_does_not_reset_its_own_ports.sh"
+	"tests/conformance/tls_material_is_engine_readable.sh"
 	"tests/conformance/suppression_lease_wired.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/rotate_apply_executes.sh"

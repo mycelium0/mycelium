@@ -404,7 +404,11 @@ verify_hy2_hop_nat() {
 	want="$(_hy2_hop_range)"
 	[ -n "$want" ] || return 0
 	lstn="$(jq -r '.hysteria2_port // 8444' "$PARAMS_JSON" 2>/dev/null)"
-	rule="$(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | head -1)"
+	# `|| true`: NO MATCH IS THE STATE THIS CHECK EXISTS TO REPORT. Without it `grep` exits 1, `pipefail`
+	# makes that the pipeline's status, and the ERR trap fires before the warn below can be printed — so
+	# the one fail-closed check that can see a missing redirect would announce itself as an internal bug
+	# instead of as the outage it found.
+	rule="$(iptables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | head -1 || true)"
 	if [ -z "$rule" ]; then
 		warn "hysteria2 port hopping: params advertise the range $want to every client, but NO redirect is installed. Every client that hops off $lstn reaches nothing, and no node-local check can see this — loopback traffic does not traverse PREROUTING."
 		return 1
@@ -429,7 +433,7 @@ verify_hy2_hop_nat() {
 	# rule: clients hop across the range and reach nothing, while every loopback check stays green.
 	if have ip6tables; then
 		local rule6
-		rule6="$(ip6tables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | head -1)"
+		rule6="$(ip6tables -t nat -S PREROUTING 2>/dev/null | grep -F 'myc-hy2-hop' | head -1 || true)"
 		if [ -z "$rule6" ]; then
 			warn "hysteria2 port hopping: the IPv4 redirect is present but there is NO IPv6 twin, and the inbounds listen on '::'. A client reaching this node over IPv6 hops across $want and reaches nothing."
 			return 1

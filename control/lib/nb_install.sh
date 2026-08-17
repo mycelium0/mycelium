@@ -223,11 +223,35 @@ install_xray() {
 	log "installed xray to $XRAY_BIN"
 }
 
+# _tls_material_readable — make TLS_DIR readable by the engine that has to open it, every time.
+#
+# MEASURED by the from-zero drill, 2026-08-17: a node rebuilt from nothing with the operator's own cert
+# restored into TLS_DIR came up with sing-box in a restart loop —
+#   FATAL initialize inbound[1]: read certificate: open .../tls/fullchain.pem: permission denied
+# — and it failed only at `systemctl start`, AFTER `sing-box check` had passed. check parses the config as
+# root; it never opens the key as the service user, so the whole render->validate->promote chain reports
+# success and the data plane is down.
+#
+# The cause was that this reconciliation lived at the END of the GENERATE path, below an early return.
+# A cert that already existed — which is every node serving a real SNI, because a public name cannot be
+# self-signed — skipped it. So the one case the branch exists for was the one case it never ran in.
+_tls_material_readable() {
+	[ -d "$TLS_DIR" ] || return 0
+	run chown -R "root:$SINGBOX_RUN_GROUP" "$TLS_DIR"
+	[ -f "$TLS_DIR/privkey.pem" ]   && run chmod 0640 "$TLS_DIR/privkey.pem"
+	[ -f "$TLS_DIR/fullchain.pem" ] && run chmod 0644 "$TLS_DIR/fullchain.pem"
+	return 0
+}
+
 ensure_self_signed_cert() {
 	# ensure_self_signed_cert CN — per-node self-signed cert + key under TLS_DIR (ADR-0014).
 	local cn="$1"
 	have openssl || die "openssl required to issue the per-node self-signed cert."
-	[ -f "$TLS_DIR/fullchain.pem" ] && [ -f "$TLS_DIR/privkey.pem" ] && { log "self-signed cert already present."; return 0; }
+	if [ -f "$TLS_DIR/fullchain.pem" ] && [ -f "$TLS_DIR/privkey.pem" ]; then
+		log "TLS cert already present; reconciling its ownership for the engine."
+		_tls_material_readable
+		return 0
+	fi
 	log "issuing per-node self-signed cert (CN=donor) via openssl"
 	run openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
 		-keyout "$TLS_DIR/privkey.pem" -out "$TLS_DIR/fullchain.pem" \
@@ -238,9 +262,7 @@ ensure_self_signed_cert() {
 		openssl x509 -in "$TLS_DIR/fullchain.pem" -noout -fingerprint -sha256 2>/dev/null \
 			| sed 's/.*=//' >"$STATE_DIR/cert.sha256.txt" || true
 	fi
-	run chown -R "root:$SINGBOX_RUN_GROUP" "$TLS_DIR"
-	run chmod 0640 "$TLS_DIR/privkey.pem"
-	run chmod 0644 "$TLS_DIR/fullchain.pem"
+	_tls_material_readable
 }
 
 install_singbox_unit() {
