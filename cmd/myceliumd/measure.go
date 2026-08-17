@@ -70,7 +70,7 @@ type measureConfig struct {
 	// PathSignalPath (optional) points at the node-local PASSIVE path-level served-flow marker the nft
 	// RST-rate observer writes ($STATE_DIR/path_signal.json = {reset:[refs]}, RP-0014 chunk B). When set, the
 	// daemon folds it into each tick's DetectorSignal: a flagged member has ConnectReset set AND HandshakeOK
-	// faulted (the loopback reach probe cannot see real client flows being reset), so detect.Classify reaches
+	// faulted (the loopback reach probe cannot see an inbound-RST rate at all), so detect.Classify reaches
 	// its blocked/connection-reset branch and the member is pool-excluded (PathReset). Fail-safe: an
 	// absent/stale/malformed marker yields no path signal (healthy), so an observer outage never faults a member.
 	PathSignalPath string `json:"path_signal_path,omitempty"`
@@ -284,7 +284,7 @@ func readL7Marker(path string, now time.Time, maxAge time.Duration) (dead []stri
 }
 
 // pathSignalMarker is the node-local PASSIVE path-level served-flow marker (RP-0014 chunk B) the nft
-// observer writes. Reset lists the member refs whose served client flows are meeting RSTs above threshold
+// observer writes. Reset lists the member refs whose inbound-RST rate on their served dport is above threshold (origin unattributable)
 // this window (ConnectReset, increment 1); Collapse lists refs whose established served flows show the
 // downstream send-queue-stall signature (PostConnectCollapse, increment 2); ObservedAt stamps it for
 // freshness. Absent/stale/malformed -> no path signal.
@@ -331,7 +331,7 @@ func readPathMarker(path string, now time.Time, maxAge time.Duration) (reset, co
 // gateToResetMap remaps the generation gate's faulted SET into the convention measure.Tick's connectReset
 // parameter expects. The gate (shared with the L7 liveness path) emits ref->FALSE — the "this member is
 // dead" convention the activeProbe map reads — but connectReset reads ref->TRUE as "this member's served
-// client flows are meeting RSTs". Without this flip the path fold is a silent no-op (Tick would read the
+// an inbound-RST rate is above threshold". Without this flip the path fold is a silent no-op (Tick would read the
 // faulted ref's value as false and fold no signal). Returns nil when nothing is faulted, which Tick folds
 // as no path signal (identical to an unset map).
 func gateToResetMap(faulted map[string]bool) map[string]bool {

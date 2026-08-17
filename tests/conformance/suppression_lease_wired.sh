@@ -161,7 +161,7 @@ r2="$(jq -r '.reason' "$W/plan2.json" 2>/dev/null)"; s2="$(jq -r '.suppress.prot
 if [ "$s2" = "none" ] && [ "$r2" = "evidence-not-permitted" ]; then
 	ok "a connection-reset fault proposes NOTHING and says why (evidence-not-permitted)"
 else
-	badln "a path-level fault produced reason=$r2 suppress=$s2. connection-reset comes from watching real client flows: for an ingress member the node cannot separate interference from one client's bad network, and withdrawing it disconnects everyone else to react to a fault they may not share."
+	badln "a path-level fault produced reason=$r2 suppress=$s2. connection-reset counts inbound RSTs by destination port and cannot attribute them to a flow: for an ingress member the node cannot separate interference from one client's bad network, and withdrawing it disconnects everyone else to react to a fault they may not share."
 fi
 
 # ---------------------------------------------------------------------------------------------------

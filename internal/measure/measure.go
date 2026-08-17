@@ -169,7 +169,9 @@ func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbe
 		Class:     cls,
 		Health:    h,
 		ConnectOK: connected,
-		// A path-level ConnectReset (RP-0014 chunk B: the node's OWN served client flows meeting RSTs, from
+		// A path-level ConnectReset (RP-0014 chunk B: an inbound-RST rate on a served destination port, ORIGIN
+		// UNKNOWN — the observer keys on dport and TCP flags only, so a scan and on-path interference are the
+		// same number; see the note above measure_pathsig_probe. Read from
 		// the passive nft observer) OVERRIDES the loopback reach HandshakeOK. The own-listener reach probe
 		// connects fine (loopback has no on-path element), so it reports HandshakeOK=true; but the CLIENT
 		// handshakes are being reset. We therefore fault HandshakeOK when connectReset fires so Classify
@@ -200,7 +202,7 @@ func detectorSignal(cls spec.TransportClass, h spec.TransportHealth, activeProbe
 // healthy (the pre-L7 behaviour, so a caller with no L7 signal folds exactly as before). connectReset maps
 // a member ref to its node-local passive path-level signal (RP-0014 chunk B): an explicit true faults that
 // ref's HandshakeOK + sets ConnectReset -> the classifier's blocked/connection-reset branch (catching real
-// served client flows meeting RSTs that the loopback probe cannot see), and excludes the ref from the
+// an inbound-RST rate on a served dport that the loopback probe cannot see, origin unattributable), and ranks the ref below unflagged ones in the
 // rotation pool (PathReset); a ref absent from the map, or a nil map, defaults to no path fault.
 // postConnectCollapse maps a member ref to its node-local passive send-queue-stall signal (RP-0014 chunk B
 // increment 2): an explicit true sets PostConnectCollapse -> the classifier's throttled/throughput-collapse
@@ -300,7 +302,7 @@ func (a *Assembler) Tick(snapshot []spec.TransportHealth, activeRef string, stat
 			}
 		}
 		// Likewise surface the path-level RST signal (chunk B) as a hard pool-exclusion: never rotate ONTO a
-		// member whose own served client flows are being reset (a co-reset sibling is no safer a target).
+		// member carrying an unexplained inbound-RST rate (it is a worse target, not an inadmissible one).
 		if connectReset != nil {
 			if r, ok := connectReset[ref]; ok && r {
 				c.PathReset = true

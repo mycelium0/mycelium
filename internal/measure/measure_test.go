@@ -384,7 +384,7 @@ func TestDetectorSignalConnectResetFold(t *testing.T) {
 
 // TestTickPathResetFaultsBlockedReset mirrors the L7-dead active test for chunk B: a member whose L4 reach
 // window is HEALTHY (the loopback probe connects) but whose node-local passive path observer reports its
-// served client flows meeting RSTs (connectReset[ref]==true) is classified BLOCKED/connection-reset, not
+// an above-threshold inbound-RST rate on its served dport (connectReset[ref]==true) is classified BLOCKED/connection-reset, not
 // clean — the on-path reset the loopback reach probe cannot see. The control proves the signal is what flips
 // it: the SAME healthy window with the path map unset (nil) stays clean.
 func TestTickPathResetFaultsBlockedReset(t *testing.T) {

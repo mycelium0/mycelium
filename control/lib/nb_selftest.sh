@@ -437,10 +437,32 @@ measure_l7_probe() {
 			# member with no usable SNI counted toward coverage while proving nothing — the same overclaim as
 			# the folded cannot-judge, on the sibling path.
 			[ -n "$sni" ] || { tested=$(( tested + 1 )); unknown="$unknown $ref"; continue; }
+# WHY THE OUTPUT IS CAPTURED BEFORE IT IS PARSED, and not piped straight into `openssl x509`.
+			#
+			# `openssl s_client ... | openssl x509` looks harmless and is not. `x509` exits the moment it has read one
+			# certificate, which closes the pipe; `s_client` then takes SIGPIPE mid-session and the kernel tears the
+			# socket down with an RST to 127.0.0.1:<served port>.
+			#
+			# That port is one this node counts. The passive path observer (RP-0014 chunk B) counts inbound RSTs by
+			# `tcp dport <served port>` with no interface predicate — deliberately, for the payload-free invariant —
+			# so loopback RSTs land in the same counter as wire RSTs, and this probe was manufacturing the very signal
+			# the node then reacted to. MEASURED on a live node, five forced runs: 5 RSTs on one served port in one
+			# run, 2 on another in another, 0 in three. Five is exactly PATHSIG_RST_FLOOR.
+			#
+			# The SYN side of the same dials IS discounted (measure_pathsig_probe subtracts the reach prober's rate)
+			# and the comment there names the L7 probe as an unsubtracted residual biasing toward FALSE NEGATIVES.
+			# Nobody noticed the same dials also feed the RST NUMERATOR, where the bias is the other way.
+			#
+			# Capturing first removes the SIGPIPE, so the session ends with a close rather than a reset. Fixed at the
+			# source rather than compensated for downstream: an estimate subtracted from a counter is a guess, and
+			# this project has enough of those.
 			local parent="${sni#*.}" leaf san
+			local _raw
 			for attempt in 1 2 3; do
-				leaf="$(echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null \
-					| openssl x509 2>/dev/null)"
+				# See the note above _l7_probe_leaf_clean: piping s_client into x509 makes x509 close the
+				# pipe first, s_client take SIGPIPE, and the kernel RST a served port this node counts.
+				_raw="$(echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null)"
+				leaf="$(printf '%s' "$_raw" | openssl x509 2>/dev/null)"
 				[ -n "$leaf" ] || { sleep 1; continue; }
 				printf '%s' "$leaf" | openssl x509 -noout -checkend 0 >/dev/null 2>&1 || { sleep 1; continue; }
 				san="$(printf '%s' "$leaf" | openssl x509 -noout -ext subjectAltName 2>/dev/null)"
@@ -771,8 +793,11 @@ measure_l7_probe_xhttp() {
 	[ -n "$port" ] && [ "$port" != "null" ] && [ -n "$sni" ] || return 0   # cannot identify the inbound -> skip
 	local parent="${sni#*.}" TO="" leaf san ok=0 attempt
 	command -v timeout >/dev/null 2>&1 && TO="timeout 8"
+	local _raw
 	for attempt in 1 2 3; do
-		leaf="$(echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null | openssl x509 2>/dev/null)"
+		# Same reason as the sibling probe: capture, then parse. A pipe here RSTs a served port.
+		_raw="$(echo | $TO openssl s_client -connect "127.0.0.1:$port" -servername "$sni" 2>/dev/null)"
+		leaf="$(printf '%s' "$_raw" | openssl x509 2>/dev/null)"
 		[ -n "$leaf" ] || { sleep 1; continue; }
 		printf '%s' "$leaf" | openssl x509 -noout -checkend 0 >/dev/null 2>&1 || { sleep 1; continue; }
 		san="$(printf '%s' "$leaf" | openssl x509 -noout -ext subjectAltName 2>/dev/null)"

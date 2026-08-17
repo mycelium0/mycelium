@@ -130,7 +130,7 @@ type RotationCandidate struct {
 	Promoted     bool           `json:"promoted"`                // tuner promote flag for this member
 	Weight       float64        `json:"weight"`                  // node-local tuner weight in [0,1]
 	L7Dead       bool           `json:"l7_dead,omitempty"`       // this node's own L7 probe reports the member client-DEAD; the planner excludes it (Audit-0007 S2). Zero value = eligible.
-	PathReset    bool           `json:"path_reset,omitempty"`    // this node's passive path-level observer reports the member's served client flows meeting RSTs (RP-0014 chunk B); the planner excludes it like L7Dead — never rotate ONTO a co-reset sibling. Zero value = eligible.
+	PathReset    bool           `json:"path_reset,omitempty"`    // this node's passive observer reports an inbound-RST rate above threshold on the member's served destination port (RP-0014 chunk B). ORIGIN UNATTRIBUTABLE — the counter keys on dport and TCP flags only, so a scan and on-path interference are the same number, and a reset aimed at the CLIENT never enters the hook at all. The planner therefore RANKS it below unflagged candidates rather than excluding it (v0.2.90). Zero value = unflagged.
 	PathCollapse bool           `json:"path_collapse,omitempty"` // this node's passive path-level observer reports the member's established served flows in a downstream post-connect throughput collapse (RP-0014 chunk B increment 2); excluded like PathReset — never rotate ONTO a co-collapsing sibling. Zero value = eligible.
 }
 
