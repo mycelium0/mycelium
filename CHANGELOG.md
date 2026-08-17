@@ -13,6 +13,66 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.92] — 2026-08-17
+
+### Fixed — the node was manufacturing the path signal it then reacted to
+
+`ConnectReset` had been firing 15–43 times a day on healthy serving transports, on nodes with **zero
+established client sessions**. Measured, five forced runs of the L7 self-test probe with the observer's own
+nft counters read before and after each: **+5 RST on one served port in one run, +2 on another in another,
+none in three.** Five is exactly `PATHSIG_RST_FLOOR`.
+
+The mechanism: `openssl s_client … | openssl x509` — `x509` exits on the first certificate, closing the
+pipe; `s_client` takes SIGPIPE and the kernel tears the socket down with an RST to
+`127.0.0.1:<served port>`. The observer counts inbound RSTs by `tcp dport <served port>` with no interface
+predicate — deliberately, for the payload-free invariant — so a loopback RST and a wire RST are the same
+number. The accounting was already half-aware: `measure_pathsig_probe` discounts the reach prober's dials
+from the SYN *denominator* and its comment names the L7 probe as an unsubtracted residual biasing toward
+false negatives. Nobody noticed the same dials also feed the RST *numerator*.
+
+Fixed at the source — capture, then parse — rather than compensated for downstream. An estimate subtracted
+from a counter is a guess.
+
+**What the evidence does and does not carry.** The mechanism is proven: a producer piped into an
+early-exiting consumer dies of SIGPIPE (rc=141), demonstrated by running it. The effect is intermittent, so
+the before/after is suggestive rather than conclusive: the piped shape produced RSTs in **3 of 25** runs
+(14 total), the captured shape in **0 of 29** (0 total) — Fisher's exact p≈0.09, short of significance at
+this sample size. The change is correct on mechanism alone and costs nothing; the new drill accumulates the
+rest.
+
+### Changed — the signal is renamed to what it measures, across every surface
+
+Thirteen places said this observer reports "served client flows meeting RSTs". It reports no such thing,
+and §2.2 item 12 makes that a defect wherever it is written.
+
+It counts two integers per served TCP port keyed on **destination port and TCP flags only** — no source
+address, no interface, no connection state, and there cannot be any: `pathsig_passive_observer.sh` forbids
+each of those and that invariant is worth more than the attribution it costs. So a port scan, a connect-scan
+with an abortive close, backscatter, a client's own abortive close and on-path injection **all land on the
+same point**, and no function of two integers separates them at any threshold, learned or fixed.
+
+**And the commonest form of what it is named for is invisible to it**: a reset injected toward the *client*
+carries the client's ephemeral port as its destination and never enters the hook. That limit was written
+down nowhere and is now in the code.
+
+The warn text says `ORIGIN UNKNOWN` and lists what it cannot distinguish.
+
+**A rejected repair, recorded because measuring killed it.** The first proposal was a learned per-port RST
+baseline, faulting on departure rather than on an invented constant. 33 samples across the population
+showed the background is **zero in 42 of 44 per-port samples** with rare bursts of 1–5 — so a rolling
+baseline learns ≈0 and every burst reads as a departure. It would have changed nothing.
+
+### Tests
+
+`probe_does_not_reset_its_own_ports.sh` (new): demonstrates the SIGPIPE mechanism by **running** it, then
+requires that no `openssl s_client` aimed at one of this node's own ports is piped into another command.
+Scoped to self-directed dials — the donor probes hit external hosts, whose RSTs land on nobody's counter
+here.
+
+`tests/e2e/pathsig_reset_drill.sh --self-rst` (new arm): runs the shipped probe on a node N times and
+requires the RST counters not to move — and **fails if the probe did no work**, because a probe that errors
+out early also emits no RSTs. Verified live: 3 runs, marker advanced 3 times, 40 SYNs, 0 RSTs.
+
 ## [0.2.91] — 2026-08-17
 
 ### Fixed — a reconciler that only reacts to a change cannot repair a state it did not witness

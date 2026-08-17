@@ -569,6 +569,27 @@ _carrying_classes() {
 	printf '%s\n' "$decports" | jq -R . | jq -s -c --argjson pm "$pm" '[ .[] | $pm[.] // empty ] | unique' 2>/dev/null || printf '[]'
 }
 
+# WHAT THIS OBSERVER CAN AND CANNOT SAY, because the name promises more than the counters deliver.
+#
+# It counts two integers per served TCP port, in an input hook, keyed on DESTINATION PORT AND TCP FLAGS
+# ONLY: packets with RST set, and pure SYNs. Nothing links a counted RST to the flow whose SYN was
+# counted — there is no source address, no interface, no connection state and no sequence number, and
+# there cannot be: pathsig_passive_observer.sh forbids every one of those expressions, and that invariant
+# is worth more than the attribution it costs.
+#
+# So a stateless port scan, a connect-scan with an abortive close, backscatter, a real client's abortive
+# close, and an on-path element injecting a reset toward THIS NODE all land on the same point: one inbound
+# RST per inbound SYN on a served dport. No function of these two integers separates them, at any
+# threshold, learned or fixed. MEASURED on this population: the RST background is zero in 42 of 44
+# per-port samples with rare bursts of 1-5, and a single burst of 5 clears PATHSIG_RST_FLOOR by itself.
+#
+# AND THE COMMONEST FORM OF THE THING IT IS NAMED FOR IS INVISIBLE TO IT. A reset injected toward the
+# CLIENT carries the client's ephemeral port as its destination, so it never enters this hook at all.
+# What is counted is resets aimed at the server side.
+#
+# Therefore: this is an inbound-RST rate on a served destination port, of unknown origin. It is not a
+# measurement of client flows being reset, and no consumer of it may say that it is.
+
 # measure_pathsig_probe [MARKER] — read the RST/SYN counter deltas since the last window, threshold, and write
 # the path-signal marker (default $STATE_DIR/path_signal.json = {observed_at, checked, reset:[REFS], collapse:
 # [REFS], carrying:[REFS], carrying_observed:[REFS]}). A ref in `reset` (ConnectReset, increment 1) names a served class whose inbound-RST rate this
@@ -680,7 +701,7 @@ measure_pathsig_probe() {
 		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
 	local hit=0
 	if [ "$reset" != "[]" ]; then
-		warn "path-signal: inbound-RST rate on served class(es) $(printf '%s' "$reset" | jq -r 'join(",")' 2>/dev/null || printf '%s' "$reset") exceeds the threshold — possible on-path connection-reset interference on real client flows."
+		warn "path-signal: inbound-RST rate on served class(es) $(printf '%s' "$reset" | jq -r 'join(",")' 2>/dev/null || printf '%s' "$reset") exceeds the threshold. ORIGIN UNKNOWN — this counts RSTs by destination port with no interface, address or connection state, so a port scan, a client's abortive close, backscatter and on-path interference are the same number here. It is not a report about client flows."
 		hit=1
 	fi
 	if [ "$collapse" != "[]" ]; then

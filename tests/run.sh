@@ -129,6 +129,10 @@
 #                               acknowledgement, both verbs are reachable from the entrypoint, the default
 #                               is disarmed, the generator derives it from the sentinel, and .loops.collapse
 #                               is declarable and reconciled by LoopDrift. OFFLINE
+#   * probe_does_not_reset_its_own_ports.sh — the node's own probes do not manufacture the path signal it
+#                               reacts to: the SIGPIPE mechanism is demonstrated by running it, no
+#                               self-directed `openssl s_client` is piped into another command, and the
+#                               node-side --self-rst drill that measures the RST delta exists. OFFLINE
 #   * rotate_closed_set_only.sh — auto-rotation can only move WITHIN the closed transport set: the
 #                               RotationAction enum has no add/grow member and RotationCandidate.Validate
 #                               rejects a proto outside the closed registry (RP-0012 AC-5). OFFLINE
@@ -377,6 +381,7 @@ GATES=(
 	"tests/conformance/rotate_judges_a_set.sh"
 	"tests/conformance/served_set_is_what_is_served.sh"
 	"tests/conformance/collapse_gated.sh"
+	"tests/conformance/probe_does_not_reset_its_own_ports.sh"
 	"tests/conformance/suppression_lease_wired.sh"
 	"tests/conformance/rotate_apply_gated.sh"
 	"tests/conformance/rotate_apply_executes.sh"

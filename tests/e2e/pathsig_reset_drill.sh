@@ -52,7 +52,10 @@ pathsig_reset_drill.sh — on-node end-to-end drill for the path-signal chain (R
 Usage (run as root, ON an armed node):
   pathsig_reset_drill.sh --port PORT [options]
 
-  --port PORT        the ACTIVE member's served TCP port to spike (required; a reality/ws-tls/shadowtls/
+  --self-rst         SILENCE ARM. Sends no RSTs at all: runs the node's OWN L7 probe N times and requires
+                     the observer's RST counters not to move. --port is not needed in this mode.
+  --port PORT        the ACTIVE member's served TCP port to spike (required for the FIRE arm; a
+                     reality/ws-tls/shadowtls/
                      trojan port — a UDP family (hy2/tuic/awg) has no TCP RST and cannot be drilled).
   --target ADDR      where to send the RST burst (default 127.0.0.1; use the node's public IP to mirror a
                      real off-node client if loopback RSTs are filtered on this host).
@@ -71,12 +74,13 @@ Requires root, nft (armed observer table), python3 (RST generator), jq. Exit: 0 
 USAGE
 }
 
-port=""; target="127.0.0.1"; count=15; generations=3; gen_gap=35; timeout_s=120
+port=""; target="127.0.0.1"; count=15; generations=3; gen_gap=35; timeout_s=120; self_rst=0
 checkout="/opt/mycelium"; state_dir="/var/lib/mycelium"; tooling_dir="/usr/local/lib/mycelium"
 plan=""
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
+		--self-rst)    self_rst=1; shift ;;
 		--port)        port="${2:?--port needs a value}"; shift 2 ;;
 		--target)      target="${2:?--target needs a value}"; shift 2 ;;
 		--count)       count="${2:?--count needs a value}"; shift 2 ;;
@@ -97,6 +101,64 @@ marker="$state_dir/path_signal.json"   # fixed: the observer probe + the daemon 
 nb="$checkout/scripts/node-bootstrap.sh"
 
 die() { printf 'pathsig_reset_drill: %s\n' "$1" >&2; exit 2; }
+
+# ---------------------------------------------------------------------------------------------------
+# THE SILENCE ARM. It sends nothing and asserts nothing moves.
+#
+# MEASURED 2026-08-17, five forced runs of the L7 self-test probe with the observer's own counters read
+# before and after each: run 1 put +5 RST on one served port, run 4 put +2 on another, three runs put
+# none. Five is exactly PATHSIG_RST_FLOOR — the node was firing its own path-signal.
+#
+# The cause was `openssl s_client … | openssl x509`: x509 exits on the first certificate, closes the pipe,
+# s_client takes SIGPIPE, and the kernel RSTs 127.0.0.1:<served port>. The observer counts inbound RSTs by
+# `tcp dport <served port>` with no interface predicate, so a loopback RST and a wire RST are the same
+# number. The fix captures before parsing; this arm is what proves it stayed fixed.
+#
+# It runs the SHIPPED probe through the SHIPPED entrypoint and reads the SHIPPED counters. And it fails if
+# the probe did no work: a probe that errors out early also emits no RSTs, so the marker must advance and
+# the SYN counters must move, or the run proves nothing.
+# ---------------------------------------------------------------------------------------------------
+if [ "$self_rst" -eq 1 ]; then
+	command -v nft >/dev/null 2>&1 || die "nft is required (the observer counter table is what this arm reads)"
+	command -v jq  >/dev/null 2>&1 || die "jq is required"
+	[ "$(id -u)" -eq 0 ] || die "must run as root (reads the nft counter table)"
+	nb="$checkout/scripts/node-bootstrap.sh"
+	[ -x "$nb" ] || [ -f "$nb" ] || die "no node-bootstrap.sh at $nb"
+	l7marker="$state_dir/l7_selftest.json"
+	snap() { nft -j list counters table inet mycelium_measure 2>/dev/null \
+		| jq -c '[.nftables[].counter? | select(.name != null) | {(.name): .packets}] | add // {}'; }
+	runs="${generations:-3}"
+	printf 'pathsig_reset_drill --self-rst: %s run(s) of the node L7 probe; the RST counters must not move.\n' "$runs"
+	total_rst=0; total_syn=0; advanced=0
+	for i in $(seq 1 "$runs"); do
+		before="$(snap)"; before_at="$(jq -r '.observed_at // ""' "$l7marker" 2>/dev/null)"
+		bash "$nb" --l7-probe --state-dir "$state_dir" --checkout "$checkout" --tooling-dir "$tooling_dir" >/dev/null 2>&1 || true
+		sleep 2
+		after="$(snap)"; after_at="$(jq -r '.observed_at // ""' "$l7marker" 2>/dev/null)"
+		[ -n "$after_at" ] && [ "$after_at" != "$before_at" ] && advanced=$(( advanced + 1 ))
+		r="$(jq -n --argjson a "$before" --argjson b "$after" \
+			'[$a | keys[] | select(startswith("rst_"))] | map(($b[.] // 0) - ($a[.] // 0)) | add // 0')"
+		y="$(jq -n --argjson a "$before" --argjson b "$after" \
+			'[$a | keys[] | select(startswith("syn_"))] | map(($b[.] // 0) - ($a[.] // 0)) | add // 0')"
+		printf '  run %s: dRST=%s dSYN=%s\n' "$i" "$r" "$y"
+		total_rst=$(( total_rst + r )); total_syn=$(( total_syn + y ))
+	done
+	if [ "$advanced" -eq 0 ] || [ "$total_syn" -le 0 ]; then
+		printf 'FAIL: the probe did no work (marker advanced %s/%s times, dSYN total %s), so a zero RST delta proves nothing.\n' \
+			"$advanced" "$runs" "$total_syn" >&2
+		exit 1
+	fi
+	if [ "$total_rst" -ne 0 ]; then
+		printf 'FAIL: the node own L7 probe emitted %s RST(s) across %s run(s) onto ports this node counts.\n' "$total_rst" "$runs" >&2
+		printf '      That is the node manufacturing its own path-signal: PATHSIG_RST_FLOOR is 5, and a single\n' >&2
+		printf '      run was measured at +5 before this was fixed. Look for an s_client piped into another command.\n' >&2
+		exit 1
+	fi
+	printf 'PASS: %s probe run(s) did the work (marker advanced %s time(s), dSYN %s) and moved the RST counters by 0.\n' \
+		"$runs" "$advanced" "$total_syn"
+	exit 0
+fi
+
 [ -n "$port" ] || die "--port is required"
 # Every count/size argument must be a positive integer (a bad value would fail late or misbehave mid-run).
 for pair in "port:$port" "count:$count" "generations:$generations" "gen-gap:$gen_gap" "timeout:$timeout_s"; do
