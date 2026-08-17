@@ -283,7 +283,7 @@ chmod +x "$W/iptables"; cp "$W/iptables" "$W/ip6tables"
 (
 	PATH="$W:$PATH"; export PATH
 	set -Eeuo pipefail
-	trap 'printf "%s\n" "$BASH_COMMAND" >>"'"$W"'/erred"' ERR
+	trap 'printf "%s\n" "$BASH_COMMAND" >>"$STATE_DIR/erred"' ERR
 	STATE_DIR="$W"; PARAMS_JSON="$W/params.json"; DRY_RUN=1
 	printf '{"hysteria2_port":8444}\n' >"$PARAMS_JSON"
 	log() { :; }; warn() { :; }; die() { exit 91; }
@@ -300,6 +300,52 @@ if [ -z "$fired" ]; then
 else
 	badln "the ERR trap fired while there was simply nothing to reconcile (\`$fired\`). \`grep -F myc-hy2-hop\` exits 1 when it matches nothing, pipefail makes that the pipeline's status, and the entrypoint's trap reports \"UNEXPECTED failure (bug, not a refusal)\" and marks the node PARTLY converged. Measured on two of three live nodes, on every single \`fungi apply\`."
 fi
+
+# --- AND THE CHECK CAN DELIVER ITS OWN MESSAGE -------------------------------------------------------
+#
+# A node that ADVERTISES a range and has NO rule is exactly the outage verify_hy2_hop_nat exists to catch.
+# Its lookup is `iptables -S | grep -F myc-hy2-hop | head -1`, and grep exits 1 on no match: under the
+# entrypoint's `set -Eeuo pipefail` that becomes the pipeline's status and the ERR trap fires BEFORE the
+# warn is reached. The one fail-closed check that can see this outage would announce itself as an internal
+# bug instead of as the outage it found.
+printf '\n-- the missing-redirect check can actually report a missing redirect --\n'
+W="$(mktemp -d "${TMPDIR:-/tmp}/myc.hv.XXXXXX")" || exit 2
+cat >"$W/iptables" <<'STUB'
+#!/usr/bin/env bash
+case " $* " in *" -S "*) printf -- '-P PREROUTING ACCEPT\n-A PREROUTING -j SOMETHING-ELSE\n'; exit 0 ;; esac
+exit 0
+STUB
+chmod +x "$W/iptables"; cp "$W/iptables" "$W/ip6tables"
+printf '{"hysteria2_port":8444,"hysteria2_hop_ports":"20000:20100"}\n' >"$W/params.json"
+(
+	PATH="$W:$PATH"; export PATH
+	set -Eeuo pipefail
+	trap 'printf "%s\n" "$BASH_COMMAND" >>"'"$W"'/erred"' ERR
+	STATE_DIR="$W"; PARAMS_JSON="$W/params.json"; DRY_RUN=0
+	log() { :; }; die() { exit 91; }
+	warn() { printf 'WARNED\n' >>"$STATE_DIR/warned"; }
+	have() { command -v "$1" >/dev/null 2>&1; }; run() { :; }
+	# common.sh too: _hy2_hop_range calls myc_hop_range_ok from it, and without that the range reads as
+	# UNCONFIGURED and the function returns before the branch this row is about. An earlier draft omitted
+	# it and the row reported "no warning" while never reaching the code that warns.
+	# shellcheck source=/dev/null
+	. "$COMMON" >/dev/null 2>&1 || exit 92
+	# shellcheck source=/dev/null
+	. "$LIB" >/dev/null 2>&1 || exit 92
+	# Called the way converge_node_tail calls it — `verify_hy2_hop_nat || failed=...`. Its `return 1` here
+	# is the DELIBERATE fail-closed answer, and on the left of `||` neither set -e nor the ERR trap fires
+	# on it. So anything the trap does record came from INSIDE the function, which is what this row is for.
+	verify_hy2_hop_nat || true
+) >/dev/null 2>&1
+erred="$( [ -f "$W/erred" ] && head -1 "$W/erred" || printf '' )"
+warned="$( [ -f "$W/warned" ] && printf yes || printf no )"
+rm -rf "$W"
+[ -z "$erred" ] \
+	&& ok "no ERR trap fires while the check looks for a rule that is not there" \
+	|| badln "the ERR trap fired on the lookup itself (\`$erred\`), so the check reports an internal bug instead of the missing redirect it was written to find."
+[ "$warned" = yes ] \
+	&& ok "and the operator gets the warning the check exists to give" \
+	|| badln "the check produced no warning on a node that advertises a range with no redirect installed — the outage would pass silently"
 
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then

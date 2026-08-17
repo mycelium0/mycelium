@@ -13,6 +13,63 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.93] — 2026-08-17
+
+Everything here was found by the **from-zero drill** — the open item since Audit-0011 — run for the first
+time on a real node: state wiped, the operator's own material restored, `fungi deploy` from nothing. Three
+defects, none of which any offline gate could have found, because each needs a node that has never been
+converged before.
+
+### Fixed — an operator-supplied certificate was never made readable by the engine
+
+The rebuilt node came up with sing-box in a restart loop:
+
+```
+FATAL initialize inbound[1]: read certificate: open .../tls/fullchain.pem: permission denied
+```
+
+and it failed at `systemctl start` — **after** `sing-box check` had passed and the candidate had been
+promoted. `check` parses the config as root and never opens the key as the service user, so the whole
+render → validate → promote chain reported success while the data plane was down.
+
+`ensure_self_signed_cert` reconciled ownership at the **end of the generate path**, below an early
+`return 0` taken when a cert is already present. So the case it exists for — an operator-supplied cert,
+which is every node serving a real SNI, because a public name cannot be self-signed — was the one case it
+never ran in. Reconciliation now happens on every converge, generation still only when the material is
+absent, and an existing certificate is never replaced.
+
+### Fixed — a leftover `awg0` link failed the whole deploy
+
+`awg-quick: 'awg0' already exists`. The state wipe does not remove the interface — it lives in the
+kernel, not in `$STATE_DIR` — so the fresh bring-up refused and the fail-closed check aborted the deploy
+of a node whose only problem was that it had been used before. The link carries the *old* keys, which the
+wipe invalidated, so taking it down is the correct reconciliation rather than a workaround. Done only
+after a first start has already failed, so a healthy node is never touched.
+
+### Fixed — three more benign non-zeroes tripping the ERR trap
+
+The class first fixed in 0.2.89, swept properly this time:
+
+- `_awg_read_epoch`: `cat` of the epoch file, whose **absence means epoch 0** — every fresh node. Measured:
+  `--awg-issue` printed *"UNEXPECTED failure (bug, not a refusal)"* and issued the client successfully.
+- `verify_hy2_hop_nat` ×2: the lookup is `iptables -S | grep -F myc-hy2-hop | head -1`, and **no match is
+  precisely the outage this check exists to report**. The trap fired before the warn could be printed, so
+  the one fail-closed check that can see a missing redirect would have announced itself as an internal bug
+  instead of as the outage it found.
+
+### Tests
+
+`tls_material_is_engine_readable.sh` (new) drives `ensure_self_signed_cert` with `run` stubbed to a
+recorder — what is under test is which commands it issues against which path, not whether the host permits
+them. Three branches: already-present reconciles, absent generates *and* reconciles, and an operator's cert
+is never overwritten. Restoring the early return turns it red.
+
+`hy2_hop_redirect_kept.sh` gains a row driving `verify_hy2_hop_nat` on a node that advertises a range with
+no rule installed, under the entrypoint's own shell options, and calling it the way `converge_node_tail`
+does — so the function's deliberate fail-closed `return 1` is not mistaken for an internal error. Two
+earlier drafts of this row could not fail: one never reached the branch (it did not source `common.sh`, so
+the range read as unconfigured), the other trapped the deliberate return.
+
 ## [0.2.92] — 2026-08-17
 
 ### Fixed — the node was manufacturing the path signal it then reacted to

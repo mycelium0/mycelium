@@ -420,6 +420,20 @@ setup_amneziawg() {
 	run systemctl enable awg-quick@awg0 2>/dev/null || warn "could not enable awg-quick@awg0."
 	if [ "$DRY_RUN" -eq 0 ] && [ -f "$awg_conf" ] && ! systemctl is-active --quiet awg-quick@awg0; then
 		run systemctl start awg-quick@awg0 2>/dev/null || true
+		# A LEFTOVER INTERFACE IS NOT A REASON TO FAIL THE BOOTSTRAP. MEASURED by the from-zero drill,
+		# 2026-08-17: the node state was wiped and rebuilt, but the awg0 link from the previous incarnation
+		# was still up — nothing removes it, because it lives in the kernel/userspace and not in STATE_DIR.
+		# awg-quick then refuses with `awg0' already exists`, the fail-closed check below fires, and the
+		# whole deploy is reported as failed on a node whose only problem is that it was used before.
+		#
+		# The interface carries the OLD keys, which the wipe invalidated, so it is serving nobody: taking it
+		# down is the correct reconciliation, not a workaround. Done only after a first start has already
+		# failed, so a healthy node is never touched.
+		if ! systemctl is-active --quiet awg-quick@awg0 && ip link show awg0 >/dev/null 2>&1; then
+			warn "awg-quick refused because the awg0 link already exists — it is a leftover from a previous incarnation (its keys are not the ones now rendered). Taking it down and retrying."
+			run awg-quick down awg0 >/dev/null 2>&1 || run ip link del awg0 >/dev/null 2>&1 || true
+			run systemctl start awg-quick@awg0 2>/dev/null || true
+		fi
 	fi
 	# Fail-closed (Audit-0004 F-006): the second family MUST be active before bootstrap reports success.
 	if [ "$DRY_RUN" -eq 0 ] && ! systemctl is-active --quiet awg-quick@awg0; then
@@ -480,7 +494,12 @@ _awg_epoch_file() { printf '%s\n' "$STATE_DIR/awg/dialect.epoch"; }
 _awg_read_epoch() {
 	local f v
 	f="$(_awg_epoch_file)"
-	v="$(cat "$f" 2>/dev/null | tr -dc '0-9')"
+	# `|| true`, because ABSENT IS THE ORDINARY STATE: epoch 0 is "this node has never rotated its
+	# dialect", which is every fresh node. `cat` of a missing file exits 1, `pipefail` makes that the
+	# pipeline's status, and the entrypoint's ERR trap prints "UNEXPECTED failure (bug, not a refusal)"
+	# — on every AWG operation, while the function goes on to return the correct 0. MEASURED on a node
+	# rebuilt from zero: `--awg-issue` printed the bug banner and issued the client successfully.
+	v="$(cat "$f" 2>/dev/null | tr -dc '0-9' || true)"
 	[ -n "$v" ] || v=0
 	printf '%s\n' "$v"
 }
