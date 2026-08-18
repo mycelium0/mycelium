@@ -228,6 +228,7 @@ myc_agg_link_outbound() {
 #
 # LOCAL-ONLY: this reads the input files and writes OUT. It performs no network I/O whatsoever.
 myc_render_aggregate() {
+	agg_dropped=""
 	local out
 	out="$1"; shift
 	[ -n "$out" ] || myc_die "aggregate: --out is required"
@@ -294,9 +295,25 @@ myc_render_aggregate() {
 			# carried in the ss:// share-link, so a faithful shadowtls+detour client outbound cannot be
 			# rebuilt from it (see myc_agg_link_outbound's ss branch). Refuse the whole merge with a
 			# precise message rather than silently emit a non-dialable bare-Shadowsocks outbound (N1).
+			# DROPPED, not fatal — the mirror of the Go side. The refusal itself is right (the link carries
+			# only the INNER material), but killing the whole fold on it made a heterogeneous network
+			# unaggregatable: MEASURED 2026-08-19, two live nodes both serving ShadowTLS produced NO
+			# multi-node profile at all. A fungi network is heterogeneous by design; one member the client
+			# cannot dial must cost that member, never the other nodes. What survives is judged against the
+			# RP-0013 family floor after the loop — that is where fail-closed belongs.
 			case "$link" in
 				*plugin=shadow-tls*)
-					myc_die "aggregate: endpoint link is a ShadowTLS share-link (node '$safe_label', tag '$raw_tag') which cannot be reconstructed into a dialable client outbound from its Link alone (the v3 handshake password/version are not in the Link). Re-export this node via its served subscription, which carries the full shadowtls detour; the aggregate refuses it fail-closed rather than emit a broken bare-Shadowsocks outbound." ;;
+					myc_warn "aggregate: dropping '$raw_tag' from node '$safe_label' — a ShadowTLS share-link carries only the inner material, not the v3 handshake, so it cannot be rebuilt into a dialable outbound. Render that node from 'subscription', which has the params."
+					agg_dropped="$agg_dropped $safe_label/$raw_tag(shadowtls)"
+					continue ;;
+			esac
+			# xhttp: an Xray-only carrier that sing-box has no transport for — including it makes sing-box
+			# reject the WHOLE profile, so it would cost the client every other node in the fold.
+			case "$link" in
+				*type=xhttp*)
+					myc_warn "aggregate: dropping '$raw_tag' from node '$safe_label' — the xhttp transport is Xray-only and sing-box cannot load it; one such outbound makes it reject the whole profile."
+					agg_dropped="$agg_dropped $safe_label/$raw_tag(xhttp)"
+					continue ;;
 			esac
 
 			# C26: assert the Link's URI scheme is one we recognise AND that it is consistent with the
@@ -387,6 +404,24 @@ myc_render_aggregate() {
 	if [ "$(printf '%s' "$profile" | jq '[.outbounds[] | select(.type=="selector")] | length')" -ne 1 ]; then
 		myc_die "aggregate: expected exactly one selector outbound."
 	fi
+
+	# THE FAIL-CLOSED LINE, on the RESULT rather than on the inputs. Dropping a member the client engine
+	# cannot dial is safe; handing back a profile whose survivors span fewer than RP-0013's independent
+	# families is not — one block then takes the client's last path, which is the whole point of the floor.
+	# Mirrors internal/spec.RenderAggregateReport.
+	_agg_fams="$(printf '%s' "$profile" | jq -r --slurpfile v "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}" '
+		[ .outbounds[]
+		  | select((.type|test("urltest|selector|direct|block"))|not)
+		  | (.tag | sub("^[^.]*\\."; ""))
+		  | . as $p
+		  | ($v[0].protos[] | select(.proto == $p) | .class)
+		  | ($v[0].block_families[.] // empty) ] | unique | length' 2>/dev/null)"
+	_agg_floor="$(jq -r '.independent_family_floor // 2' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}" 2>/dev/null)"
+	case "$_agg_fams" in ''|*[!0-9]*) _agg_fams=0 ;; esac
+	if [ "$_agg_fams" -lt "${_agg_floor:-2}" ]; then
+		myc_die "aggregate: the folded profile spans $_agg_fams independent family/families, floor is ${_agg_floor:-2} (RP-0013) — a client blocked on one would have nowhere left.${agg_dropped:+ Dropped:$agg_dropped}"
+	fi
+	[ -z "$agg_dropped" ] || myc_warn "aggregate: folded profile omits:$agg_dropped — the surviving set still spans $_agg_fams independent families."
 	if ! printf '%s' "$profile" | jq -e '
 		([.outbounds[] | select(.type=="urltest") | .outbounds[]] | sort)
 		== ([.outbounds[] | select(.type!="urltest" and .type!="selector" and .type!="direct" and .type!="block") | .tag] | sort)
