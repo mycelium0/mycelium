@@ -37,6 +37,29 @@ func OutboundFromLink(tag, link string) (json.RawMessage, error) {
 	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n")), nil
 }
 
+// OutboundSkipReason names why a link must not become a lone sing-box outbound, or "" when it may.
+//
+// Two distinct cases, and neither is a parse failure:
+//   - xhttp: sing-box has no such transport (Xray-only, ADR-0032). An outbound carrying it makes sing-box
+//     reject the WHOLE profile, so it is worse than useless in a client config.
+//   - ShadowTLS: a PAIR (outer shadowsocks + shadowtls detour) that one outbound cannot express.
+//
+// Exported because the single-link CLI verb must REFUSE with a cause an operator can act on. The aggregate
+// renderers still emit xhttp — see the note at its case — which is a recorded open defect, not a use of
+// this function.
+func OutboundSkipReason(link string) string {
+	main := uriBefore(link, "#")
+	scheme := uriBefore(main, "://")
+	q := parseQuery(uriAfter(uriAfter(main, "://"), "?"))
+	if scheme == "vless" && q["type"] == "xhttp" {
+		return "it carries the xhttp transport, which sing-box cannot load — an Xray-only carrier (ADR-0032). A sing-box client profile must not contain it: one such outbound makes sing-box reject the WHOLE profile"
+	}
+	if scheme == "ss" && q["plugin"] == "shadow-tls" {
+		return "ShadowTLS is a pair — an outer shadowsocks outbound whose detour is the shadowtls half — which one outbound cannot express. Render it through `subscription`, which emits both halves"
+	}
+	return ""
+}
+
 // outboundValue is OutboundFromLink's typed core: it returns the outbound as a typed struct (an aggVless /
 // aggHy2 / ... value), or nil for the fail-closed null cases (a ShadowTLS ss-link or an unknown scheme).
 // RenderAggregate uses the typed value directly so the merged profile indents uniformly like `jq .`.
@@ -80,6 +103,22 @@ func outboundValue(tag, link string) (any, error) {
 		case "grpc":
 			ob.Transport = &aggTransport{Type: "grpc", ServiceName: qd(q, "serviceName", "grpc")}
 		case "xhttp":
+			// STILL RENDERED HERE, and that is a KNOWN OPEN DEFECT rather than an endorsement.
+			//
+			// sing-box has no `xhttp` transport — it is an Xray-only carrier (ADR-0032) — so a sing-box
+			// profile containing this outbound fails to load ENTIRELY: `decode config: outbounds[N].
+			// transport: unknown transport type: xhttp`. One un-dialable member costs the client every
+			// other member too. MEASURED 2026-08-17.
+			//
+			// It is not skipped here because skipping changes a contract this renderer shares with the
+			// shell one: render_aggregate.sh DIES on a member that yields no outbound (it is how the
+			// ShadowTLS pair is refused), and both are pinned byte-for-byte by aggregate_*_go_equiv.sh.
+			// Turning "cannot render" into "silently drop" is a design change across two producers and
+			// their equivalence gates, not a patch. Tracked; the node's own subscription renderer already
+			// excludes xhttp-tls, so no client-facing path is affected today.
+			//
+			// What IS fixed: OutboundSkipReason names it, and the single-link CLI verb refuses instead of
+			// handing back a config nothing can load.
 			ob.Transport = &aggTransport{Type: "xhttp", Path: qd(q, "path", "/")}
 		case "ws":
 			ob.Transport = &aggTransport{Type: "ws", Path: qd(q, "path", "/ws"),
