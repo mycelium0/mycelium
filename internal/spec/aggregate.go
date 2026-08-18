@@ -7,10 +7,12 @@ package spec
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+
+	"encoding/json"
 )
 
 // OutboundFromLink parses an opaque client share-link (the same schemes ShareLink emits — vless://,
