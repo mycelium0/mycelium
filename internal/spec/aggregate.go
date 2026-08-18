@@ -432,7 +432,6 @@ func RenderAggregateReport(inputs []AggregateInput) ([]byte, AggregateReport, er
 				dropped = append(dropped, fmt.Sprintf("%s/%s (ShadowTLS: the share-link carries only the inner material, not the v3 handshake — render it from `subscription`, which has the params)", safe, shortTag))
 				continue
 			}
-			}
 			// xhttp is an Xray-only carrier (ADR-0032): sing-box has no such transport, and an outbound
 			// carrying one makes it reject the WHOLE profile — so including it would cost the client every
 			// other node in the fold. Dropped for the same reason and with the same accounting.
