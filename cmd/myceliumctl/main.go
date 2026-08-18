@@ -746,13 +746,26 @@ func cmdLinkOutbound(args []string) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("link-outbound: exactly one LINK argument is required")
 	}
+	// ASKED BEFORE RENDERING, because the renderer will happily produce an xhttp outbound — sing-box
+	// cannot load it, and a profile containing one is rejected whole. This verb hands its output straight
+	// to a human or a script, so it must refuse rather than emit something nothing can use.
+	if why := spec.OutboundSkipReason(fs.Arg(0)); why != "" {
+		return fmt.Errorf("link-outbound: %q: %s", *tag, why)
+	}
 	ob, err := spec.OutboundFromLink(*tag, fs.Arg(0))
 	if err != nil {
 		return fmt.Errorf("link-outbound: %w", err)
 	}
 	if ob == nil {
-		fmt.Println("null")
-		return nil
+		// A nil-with-no-error means the link is not representable as ONE sing-box outbound. Printing `null`
+		// at rc=0 handed the caller a JSON null that jq would splice straight into an outbound list, and a
+		// profile with a null in it is one sing-box refuses whole — a silent way to produce an unloadable
+		// config and call it done. Name which of the two cases it is and fail.
+		why := spec.OutboundSkipReason(fs.Arg(0))
+		if why == "" {
+			why = "the link is not representable as a single sing-box outbound"
+		}
+		return fmt.Errorf("link-outbound: %q: %s", *tag, why)
 	}
 	fmt.Println(string(ob))
 	return nil

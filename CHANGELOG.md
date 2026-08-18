@@ -13,6 +13,48 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.94] — 2026-08-19
+
+### Fixed — `link-outbound` handed back configs nothing can load, at rc=0
+
+Found while building the Audit-0013 transport matrix: every per-protocol client config derived through
+this verb failed to load, on every node, with
+
+```
+decode config: outbounds[N].transport: unknown transport type: xhttp
+```
+
+and the verb had reported success for each of them. sing-box has no `xhttp` transport — it is an Xray-only
+carrier (ADR-0032) — and an outbound carrying one makes sing-box reject the **whole** profile, so a single
+un-dialable member costs the client every other member too. The ShadowTLS link had the same shape of
+problem from the other side: the verb printed a bare `null` at rc=0, which jq would splice straight into
+an outbound list, and a profile with a null in it is likewise rejected whole.
+
+`spec.OutboundSkipReason` is the single owner of "why this link must not become a lone sing-box outbound",
+and the verb now asks it **before** rendering and refuses with the cause: the wrong engine, or a pair that
+one outbound cannot express.
+
+**Deliberately NOT changed, and recorded rather than half-fixed.** Both aggregate renderers — Go and shell
+— still emit an xhttp outbound, so a multi-node profile folded from a bundle containing one is unloadable.
+Skipping it there is not a patch: `render_aggregate.sh` **dies** on a member that yields no outbound (that
+is how the ShadowTLS pair is refused), the two producers are pinned byte-for-byte by
+`aggregate_*_go_equiv.sh`, and turning "cannot render" into "silently drop" is a contract change across
+both. The node's own subscription renderer already excludes xhttp-tls, so **no client-facing path is
+affected today** — verified: the served subscription loads, and it contains no xhttp.
+
+### Changed — the equivalence gate now compares meaning where bytes would pin the defect
+
+`aggregate_outbound_go_equiv.sh` compared the two producers byte-for-byte across the whole matrix. For a
+link that must not become an outbound **at all**, that assertion pins the wrong thing: the shell is a
+library call whose caller dies on `null` and must return one, while the Go verb's output goes to a human
+and must refuse with a cause. The gate now requires, for those links, that *neither* producer yields a
+usable outbound — and that Go's refusal names an engine reason rather than failing vaguely.
+
+**The row's first draft failed for the reason this tree keeps rediscovering:** `"$SPINE" … | grep -q`
+under `set -o pipefail` returns the verb's own non-zero — it refused, which is the point — so the pipeline
+reported failure even though grep matched. Capture, then grep. That is the fourth instance of this class
+fixed today.
+
 ## [0.2.93] — 2026-08-17
 
 Everything here was found by the **from-zero drill** — the open item since Audit-0011 — run for the first

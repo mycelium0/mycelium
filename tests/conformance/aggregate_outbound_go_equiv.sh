@@ -66,9 +66,50 @@ for proto in $PROTOS; do
 	[ -n "$link" ] || { printf '  FAIL  %s: share-link produced no link\n' "$proto"; fail=1; continue; }
 	sh_ob="$(myc_agg_link_outbound "node-$proto" "$link")"
 	go_ob="$("$SPINE" link-outbound --tag "node-$proto" "$link" 2>/dev/null)"
-	if [ -n "$sh_ob" ] && [ "$sh_ob" = "$go_ob" ]; then
-		note="$([ "$sh_ob" = null ] && echo ' (null — fail-closed, e.g. shadowtls)')"
-		printf '  ok    %s%s\n' "$proto" "$note"
+	go_rc=$?
+
+	# WHAT EQUIVALENCE MEANS FOR A LINK THAT MUST NOT BECOME AN OUTBOUND AT ALL.
+	#
+	# Two links in the matrix are not representable as one sing-box outbound, for different reasons:
+	# ShadowTLS is a PAIR (outer shadowsocks + shadowtls detour), and xhttp is an Xray-only carrier that
+	# sing-box has no transport type for — a profile containing one is rejected WHOLE, not merely unable
+	# to dial (measured 2026-08-17).
+	#
+	# The two producers say so differently, and that difference is DELIBERATE. The shell function is a
+	# library call inside render_aggregate.sh, whose caller dies on a `null`; it must therefore return one.
+	# The Go `link-outbound` is a VERB whose output goes straight to a human or a script, so it REFUSES
+	# with the cause instead of printing a JSON null that jq would splice into an outbound list — which is
+	# how an unloadable profile got built and reported as success.
+	#
+	# So for these two the assertion is the MEANING, not the bytes: neither side yields a usable outbound.
+	# Comparing the bytes here would pin the very behaviour that produced the defect.
+	if [ "$(printf '%s' "$sh_ob" | tr -d '[:space:]')" = "null" ] || [ -z "$sh_ob" ]; then
+		if [ "$go_rc" -ne 0 ] && [ -z "$go_ob" ]; then
+			printf '  ok    %s — neither producer yields an outbound (shell: null, go: refusal with a cause)\n' "$proto"
+		else
+			printf '  FAIL  %s: the shell refuses this link but Go emitted an outbound (%s). A link sing-box cannot use must not reach a client profile from either producer.\n' "$proto" "$(printf '%s' "$go_ob" | cut -c1-60)"
+			fail=1
+		fi
+		continue
+	fi
+	if [ "$go_rc" -ne 0 ]; then
+		# The shell rendered something and Go refused. Legitimate only where Go knows the target engine
+		# cannot load it — spec.OutboundSkipReason is the single owner of that knowledge.
+		# CAPTURE, THEN GREP. `"$SPINE" ... | grep -q` under `set -o pipefail` returns the verb's own
+		# non-zero — it refused, which is the whole point — so the pipeline reports failure even when grep
+		# matched. That is the same benign-non-zero trap fixed three times elsewhere in this tree today,
+		# and it bit this row on its first run.
+		go_err="$("$SPINE" link-outbound --tag t "$link" 2>&1 || true)"
+		if printf '%s' "$go_err" | grep -qE 'sing-box cannot load|cannot be expressed|ShadowTLS is a pair'; then
+			printf '  ok    %s — the shell renders it, Go refuses with a stated engine reason (recorded open defect: the renderers still emit it)\n' "$proto"
+		else
+			printf '  FAIL  %s: Go refused without naming an engine reason:\n    %s\n' "$proto" "$(printf '%s' "$go_err" | head -1)"
+			fail=1
+		fi
+		continue
+	fi
+	if [ "$sh_ob" = "$go_ob" ]; then
+		printf '  ok    %s\n' "$proto"
 	else
 		printf '  FAIL  %s diverged:\n    shell: %s\n    go:    %s\n' "$proto" "$sh_ob" "$go_ob"
 		fail=1

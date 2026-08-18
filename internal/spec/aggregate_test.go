@@ -7,6 +7,7 @@ package spec
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -66,11 +67,25 @@ func TestShareLinkOutboundRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("OutboundFromLink(%q): %v", d.Proto, err)
 		}
-		if d.Proto == "shadowtls" { // fail-closed null by design
+		// ShadowTLS yields no outbound: it is a PAIR (outer shadowsocks + shadowtls detour) that one
+		// outbound cannot express.
+		if d.Proto == "shadowtls" {
 			if ob != nil {
-				t.Errorf("%q: expected null outbound", d.Proto)
+				t.Errorf("%q: expected no outbound", d.Proto)
+			}
+			if why := OutboundSkipReason(link); why == "" {
+				t.Errorf("%q yields no outbound but OutboundSkipReason says nothing — a caller that must refuse cannot say why", d.Proto)
 			}
 			continue
+		}
+		// xhttp DOES still render here (a recorded open defect — see the case comment in aggregate.go),
+		// and OutboundSkipReason must nonetheless name it, because the single-link CLI verb refuses on
+		// that answer rather than on the renderer's. MEASURED: a sing-box profile containing an xhttp
+		// outbound fails to load ENTIRELY, so this is not a preference.
+		if strings.Contains(link, "type=xhttp") {
+			if why := OutboundSkipReason(link); why == "" {
+				t.Errorf("%q carries xhttp, which sing-box cannot load, and OutboundSkipReason is silent about it — the CLI verb would hand out an unloadable outbound at rc=0", d.Proto)
+			}
 		}
 		var m map[string]any
 		if err := json.Unmarshal(ob, &m); err != nil {
