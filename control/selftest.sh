@@ -773,14 +773,20 @@ jq -e 'any(.outbounds[]; (.tag | startswith("nodeA.")))' "$AGG_OUT" >/dev/null \
 jq -e 'any(.outbounds[]; (.tag | startswith("nodeB.")))' "$AGG_OUT" >/dev/null \
 	&& ok "merge contains outbounds from nodeB" || bad "nodeB outbounds missing from merge"
 
-# Each input node's endpoint count is fully represented in the merged proxies (no endpoint dropped).
-AGG_EP1="$(jq '.endpoints | length' "$AGG_B1")"
-AGG_EP2="$(jq '.endpoints | length' "$AGG_B2")"
+# Every endpoint the CLIENT ENGINE CAN DIAL is represented — the count is endpoints minus the members no
+# sing-box outbound can express (xhttp: not a sing-box transport; ShadowTLS: a pair the share-link does not
+# carry). Those are dropped and named rather than fatal, so "all endpoints became outbounds" is no longer
+# the contract; "nothing dialable was lost" is. Asserting the arithmetic, not just `<=`, keeps this from
+# degrading into a check that cannot fail.
+AGG_UND1="$(jq '[.endpoints[] | select((.link|test("type=xhttp")) or (.link|test("plugin=shadow-tls")))] | length' "$AGG_B1")"
+AGG_UND2="$(jq '[.endpoints[] | select((.link|test("type=xhttp")) or (.link|test("plugin=shadow-tls")))] | length' "$AGG_B2")"
+AGG_EP1="$(( $(jq '.endpoints | length' "$AGG_B1") - AGG_UND1 ))"
+AGG_EP2="$(( $(jq '.endpoints | length' "$AGG_B2") - AGG_UND2 ))"
 AGG_NA="$(jq '[.outbounds[] | select(.tag | startswith("nodeA."))] | length' "$AGG_OUT")"
 AGG_NB="$(jq '[.outbounds[] | select(.tag | startswith("nodeB."))] | length' "$AGG_OUT")"
 [ "$AGG_NA" -eq "$AGG_EP1" ] && [ "$AGG_NB" -eq "$AGG_EP2" ] \
-	&& ok "every endpoint from every node became a merged outbound ($AGG_NA + $AGG_NB)" \
-	|| bad "endpoint->outbound count mismatch (nodeA $AGG_NA/$AGG_EP1, nodeB $AGG_NB/$AGG_EP2)"
+	&& ok "every dialable endpoint became a merged outbound ($AGG_NA + $AGG_NB; $((AGG_UND1 + AGG_UND2)) undialable dropped)" \
+	|| bad "endpoint->outbound count mismatch (nodeA $AGG_NA/$AGG_EP1, nodeB $AGG_NB/$AGG_EP2, after excluding $((AGG_UND1 + AGG_UND2)) undialable)"
 
 # Tags are NAMESPACED (prefixed) and UNIQUE across nodes — the whole point of namespacing is that
 # the same protocol on two nodes never collides.
@@ -864,8 +870,10 @@ fi
 # subscription path emits a `shadowtls` (version:3) handshake outbound with the inner SS detouring
 # through it; the aggregate cannot rebuild that detour from the Link alone. Silently emitting a bare
 # `shadowsocks` outbound (dialing the handshake port as plain SS with the wrong credential) is the N1
-# functional break. The aggregate MUST refuse such a bundle fail-closed instead. This fixture
-# explicitly ENABLES shadowtls so the lossy path is exercised — it can never false-green again.
+# functional break, and it is still forbidden. What CHANGED (measured 2026-08-19 on two live nodes, both
+# serving ShadowTLS): refusing the whole fold made every real pair of nodes unaggregatable, so the member
+# is now dropped and NAMED while the rest of the network survives. This fixture explicitly ENABLES
+# shadowtls so the lossy path is exercised — it can never false-green again.
 AGG_STLS_PARAMS="$WORK/agg.params-shadowtls.json"
 AGG_STLS_BUNDLE="$WORK/agg.bundle-shadowtls.json"
 jq '.node_address = "nodec.example.invalid" | .region_bucket = "bucket-charlie" | .shadowtls_enabled = true' "$SB_PARAMS" > "$AGG_STLS_PARAMS"
@@ -874,18 +882,25 @@ jq '.node_address = "nodec.example.invalid" | .region_bucket = "bucket-charlie" 
 # refusal below is exercising the real lossy transport, not a no-op).
 jq -e 'any(.endpoints[]; .transport_class == "shadowtls-tcp" and (.link | contains("plugin=shadow-tls")))' "$AGG_STLS_BUNDLE" >/dev/null \
 	&& ok "shadowtls fixture bundle carries a plugin=shadow-tls endpoint (lossy path present)" || bad "shadowtls fixture bundle has no plugin=shadow-tls endpoint"
-# The decisive N1 assertion: merging a shadowtls-bearing bundle is REFUSED (no broken outbound).
+# The decisive N1 assertion: the ShadowTLS member never becomes an outbound — and the OTHER node in the
+# fold is not punished for it.
 AGG_STLS_OUT="$WORK/agg.shadowtls.json"; rm -f "$AGG_STLS_OUT"
-if "$CTL" aggregate --bundle "$AGG_STLS_BUNDLE" --name nodeC --bundle "$AGG_B1" --name nodeD --out "$AGG_STLS_OUT" >/dev/null 2>&1 && [ -s "$AGG_STLS_OUT" ]; then
-	# It must NOT have produced a profile; if it did, prove the break: a bare-SS shadowtls outbound
-	# (no shadowtls type, no detour) would be the non-dialable N1 artifact.
+AGG_STLS_ERR="$WORK/agg.shadowtls.err"
+if "$CTL" aggregate --bundle "$AGG_STLS_BUNDLE" --name nodeC --bundle "$AGG_B1" --name nodeD --out "$AGG_STLS_OUT" >/dev/null 2>"$AGG_STLS_ERR" && [ -s "$AGG_STLS_OUT" ]; then
+	ok "aggregate folds a ShadowTLS-bearing bundle instead of refusing the whole network"
 	if jq -e 'any(.outbounds[]; (.tag | endswith(".shadowtls")) and .type == "shadowsocks" and (has("detour") | not))' "$AGG_STLS_OUT" >/dev/null 2>&1; then
 		bad "aggregate emitted a NON-DIALABLE bare-Shadowsocks outbound for a ShadowTLS endpoint (N1 functional break)"
 	else
-		bad "aggregate accepted a ShadowTLS-bearing bundle (must fail closed: its Link is non-reconstructible)"
+		ok "and the ShadowTLS member is absent, not rebuilt as a bare-SS outbound (N1 stays closed)"
 	fi
+	jq -e 'any(.outbounds[]; .tag | startswith("nodeD."))' "$AGG_STLS_OUT" >/dev/null 2>&1 \
+		&& ok "the other node survives the drop (one unrepresentable member costs that member only)" \
+		|| bad "dropping the ShadowTLS member also lost nodeD — the whole point is that it must not"
+	grep -qi 'shadowtls\|shadow-tls' "$AGG_STLS_ERR" \
+		&& ok "and the drop is named to the operator (silent truncation is the worse failure)" \
+		|| bad "the ShadowTLS member was dropped without a word: $(tr -d '\n' < "$AGG_STLS_ERR" | cut -c1-160)"
 else
-	ok "aggregate refuses a ShadowTLS-bearing bundle fail-closed (N1: Link non-reconstructible, no broken bare-SS outbound)"
+	bad "aggregate REFUSED a ShadowTLS-bearing bundle. Measured on two live nodes: both serve ShadowTLS, so a fold that dies on it can never produce a multi-node profile at all. The member must be dropped and named; fail-closed belongs on the result (the RP-0013 family floor), not on the input."
 fi
 
 # ---------------------------------------------------------------------------
@@ -903,27 +918,29 @@ C07_PARAMS_B="$WORK/c07.paramsB.json"
 C07_BUNDLE_A="$WORK/c07.bundleA.json"
 C07_BUNDLE_B="$WORK/c07.bundleB.json"
 C07_MERGED="$WORK/c07.merged.json"
-# Enable ONLY the reality-xhttp family (carries the path), shadowtls off (non-aggregatable), so the
-# merge succeeds and the path is the value under test. Two distinct node addresses + labels.
+# The member under test must carry a path AND survive the fold, so this uses ws-tls rather than an xhttp
+# family: xhttp is dropped from a client profile (sing-box has no such transport), and a fold of nothing
+# but xhttp + one other family would then fall below the RP-0013 floor and be refused — the round-trip
+# would never be reached. reality-vision supplies the second independent family. Two distinct addresses.
 jq --arg p "$C07_ADV_PATH" '
 	{ engine, node_address: "c07a.example.invalid", region_bucket: "bucket-c07a",
 	  reality_private_key, reality_public_key, short_ids, donor_sni, donor_host,
-	  tls_sni, grpc_service_name, xhttp_path: $p,
-	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096,
-	  hysteria2_enabled: true, hysteria2_port: 8444, hysteria2_password: "x" }
+	  tls_sni, grpc_service_name, ws_path: $p,
+	  vless_ws_tls_enabled: true, vless_ws_tls_port: 8443,
+	  vless_reality_vision_enabled: true, vless_reality_vision_port: 443 }
 ' "$SB_PARAMS" > "$C07_PARAMS_A"
 jq --arg p "$C07_ADV_PATH" '
 	{ engine, node_address: "c07b.example.invalid", region_bucket: "bucket-c07b",
 	  reality_private_key, reality_public_key, short_ids, donor_sni, donor_host,
-	  tls_sni, grpc_service_name, xhttp_path: $p,
-	  vless_reality_xhttp_enabled: true, vless_reality_xhttp_port: 2096,
-	  hysteria2_enabled: true, hysteria2_port: 8444, hysteria2_password: "x" }
+	  tls_sni, grpc_service_name, ws_path: $p,
+	  vless_ws_tls_enabled: true, vless_ws_tls_port: 8443,
+	  vless_reality_vision_enabled: true, vless_reality_vision_port: 443 }
 ' "$SB_PARAMS" > "$C07_PARAMS_B"
 "$CTL" bundle --params "$C07_PARAMS_A" --state "$STATE" --out "$C07_BUNDLE_A" 2>/dev/null
 "$CTL" bundle --params "$C07_PARAMS_B" --state "$STATE" --out "$C07_BUNDLE_B" 2>/dev/null
 # The Link must be percent-encoded by the producer: the raw '?' / '#' / '&' MUST NOT appear inside the
 # query (the path value is encoded). Assert the encoded form is present (proves @uri ran).
-if jq -e '.endpoints[] | select(.transport_class=="reality-tcp") | .link | contains("path=%2Fapi%3Fx%3D1")' "$C07_BUNDLE_A" >/dev/null 2>&1; then
+if jq -e '.endpoints[] | select(.transport_class=="ws-tls") | .link | contains("path=%2Fapi%3Fx%3D1")' "$C07_BUNDLE_A" >/dev/null 2>&1; then
 	ok "C07 producer percent-encodes the adversarial path in the Link (@uri)"
 else
 	bad "C07 producer did NOT percent-encode the adversarial path (raw delimiters would shift query boundaries)"
@@ -932,7 +949,7 @@ fi
 jq -e . "$C07_MERGED" >/dev/null && ok "C07 merged profile is valid JSON" || bad "C07 merged profile invalid"
 # The decisive round-trip: the consumer must decode the path back to the EXACT original (delimiters and
 # all). If percent-encoding or decoding were missing/asymmetric, this would differ.
-C07_GOT="$(jq -r '.outbounds[] | select(.tag=="c07a.vless-reality-xhttp") | .transport.path' "$C07_MERGED" 2>/dev/null)"
+C07_GOT="$(jq -r '.outbounds[] | select(.tag=="c07a.vless-ws-tls") | .transport.path' "$C07_MERGED" 2>/dev/null)"
 if [ "$C07_GOT" = "$C07_ADV_PATH" ]; then
 	ok "C07 round-trip: adversarial path survives bundle->aggregate EXACTLY ('$C07_GOT')"
 else

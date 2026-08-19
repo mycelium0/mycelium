@@ -13,6 +13,53 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.95] — 2026-08-19
+
+### Fixed — `aggregate` refused every real pair of nodes in the population
+
+Measured against two live nodes: the fold died on the first ShadowTLS endpoint, before xhttp even
+mattered. Both nodes serve ShadowTLS, so the multi-node client profile this verb exists to produce could
+not be built from **any** pair of real nodes.
+
+Each refusal was individually correct. An `ss://` ShadowTLS share-link carries only the **inner**
+shadowsocks material, not the v3 handshake password/version, so an outbound rebuilt from it dials a
+ShadowTLS listener with the wrong credential. sing-box has no `xhttp` transport, so one such outbound
+makes it reject the whole config. What was wrong is that each was **fatal to the entire fold**: one
+member the client cannot represent took every other node down with it.
+
+A network is heterogeneous by design — nodes offer different channels to clients and reach each other
+over different ones again. An aggregate that only works when every member happens to be representable
+does not work.
+
+So the undialable member is now **dropped and named**, on both producers, and the fail-closed line moves
+to the **result**: what survives must still clear the RP-0013 independent-family floor, or the fold is
+refused with the shortfall stated. Dropping a member the client cannot dial is safe; handing back a
+single-family profile is not — one block would then take the client's last path.
+
+Two things surfaced while fixing it. The Go verb called `RenderAggregate`, which discards the report, so
+it would have dropped members **silently** — the worse half of this trade, since the operator would hand
+out a profile believing it covered a transport it does not; it now warns per member. And the per-node log
+said "merged 7 endpoint(s)" while five landed, which is a component reporting on something other than
+what it did; it now says merged N **of** M.
+
+**This corrects a claim made in 0.2.94.** That entry recorded the aggregate xhttp defect as deliberately
+not fixed, on the reasoning that "no client-facing path is affected today" because the node's own
+subscription excludes xhttp. The multi-node aggregate *is* a client-facing path, and it was not merely
+degraded — it produced nothing at all. The check that would have caught it is the one that was not run:
+fold two real bundles and load the result.
+
+**Measured after the fix, two real node bundles, both producers:** 10 outbounds, 0 xhttp, 3 independent
+families, `sing-box check` accepts, identical tag sets. Before: refused outright.
+
+**Left open, and it is a capability gap rather than a defect:** a link-only consumer can never offer
+ShadowTLS, because the share-link format does not carry the v3 handshake material. A multi-node profile
+therefore lacks ShadowTLS for every node in it. The drop message points the operator at `subscription`,
+which renders from params and has what the link does not.
+
+Gate: `aggregate_tolerates_heterogeneity.sh` drives the shipped producer over rendered bundles carrying
+both undialable shapes, asserting the fixture actually contains them first so it cannot pass vacuously.
+Red on the pre-fix tree (3 rows).
+
 ## [0.2.94] — 2026-08-19
 
 ### Fixed — `link-outbound` handed back configs nothing can load, at rc=0

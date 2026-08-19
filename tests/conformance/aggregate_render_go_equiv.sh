@@ -44,7 +44,9 @@ fi
 STATE="$WORK/identities.json"
 jq -n '{ version:1, clients:[ { name:"alice", id:"a1b2c3d4-e5f6-7890-abcd-ef0123456789", created:"2026-01-01T00:00:00Z", password:"idpw/1" } ] }' > "$STATE"
 
-# Node A: most link-bearing transports (NOT shadowtls — the aggregate fails closed on it, by design);
+# Node A: most link-bearing transports. ShadowTLS is deliberately NOT here: it is now dropped-and-named
+# rather than fatal, and the drop path has its own gate (aggregate_tolerates_heterogeneity.sh). This
+# fixture stays on the members that must survive BYTE-identically through both folds;
 # reserved chars in the paths/passwords stress the encode->parse->decode round-trip through both folds.
 jq -n '{
 	node_address:"nodeA.example.invalid", donor_host:"www.example.invalid", donor_sni:"www.example.invalid",

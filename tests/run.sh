@@ -70,6 +70,11 @@
 #                               is BYTE-IDENTICAL to the shell aggregate producer: two per-node bundles
 #                               folded into one client sing-box profile (namespaced outbounds + urltest +
 #                               selector), raw byte-diff (no timestamp) (RP-0008 P3-c). SKIPs without Go
+#   * aggregate_tolerates_heterogeneity.sh — a member the client engine cannot dial (ShadowTLS share-link,
+#                               xhttp transport) costs THAT MEMBER, not the other nodes: the fold succeeds,
+#                               names what it dropped, and fail-closed moves to the RESULT — the survivors
+#                               must still clear the RP-0013 independent-family floor. Drives the producer
+#                               over rendered bundles; red on the pre-fix tree
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -321,6 +326,7 @@ GATES=(
 	"tests/conformance/bundle_render_go_equiv.sh"
 	"tests/conformance/aggregate_outbound_go_equiv.sh"
 	"tests/conformance/aggregate_render_go_equiv.sh"
+	"tests/conformance/aggregate_tolerates_heterogeneity.sh"
 	"tests/conformance/subscription_go_equiv.sh"
 	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/client_server_credential_agreement.sh"

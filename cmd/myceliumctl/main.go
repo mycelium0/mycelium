@@ -828,9 +828,19 @@ func cmdAggregate(args []string) error {
 		}
 		inputs = append(inputs, spec.AggregateInput{Bundle: b, Label: labels[i]})
 	}
-	profile, err := spec.RenderAggregate(inputs)
+	// Report, not RenderAggregate: a member the client engine cannot dial is dropped rather than fatal,
+	// and a drop nobody is told about is the worse of the two failures — the operator hands out a profile
+	// believing it covers a transport it does not. The shell producer warns per member; so does this.
+	profile, report, err := spec.RenderAggregateReport(inputs)
 	if err != nil {
 		return fmt.Errorf("aggregate: %w", err)
+	}
+	for _, d := range report.Dropped {
+		fmt.Fprintf(os.Stderr, "myceliumctl: warning: aggregate: dropping %s\n", d)
+	}
+	if len(report.Dropped) > 0 {
+		fmt.Fprintf(os.Stderr, "myceliumctl: warning: aggregate: folded profile omits %d member(s); the surviving set spans %d independent family/families (%s)\n",
+			len(report.Dropped), len(report.Families), strings.Join(report.Families, " "))
 	}
 	if out == "-" {
 		_, err = os.Stdout.Write(profile)

@@ -7,10 +7,12 @@ package spec
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+
+	"encoding/json"
 )
 
 // OutboundFromLink parses an opaque client share-link (the same schemes ShareLink emits — vless://,
@@ -44,9 +46,10 @@ func OutboundFromLink(tag, link string) (json.RawMessage, error) {
 //     reject the WHOLE profile, so it is worse than useless in a client config.
 //   - ShadowTLS: a PAIR (outer shadowsocks + shadowtls detour) that one outbound cannot express.
 //
-// Exported because the single-link CLI verb must REFUSE with a cause an operator can act on. The aggregate
-// renderers still emit xhttp — see the note at its case — which is a recorded open defect, not a use of
-// this function.
+// Exported because two callers need the same answer for different ends: the single-link CLI verb REFUSES
+// with a cause an operator can act on, and the aggregate fold DROPS the member and names it. The fold does
+// not refuse — a network is heterogeneous by design, so one member the client cannot represent must cost
+// that member, not the other nodes; the fail-closed line sits on the result (the RP-0013 family floor).
 func OutboundSkipReason(link string) string {
 	main := uriBefore(link, "#")
 	scheme := uriBefore(main, "://")
@@ -363,12 +366,32 @@ const (
 // "mycelium" (default "auto"), then direct + block. LOCAL-only, pure (no network). Fail-closed throughout:
 // ASCII labels only, unique labels, a recognised scheme consistent with the declared transport_class, a
 // ShadowTLS link refused, port in 1..65535. Byte-identical to the shell (aggregate_render_go_equiv pins it).
+// AggregateReport is what a fold could not represent, and what survived. Returned alongside the profile so
+// a caller can TELL the operator which members were left out — a client quietly missing a transport it was
+// told it had is precisely the defect class this project exists to remove.
+type AggregateReport struct {
+	Dropped  []string // "node/tag (why)" for each member this fold could not represent
+	Families []string // the distinct block families the surviving profile spans
+}
+
+// RenderAggregate folds >=2 bundles into one client profile. Kept for callers that do not need the report.
 func RenderAggregate(inputs []AggregateInput) ([]byte, error) {
+	out, _, err := RenderAggregateReport(inputs)
+	return out, err
+}
+
+// RenderAggregateReport is RenderAggregate plus what it had to leave out.
+func RenderAggregateReport(inputs []AggregateInput) ([]byte, AggregateReport, error) {
 	if len(inputs) < 2 {
-		return nil, fmt.Errorf("aggregate: need >=2 --bundle inputs to merge (got %d); a single node already has its own subscription", len(inputs))
+		return nil, AggregateReport{}, fmt.Errorf("aggregate: need >=2 --bundle inputs to merge (got %d); a single node already has its own subscription", len(inputs))
 	}
 	var proxies []any
 	var tags []string
+	// Members this fold could not represent for the target client engine. Collected rather than fatal —
+	// see the ShadowTLS note below — and reported, because a client silently missing a transport it was
+	// told it had is the defect this project spends its time removing.
+	var dropped []string
+	famSeen := map[string]struct{}{}
 	seen := map[string]bool{}
 	for idx := range inputs {
 		label := inputs[idx].Label
@@ -376,14 +399,14 @@ func RenderAggregate(inputs []AggregateInput) ([]byte, error) {
 		if strings.IndexFunc(label, func(r rune) bool {
 			return !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-')
 		}) >= 0 {
-			return nil, fmt.Errorf("aggregate: node label %q contains a character outside the ASCII whitelist [A-Za-z0-9._-] — non-ASCII/whitespace labels are refused (homoglyph tag-collision risk). Use an ASCII --name", label)
+			return nil, AggregateReport{}, fmt.Errorf("aggregate: node label %q contains a character outside the ASCII whitelist [A-Za-z0-9._-] — non-ASCII/whitespace labels are refused (homoglyph tag-collision risk). Use an ASCII --name", label)
 		}
 		safe := label
 		if safe == "" {
 			safe = fmt.Sprintf("node%d", idx+1)
 		}
 		if seen[safe] {
-			return nil, fmt.Errorf("aggregate: duplicate node label %q — every --name must be unique so tags never collide across nodes", safe)
+			return nil, AggregateReport{}, fmt.Errorf("aggregate: duplicate node label %q — every --name must be unique so tags never collide across nodes", safe)
 		}
 		seen[safe] = true
 		for _, ep := range inputs[idx].Bundle.Endpoints {
@@ -393,31 +416,71 @@ func RenderAggregate(inputs []AggregateInput) ([]byte, error) {
 			}
 			nsTag := safe + "." + shortTag
 			link := ep.Link
+			// DROPPED, not fatal. The refusal itself is right: an ss:// ShadowTLS link carries only the
+			// INNER shadowsocks material (method:password + masquerade SNI) and NOT the v3 handshake
+			// password or version, so the pair the subscription renderer emits cannot be reconstructed
+			// from the link alone — and a bare SS outbound would dial the ShadowTLS port with the wrong
+			// credential. What was wrong is that it killed the WHOLE fold.
+			//
+			// A fungi network is heterogeneous BY DESIGN: different nodes offer different transports, and
+			// the point of an aggregate is to hand one client several nodes. Under the old contract a
+			// single node serving ShadowTLS made the entire multi-node profile unbuildable — measured
+			// 2026-08-19 on two live nodes, where `aggregate` refused outright and produced nothing.
+			// One member the client cannot dial must cost that member, never the other nodes.
+			//
+			// The fail-closed line moves to where it belongs: what SURVIVES must still clear the RP-0013
+			// independent-family floor (checked after the loop). Dropping is safe; leaving a client with
+			// one family is not.
 			if strings.Contains(link, "plugin=shadow-tls") {
-				return nil, fmt.Errorf("aggregate: endpoint link is a ShadowTLS share-link (node %q, tag %q) which cannot be reconstructed into a dialable client outbound from its Link alone (the v3 handshake password/version are not in the Link)", safe, ep.Tag)
+				dropped = append(dropped, fmt.Sprintf("%s/%s (ShadowTLS: the share-link carries only the inner material, not the v3 handshake — render it from `subscription`, which has the params)", safe, shortTag))
+				continue
+			}
+			// xhttp is an Xray-only carrier (ADR-0032): sing-box has no such transport, and an outbound
+			// carrying one makes it reject the WHOLE profile — so including it would cost the client every
+			// other node in the fold. Dropped for the same reason and with the same accounting.
+			if OutboundSkipReason(link) != "" && !strings.Contains(link, "plugin=shadow-tls") {
+				dropped = append(dropped, fmt.Sprintf("%s/%s (%s)", safe, shortTag, OutboundSkipReason(link)))
+				continue
 			}
 			scheme := uriBefore(link, "://")
 			if !aggSchemeClassOK(scheme, string(ep.TransportClass)) {
 				switch scheme {
 				case "vless", "hysteria2", "tuic", "ss", "trojan":
-					return nil, fmt.Errorf("aggregate: endpoint scheme %q is inconsistent with its declared transport_class %q (node %q, tag %q) — the Link protocol and the typed family disagree", scheme, ep.TransportClass, safe, ep.Tag)
+					return nil, AggregateReport{}, fmt.Errorf("aggregate: endpoint scheme %q is inconsistent with its declared transport_class %q (node %q, tag %q) — the Link protocol and the typed family disagree", scheme, ep.TransportClass, safe, ep.Tag)
 				default:
-					return nil, fmt.Errorf("aggregate: endpoint link has an unrecognised scheme %q (node %q, tag %q) — expected one of vless/hysteria2/tuic/ss/trojan", scheme, safe, ep.Tag)
+					return nil, AggregateReport{}, fmt.Errorf("aggregate: endpoint link has an unrecognised scheme %q (node %q, tag %q) — expected one of vless/hysteria2/tuic/ss/trojan", scheme, safe, ep.Tag)
 				}
 			}
 			ob, err := outboundValue(nsTag, link)
 			if err != nil || ob == nil {
-				return nil, fmt.Errorf("aggregate: could not parse endpoint link into a client outbound (node %q, tag %q)", safe, ep.Tag)
+				return nil, AggregateReport{}, fmt.Errorf("aggregate: could not parse endpoint link into a client outbound (node %q, tag %q)", safe, ep.Tag)
 			}
 			if port := aggOutboundPort(ob); port < 1 || port > 65535 {
-				return nil, fmt.Errorf("aggregate: endpoint link port %d out of range 1..65535 (node %q, tag %q)", port, safe, ep.Tag)
+				return nil, AggregateReport{}, fmt.Errorf("aggregate: endpoint link port %d out of range 1..65535 (node %q, tag %q)", port, safe, ep.Tag)
 			}
 			proxies = append(proxies, ob)
 			tags = append(tags, nsTag)
+			if fam, ok := BlockFamilyForProto(shortTag); ok {
+				famSeen[fam] = struct{}{}
+			}
 		}
 	}
 	if len(proxies) == 0 {
-		return nil, fmt.Errorf("aggregate: produced zero outbounds (no endpoints across the inputs)")
+		return nil, AggregateReport{}, fmt.Errorf("aggregate: produced zero outbounds across %d input bundle(s). Dropped: %s", len(inputs), strings.Join(dropped, "; "))
+	}
+	// THE FAIL-CLOSED LINE, moved to where it belongs. Dropping a member the client engine cannot dial is
+	// safe; handing back a profile whose survivors span fewer than RP-0013's independent families is not —
+	// one block then takes the client's last path, which is the whole reason the floor exists. This is the
+	// check that replaces "every member must render", and it judges the RESULT rather than the inputs.
+	fams := make([]string, 0, len(famSeen))
+	for f := range famSeen {
+		fams = append(fams, f)
+	}
+	sort.Strings(fams)
+	if len(fams) < IndependentFamilyFloor {
+		return nil, AggregateReport{Dropped: dropped, Families: fams},
+			fmt.Errorf("aggregate: the folded profile spans %d independent family/families (%s), floor is %d (RP-0013) — a client blocked on one would have nowhere left. Dropped: %s",
+				len(fams), strings.Join(fams, " "), IndependentFamilyFloor, strings.Join(dropped, "; "))
 	}
 	outbounds := make([]any, 0, len(proxies)+4)
 	outbounds = append(outbounds, proxies...)
@@ -433,9 +496,9 @@ func RenderAggregate(inputs []AggregateInput) ([]byte, error) {
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(aggProfile{Outbounds: outbounds}); err != nil {
-		return nil, err
+		return nil, AggregateReport{}, err
 	}
-	return buf.Bytes(), nil
+	return buf.Bytes(), AggregateReport{Dropped: dropped, Families: fams}, nil
 }
 
 // aggSchemeClassOK reports whether a share-link scheme is consistent with the endpoint's declared
