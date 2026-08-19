@@ -56,6 +56,50 @@ myc_agg_assert_bundle() {
 		|| myc_die "aggregate: input bundle ($label) has a malformed endpoint (each needs tag/transport_class/region/priority/health/link, link non-empty): $file"
 }
 
+# myc_agg_jq_uri_defs — the ONE shell-side URI grammar: the jq defs that split a share-link into
+# scheme / authority / query and percent-decode a value. Emitted here and interpolated into every jq
+# program in this file rather than retyped, because two hand-kept copies of a parser is how a producer
+# and its own re-parser come to disagree about the same link (C07). Its Go twin is uriBefore/uriAfter/
+# uriDecode/parseQuery in internal/spec/aggregate.go; the *_go_equiv gates pin the pair.
+myc_agg_jq_uri_defs() {
+	cat <<'JQDEFS'
+def after($sep): if (. | contains($sep)) then (./ $sep)[1:] | join($sep) else "" end;
+def before($sep): (./ $sep)[0];
+def hexval: {"0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
+             "a":10,"b":11,"c":12,"d":13,"e":14,"f":15,
+             "A":10,"B":11,"C":12,"D":13,"E":14,"F":15}[.];
+def urldecode:
+	(. // "") as $s
+	| if ($s | contains("%") | not) then $s
+	else
+		($s | split("%")) as $parts
+		| ($parts[0]) +
+		  ( $parts[1:]
+			| map(
+				if (test("^[0-9A-Fa-f]{2}")) then
+					( ((.[0:1] | hexval) * 16) + (.[1:2] | hexval) ) as $code
+					| ([$code] | implode) + .[2:]
+				else
+					# not a valid %XX escape — keep the stray % literal (defensive)
+					"%" + .
+				end
+			)
+			| join("")
+		  )
+	end;
+# parse "k=v&k2=v2" into an object {k: <decoded v>,...}. Keys are producer-controlled literals
+# (never encoded), so only the VALUE is percent-decoded. An empty value (k=) is preserved so the
+# parser and producer agree on the param set (C26: do not silently drop empty query params).
+def query_to_obj:
+	if (. == "") then {}
+	else
+		split("&")
+		| map(select(length > 0) | { (before("=")): (after("=") | urldecode) })
+		| add // {}
+	end;
+JQDEFS
+}
+
 # ---------------------------------------------------------------------------
 # Link -> sing-box client outbound
 # ---------------------------------------------------------------------------
@@ -70,148 +114,152 @@ myc_agg_assert_bundle() {
 # Every value flows through --arg, so nothing from the link is ever interpreted as shell or jq.
 # An unrecognised scheme yields empty (the caller fails closed).
 myc_agg_link_outbound() {
-	local tag link fpvocab
+	local tag link fpvocab prog
 	tag="$1"; link="$2"
 	fpvocab="$(myc_fp_vocab)"   # Audit-0008 S2-4: closed client-fp vocab for the in-jq normfp (below).
-	jq -nc --arg tag "$tag" --arg link "$link" --argjson fpvocab "$fpvocab" '
-		# --- pure-jq URI parsing helpers (operate only on the passed string) ---
-		def after($sep): if (. | contains($sep)) then (./ $sep)[1:] | join($sep) else "" end;
-		def before($sep): (./ $sep)[0];
-		# normfp — Audit-0008 S2-4: the byte-twin of Go spec.NormalizeClientFingerprint. A share-link fp
-		# that is a member of the closed vocab ($fpvocab) passes through; an absent/empty/unknown value
-		# resolves to "chrome" (DefaultClientFingerprint). Keeps a hand-edited or foreign Link from
-		# splicing an invalid uTLS token into the merged client profile (fail-serve / distinguishable).
-		def normfp: . as $f | if ($f != "" and ($fpvocab | index($f)) != null) then $f else "chrome" end;
-		# C07: percent-decode one URI component (the inverse of render_bundle.sh @uri). jq has no
-		# built-in URI-decode, so decode %XX byte-by-byte: split on "%", keep the first chunk literal,
-		# and for every following chunk turn its leading two hex digits into the byte they encode and
-		# keep the rest of the chunk literal. Producer and parser thus agree on every value exactly —
-		# a value like "/api?x=1#frag" survives encode->splice->parse->decode unchanged (C07 round-trip).
-		# (jq tonumber does not parse hex, so the two hex digits are converted via an explicit nibble map.)
-		def hexval: {"0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
-		             "a":10,"b":11,"c":12,"d":13,"e":14,"f":15,
-		             "A":10,"B":11,"C":12,"D":13,"E":14,"F":15}[.];
-		def urldecode:
-			(. // "") as $s
-			| if ($s | contains("%") | not) then $s
-			else
-				($s | split("%")) as $parts
-				| ($parts[0]) +
-				  ( $parts[1:]
-					| map(
-						if (test("^[0-9A-Fa-f]{2}")) then
-							( ((.[0:1] | hexval) * 16) + (.[1:2] | hexval) ) as $code
-							| ([$code] | implode) + .[2:]
-						else
-							# not a valid %XX escape — keep the stray % literal (defensive)
-							"%" + .
-						end
-					)
-					| join("")
-				  )
-			end;
-		# parse "k=v&k2=v2" into an object {k: <decoded v>,...}. Keys are producer-controlled literals
-		# (never encoded), so only the VALUE is percent-decoded. An empty value (k=) is preserved so the
-		# parser and producer agree on the param set (C26: do not silently drop empty query params).
-		def query_to_obj:
-			if (. == "") then {}
-			else
-				split("&")
-				| map(select(length > 0) | { (before("=")): (after("=") | urldecode) })
-				| add // {}
-			end;
+	# The URI grammar is NOT retyped here: it comes from myc_agg_jq_uri_defs, the one owner, so this
+	# parser and myc_agg_outbound_skip_reason can never disagree about the same link. The rest of the
+	# program is a QUOTED heredoc, so nothing in it is expanded by the shell before jq sees it.
+	prog="$(myc_agg_jq_uri_defs)
+$(cat <<'JQPROG'
+	# --- pure-jq URI parsing helpers (operate only on the passed string) ---
+	# normfp — Audit-0008 S2-4: the byte-twin of Go spec.NormalizeClientFingerprint. A share-link fp
+	# that is a member of the closed vocab ($fpvocab) passes through; an absent/empty/unknown value
+	# resolves to "chrome" (DefaultClientFingerprint). Keeps a hand-edited or foreign Link from
+	# splicing an invalid uTLS token into the merged client profile (fail-serve / distinguishable).
+	def normfp: . as $f | if ($f != "" and ($fpvocab | index($f)) != null) then $f else "chrome" end;
+	# C07: percent-decode one URI component (the inverse of render_bundle.sh @uri). jq has no
+	# built-in URI-decode, so decode %XX byte-by-byte: split on "%", keep the first chunk literal,
+	# and for every following chunk turn its leading two hex digits into the byte they encode and
+	# keep the rest of the chunk literal. Producer and parser thus agree on every value exactly —
+	# a value like "/api?x=1#frag" survives encode->splice->parse->decode unchanged (C07 round-trip).
+	# (jq tonumber does not parse hex, so the two hex digits are converted via an explicit nibble map.)
 
-		($link | before("#")) as $main         # everything before the fragment
-		| ($main | before("://")) as $scheme    # uri scheme
-		| ($main | after("://")) as $rest        # userinfo@host:port[?query]
-		| ($rest | before("?")) as $authority    # userinfo@host:port
-		| ($rest | after("?")  | query_to_obj) as $q
-		# C07: $userinfo / $host are percent-decoded AFTER the structural split. The producer encodes
-		# every reserved char (@, :, etc.) inside a value, so splitting on the literal @/: delimiters is
-		# safe; we decode the extracted token back to its true value here.
-		| ($authority | (if contains("@") then before("@") else "" end)) as $userinfo_raw
-		| ($authority | (if contains("@") then after("@") else . end)) as $hostport
-		# host:port — split on the first colon. C28 DECISION (Phase-1, recorded): IPv6 literals are
-		# UNSUPPORTED here on purpose — Mycelium Links carry hostnames (node_address), never a bare
-		# "[::1]:443" authority, so bracket-aware splitting is deliberately out of scope for Phase-1. A
-		# bracketed IPv6 authority would mis-split; if a future phase emits IPv6-literal Links this must
-		# grow bracket handling. Until then this is the explicit accepted limitation, not an oversight.
-		| ($hostport | before(":")) as $host_raw
-		| ($hostport | after(":")) as $portstr
-		| ($host_raw | urldecode) as $host
-		| ($userinfo_raw | urldecode) as $userinfo
-		| ($portstr | tonumber? // 0) as $port
-		# build the outbound by scheme (the tls block is inlined per scheme below)
-		| (
-			if $scheme == "vless" then
-				# security=reality -> reality tls; security=tls -> plain own-cert tls.
-				($q.security // "") as $sec
-				| (if $sec == "reality"
-					then { enabled: true, server_name: ($q.sni // ""),
-					       utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
-					       reality: { enabled: true, public_key: ($q.pbk // ""), short_id: ($q.sid // "") } }
-					else { enabled: true, server_name: ($q.sni // ""),
-					       utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
-					       alpn: (($q.alpn // "h2,http/1.1") | split(",")) }
-				end) as $tls
-				| ({ type: "vless", tag: $tag, server: $host, server_port: $port,
-				     uuid: $userinfo, flow: ($q.flow // ""), packet_encoding: "xudp", tls: $tls }
-				  + ( ($q.type // "tcp") as $nt
-				      | if $nt == "grpc" then { transport: { type: "grpc", service_name: ($q.serviceName // "grpc") } }
-				        elif $nt == "xhttp" then { transport: { type: "xhttp", path: ($q.path // "/") } }
-				        elif $nt == "ws" then { transport: { type: "ws", path: ($q.path // "/ws"), headers: { Host: ($q.host // $q.sni // "") } } }
-				        else {} end ))
-			elif $scheme == "hysteria2" then
-				{ type: "hysteria2", tag: $tag, server: $host, server_port: $port,
-				  password: $userinfo,
-				  tls: { enabled: true, server_name: ($q.sni // ""),
-				         # fp-static: QUIC uTLS is a separate handshake axis from the REALITY/TLS client
-				         # fingerprint; hy2/tuic links carry no fp, so RP-0015 client_fingerprint skips it.
-				         utls: { enabled: true, fingerprint: "chrome" },
-				         alpn: (($q.alpn // "h3") | split(",")) } }
-			elif $scheme == "tuic" then
-				# tuic://uuid:password@host:port — split the RAW userinfo on the literal ":" (the producer
-				# percent-encodes any ":" inside either half, so the first ":" is the real delimiter), then
-				# percent-decode each half back to its true value (C07).
-				($userinfo_raw | before(":") | urldecode) as $uuid
-				| ($userinfo_raw | after(":") | urldecode) as $pw
-				| { type: "tuic", tag: $tag, server: $host, server_port: $port,
-				    uuid: $uuid, password: $pw, congestion_control: ($q.congestion_control // "bbr"),
-				    tls: { enabled: true, server_name: ($q.sni // ""),
-				           # fp-static: QUIC uTLS — separate handshake axis (see hysteria2 above).
-				           utls: { enabled: true, fingerprint: "chrome" },
-				           alpn: (($q.alpn // "h3") | split(",")) } }
-			elif $scheme == "ss" then
-				# ss://method:password@host:port  (optionally ?plugin=shadow-tls&sni=...)
-				# FAIL-CLOSED on a ShadowTLS share-link: the ss:// Link carries only the INNER
-				# Shadowsocks material (method:password) + the masquerade SNI. It does NOT carry the
-				# v3 handshake password or version, so the shadowtls+detour outbound the subscription
-				# path emits (render_singbox.sh: a "shadowtls" version:3 handshake outbound that the
-				# inner SS detours through) CANNOT be faithfully reconstructed from the Link alone.
-				# Emitting a bare Shadowsocks outbound here would dial the ShadowTLS handshake port as
-				# plain SS with the wrong (inner) credential, a non-dialable endpoint. Refuse it instead.
-				# (N1: yield null so the fail-closed path in the caller rejects this endpoint loudly.)
-				if (($q.plugin // "") == "shadow-tls") then null
-				else
-					# Split the RAW userinfo on the literal ":" (method is the unreserved cipher name;
-					# the producer percent-encodes any ":" inside the password), then decode each half (C07).
-					($userinfo_raw | before(":") | urldecode) as $method
-					| ($userinfo_raw | after(":") | urldecode) as $pw
-					| { type: "shadowsocks", tag: $tag, server: $host, server_port: $port,
-					    method: $method, password: $pw }
-				end
-			elif $scheme == "trojan" then
-				{ type: "trojan", tag: $tag, server: $host, server_port: $port,
-				  password: $userinfo,
-				  tls: { enabled: true, server_name: ($q.sni // ""),
-				         utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
-				         alpn: (($q.alpn // "h2,http/1.1") | split(",")) } }
+	($link | before("#")) as $main         # everything before the fragment
+	| ($main | before("://")) as $scheme    # uri scheme
+	| ($main | after("://")) as $rest        # userinfo@host:port[?query]
+	| ($rest | before("?")) as $authority    # userinfo@host:port
+	| ($rest | after("?")  | query_to_obj) as $q
+	# C07: $userinfo / $host are percent-decoded AFTER the structural split. The producer encodes
+	# every reserved char (@, :, etc.) inside a value, so splitting on the literal @/: delimiters is
+	# safe; we decode the extracted token back to its true value here.
+	| ($authority | (if contains("@") then before("@") else "" end)) as $userinfo_raw
+	| ($authority | (if contains("@") then after("@") else . end)) as $hostport
+	# host:port — split on the first colon. C28 DECISION (Phase-1, recorded): IPv6 literals are
+	# UNSUPPORTED here on purpose — Mycelium Links carry hostnames (node_address), never a bare
+	# "[::1]:443" authority, so bracket-aware splitting is deliberately out of scope for Phase-1. A
+	# bracketed IPv6 authority would mis-split; if a future phase emits IPv6-literal Links this must
+	# grow bracket handling. Until then this is the explicit accepted limitation, not an oversight.
+	| ($hostport | before(":")) as $host_raw
+	| ($hostport | after(":")) as $portstr
+	| ($host_raw | urldecode) as $host
+	| ($userinfo_raw | urldecode) as $userinfo
+	| ($portstr | tonumber? // 0) as $port
+	# build the outbound by scheme (the tls block is inlined per scheme below)
+	| (
+		if $scheme == "vless" then
+			# security=reality -> reality tls; security=tls -> plain own-cert tls.
+			($q.security // "") as $sec
+			| (if $sec == "reality"
+				then { enabled: true, server_name: ($q.sni // ""),
+				       utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
+				       reality: { enabled: true, public_key: ($q.pbk // ""), short_id: ($q.sid // "") } }
+				else { enabled: true, server_name: ($q.sni // ""),
+				       utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
+				       alpn: (($q.alpn // "h2,http/1.1") | split(",")) }
+			end) as $tls
+			| ({ type: "vless", tag: $tag, server: $host, server_port: $port,
+			     uuid: $userinfo, flow: ($q.flow // ""), packet_encoding: "xudp", tls: $tls }
+			  + ( ($q.type // "tcp") as $nt
+			      | if $nt == "grpc" then { transport: { type: "grpc", service_name: ($q.serviceName // "grpc") } }
+			        elif $nt == "xhttp" then { transport: { type: "xhttp", path: ($q.path // "/") } }
+			        elif $nt == "ws" then { transport: { type: "ws", path: ($q.path // "/ws"), headers: { Host: ($q.host // $q.sni // "") } } }
+			        else {} end ))
+		elif $scheme == "hysteria2" then
+			{ type: "hysteria2", tag: $tag, server: $host, server_port: $port,
+			  password: $userinfo,
+			  tls: { enabled: true, server_name: ($q.sni // ""),
+			         # fp-static: QUIC uTLS is a separate handshake axis from the REALITY/TLS client
+			         # fingerprint; hy2/tuic links carry no fp, so RP-0015 client_fingerprint skips it.
+			         utls: { enabled: true, fingerprint: "chrome" },
+			         alpn: (($q.alpn // "h3") | split(",")) } }
+		elif $scheme == "tuic" then
+			# tuic://uuid:password@host:port — split the RAW userinfo on the literal ":" (the producer
+			# percent-encodes any ":" inside either half, so the first ":" is the real delimiter), then
+			# percent-decode each half back to its true value (C07).
+			($userinfo_raw | before(":") | urldecode) as $uuid
+			| ($userinfo_raw | after(":") | urldecode) as $pw
+			| { type: "tuic", tag: $tag, server: $host, server_port: $port,
+			    uuid: $uuid, password: $pw, congestion_control: ($q.congestion_control // "bbr"),
+			    tls: { enabled: true, server_name: ($q.sni // ""),
+			           # fp-static: QUIC uTLS — separate handshake axis (see hysteria2 above).
+			           utls: { enabled: true, fingerprint: "chrome" },
+			           alpn: (($q.alpn // "h3") | split(",")) } }
+		elif $scheme == "ss" then
+			# ss://method:password@host:port  (optionally ?plugin=shadow-tls&sni=...)
+			# FAIL-CLOSED on a ShadowTLS share-link: the ss:// Link carries only the INNER
+			# Shadowsocks material (method:password) + the masquerade SNI. It does NOT carry the
+			# v3 handshake password or version, so the shadowtls+detour outbound the subscription
+			# path emits (render_singbox.sh: a "shadowtls" version:3 handshake outbound that the
+			# inner SS detours through) CANNOT be faithfully reconstructed from the Link alone.
+			# Emitting a bare Shadowsocks outbound here would dial the ShadowTLS handshake port as
+			# plain SS with the wrong (inner) credential, a non-dialable endpoint. Refuse it instead.
+			# (N1: yield null so the fail-closed path in the caller rejects this endpoint loudly.)
+			if (($q.plugin // "") == "shadow-tls") then null
 			else
-				null
+				# Split the RAW userinfo on the literal ":" (method is the unreserved cipher name;
+				# the producer percent-encodes any ":" inside the password), then decode each half (C07).
+				($userinfo_raw | before(":") | urldecode) as $method
+				| ($userinfo_raw | after(":") | urldecode) as $pw
+				| { type: "shadowsocks", tag: $tag, server: $host, server_port: $port,
+				    method: $method, password: $pw }
 			end
-		)
-	'
+		elif $scheme == "trojan" then
+			{ type: "trojan", tag: $tag, server: $host, server_port: $port,
+			  password: $userinfo,
+			  tls: { enabled: true, server_name: ($q.sni // ""),
+			         utls: { enabled: true, fingerprint: (($q.fp // "") | normfp) },
+			         alpn: (($q.alpn // "h2,http/1.1") | split(",")) } }
+		else
+			null
+		end
+	)
+JQPROG
+)"
+	jq -nc --arg tag "$tag" --arg link "$link" --argjson fpvocab "$fpvocab" "$prog"
 }
+
+# myc_agg_outbound_skip_reason LINK -> a reason string when this link must NOT become a lone sing-box
+# outbound, empty when it may. The byte-twin of spec.OutboundSkipReason (internal/spec/aggregate.go).
+#
+# WHY IT EXISTS AS A FUNCTION AND NOT A GLOB. The fold used to decide this with
+# `case "$link" in *plugin=shadow-tls*|*type=xhttp*)`, which matches ANYWHERE in the link — including
+# inside the #fragment and inside a percent-encoded value — while Go strips the fragment first and
+# requires BOTH the scheme and the PARSED query key. Two owners of one predicate, disagreeing on inputs
+# neither had been driven with. No real bundle triggers the difference today (tags come from the closed
+# proto vocabulary and paths are percent-encoded), so this is a latent divergence, not a live defect —
+# which is exactly when it is cheap to close.
+myc_agg_outbound_skip_reason() {
+	local link prog
+	link="$1"
+	prog="$(myc_agg_jq_uri_defs)
+$(cat <<'JQSKIP'
+
+		($link | before("#")) as $main
+		| ($main | before("://")) as $scheme
+		| ($main | after("://") | after("?") | query_to_obj) as $q
+		| if ($scheme == "vless" and ($q.type // "") == "xhttp") then
+			"the xhttp transport is Xray-only and sing-box cannot load it; one such outbound makes it reject the whole profile"
+		  elif ($scheme == "ss" and ($q.plugin // "") == "shadow-tls") then
+			"a ShadowTLS share-link carries only the inner material, not the v3 handshake, so it cannot be rebuilt into a dialable outbound. Render that node from 'subscription', which has the params"
+		  else
+			""
+		  end
+JQSKIP
+)"
+	jq -rn --arg link "$link" "$prog"
+}
+
 
 # ---------------------------------------------------------------------------
 # aggregate (client-side multi-node merge)
@@ -277,7 +325,7 @@ myc_render_aggregate() {
 		seen_labels="${seen_labels}${safe_label} "
 
 		# Walk this node's endpoints in order; build one namespaced outbound per endpoint.
-		local n_ep ep_i raw_tag short_tag ns_tag link outbound ep_class scheme ob_port n_kept
+		local n_ep ep_i raw_tag short_tag ns_tag link outbound ep_class scheme ob_port n_kept _skip
 		n_kept=0
 		n_ep="$(jq '.endpoints | length' "$file")"
 		ep_i=0
@@ -301,20 +349,12 @@ myc_render_aggregate() {
 			# multi-node profile at all. A fungi network is heterogeneous by design; one member the client
 			# cannot dial must cost that member, never the other nodes. What survives is judged against the
 			# RP-0013 family floor after the loop — that is where fail-closed belongs.
-			case "$link" in
-				*plugin=shadow-tls*)
-					myc_warn "aggregate: dropping '$raw_tag' from node '$safe_label' — a ShadowTLS share-link carries only the inner material, not the v3 handshake, so it cannot be rebuilt into a dialable outbound. Render that node from 'subscription', which has the params."
-					agg_dropped="$agg_dropped $safe_label/$raw_tag(shadowtls)"
-					ep_i=$((ep_i + 1)); continue ;;
-			esac
-			# xhttp: an Xray-only carrier that sing-box has no transport for — including it makes sing-box
-			# reject the WHOLE profile, so it would cost the client every other node in the fold.
-			case "$link" in
-				*type=xhttp*)
-					myc_warn "aggregate: dropping '$raw_tag' from node '$safe_label' — the xhttp transport is Xray-only and sing-box cannot load it; one such outbound makes it reject the whole profile."
-					agg_dropped="$agg_dropped $safe_label/$raw_tag(xhttp)"
-					ep_i=$((ep_i + 1)); continue ;;
-			esac
+			_skip="$(myc_agg_outbound_skip_reason "$link")"
+			if [ -n "$_skip" ]; then
+				myc_warn "aggregate: dropping '$raw_tag' from node '$safe_label' — $_skip."
+				agg_dropped="$agg_dropped $safe_label/$raw_tag"
+				ep_i=$((ep_i + 1)); continue
+			fi
 
 			# C26: assert the Link's URI scheme is one we recognise AND that it is consistent with the
 			# endpoint's declared transport_class. A mismatch (e.g. an ss:// Link tagged transport_class
@@ -428,10 +468,10 @@ myc_render_aggregate() {
 		  | .tag as $t
 		  | select([$v[0].protos[] | . as $pr | select($t | endswith("." + $pr.proto))] | length == 0)
 		  | $t ] | join(",")' 2>/dev/null)"
-	_agg_floor="$(jq -r '.independent_family_floor // 2' "$_agg_vocab" 2>/dev/null)"
+	_agg_floor="$(jq -r '.independent_family_floor' "$_agg_vocab" 2>/dev/null)"
 	case "$_agg_fams" in ''|*[!0-9]*) _agg_fams=0 ;; esac
-	if [ "$_agg_fams" -lt "${_agg_floor:-2}" ]; then
-		myc_die "aggregate: the folded profile spans $_agg_fams independent family/families, floor is ${_agg_floor:-2} (RP-0013) — a client blocked on one would have nowhere left.${agg_dropped:+ Dropped:$agg_dropped}${_agg_unclassified:+ Not classifiable against the vocabulary (so not counted): $_agg_unclassified}"
+	if [ "$_agg_fams" -lt "$_agg_floor" ]; then
+		myc_die "aggregate: the folded profile spans $_agg_fams independent family/families, floor is $_agg_floor (RP-0013) — a client blocked on one would have nowhere left.${agg_dropped:+ Dropped:$agg_dropped}${_agg_unclassified:+ Not classifiable against the vocabulary (so not counted): $_agg_unclassified}"
 	fi
 	[ -z "$agg_dropped" ] || myc_warn "aggregate: folded profile omits:$agg_dropped — the surviving set still spans $_agg_fams independent families."
 	if ! printf '%s' "$profile" | jq -e '
