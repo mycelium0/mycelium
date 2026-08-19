@@ -185,6 +185,13 @@ elif ( cd "$REPO_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0
 		[ -n "$a" ] && [ "$a" = "$b" ] \
 			&& ok "Go and shell keep exactly the same members" \
 			|| badln "the two producers disagree about what survives — shell=$a go=$b. A client would get a different network depending on which binary rendered its profile."
+		# Agreeing on the OUTCOME is not enough: a producer that drops silently hands the operator a
+		# profile they believe is complete. Both must SAY what they left out.
+		for want in shadowtls xhttp; do
+			grep -qi "$want" "$WORK/goe" \
+				&& ok "the Go producer names its dropped $want member too" \
+				|| badln "the Go fold dropped the $want member without telling anyone (stderr: $(tr -d '\n' < "$WORK/goe" | cut -c1-160)). Silent truncation is the failure this change must not introduce."
+		done
 	else
 		badln "the Go fold refused the heterogeneous pair: $(tr -d '\n' < "$WORK/goe" | cut -c1-200)"
 	fi
