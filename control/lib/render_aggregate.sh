@@ -277,7 +277,8 @@ myc_render_aggregate() {
 		seen_labels="${seen_labels}${safe_label} "
 
 		# Walk this node's endpoints in order; build one namespaced outbound per endpoint.
-		local n_ep ep_i raw_tag short_tag ns_tag link outbound ep_class scheme ob_port
+		local n_ep ep_i raw_tag short_tag ns_tag link outbound ep_class scheme ob_port n_kept
+		n_kept=0
 		n_ep="$(jq '.endpoints | length' "$file")"
 		ep_i=0
 		while [ "$ep_i" -lt "$n_ep" ]; do
@@ -304,7 +305,7 @@ myc_render_aggregate() {
 				*plugin=shadow-tls*)
 					myc_warn "aggregate: dropping '$raw_tag' from node '$safe_label' — a ShadowTLS share-link carries only the inner material, not the v3 handshake, so it cannot be rebuilt into a dialable outbound. Render that node from 'subscription', which has the params."
 					agg_dropped="$agg_dropped $safe_label/$raw_tag(shadowtls)"
-					continue ;;
+					ep_i=$((ep_i + 1)); continue ;;
 			esac
 			# xhttp: an Xray-only carrier that sing-box has no transport for — including it makes sing-box
 			# reject the WHOLE profile, so it would cost the client every other node in the fold.
@@ -312,7 +313,7 @@ myc_render_aggregate() {
 				*type=xhttp*)
 					myc_warn "aggregate: dropping '$raw_tag' from node '$safe_label' — the xhttp transport is Xray-only and sing-box cannot load it; one such outbound makes it reject the whole profile."
 					agg_dropped="$agg_dropped $safe_label/$raw_tag(xhttp)"
-					continue ;;
+					ep_i=$((ep_i + 1)); continue ;;
 			esac
 
 			# C26: assert the Link's URI scheme is one we recognise AND that it is consistent with the
@@ -352,10 +353,13 @@ myc_render_aggregate() {
 
 			outbounds_json="$(printf '%s' "$outbounds_json" | jq -c --argjson ob "$outbound" '. + [$ob]')"
 			tags_json="$(printf '%s' "$tags_json" | jq -c --arg t "$ns_tag" '. + [$t]')"
+			n_kept=$((n_kept + 1))
 
 			ep_i=$((ep_i + 1))
 		done
-		myc_log "aggregate: merged $n_ep endpoint(s) from node '$safe_label' ($file)"
+		# Report what was MERGED, not what was offered: with drops in play, "merged 7" while 5 landed is a
+		# component reporting on something other than what it did.
+		myc_log "aggregate: merged $n_kept of $n_ep endpoint(s) from node '$safe_label' ($file)"
 	done
 
 	# Tag-collision guard: across ALL nodes the namespaced tags MUST be unique. (They are by
@@ -416,13 +420,13 @@ myc_render_aggregate() {
 		[ .outbounds[]
 		  | select((.type|test("^(urltest|selector|direct|block)$"))|not)
 		  | .tag as $t
-		  | ($v[0].protos[] | select($t | endswith("." + .proto)) | .class)
+		  | ($v[0].protos[] | . as $pr | select($t | endswith("." + $pr.proto)) | $pr.class)
 		  | ($v[0].block_families[.] // empty) ] | unique | length' 2>/dev/null)"
 	_agg_unclassified="$(printf '%s' "$profile" | jq -r --slurpfile v "$_agg_vocab" '
 		[ .outbounds[]
 		  | select((.type|test("^(urltest|selector|direct|block)$"))|not)
 		  | .tag as $t
-		  | select([$v[0].protos[] | select($t | endswith("." + .proto))] | length == 0)
+		  | select([$v[0].protos[] | . as $pr | select($t | endswith("." + $pr.proto))] | length == 0)
 		  | $t ] | join(",")' 2>/dev/null)"
 	_agg_floor="$(jq -r '.independent_family_floor // 2' "$_agg_vocab" 2>/dev/null)"
 	case "$_agg_fams" in ''|*[!0-9]*) _agg_fams=0 ;; esac
