@@ -291,11 +291,10 @@ myc_render_aggregate() {
 			[ -n "$short_tag" ] || short_tag="$raw_tag"
 			ns_tag="${safe_label}.${short_tag}"
 
-			# Fail-closed BEFORE parsing on a ShadowTLS Link: its v3 handshake password/version are not
-			# carried in the ss:// share-link, so a faithful shadowtls+detour client outbound cannot be
-			# rebuilt from it (see myc_agg_link_outbound's ss branch). Refuse the whole merge with a
-			# precise message rather than silently emit a non-dialable bare-Shadowsocks outbound (N1).
-			# DROPPED, not fatal — the mirror of the Go side. The refusal itself is right (the link carries
+			# DROP, don't die. A ShadowTLS share-link does not carry the v3 handshake password/version, so a
+			# faithful shadowtls+detour outbound cannot be rebuilt from it and a bare shadowsocks outbound
+			# would dial the ShadowTLS port with the wrong credential (N1). That refusal is right; making it
+			# fatal to the whole fold was not — the mirror of the Go side. The refusal itself is right (the link carries
 			# only the INNER material), but killing the whole fold on it made a heterogeneous network
 			# unaggregatable: MEASURED 2026-08-19, two live nodes both serving ShadowTLS produced NO
 			# multi-node profile at all. A fungi network is heterogeneous by design; one member the client
@@ -409,17 +408,26 @@ myc_render_aggregate() {
 	# cannot dial is safe; handing back a profile whose survivors span fewer than RP-0013's independent
 	# families is not — one block then takes the client's last path, which is the whole point of the floor.
 	# Mirrors internal/spec.RenderAggregateReport.
-	_agg_fams="$(printf '%s' "$profile" | jq -r --slurpfile v "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}" '
+	_agg_vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
+	# Recover each outbound's proto by SUFFIX ("<label>.<proto>"), not by stripping to the first dot: the
+	# label whitelist above admits '.', so a label like "home.eu" would leave "eu.hysteria2" behind and the
+	# family would silently go uncounted — undercounting here refuses a profile that is in fact fine.
+	_agg_fams="$(printf '%s' "$profile" | jq -r --slurpfile v "$_agg_vocab" '
 		[ .outbounds[]
-		  | select((.type|test("urltest|selector|direct|block"))|not)
-		  | (.tag | sub("^[^.]*\\."; ""))
-		  | . as $p
-		  | ($v[0].protos[] | select(.proto == $p) | .class)
+		  | select((.type|test("^(urltest|selector|direct|block)$"))|not)
+		  | .tag as $t
+		  | ($v[0].protos[] | select($t | endswith("." + .proto)) | .class)
 		  | ($v[0].block_families[.] // empty) ] | unique | length' 2>/dev/null)"
-	_agg_floor="$(jq -r '.independent_family_floor // 2' "${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}" 2>/dev/null)"
+	_agg_unclassified="$(printf '%s' "$profile" | jq -r --slurpfile v "$_agg_vocab" '
+		[ .outbounds[]
+		  | select((.type|test("^(urltest|selector|direct|block)$"))|not)
+		  | .tag as $t
+		  | select([$v[0].protos[] | select($t | endswith("." + .proto))] | length == 0)
+		  | $t ] | join(",")' 2>/dev/null)"
+	_agg_floor="$(jq -r '.independent_family_floor // 2' "$_agg_vocab" 2>/dev/null)"
 	case "$_agg_fams" in ''|*[!0-9]*) _agg_fams=0 ;; esac
 	if [ "$_agg_fams" -lt "${_agg_floor:-2}" ]; then
-		myc_die "aggregate: the folded profile spans $_agg_fams independent family/families, floor is ${_agg_floor:-2} (RP-0013) — a client blocked on one would have nowhere left.${agg_dropped:+ Dropped:$agg_dropped}"
+		myc_die "aggregate: the folded profile spans $_agg_fams independent family/families, floor is ${_agg_floor:-2} (RP-0013) — a client blocked on one would have nowhere left.${agg_dropped:+ Dropped:$agg_dropped}${_agg_unclassified:+ Not classifiable against the vocabulary (so not counted): $_agg_unclassified}"
 	fi
 	[ -z "$agg_dropped" ] || myc_warn "aggregate: folded profile omits:$agg_dropped — the surviving set still spans $_agg_fams independent families."
 	if ! printf '%s' "$profile" | jq -e '
