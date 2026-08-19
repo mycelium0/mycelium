@@ -251,16 +251,27 @@ EOF
 fi
 
 if [ -n "$GO" ] && [ -x "$WORK/spine" ]; then
+	# INSTRUMENT CHECK FIRST. If the verb is invoked wrongly it fails for every input, and every row
+	# then reads as "skip" — the two "skip" rows would pass and the gate would look half-healthy. Prove
+	# the verb can say KEEP at all before believing a single verdict.
+	if ! "$WORK/spine" link-outbound --tag t \
+		'hysteria2://pw@h.example.invalid:8444?sni=x#tag' >/dev/null 2>"$WORK/lo.err"; then
+		badln "the link-outbound verb refused a plainly dialable hysteria2 link ($(tr -d '\n' < "$WORK/lo.err" | cut -c1-140)) — the Go rows below cannot distinguish skip from an invocation error, so they are not run"
+	else
 	while IFS='|' read -r lnk want; do
 		[ -n "$lnk" ] || continue
 		# The single-link verb REFUSES exactly the links the fold drops, and for the same reason.
-		if "$WORK/spine" link-outbound --tag t --link "$lnk" >/dev/null 2>"$WORK/lo.err"; then got=keep; else got=skip; fi
+		# The LINK is a positional argument; only --tag is a flag. Passing it as a flag made every row
+		# error out and read as "skip", so the rows could not fail correctly — checked by asserting a
+		# known-good link keeps, below, before trusting any of them.
+		if "$WORK/spine" link-outbound --tag t "$lnk" >/dev/null 2>"$WORK/lo.err"; then got=keep; else got=skip; fi
 		[ "$got" = "$want" ] \
 			&& ok "Go:    $want — $(printf '%s' "$lnk" | cut -c1-58)" \
 			|| badln "Go said '$got', expected '$want', for: $lnk ($(tr -d '\n' < "$WORK/lo.err" | cut -c1-110))"
 	done <<EOF
 $ADVERSARIAL
 EOF
+	fi
 fi
 
 printf '\n-- Result --\n'
