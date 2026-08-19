@@ -466,19 +466,31 @@ myc_render_bundle() {
 	# (.block_families, .independent_family_floor) — never restated here (ADR-0038). A class whose
 	# family the vocab does not know is a fail-closed refusal, not a silent pass: an unmapped class
 	# would otherwise count as its own family and inflate the total.
-	if command -v jq >/dev/null 2>&1; then
-		_bf_vocab="${MYC_VOCAB:-${ARTIFACT_ROOT:-${REPO_ROOT:-.}}/control/vocab.json}"
-		if [ -f "$_bf_vocab" ]; then
-			_floor="$(jq -r '.independent_family_floor // 2' "$_bf_vocab")"
-			_unmapped="$(printf '%s' "$bundle" | jq -r --slurpfile v "$_bf_vocab" \
-				'[.endpoints[].transport_class | select(($v[0].block_families // {})[.] == null)] | unique | join(" ")')"
-			[ -z "$_unmapped" ] || myc_die "bundle: transport class(es) '$_unmapped' have no block family in the Go-owned vocab — refusing to count independent families from an incomplete map."
-			_fams="$(printf '%s' "$bundle" | jq -r --slurpfile v "$_bf_vocab" \
-				'[.endpoints[].transport_class | ($v[0].block_families // {})[.]] | unique | length')"
-			if [ "${_fams:-0}" -lt "${_floor:-2}" ]; then
-				myc_die "bundle: the served transports span only ${_fams:-0} independent block family, floor is ${_floor:-2} (RP-0013). A single-family block would take this client's last path away. Enable a transport from a different family before serving a bundle."
-			fi
-		fi
+	# FAIL-CLOSED ON THE INSTRUMENT TOO. This check used to sit inside `if command -v jq` + `if [ -f
+	# vocab ]` with no else, so an absent jq or an unreadable vocabulary SILENTLY SKIPPED the floor and
+	# published the bundle — while the transport-class check twenty lines below dies on the very same
+	# file. One file, two postures, and the open one re-opens exactly the defect this check exists for:
+	# a safety floor that disappears together with its instrument is not a floor.
+	#
+	# `myc_vocab_load` is the single owner of resolving and reading control/vocab.json — it dies on a
+	# missing file and on an unreadable one — so the local re-resolution of the same path is gone too.
+	# Two resolutions of one file inside one function is the duplicate-truth shape in miniature.
+	myc_vocab_load
+	local _floor _unmapped _fams
+	_floor="$(jq -r '.independent_family_floor' "$MYC_VOCAB" 2>/dev/null)"
+	case "$_floor" in
+		''|*[!0-9]*) myc_die "bundle: could not read .independent_family_floor from $MYC_VOCAB — refusing to publish a bundle whose family floor was never established (RP-0013)." ;;
+	esac
+	_unmapped="$(printf '%s' "$bundle" | jq -r --slurpfile v "$MYC_VOCAB" \
+		'[.endpoints[].transport_class | select(($v[0].block_families // {})[.] == null)] | unique | join(" ")')"
+	[ -z "$_unmapped" ] || myc_die "bundle: transport class(es) '$_unmapped' have no block family in the Go-owned vocab — refusing to count independent families from an incomplete map."
+	_fams="$(printf '%s' "$bundle" | jq -r --slurpfile v "$MYC_VOCAB" \
+		'[.endpoints[].transport_class | ($v[0].block_families // {})[.]] | unique | length')"
+	case "$_fams" in
+		''|*[!0-9]*) myc_die "bundle: could not count independent block families against $MYC_VOCAB — refusing to publish an unjudged bundle (RP-0013)." ;;
+	esac
+	if [ "$_fams" -lt "$_floor" ]; then
+		myc_die "bundle: the served transports span only $_fams independent block family, floor is $_floor (RP-0013). A single-family block would take this client's last path away. Enable a transport from a different family before serving a bundle."
 	fi
 	if ! printf '%s' "$bundle" | jq -e '.endpoints | all(.health == "unknown")' >/dev/null 2>&1; then
 		myc_die "bundle: a non-unknown health label leaked (Phase-1 invariant; Bundle.Validate rejects it)."

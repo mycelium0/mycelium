@@ -205,6 +205,75 @@ else
 	printf '  SKIP  the Go spine did not build here; CI runs this row\n'
 fi
 
+# ---------------------------------------------------------------------------------------------------
+# 6. THE PREDICATE ITSELF — the two producers must agree on ADVERSARIAL links, not just on real ones.
+#
+# The shell used to decide this with `case "$link" in *plugin=shadow-tls*|*type=xhttp*)`, a glob that
+# matches ANYWHERE in the link: inside the #fragment, inside a percent-encoded value. Go strips the
+# fragment first and requires BOTH the scheme and the PARSED query key (OutboundSkipReason). Two owners
+# of one predicate, and nothing had ever driven them with an input that separates them — every fixture
+# used links where the two happen to agree. No real bundle triggers it (tags come from the closed proto
+# vocabulary, paths are percent-encoded), which is exactly when it is cheap to close and worth pinning.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and the two producers agree on what "undialable" MEANS --\n'
+# link | expect: skip|keep
+ADVERSARIAL='ss://YWVzOnB3@h.example.invalid:8446?plugin=shadow-tls&sni=x#tag|skip
+vless://11111111-2222-3333-4444-555555555555@h.example.invalid:443?type=xhttp&path=%2Fx#tag|skip
+vless://11111111-2222-3333-4444-555555555555@h.example.invalid:443?type=tcp&security=reality#type=xhttp|keep
+vless://11111111-2222-3333-4444-555555555555@h.example.invalid:443?type=ws&path=%2Ftype%3Dxhttp#tag|keep
+ss://YWVzOnB3@h.example.invalid:8388?sni=x#plugin=shadow-tls|keep
+hysteria2://pw@h.example.invalid:8444?sni=x#tag|keep'
+
+shell_skip() { # -> "skip" | "keep"
+	local r
+	r="$(
+		MYC_ROOT="$REPO_ROOT/control" ARTIFACT_ROOT="$REPO_ROOT" bash -c '
+			. "$1/common.sh"; . "$1/jqlib.sh"; . "$1/vocab.sh"; . "$1/render_aggregate.sh"
+			myc_agg_outbound_skip_reason "$2"' _ "$REPO_ROOT/control/lib" "$1" 2>/dev/null
+	)"
+	[ -n "$r" ] && printf 'skip' || printf 'keep'
+}
+
+if ! MYC_ROOT="$REPO_ROOT/control" ARTIFACT_ROOT="$REPO_ROOT" bash -c '
+		. "$1/common.sh"; . "$1/jqlib.sh"; . "$1/vocab.sh"; . "$1/render_aggregate.sh"
+		command -v myc_agg_outbound_skip_reason >/dev/null' _ "$REPO_ROOT/control/lib" 2>/dev/null; then
+	badln "there is no myc_agg_outbound_skip_reason — the shell still decides 'undialable' inline, so the fold and the single-link verb are two owners of one predicate and nothing compares them"
+else
+	while IFS='|' read -r lnk want; do
+		[ -n "$lnk" ] || continue
+		got="$(shell_skip "$lnk")"
+		[ "$got" = "$want" ] \
+			&& ok "shell: $want — $(printf '%s' "$lnk" | cut -c1-58)" \
+			|| badln "shell said '$got', expected '$want', for: $lnk. A glob over the whole link matches inside the #fragment and inside percent-encoded values; Go strips the fragment and requires the scheme plus the parsed query key. Whichever is wrong, the two producers hand a client different networks."
+	done <<EOF
+$ADVERSARIAL
+EOF
+fi
+
+if [ -n "$GO" ] && [ -x "$WORK/spine" ]; then
+	# INSTRUMENT CHECK FIRST. If the verb is invoked wrongly it fails for every input, and every row
+	# then reads as "skip" — the two "skip" rows would pass and the gate would look half-healthy. Prove
+	# the verb can say KEEP at all before believing a single verdict.
+	if ! "$WORK/spine" link-outbound --tag t \
+		'hysteria2://pw@h.example.invalid:8444?sni=x#tag' >/dev/null 2>"$WORK/lo.err"; then
+		badln "the link-outbound verb refused a plainly dialable hysteria2 link ($(tr -d '\n' < "$WORK/lo.err" | cut -c1-140)) — the Go rows below cannot distinguish skip from an invocation error, so they are not run"
+	else
+	while IFS='|' read -r lnk want; do
+		[ -n "$lnk" ] || continue
+		# The single-link verb REFUSES exactly the links the fold drops, and for the same reason.
+		# The LINK is a positional argument; only --tag is a flag. Passing it as a flag made every row
+		# error out and read as "skip", so the rows could not fail correctly — checked by asserting a
+		# known-good link keeps, below, before trusting any of them.
+		if "$WORK/spine" link-outbound --tag t "$lnk" >/dev/null 2>"$WORK/lo.err"; then got=keep; else got=skip; fi
+		[ "$got" = "$want" ] \
+			&& ok "Go:    $want — $(printf '%s' "$lnk" | cut -c1-58)" \
+			|| badln "Go said '$got', expected '$want', for: $lnk ($(tr -d '\n' < "$WORK/lo.err" | cut -c1-110))"
+	done <<EOF
+$ADVERSARIAL
+EOF
+	fi
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the aggregate does not tolerate a heterogeneous network.\n' >&2

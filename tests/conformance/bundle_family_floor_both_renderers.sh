@@ -148,6 +148,71 @@ grep -q 'IndependentFallbackOK' "$GO_RENDER" \
 	&& ok "and the Go renderer still enforces the same floor — both, not one" \
 	|| badln "internal/spec/bundle_render.go no longer enforces the floor. Moving the check rather than mirroring it leaves the Go path — used by deploy-plan and the equivalence gates — able to emit what the node would refuse."
 
+# ---------------------------------------------------------------------------------------------------
+# 5. THE FLOOR SURVIVES A BROKEN INSTRUMENT — driven end to end through the shipped renderer.
+#
+# MEASURED, and stated at the strength the measurement supports. The check used to sit inside
+# `if command -v jq` + `if [ -f vocab ]` with no else, which READS as a fail-open skip. Driving it
+# showed it is NOT reachable through control/myceliumctl: vocab.sh sets MYC_VOCAB at source time, so
+# the alternate path resolution below it is dead, and a vocabulary that cannot be read dies twenty
+# lines later at myc_vocab_load. The floor was safe BY COINCIDENCE — it depended on an unrelated check
+# further down the same function.
+#
+# One case was a real behaviour difference, and only one: a vocabulary carrying no
+# .independent_family_floor. The shell said `// 2` and published against a threshold it had invented,
+# which is the second copy of a Go-owned number this gate exists to forbid. That row goes red on the
+# pre-fix tree; the other two pass on both and are here as PINS — they hold the refusal in place so a
+# later change cannot quietly turn the coincidence into an actual skip.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and it holds even when its own instrument is broken --\n'
+CTL="$REPO_ROOT/control/myceliumctl"
+if [ ! -f "$CTL" ]; then
+	badln "control/myceliumctl is missing; the end-to-end rows cannot run"
+else
+	FW="$(mktemp -d "${TMPDIR:-/tmp}/myc.bff.XXXXXX")"
+	jq -n '{ version:1, clients:[ { name:"a", id:"a1b2c3d4-e5f6-7890-abcd-ef0123456789",
+		created:"2026-01-01T00:00:00Z", password:"p" } ] }' > "$FW/id.json"
+	# Two independent families, so the CONTROL row can succeed and these rows can fail in both directions.
+	jq -n '{ node_address:"n.example.invalid", donor_host:"www.example.invalid",
+		donor_sni:"www.example.invalid", reality_public_key:"PK", short_ids:["0123abcd"],
+		tls_sni:"n.example.invalid", ss_password:"p", hysteria2_password:"p",
+		vless_reality_vision_enabled:true, shadowsocks_enabled:true }' > "$FW/params.json"
+
+	render() { # render <vocab-path-or-empty> -> rc
+		if [ -n "$1" ]; then MYC_VOCAB="$1" bash "$CTL" bundle --params "$FW/params.json" \
+			--state "$FW/id.json" --out "$FW/out.json" >/dev/null 2>"$FW/err"
+		else bash "$CTL" bundle --params "$FW/params.json" --state "$FW/id.json" \
+			--out "$FW/out.json" >/dev/null 2>"$FW/err"; fi
+	}
+
+	if render ""; then
+		ok "the control case still renders — a two-family bundle is accepted"
+	else
+		badln "a valid two-family bundle was refused: $(tr -d '\n' < "$FW/err" | cut -c1-180). Without this row the ones below would pass by refusing everything."
+	fi
+
+	if render "$FW/absent-vocab.json"; then
+		badln "a bundle was PUBLISHED with the vocabulary absent. The family floor was never evaluated, so nothing established that this client keeps a second path (RP-0013)."
+	else
+		ok "an absent vocabulary refuses the render (pin: this must not become a skip)"
+	fi
+
+	jq 'del(.block_families)' "$VOCAB" > "$FW/no-fams.json"
+	if render "$FW/no-fams.json"; then
+		badln "a bundle was PUBLISHED with .block_families removed from the vocabulary — the class->family map is what the floor is counted against, so its absence means the count is meaningless, not zero-cost."
+	else
+		ok "a vocabulary with no class->family map refuses the render (pin)"
+	fi
+
+	jq 'del(.independent_family_floor)' "$VOCAB" > "$FW/no-floor.json"
+	if render "$FW/no-floor.json"; then
+		badln "a bundle was PUBLISHED with .independent_family_floor removed. If the shell substitutes its own default it has restated a Go-owned number — the second copy this gate exists to forbid."
+	else
+		ok "a vocabulary carrying no threshold refuses rather than defaulting to a shell literal — the row that was red before this change"
+	fi
+	rm -rf "$FW"
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: a bundle that leaves a client one block away from nothing can still be served.\n' >&2
