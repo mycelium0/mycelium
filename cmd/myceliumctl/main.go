@@ -457,13 +457,32 @@ func cmdBundle(args []string) error {
 	statePath := fs.String("state", "", "identities.json (required)")
 	frontPath := fs.String("front", "", "optional FrontConfig JSON (ADR-0033): when enabled, appends one fronted endpoint")
 	out := fs.String("out", "-", "output file (- for stdout)")
+	// --awg-client PATH — include the AmneziaWG client config as an endpoint, the same flag the shell
+	// renderer takes. OPTIONAL by construction: without it the bundle renders exactly as before. It is
+	// not cosmetic: a default node serves two REALITY protos, which are ONE block family, so its bundle
+	// falls below the RP-0013 floor while the node in fact serves REALITY and AmneziaWG. This is how the
+	// second family reaches the artifact — and the reason the Go renderer could not be cut over without it.
+	awgClient := fs.String("awg-client", "", "optional AmneziaWG client config: appended as one endpoint")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *paramsPath == "" || *statePath == "" {
 		return fmt.Errorf("bundle: --params and --state are required")
 	}
-	var fc spec.FrontConfig // zero value = disabled => RenderBundleFront is byte-identical to RenderBundle
+	// Read it HERE, not in spec: the render stays pure. The refusals mirror the shell's — a path that is
+	// not there, or is empty, must never render a bundle that silently omits a family the node serves.
+	var awgConf string
+	if *awgClient != "" {
+		data, err := os.ReadFile(*awgClient)
+		if err != nil {
+			return fmt.Errorf("bundle: --awg-client %q: %w. Refusing to render a bundle that silently omits a family the node serves", *awgClient, err)
+		}
+		if len(data) == 0 {
+			return fmt.Errorf("bundle: --awg-client %q is empty", *awgClient)
+		}
+		awgConf = string(data)
+	}
+	var fc spec.FrontConfig // zero value = disabled => the render is byte-identical to one with no front
 	if *frontPath != "" {
 		fdata, err := os.ReadFile(*frontPath)
 		if err != nil {
@@ -501,7 +520,7 @@ func cmdBundle(args []string) error {
 	if len(st.Clients) > 0 {
 		id, pw = st.Clients[0].ID, st.Clients[0].Password
 	}
-	b, err := spec.RenderBundleFront(pmap, id, pw, fc, time.Now().UTC().Truncate(time.Second))
+	b, err := spec.RenderBundleWith(pmap, id, pw, spec.BundleOptions{Front: fc, AWGClientConf: awgConf}, time.Now().UTC().Truncate(time.Second))
 	if err != nil {
 		return fmt.Errorf("bundle: %w", err)
 	}
@@ -1588,7 +1607,8 @@ Commands:
   lease grant|release|reap|list ...            the ONE writer for time-bounded suppression leases (ADR-0040 2.4);
                                                grant needs --plan --leases --limits --marker --refs --enabled
   share-link --proto P FILE|-                  render the dialable client share-link for a transport from LinkParams JSON (RP-0008 P3)
-  bundle --params F --state F [--out F|-]       render a node's distribution Bundle JSON from params + identities (RP-0008 P3)
+  bundle --params F --state F [--awg-client F] [--front F] [--out F|-]
+                                               render a node's distribution Bundle JSON from params + identities (RP-0008 P3)
   link-outbound --tag T LINK                    parse a client share-link into a sing-box client outbound JSON (RP-0008 P3)
   aggregate --out F --bundle F [--name L] ...   fold >=2 per-node bundles into one client sing-box profile (RP-0008 P3)
   node validate FILE|-                         parse + validate a node profile descriptor (ADR-0034)

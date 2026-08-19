@@ -25,15 +25,17 @@ const FrontEndpointPriorityBase = 1000
 // SAME base resolution as the direct ones (bundleBaseLinkParams) so the two cannot drift, gets a distinct
 // `-front` tag, and a last-resort priority. Pure.
 func RenderBundleFront(params map[string]json.RawMessage, firstClientID, firstClientPassword string, fc FrontConfig, generatedAt time.Time) (Bundle, error) {
-	b, err := RenderBundle(params, firstClientID, firstClientPassword, generatedAt)
-	if err != nil {
-		return Bundle{}, err
-	}
+	return RenderBundleWith(params, firstClientID, firstClientPassword, BundleOptions{Front: fc}, generatedAt)
+}
+
+// appendFrontEndpoint is RenderBundleFront's body, called by the renderer core once the bundle exists.
+// It mutates b in place and is a no-op for a disabled / non-matching / not-served front.
+func appendFrontEndpoint(b *Bundle, params map[string]json.RawMessage, firstClientID, firstClientPassword string, fc FrontConfig) error {
 	if !fc.Enabled {
-		return b, nil // default-off: byte-identical to RenderBundle
+		return nil // default-off: byte-identical to a render without a front
 	}
 	if err := fc.Validate(); err != nil {
-		return Bundle{}, fmt.Errorf("bundle front: %w", err)
+		return fmt.Errorf("bundle front: %w", err)
 	}
 	// Locate the frontable transport in the registry and require this node to actually serve it.
 	var d ProtoDescriptor
@@ -45,21 +47,21 @@ func RenderBundleFront(params map[string]json.RawMessage, firstClientID, firstCl
 		}
 	}
 	if !found || d.EnableKey == "" || !paramBool(params, d.EnableKey) {
-		return b, nil // front configured for a transport this node does not serve — fail-safe no-op
+		return nil // front configured for a transport this node does not serve — fail-safe no-op
 	}
 	base, err := bundleBaseLinkParams(params, firstClientID, firstClientPassword)
 	if err != nil {
-		return Bundle{}, err
+		return err
 	}
 	lp := base
 	lp.Port = paramStr(params, d.PortKey, strconv.Itoa(d.DefaultPort))
 	fronted, ok := FrontLinkParams(d.Proto, lp, fc)
 	if !ok {
-		return b, nil
+		return nil
 	}
 	link, err := ShareLink(d.Proto, fronted)
 	if err != nil {
-		return Bundle{}, fmt.Errorf("bundle front: %w", err)
+		return fmt.Errorf("bundle front: %w", err)
 	}
 	region := paramStr(params, "region_bucket", "unspecified")
 	b.Endpoints = append(b.Endpoints, Endpoint{
@@ -70,7 +72,7 @@ func RenderBundleFront(params map[string]json.RawMessage, firstClientID, firstCl
 		Health:         HealthUnknown,
 		Link:           link,
 	})
-	return b, nil
+	return nil
 }
 
 // FrontPort is the port a CDN/ingress front listens on — always 443, because the whole point of
