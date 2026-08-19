@@ -13,6 +13,48 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.96] — 2026-08-20
+
+### Fixed — two predicates with two owners each, neither pair ever driven apart
+
+Both found while asking which surface should move to Go next. Neither is a port; both are the same
+shape — one truth, two holders, and no fixture that separates them.
+
+**The independent-family floor read its own threshold as `.independent_family_floor // 2`.** The
+threshold is Go-owned and emitted into `control/vocab.json`; `// 2` is a second copy of it living in
+shell, which is precisely what `bundle_family_floor_both_renderers.sh` already forbids one row above.
+A vocabulary carrying no threshold published against an invented one. It now refuses. The same check
+also re-resolved `control/vocab.json` through a path expression that differs from `vocab.sh`'s; that
+resolution was **dead** — `vocab.sh` sets `MYC_VOCAB` at source time — so removing it deletes a
+duplicate rather than closing a hole.
+
+**Said at the strength it was measured.** The `if command -v jq` / `if [ -f vocab ]` wrapper around the
+floor READS as a fail-open skip, and I first reported it as one. Driving it showed it is not reachable
+through `control/myceliumctl`: a vocabulary that cannot be read dies twenty lines later at
+`myc_vocab_load`. The floor was safe **by coincidence**, resting on an unrelated check further down the
+same function. Worth removing on those grounds; not a live defect, and the gate rows say so — one row
+is red on the pre-fix tree, the other three are labelled as pins.
+
+**The "undialable" predicate had two owners that disagreed.** The fold globbed
+`*plugin=shadow-tls*` / `*type=xhttp*` over the WHOLE link — matching inside the `#fragment` and inside
+percent-encoded values — while `spec.OutboundSkipReason` strips the fragment and requires the scheme
+**plus** the parsed query key. Every fixture in the tree used links where the two agree, so nothing had
+ever separated them. No real bundle triggers it (tags come from the closed proto vocabulary, paths are
+percent-encoded), which is exactly when closing it is cheap. Shell now parses the same way, through
+`myc_agg_outbound_skip_reason`.
+
+The jq URI grammar both shell parsers need is emitted by one function instead of typed twice;
+`myc_agg_link_outbound` composes it. Verified byte-identical on a real two-node fold before and after,
+and all six Go↔shell equivalence gates stay green.
+
+**And the new rows could not fail correctly at first.** `link-outbound` takes the LINK positionally;
+passing it as `--link` made every row error out, so every verdict read as "skip" — the two skip rows
+passed and the three keep rows failed, which looks like a finding and is an instrument fault. The block
+now proves the verb can answer KEEP at all before any verdict is believed.
+
+Measured on a node with Go: 12/12 adversarial links agreed between the two producers; the real two-node
+fold is byte-identical across engines and `sing-box check` accepts it.
+
 ## [0.2.95] — 2026-08-19
 
 ### Fixed — `aggregate` refused every real pair of nodes in the population
