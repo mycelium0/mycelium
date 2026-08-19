@@ -46,9 +46,10 @@ func OutboundFromLink(tag, link string) (json.RawMessage, error) {
 //     reject the WHOLE profile, so it is worse than useless in a client config.
 //   - ShadowTLS: a PAIR (outer shadowsocks + shadowtls detour) that one outbound cannot express.
 //
-// Exported because the single-link CLI verb must REFUSE with a cause an operator can act on. The aggregate
-// renderers still emit xhttp — see the note at its case — which is a recorded open defect, not a use of
-// this function.
+// Exported because two callers need the same answer for different ends: the single-link CLI verb REFUSES
+// with a cause an operator can act on, and the aggregate fold DROPS the member and names it. The fold does
+// not refuse — a network is heterogeneous by design, so one member the client cannot represent must cost
+// that member, not the other nodes; the fail-closed line sits on the result (the RP-0013 family floor).
 func OutboundSkipReason(link string) string {
 	main := uriBefore(link, "#")
 	scheme := uriBefore(main, "://")
