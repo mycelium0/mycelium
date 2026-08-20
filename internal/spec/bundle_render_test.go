@@ -88,3 +88,61 @@ func TestRenderBundleFailClosed(t *testing.T) {
 		t.Error("out-of-range port should fail closed")
 	}
 }
+
+// TestRenderBundleAWGEndpoint pins the three things about the AmneziaWG endpoint that the byte-equivalence
+// gate cannot see on its own: that it is judged BY the RP-0013 floor rather than appended after it, that
+// its priority is 0 (the shell's literal, NOT the registry index — amneziawg is last in the registry), and
+// that it carries the client config verbatim.
+func TestRenderBundleAWGEndpoint(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	// The DEFAULT profile: two REALITY protos, which collapse to ONE block family.
+	p := map[string]json.RawMessage{
+		"node_address":                json.RawMessage(`"n.example.invalid"`),
+		"donor_host":                  json.RawMessage(`"www.example.invalid"`),
+		"donor_sni":                   json.RawMessage(`"www.example.invalid"`),
+		"reality_public_key":          json.RawMessage(`"PK"`),
+		"short_ids":                   json.RawMessage(`["0123abcd"]`),
+		"tls_sni":                     json.RawMessage(`"n.example.invalid"`),
+		"grpc_service_name":           json.RawMessage(`"g"`),
+		"vless_reality_vision_enabled": json.RawMessage(`true`),
+		"vless_reality_grpc_enabled":   json.RawMessage(`true`),
+	}
+
+	// Without the AWG config this node is below the floor — that is what makes the next case meaningful.
+	if _, err := RenderBundle(p, "a1b2c3d4-e5f6-7890-abcd-ef0123456789", "pw", at); err == nil {
+		t.Fatal("the default two-REALITY profile rendered without AmneziaWG; it spans one family and RP-0013 must refuse it. Every assertion below would then prove nothing.")
+	}
+
+	const conf = "[Interface]\nPrivateKey = aB+cd/12=\nAddress = 10.8.0.2/32\n\n[Peer]\nPublicKey = XY&Z=\n"
+	b, err := RenderBundleWith(p, "a1b2c3d4-e5f6-7890-abcd-ef0123456789", "pw",
+		BundleOptions{AWGClientConf: conf}, at)
+	if err != nil {
+		t.Fatalf("the same node WITH its AmneziaWG endpoint was refused: %v. The endpoint is how a default node reaches its second block family, so it has to be appended before the floor is judged, not after.", err)
+	}
+
+	var got *Endpoint
+	for i := range b.Endpoints {
+		if b.Endpoints[i].Tag == "mycelium-amneziawg" {
+			got = &b.Endpoints[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("no mycelium-amneziawg endpoint in %d rendered endpoints", len(b.Endpoints))
+	}
+	if got.Link != conf {
+		t.Errorf("the client config was not carried verbatim:\n got %q\nwant %q", got.Link, conf)
+	}
+	if got.Priority != 0 {
+		t.Errorf("priority = %d, want 0 — the shell writes a literal 0 here, not the registry index (amneziawg is LAST in the registry, so an index would be a silent divergence the byte gate would catch only if a fixture happened to carry it)", got.Priority)
+	}
+	if got.TransportClass != TransportClassAmneziaWGUDP {
+		t.Errorf("transport_class = %q, want %q", got.TransportClass, TransportClassAmneziaWGUDP)
+	}
+	if !b.IndependentFallbackOK() {
+		t.Error("the bundle with AmneziaWG still does not clear the independent-family floor")
+	}
+	// And it must be additive: no AWG config leaves the render exactly as it was.
+	if _, err := RenderBundleWith(p, "a1b2c3d4-e5f6-7890-abcd-ef0123456789", "pw", BundleOptions{}, at); err == nil {
+		t.Error("BundleOptions{} rendered the one-family node — the empty options must behave exactly like RenderBundle")
+	}
+}
