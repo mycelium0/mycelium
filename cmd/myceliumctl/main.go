@@ -477,10 +477,14 @@ func cmdBundle(args []string) error {
 		if err != nil {
 			return fmt.Errorf("bundle: --awg-client %q: %w. Refusing to render a bundle that silently omits a family the node serves", *awgClient, err)
 		}
-		if len(data) == 0 {
+		// Trailing newlines are STRIPPED, because the shell reads this file as `$(cat FILE)` and command
+		// substitution drops them — and the three live nodes are already serving bundles in that form.
+		// Matching the deployed producer is the point of the equivalence gate; matching the file on disk
+		// instead would change the served bytes on every node the day the renderer is cut over.
+		awgConf = strings.TrimRight(string(data), "\n")
+		if awgConf == "" {
 			return fmt.Errorf("bundle: --awg-client %q is empty", *awgClient)
 		}
-		awgConf = string(data)
 	}
 	var fc spec.FrontConfig // zero value = disabled => the render is byte-identical to one with no front
 	if *frontPath != "" {
