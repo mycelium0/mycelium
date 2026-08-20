@@ -96,9 +96,17 @@ else
 			badln "the SHIPPED template was refused: $(tr -d '\n' < "$WORK/e" | cut -c1-200). Every refusal row below would then pass for the wrong reason."
 		fi
 
-		# A meaning-preserving reformat is still a refusal: 'no meaning changed' is exactly the judgement
-		# a machine must not make about a template whose shape is hand-encoded elsewhere.
-		jq '.' "$TEMPLATE" > "$WORK/reformatted.json" 2>/dev/null
+		# The modification must actually MODIFY. The first draft of this row used `jq '.' TEMPLATE`, and the
+		# shipped template is already in jq's exact output format — so the "modified" file was byte-identical
+		# and the row asserted a refusal of the very bytes the pin accepts. It passed by being a no-op, which
+		# is the same class of defect this suite keeps finding, committed by the test.
+		#
+		# A meaning-preserving edit is deliberately chosen: 'no meaning changed' is exactly the judgement a
+		# machine must not make about a template whose shape is hand-encoded elsewhere.
+		jq '. + {"_mycelium_gate_marker": true}' "$TEMPLATE" > "$WORK/reformatted.json" 2>/dev/null
+		if cmp -s "$TEMPLATE" "$WORK/reformatted.json"; then
+			badln "the 'modified' template is byte-identical to the shipped one, so the refusal row below would assert nothing. Change how it is modified."
+		fi
 		if "$WORK/spine" render-server --engine singbox --template "$WORK/reformatted.json" \
 			--params "$WORK/params.json" --state "$WORK/id.json" --out /dev/null >/dev/null 2>"$WORK/e2"; then
 			badln "a template with different BYTES was accepted. The structs were not re-derived from it, so the render ignores whatever it says — which is the silent failure this pin exists to prevent."
