@@ -97,13 +97,13 @@ func TestRenderBundleAWGEndpoint(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	// The DEFAULT profile: two REALITY protos, which collapse to ONE block family.
 	p := map[string]json.RawMessage{
-		"node_address":                json.RawMessage(`"n.example.invalid"`),
-		"donor_host":                  json.RawMessage(`"www.example.invalid"`),
-		"donor_sni":                   json.RawMessage(`"www.example.invalid"`),
-		"reality_public_key":          json.RawMessage(`"PK"`),
-		"short_ids":                   json.RawMessage(`["0123abcd"]`),
-		"tls_sni":                     json.RawMessage(`"n.example.invalid"`),
-		"grpc_service_name":           json.RawMessage(`"g"`),
+		"node_address":                 json.RawMessage(`"n.example.invalid"`),
+		"donor_host":                   json.RawMessage(`"www.example.invalid"`),
+		"donor_sni":                    json.RawMessage(`"www.example.invalid"`),
+		"reality_public_key":           json.RawMessage(`"PK"`),
+		"short_ids":                    json.RawMessage(`["0123abcd"]`),
+		"tls_sni":                      json.RawMessage(`"n.example.invalid"`),
+		"grpc_service_name":            json.RawMessage(`"g"`),
 		"vless_reality_vision_enabled": json.RawMessage(`true`),
 		"vless_reality_grpc_enabled":   json.RawMessage(`true`),
 	}
