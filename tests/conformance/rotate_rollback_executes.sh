@@ -116,7 +116,17 @@ scenario() (
 	TOOLING_DIR="$FAKENODE_ROOT/tooling"
 	# no-spine forces the degraded bookkeeping path REGARDLESS of the host, so the row that checks what the
 	# node TELLS the operator is not a property of whether this machine happens to have Go.
-	if [ "$mode" = no-spine ]; then SPINE_BIN="$TOOLING_DIR/bin/absent"; else SPINE_BIN="${SPINE:-$TOOLING_DIR/bin/absent}"; fi
+	# SPINE_BIN is now BOTH the rotation planner and (since the RP-0008 P3 cutover) the config renderer.
+	# This fixture controls the candidate bytes on purpose — a byte-identical candidate short-circuits
+	# before Phase C and no rollback could ever be reached — so it must not hand the render to the real
+	# spine, which would refuse this fake node's stub template outright (spec.CheckServerTemplatePinned)
+	# and turn a rollback fixture into a template-pin test. The wrapper (written below, after the
+	# containment check) keeps the rotation verbs REAL and substitutes only render-server.
+	if [ "$mode" != no-spine ] && [ -n "${SPINE:-}" ] && [ -x "${SPINE:-}" ]; then
+		SPINE_BIN="$TOOLING_DIR/bin/spine-wrapper"
+	else
+		SPINE_BIN="$TOOLING_DIR/bin/absent"
+	fi
 	MYCTL="$STUBDIR/myceliumctl"
 	SINGBOX_BIN="$STUBDIR/sing-box"
 	RENDER_TEMPLATE="$FAKENODE_ROOT/template.json"
@@ -145,6 +155,19 @@ printf '{"generation":"NEW","inbounds":[]}\n' >"$out"
 STUB
 	chmod +x "$MYCTL"
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$SINGBOX_BIN"; chmod +x "$SINGBOX_BIN"
+
+	# The spine wrapper: real rotation verbs, stubbed render. Written here so it lands after the
+	# containment check above, like every other file this fixture creates.
+	case "$SPINE_BIN" in
+		*/spine-wrapper)
+			mkdir -p "$(dirname "$SPINE_BIN")"
+			cat >"$SPINE_BIN" <<WRAP
+#!/usr/bin/env bash
+if [ "\${1:-}" = "render-server" ]; then exec "$MYCTL" "\$@"; fi
+exec "$SPINE" "\$@"
+WRAP
+			chmod +x "$SPINE_BIN" ;;
+	esac
 
 	# systemctl: FAIL-ONCE on restart, so the failing apply and the RECOVERY restart are distinguishable.
 	# A stub that always fails would also fail step 4 and the rows could not tell "the rollback restarted
