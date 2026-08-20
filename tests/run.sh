@@ -75,6 +75,14 @@
 #                               names what it dropped, and fail-closed moves to the RESULT — the survivors
 #                               must still clear the RP-0013 independent-family floor. Drives the producer
 #                               over rendered bundles; red on the pre-fix tree
+#   * render_server_template_pinned.sh — the Go server renderer does not READ the sing-box template (it
+#                               encodes the shape in typed structs), so it VERIFIES it: a template these
+#                               structs do not encode is refused, not ignored. Pins the sha and drives
+#                               the refusal
+#   * render_server_cutover.sh — the live data-plane config is rendered by the Go spine; the shell is the
+#                               fallback for a node whose spine was never built, and NOT a way around a
+#                               refusal (a refusal is a real disagreement, not an outage). Drives the
+#                               shipped function with a recorder
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -327,6 +335,8 @@ GATES=(
 	"tests/conformance/aggregate_outbound_go_equiv.sh"
 	"tests/conformance/aggregate_render_go_equiv.sh"
 	"tests/conformance/aggregate_tolerates_heterogeneity.sh"
+	"tests/conformance/render_server_template_pinned.sh"
+	"tests/conformance/render_server_cutover.sh"
 	"tests/conformance/subscription_go_equiv.sh"
 	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/client_server_credential_agreement.sh"

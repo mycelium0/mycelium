@@ -640,12 +640,14 @@ func cmdSubscription(args []string) error {
 
 // cmdRenderServer renders the node's sing-box SERVER config (RP-0008 P3-e) via spec.RenderServer — the
 // Go port of `myceliumctl render-server --engine singbox` (incl. the two-hop via_user routing). The
-// Go renderer encodes the template structure in typed structs, so --template is accepted (CLI parity)
-// but unused; the render_server_go_equiv gate keeps the structs in lockstep with the shipped template.
+// Go renderer encodes the template structure in typed structs, so --template is not READ — but it is
+// VERIFIED (spec.CheckServerTemplatePinned): a template these structs do not encode is refused rather
+// than ignored, because ignoring it means an operator edit silently does nothing. The
+// render_server_go_equiv gate keeps the structs in lockstep with the shipped template.
 func cmdRenderServer(args []string) error {
 	fs := flag.NewFlagSet("render-server", flag.ContinueOnError)
 	engine := fs.String("engine", "singbox", "engine (only singbox is ported to the Go spine)")
-	_ = fs.String("template", "", "template path (accepted for CLI parity; the Go renderer encodes the template)")
+	templatePath := fs.String("template", "", "sing-box server template: not read, but VERIFIED against the one these structs encode")
 	paramsPath := fs.String("params", "", "params.json (required)")
 	statePath := fs.String("state", "", "identities.json (required)")
 	out := fs.String("out", "-", "output file (- for stdout)")
@@ -654,6 +656,18 @@ func cmdRenderServer(args []string) error {
 	}
 	if *engine != "singbox" {
 		return fmt.Errorf("render-server: --engine %q is not ported to the Go spine; use control/myceliumctl for the xray engine", *engine)
+	}
+	// The template is not read, but it IS verified. Accepting and discarding it means an operator edit
+	// silently does nothing once this renderer is load-bearing; refusing turns that into a loud failure
+	// at the render, before anything is promoted.
+	if *templatePath != "" {
+		tdata, err := os.ReadFile(*templatePath)
+		if err != nil {
+			return fmt.Errorf("render-server: read --template %s: %w", *templatePath, err)
+		}
+		if err := spec.CheckServerTemplatePinned(tdata); err != nil {
+			return fmt.Errorf("render-server: %w", err)
+		}
 	}
 	if *paramsPath == "" || *statePath == "" {
 		return fmt.Errorf("render-server: --params and --state are required")
