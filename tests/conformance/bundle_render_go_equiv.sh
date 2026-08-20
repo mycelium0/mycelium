@@ -13,6 +13,12 @@
 # (no cutover); the Go renderer is additive.
 # Author: mindicator & silicon bags quartet.
 #
+# FIXTURE C exists because this gate was GREEN over the one input where the two producers disagreed. The
+# Go verb had no --awg-client and spec.RenderBundle had no AmneziaWG endpoint, while the node's serve path
+# passes that flag on every converge — so "byte-identical" was measured only across inputs that avoided
+# the difference. Fixture C uses the DEFAULT profile (two REALITY protos = ONE block family), which makes
+# it load-bearing: without the AWG endpoint the render is refused by the RP-0013 floor on both sides.
+#
 # SKIP-IF-NO-GO: the offline jq-only host cannot run the Go side (mirrors bundle_go_roundtrip /
 # share_link_go_equiv); the Go-node / CI lane runs the diff, and the Go-side unit test
 # TestRenderBundleShape pins the structure where Go is unavailable.
@@ -97,12 +103,14 @@ jq -n '{ version: 1, clients: [ { name: "bob", id: "b0b00000-0000-4000-8000-0000
 
 norm() { sed -E 's/("generated_at": ")[^"]*(")/\1NORMALIZED\2/' "$1"; }
 fail=0
-compare_fixture() { # NAME PARAMS STATE
-	local name="$1" params="$2" state="$3"
-	if ! bash "$CTL" bundle --params "$params" --state "$state" --out "$WORK/sh.json" 2>"$WORK/sh.err"; then
+compare_fixture() { # NAME PARAMS STATE [AWG_CONF]
+	local name="$1" params="$2" state="$3" awg="${4:-}"
+	local -a extra=()
+	[ -n "$awg" ] && extra=(--awg-client "$awg")
+	if ! bash "$CTL" bundle --params "$params" --state "$state" "${extra[@]}" --out "$WORK/sh.json" 2>"$WORK/sh.err"; then
 		printf '  FAIL  [%s] shell render failed: %s\n' "$name" "$(tr -d '\n' < "$WORK/sh.err" | cut -c1-160)"; fail=1; return
 	fi
-	if ! "$SPINE" bundle --params "$params" --state "$state" --out "$WORK/go.json" 2>"$WORK/go.err"; then
+	if ! "$SPINE" bundle --params "$params" --state "$state" "${extra[@]}" --out "$WORK/go.json" 2>"$WORK/go.err"; then
 		printf '  FAIL  [%s] Go render failed: %s\n' "$name" "$(tr -d '\n' < "$WORK/go.err" | cut -c1-160)"; fail=1; return
 	fi
 	norm "$WORK/sh.json" > "$WORK/sh.norm"; norm "$WORK/go.json" > "$WORK/go.norm"
@@ -116,9 +124,45 @@ compare_fixture() { # NAME PARAMS STATE
 compare_fixture "A: all transports, with client password" "$PARAMS" "$STATE"
 compare_fixture "B: subset, EMPTY client password -> shared-secret fallback" "$PARAMS_B" "$STATE_B"
 
+# ---------------------------------------------------------------------------------------------------
+# FIXTURE C — the AmneziaWG endpoint, and the DEFAULT node that needs it.
+#
+# Fixtures A and B never pass --awg-client, and for a long time neither did anything else: the Go verb
+# had no such flag and spec.RenderBundle had no AWG endpoint, while the node's serve path passes it on
+# every converge. So this gate was GREEN over precisely the input where the two producers disagreed —
+# the same shape as the aggregate defect of 0.2.95, one layer down.
+#
+# The params here are the DEFAULT profile: two REALITY protos, which are ONE block family. That makes
+# this fixture load-bearing rather than decorative — without the AWG endpoint the render is refused by
+# the RP-0013 floor on both sides, so it also pins that the endpoint is appended BEFORE the floor is
+# judged, not after. The config carries newlines, '=', '+', '/' and '&' so the value survives verbatim.
+# ---------------------------------------------------------------------------------------------------
+AWG_CONF="$WORK/awg.conf"
+printf '[Interface]\nPrivateKey = aB+cd/12=\nAddress = 10.8.0.2/32\nJc = 4\n\n[Peer]\nPublicKey = XY&Z=\nEndpoint = n.example.invalid:51820\n' > "$AWG_CONF"
+PARAMS_C="$WORK/params_c.json"
+jq -n '{ node_address: "c.example.invalid", donor_host: "www.example.invalid",
+	donor_sni: "www.example.invalid", reality_public_key: "PKC", short_ids: ["0123abcd"],
+	tls_sni: "c.example.invalid", grpc_service_name: "grpc.health.v1.Health",
+	vless_reality_vision_enabled: true, vless_reality_grpc_enabled: true }' > "$PARAMS_C"
+compare_fixture "C: DEFAULT node (one family) + AmneziaWG client config" "$PARAMS_C" "$STATE" "$AWG_CONF"
+
+# The fixture is only worth what it contains: prove the AWG endpoint is actually IN the rendered bundle,
+# and that it is what lifts the node over the floor. Otherwise C could pass by rendering nothing new.
+if [ -s "$WORK/sh.json" ]; then
+	jq -e 'any(.endpoints[]; .tag == "mycelium-amneziawg" and (.link | contains("[Interface]")))' \
+		"$WORK/sh.json" >/dev/null 2>&1 \
+		&& printf '  ok    [C] the AmneziaWG config is present as an endpoint, carried verbatim\n' \
+		|| { printf '  FAIL  [C] no mycelium-amneziawg endpoint carrying the config — fixture C proves nothing\n'; fail=1; }
+	if bash "$CTL" bundle --params "$PARAMS_C" --state "$STATE" --out "$WORK/nofam.json" 2>/dev/null; then
+		printf '  FAIL  [C] the same params rendered WITHOUT --awg-client too, so this fixture does not pin that the endpoint is added before the RP-0013 floor is judged\n'; fail=1
+	else
+		printf '  ok    [C] and without it the same node is refused — so the endpoint is judged by the floor, not appended after it\n'
+	fi
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -eq 0 ]; then
-	printf 'PASS: spec.RenderBundle is byte-identical to the shell bundle producer (both fixtures).\n'
+	printf 'PASS: spec.RenderBundle is byte-identical to the shell bundle producer (all three fixtures).\n'
 	exit 0
 fi
 printf 'FAIL: the Go bundle renderer is not byte-identical — do NOT cut over (RP-0008 P3 equivalence).\n' >&2

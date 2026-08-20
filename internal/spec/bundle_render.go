@@ -22,7 +22,33 @@ import (
 // the client config cannot diverge (CONFLICTING_SOURCE_OF_TRUTH): absent/null/false/empty params take
 // the documented default; the per-identity password falls back to the shared protocol secret; the
 // own-cert genuine-TLS families fail closed without an explicit tls_sni (C03); ports must be 1..65535 (C09).
+// BundleOptions carries the OPTIONAL inputs to a bundle render. Both are additive: the zero value renders
+// exactly what RenderBundle always did, so a node that configures neither is byte-unchanged.
+type BundleOptions struct {
+	// Front, when enabled and matching a transport this node serves, appends one fronted endpoint
+	// (ADR-0033 P2). Go-only — the shell renderer has no front, so it carries no equivalence constraint.
+	Front FrontConfig
+	// AWGClientConf is the AmneziaWG client config VERBATIM (the exact bytes the client imports and a QR
+	// encodes). Non-empty appends one amneziawg endpoint whose Link is that config. The shell renderer
+	// takes the same thing via --awg-client, and bundle_render_go_equiv pins the two byte-for-byte.
+	AWGClientConf string
+}
+
+// RenderBundle renders with no optional inputs — the historical signature, kept so existing callers and
+// fixtures are untouched.
 func RenderBundle(params map[string]json.RawMessage, firstClientID, firstClientPassword string, generatedAt time.Time) (Bundle, error) {
+	return RenderBundleWith(params, firstClientID, firstClientPassword, BundleOptions{}, generatedAt)
+}
+
+// RenderBundleWith is RenderBundle plus the optional inputs.
+//
+// ORDER MATTERS, and it is the reason the AmneziaWG endpoint could not simply be appended by a wrapper
+// the way the front is. The shell renderer adds it BEFORE the RP-0013 independent-family check, and it
+// has to: a default node serves two REALITY protos — ONE block family — and AmneziaWG is how it reaches
+// its SECOND. Append it after the floor and the renderer refuses the very configuration the node ships
+// with. The front is different: it re-serves a family the node already has, so appending it afterwards
+// changes no verdict.
+func RenderBundleWith(params map[string]json.RawMessage, firstClientID, firstClientPassword string, opts BundleOptions, generatedAt time.Time) (Bundle, error) {
 	base, err := bundleBaseLinkParams(params, firstClientID, firstClientPassword)
 	if err != nil {
 		return Bundle{}, err
@@ -63,6 +89,20 @@ func RenderBundle(params map[string]json.RawMessage, firstClientID, firstClientP
 	if len(eps) == 0 {
 		return Bundle{}, fmt.Errorf("bundle: no protocols enabled in params (set at least one <proto>_enabled: true)")
 	}
+	// The AmneziaWG endpoint. Its Link is the client config verbatim, not a URL: bundle.go documents Link
+	// as an "opaque dialable client config", and for this family the dialable thing IS the config — which
+	// is why the registry's Scheme for amneziawg is empty. Priority 0 mirrors the shell exactly (NOT the
+	// registry index, which for amneziawg is last); the class comes from the registry, never restated.
+	if opts.AWGClientConf != "" {
+		eps = append(eps, Endpoint{
+			Tag:            "mycelium-amneziawg",
+			TransportClass: amneziaWGDescriptor().Class,
+			Region:         RegionBucket(region),
+			Priority:       0,
+			Health:         HealthUnknown,
+			Link:           opts.AWGClientConf,
+		})
+	}
 	bundle := Bundle{Version: NetworkStateVersion, Endpoints: eps, GeneratedAt: generatedAt}
 	// RP-0013 AC-2 serve-time contract (fail-closed): a served bundle MUST span >= 2 INDEPENDENT transport
 	// families so a single-family block never removes the client's last path — the precondition for e2e
@@ -71,7 +111,22 @@ func RenderBundle(params map[string]json.RawMessage, firstClientID, firstClientP
 	if !bundle.IndependentFallbackOK() {
 		return Bundle{}, fmt.Errorf("bundle: the enabled transports span only %d independent family (%v) — a served bundle must span >= 2 DISTINCT families so a single-family block never removes the client's last path (RP-0013 AC-2 / AC-6); enable a second, independent transport family", len(bundle.DistinctClasses()), bundle.DistinctClasses())
 	}
+	if err := appendFrontEndpoint(&bundle, params, firstClientID, firstClientPassword, opts.Front); err != nil {
+		return Bundle{}, err
+	}
 	return bundle, nil
+}
+
+// amneziaWGDescriptor returns the registry entry for the amneziawg family. It has no enable key, so the
+// render loop never reaches it; this is the one place that needs it by name. Looking it up rather than
+// writing TransportClassAmneziaWGUDP inline keeps the class single-owned by the registry (ADR-0038).
+func amneziaWGDescriptor() ProtoDescriptor {
+	for i := range transportRegistry {
+		if transportRegistry[i].Proto == "amneziawg" {
+			return transportRegistry[i]
+		}
+	}
+	return ProtoDescriptor{} // unreachable: the registry is a compile-time literal that contains it
 }
 
 // bundleBaseLinkParams resolves the per-bundle base LinkParams (everything except the per-protocol Port)

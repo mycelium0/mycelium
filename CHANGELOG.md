@@ -13,6 +13,44 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.97] — 2026-08-20
+
+### Fixed — the Go bundle renderer could not produce the node's second block family
+
+RP-0008 P3 records the renderers as ported. `bundle` was not. `cmdBundle` declared only
+`--params/--state/--front/--out`; there was **no `--awg-client`**, and `spec.RenderBundle` had no
+AmneziaWG endpoint at all — while the node's serve path passes that flag on every converge
+(`nb_serve_bundle.sh:119`).
+
+That endpoint is not decorative. A default node serves two REALITY protos, which are **one** block
+family; the AmneziaWG config is how it reaches its **second**. So the Go renderer, had it been cut over,
+would have refused the very configuration the node ships with — and both fixtures in
+`bundle_render_go_equiv.sh` omitted `--awg-client`, which means **the gate was green over exactly the
+input where the two producers disagreed.** The same shape as the aggregate defect of 0.2.95, one layer
+down: byte-equivalence measured only across inputs that avoid the difference.
+
+`BundleOptions{Front, AWGClientConf}` carries the optional inputs; `RenderBundle` and
+`RenderBundleFront` stay as wrappers so no caller or fixture changed. **Order is the substance of the
+fix**: the AmneziaWG endpoint is appended INSIDE the renderer, before the RP-0013 floor is judged,
+because it is what the floor is meant to count. The front stays appended after — it re-serves a family
+the node already has, so it changes no verdict.
+
+Two details the byte diff would only have caught by luck, both pinned by a Go test instead: the priority
+is the shell's literal `0`, **not** the registry index (amneziawg is last in the registry), and the
+config is carried verbatim as the Link — for this family the dialable thing IS the config, which is why
+the registry's Scheme for it is empty.
+
+**One real divergence, found by driving both producers rather than reading them.** Shell reads the file
+as `$(cat FILE)`, and command substitution strips trailing newlines; Go read the bytes as they are. The
+three live nodes are already serving the stripped form, so Go now strips — matching the deployed
+producer, not the file on disk.
+
+Measured on a node, both producers, byte-identical with `generated_at` normalised: default node (2
+REALITY) + AmneziaWG → 3 endpoints / 2 families, accepted by both; the same node without it → refused by
+both; a rich node + AmneziaWG → 5 endpoints / 4 families; and a rich node without it unchanged from
+before. Fixture C goes red the moment the Go flag is removed, and the Go test goes red the moment the
+endpoint moves after the floor.
+
 ## [0.2.96] — 2026-08-20
 
 ### Fixed — two predicates with two owners each, neither pair ever driven apart
