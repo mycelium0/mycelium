@@ -13,6 +13,53 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.98] — 2026-08-20
+
+### Changed — the live data-plane config is now rendered by the Go spine (RP-0008 P3 cutover)
+
+`render_candidate` runs `myceliumctl-go render-server`; the shell producer stays as the fallback for a
+node whose spine was never built (`install_spine` warns rather than dies, and a node that cannot render
+cannot converge — degrading beats bricking). The two are pinned byte-identical by
+`render_server_go_equiv`, so this is not a second opinion: it is the same answer, computed by the
+implementation that owns the schema.
+
+**The fallback is absence-only.** Falling back when the spine REFUSES would be worse than having no
+fallback: a refusal is a real disagreement, not an outage to route around — most likely a server template
+that no longer matches the structs the spine encodes — and rendering it the other way would serve exactly
+what the spine just said it could not, with the fallback hiding the drift. A refusal now fails closed and
+promotes nothing. Which producer ran is logged, because otherwise "this node renders through Go" cannot
+be checked from outside, and that checkability is the only reason the cutover is safe to make.
+
+### Fixed — `render-server` accepted a template and threw it away
+
+Prerequisite for the above, and the reason it could not be done before. The Go renderer does not READ the
+sing-box template — reproducing jq's key order required encoding the shape in typed structs — and
+`--template` was accepted "for CLI parity" and then discarded. Harmless while the shell was the one that
+ran. The moment Go renders the live config it becomes this tree's most expensive failure shape: an
+operator edits the template, the node converges at rc=0, and the edit does nothing.
+
+`spec.ShippedServerTemplateSHA256` records the bytes the structs encode and the verb now REFUSES anything
+else. On the bytes, not on a parse: a reformat that changes no meaning still means the structs were not
+re-derived, and "no meaning changed" is exactly the judgement a machine must not make here. Editing the
+template is a three-part change — file, structs, constant — and `render_server_template_pinned.sh` fails
+offline the moment they fall out of step.
+
+**Measured on all three live nodes, against each node's REAL params:** the Go renderer reproduces the
+running `/usr/local/etc/sing-box/config.json` **byte for byte** (4849 / 4841 / 4838 bytes), and `sing-box
+check` accepts each. Not a fixture — the artefact the node is serving right now.
+
+**Two instrument faults on the way, both caught before they became findings.** The refusal row handed the
+verb `jq '.' TEMPLATE`, and the shipped template is already in jq's exact output format — so the
+"modified" file was byte-identical and the row asserted a refusal of the bytes the pin accepts. It passed
+by being a no-op. And on one node the comparison harness reported a divergence that was really `go` not
+being on the PATH of a non-interactive shell: the build never ran, the output file never existed, and a
+missing file diffed as "0 lines". Both harnesses now stop rather than compare nothing.
+
+Gates: `render_server_template_pinned.sh` (the pin, plus the driven refusal, plus the shipped template
+still accepted so the refusal row cannot pass by refusing everything) and `render_server_cutover.sh`
+(drives the shipped function with a recorder: the spine renders, a refusal is fatal, absence degrades
+loudly — two mutations turn it red). Suite 113 -> 115.
+
 ## [0.2.97] — 2026-08-20
 
 ### Fixed — the Go bundle renderer could not produce the node's second block family
