@@ -117,7 +117,7 @@ seed_params() { # PARAMS_PATH
 		anchored="$(jq -r '.targets[].ref' "$cfg" | sort -u)"
 		missing=""
 		for p in $enabled; do
-			printf '%s\n' "$anchored" | grep -qx "$p" || missing="$missing $p"
+			grep -qx "$p" <<<"$anchored" || missing="$missing $p"
 		done
 		[ -z "$missing" ] \
 			&& ok "every ENABLED sing-box transport has an anchor (nothing is served unmeasured)" \

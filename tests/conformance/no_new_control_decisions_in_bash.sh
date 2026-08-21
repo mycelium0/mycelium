@@ -145,7 +145,7 @@ for lib in $loop_libs; do
 	# CALL sites only: drop comment lines and the function's own definition line.
 	while IFS= read -r fn; do
 		[ -n "$fn" ] || continue
-		printf '%s\n' "$defined_fns" | grep -qxF -- "$fn" && continue
+		grep -qxF -- "$fn" <<<"$defined_fns" && continue
 		case " $missing_helpers " in *" $fn "*) ;; *) missing_helpers="$missing_helpers $fn" ;; esac
 	done <<INNER
 $(grep -vE '^[[:space:]]*#' "$f" | grep -oE '\bmyc_[a-z0-9_]+' | sort -u)

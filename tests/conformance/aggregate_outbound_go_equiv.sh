@@ -100,7 +100,7 @@ for proto in $PROTOS; do
 		# matched. That is the same benign-non-zero trap fixed three times elsewhere in this tree today,
 		# and it bit this row on its first run.
 		go_err="$("$SPINE" link-outbound --tag t "$link" 2>&1 || true)"
-		if printf '%s' "$go_err" | grep -qE 'sing-box cannot load|cannot be expressed|ShadowTLS is a pair'; then
+		if grep -qE 'sing-box cannot load|cannot be expressed|ShadowTLS is a pair' <<<"$go_err" ; then
 			printf '  ok    %s — the shell renders it, Go refuses with a stated engine reason (recorded open defect: the renderers still emit it)\n' "$proto"
 		else
 			printf '  FAIL  %s: Go refused without naming an engine reason:\n    %s\n' "$proto" "$(printf '%s' "$go_err" | head -1)"

@@ -83,15 +83,15 @@ drive() {
 # ---------------------------------------------------------------------------------------------------
 printf -- '-- a cert that is already there --\n'
 t="$(drive yes)"
-if printf '%s' "$t" | grep -q 'chown -R root:sing-box'; then
+if grep -q 'chown -R root:sing-box' <<<"$t" ; then
 	ok "ownership is reconciled even though nothing was generated"
 else
 	badln "ensure_self_signed_cert did NOT chown an already-present cert (trace: $(printf '%s' "$t" | tr '\n' '|' | cut -c1-160)). That is the from-zero failure: an operator-supplied cert stays unreadable by the engine, sing-box check still passes because it never opens the key as the service user, and the node reports a successful deploy with its data plane in a restart loop."
 fi
-printf '%s' "$t" | grep -q 'chmod 0640 .*privkey.pem' \
+grep -q 'chmod 0640 .*privkey.pem' <<<"$t" \
 	&& ok "and the key is 0640 — readable by the service group, by nobody else" \
 	|| badln "the private key mode is not reconciled to 0640 on the already-present branch"
-printf '%s' "$t" | grep -q 'chmod 0644 .*fullchain.pem' \
+grep -q 'chmod 0644 .*fullchain.pem' <<<"$t" \
 	&& ok "and the chain is 0644" \
 	|| badln "the certificate chain mode is not reconciled on the already-present branch"
 
@@ -100,10 +100,10 @@ printf '%s' "$t" | grep -q 'chmod 0644 .*fullchain.pem' \
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- and a node with no cert at all --\n'
 t2="$(drive no)"
-printf '%s' "$t2" | grep -q 'openssl req -x509' \
+grep -q 'openssl req -x509' <<<"$t2" \
 	&& ok "a fresh node still generates its self-signed cert" \
 	|| badln "no cert is generated on an empty node (trace: $(printf '%s' "$t2" | tr '\n' '|' | cut -c1-140)) — a fresh bootstrap would have no TLS material at all"
-printf '%s' "$t2" | grep -q 'chown -R root:sing-box' \
+grep -q 'chown -R root:sing-box' <<<"$t2" \
 	&& ok "and reconciles ownership after generating it" \
 	|| badln "the generate branch no longer chowns; it did before, and moving the reconciliation must not have dropped it"
 
@@ -111,12 +111,12 @@ printf '%s' "$t2" | grep -q 'chown -R root:sing-box' \
 # 3. RECONCILE, NEVER REPLACE.
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- and it never replaces what the operator placed --\n'
-if printf '%s' "$t" | grep -q 'PRESERVED'; then
+if grep -q 'PRESERVED' <<<"$t" ; then
 	ok "an existing cert survives the converge untouched"
 else
 	badln "the operator's cert did not survive. Overwriting a real certificate with a self-signed one takes every genuine-TLS transport off the air, and the node cannot get the real one back by itself — there is no ACME client on these nodes."
 fi
-printf '%s' "$t" | grep -q 'openssl req -x509' \
+grep -q 'openssl req -x509' <<<"$t" \
 	&& badln "the already-present branch ran the generator. That is the same defect from the other side: a converge would replace the operator's certificate." \
 	|| ok "and the generator is not run when a cert is already there"
 

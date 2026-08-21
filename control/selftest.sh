@@ -107,8 +107,8 @@ command -v xray >/dev/null 2>&1 && ok "xray stub is on PATH" || bad "xray stub m
 note "reality-keys (stubbed xray/openssl)"
 # ---------------------------------------------------------------------------
 RK_OUT="$("$CTL" reality-keys --shortids 2 2>/dev/null)"
-printf '%s\n' "$RK_OUT" | grep -q '^REALITY_PRIVATE_KEY=cHJpdmF0' && ok "private key parsed" || bad "private key parse"
-printf '%s\n' "$RK_OUT" | grep -q '^REALITY_PUBLIC_KEY=cHVibGlj'  && ok "public key parsed"  || bad "public key parse"
+grep -q '^REALITY_PRIVATE_KEY=cHJpdmF0' <<<"$RK_OUT" && ok "private key parsed" || bad "private key parse"
+grep -q '^REALITY_PUBLIC_KEY=cHVibGlj' <<<"$RK_OUT" && ok "public key parsed"  || bad "public key parse"
 [ "$(printf '%s\n' "$RK_OUT" | grep -c '^REALITY_SHORT_ID_')" -eq 2 ] && ok "two shortIds emitted" || bad "shortId count"
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ fi
 
 # list output contains the names.
 LIST_OUT="$("$CTL" identity list --state "$STATE")"
-printf '%s\n' "$LIST_OUT" | grep -q 'alice' && printf '%s\n' "$LIST_OUT" | grep -q 'carol' \
+grep -q 'alice' <<<"$LIST_OUT" && grep -q 'carol' <<<"$LIST_OUT" \
 	&& ok "list shows clients" || bad "list missing clients"
 
 # Revoke by name.

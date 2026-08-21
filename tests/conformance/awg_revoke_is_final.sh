@@ -150,7 +150,7 @@ seed_client() { # NAME
 	( revoke_awg_client alice ) >/dev/null 2>&1 || badln "revoke_awg_client failed outright — the rows below would prove nothing"
 
 	calls="$(cat "$FAKENODE_ROOT/awg.calls" 2>/dev/null || true)"
-	printf '%s' "$calls" | grep -q 'peer PUB-alice remove' \
+	grep -q 'peer PUB-alice remove' <<<"$calls" \
 		&& ok "the key is removed from the RUNNING interface (awg set awg0 peer ... remove)" \
 		|| badln "no 'awg set awg0 peer ... remove' was issued. The on-disk config is not what the kernel honours: until the next restart — which may be weeks — the revoked key still completes handshakes, while the operator has been told it is revoked."
 
@@ -331,10 +331,10 @@ seed_client() { # NAME
 	[ "$rc" -ne 0 ] \
 		&& ok "a revoke that cannot reach every peer exits NON-ZERO" \
 		|| badln "the revoke reported SUCCESS while an unreachable [Peer] remained. On the node where this was found, that peer's private key was sitting in the state dir — the operator would have been told the credential was retired while it still worked."
-	printf '%s' "$out" | grep -q "is revoked" \
+	grep -q "is revoked" <<<"$out" \
 		&& badln "it printed the 'is revoked' guarantee despite an unreachable peer — the guarantee must be earned, not printed" \
 		|| ok "it does NOT print the 'is revoked' guarantee it cannot honour"
-	printf '%s' "$out" | grep -q 'awg-revoke-peer' \
+	grep -q 'awg-revoke-peer' <<<"$out" \
 		&& ok "it hands over the exact command that finishes the job" \
 		|| badln "it reports the problem without naming the verb that resolves it"
 	[ -s "$STATE_DIR/awg/REVOKE_INCOMPLETE" ] \
@@ -460,13 +460,13 @@ seed_client() { # NAME
 	[ "$rc" -ne 0 ] \
 		&& ok "a surviving private key elsewhere on the node makes the revoke report INCOMPLETE" \
 		|| badln "the revoke claimed success while a private key deriving to the revoked public key was still stored on the node. It deleted the files it could name and asserted a fact about the ones it could not."
-	printf '%s' "$out" | grep -q 'whatever.private' \
+	grep -q 'whatever.private' <<<"$out" \
 		&& ok "it names the loose *.private file it found" \
 		|| badln "it did not report the surviving *.private file, so the operator cannot act on it"
-	printf '%s' "$out" | grep -q 'identity.json' \
+	grep -q 'identity.json' <<<"$out" \
 		&& ok "it also finds a private_key nested inside a *.json" \
 		|| badln "a private_key inside a JSON file was missed — that is exactly the shape found on the live node"
-	printf '%s' "$out" | grep -q "is revoked" \
+	grep -q "is revoked" <<<"$out" \
 		&& badln "it still printed the 'is revoked' guarantee" \
 		|| ok "and it withholds the guarantee"
 	exit "$fail"
@@ -489,7 +489,7 @@ seed_client() { # NAME
 	need_root() { :; }
 	have() { command -v "$1" >/dev/null 2>&1; }
 	out="$( ( revoke_awg_client alice ) 2>&1 )"
-	printf '%s' "$out" | grep -q -- '--revoke alice' \
+	grep -q -- '--revoke alice' <<<"$out" \
 		&& ok "a namesake in the sing-box/xray identity set is surfaced with the command to retire it too" \
 		|| badln "an identity of the same name in the OTHER namespace was not mentioned — the operator is left believing one revoke covered both"
 	exit "$fail"
@@ -595,7 +595,7 @@ fi
 	have() { command -v "$1" >/dev/null 2>&1; }
 
 	out="$( ( revoke_awg_peer "$REALKEY" ) 2>&1 )"
-	printf '%s' "$out" | grep -q 'nothing to revoke' \
+	grep -q 'nothing to revoke' <<<"$out" \
 		&& badln "the verb reported 'nothing to revoke' for a peer that IS in the config. A base64 key carries '+' and '/', and matching it as a REGEX makes the pattern fail silently — the operator is told the credential was never there." \
 		|| ok "a real base64 key (with + and /) is recognised in the config"
 	grep -qF "$REALKEY" "$MYC_AWG_CONF" \

@@ -56,27 +56,27 @@ else
 fi
 
 # 2) RESTORE-ON-FAILURE: the bring-up failure path restores the backup + restarts, then dies.
-if printf '%s\n' "$body" | grep -qE 'cp -a "\$bak/awg0.conf" "\$awg_conf"' \
-	&& printf '%s\n' "$body" | grep -qE 'restart awg-quick@awg0' \
-	&& printf '%s\n' "$body" | grep -qiE 'RESTOR'; then
+if grep -qE 'cp -a "\$bak/awg0.conf" "\$awg_conf"' <<<"$body" \
+	&& grep -qE 'restart awg-quick@awg0' <<<"$body" \
+	&& grep -qiE 'RESTOR' <<<"$body" ; then
 	ok "restore-on-failure path present (cp backup back + restart awg0 + die)"
 else
 	bad "no restore-on-failure path (a failed bring-up must restore the backup)"
 fi
 
 # 3) SURGICAL: _awg_swap_dialect seds ONLY the 9 dialect keys, never a key/address/peer field.
-if printf '%s\n' "$swap" | grep -qE 's/\^H1 = ' && printf '%s\n' "$swap" | grep -qE 's/\^Jc = '; then
+if grep -qE 's/\^H1 = ' <<<"$swap" && grep -qE 's/\^Jc = ' <<<"$swap" ; then
 	ok "the swap rewrites the dialect lines (Jc.., H1..)"
 else
 	bad "the swap does not target the dialect lines as expected"
 fi
-if printf '%s\n' "$swap" | grep -qiE 's/\^?(PrivateKey|PublicKey|PresharedKey|AllowedIPs|Address|Endpoint)'; then
+if grep -qiE 's/\^?(PrivateKey|PublicKey|PresharedKey|AllowedIPs|Address|Endpoint)' <<<"$swap" ; then
 	bad "the swap seds a KEY/ADDRESS/PEER field — it must ONLY touch the 9 dialect lines"
 else
 	ok "the swap never seds a key/address/peer field (surgical)"
 fi
 # before+after 9-line sanity present.
-if printf '%s\n' "$swap" | grep -qE '_awg_dialect_lines' && printf '%s\n' "$swap" | grep -qE '\-eq 9'; then
+if grep -qE '_awg_dialect_lines' <<<"$swap" && grep -qE '\-eq 9' <<<"$swap" ; then
 	ok "the swap verifies exactly 9 dialect lines (refuses a non-standard config; post-swap sanity)"
 else
 	bad "the swap does not verify the 9-dialect-line invariant before/after"
@@ -92,7 +92,7 @@ else
 fi
 
 # 5) DRY-RUN: a preview branch returns without mutating.
-if printf '%s\n' "$body" | grep -qE '\[ "\$DRY_RUN" -eq 1 \]' && printf '%s\n' "$body" | grep -qE '\[dry-run\]'; then
+if grep -qE '\[ "\$DRY_RUN" -eq 1 \]' <<<"$body" && grep -qE '\[dry-run\]' <<<"$body" ; then
 	ok "a --dry-run branch previews without mutating"
 else
 	bad "no --dry-run preview branch in the apply machinery"
@@ -119,14 +119,14 @@ der="$(awk '/^derive_awg_dialect\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$AWG")"
 
 # 7) EPOCH-0 COMPATIBILITY: epoch 0 must derive from the key ALONE, so introducing rotation reproduces an
 #    already-migrated node's original dialect byte-for-byte.
-if printf '%s\n' "$der" | grep -qE '\[ "\$epoch" -eq 0 \] \|\| input='; then
+if grep -qE '\[ "\$epoch" -eq 0 \] \|\| input=' <<<"$der" ; then
 	ok "epoch 0 derives from the key alone (already-migrated nodes keep their dialect)"
 else
 	bad "derive_awg_dialect does not preserve epoch-0 behaviour (would change existing nodes' dialects)"
 fi
 
 # 8) ROTATION ACTUALLY CHANGES THE DIALECT: rotate bumps the epoch (cur + 1).
-if printf '%s\n' "$rot" | grep -qE 'next=\$\(\( cur \+ 1 \)\)' && printf '%s\n' "$rot" | grep -qE '_awg_apply_dialect "\$next"'; then
+if grep -qE 'next=\$\(\( cur \+ 1 \)\)' <<<"$rot" && grep -qE '_awg_apply_dialect "\$next"' <<<"$rot" ; then
 	ok "rotate bumps the epoch (cur+1) and applies at the new epoch (a genuinely fresh dialect)"
 else
 	bad "rotate does not bump the epoch — it would be idempotent, not a rotation"
@@ -140,16 +140,16 @@ else
 fi
 
 # 10) L7 SELFTEST IS FAIL-CLOSED: a DEAD probe rolls back (config AND epoch), not just warns.
-if printf '%s\n' "$apply" | grep -qE 'measure_l7_probe_amneziawg' \
-	&& printf '%s\n' "$apply" | grep -qE '_awg_rollback "the L7 selftest'; then
+if grep -qE 'measure_l7_probe_amneziawg' <<<"$apply" \
+	&& grep -qE '_awg_rollback "the L7 selftest' <<<"$apply" ; then
 	ok "the L7 handshake selftest is fail-closed (a DEAD data-plane rolls back)"
 else
 	bad "the L7 selftest does not roll back on a DEAD data-plane (a node could sit on an unservable dialect)"
 fi
 
 # 11) ROLLBACK REVERTS THE EPOCH in lockstep with the config (no epoch/config skew).
-if printf '%s\n' "$apply" | grep -qE '_awg_rollback\(\)' \
-	&& printf '%s\n' "$apply" | grep -qE 'printf .%s\\n. "\$prev_epoch" > "\$\(_awg_epoch_file\)"'; then
+if grep -qE '_awg_rollback\(\)' <<<"$apply" \
+	&& grep -qE 'printf .%s\\n. "\$prev_epoch" > "\$\(_awg_epoch_file\)"' <<<"$apply" ; then
 	ok "rollback reverts the epoch together with the config (no epoch/config skew)"
 else
 	bad "rollback does not revert the epoch — a failed rotation would leave epoch/config skewed"
@@ -158,7 +158,7 @@ fi
 # 12) A RE-RENDER RESPECTS THE EPOCH: render_awg0 derives at the current epoch, so a rotated node does not
 #     silently revert to its epoch-0 dialect on the next render.
 r0="$(awk '/^render_awg0\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$AWG")"
-if printf '%s\n' "$r0" | grep -qE 'derive_awg_dialect "\$spriv" "\$\(_awg_read_epoch\)"'; then
+if grep -qE 'derive_awg_dialect "\$spriv" "\$\(_awg_read_epoch\)"' <<<"$r0" ; then
 	ok "render_awg0 derives at the current epoch (a rotated node keeps its rotated dialect on re-render)"
 else
 	bad "render_awg0 ignores the rotation epoch — a re-render would revert a rotated node's dialect"

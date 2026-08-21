@@ -38,29 +38,29 @@ FN="$(awk '/^measure_fp_ab_probe\(\) \{/{f=1} f{print} f&&/^\}/{exit}' "$NS")"
 
 # The alternate presets come ONLY from the Go-owned closed vocab (control/vocab.json .client_fingerprints),
 # with the current excluded — never a randomiser (principle 1: a unique JA4 is itself a tell).
-printf '%s' "$FN" | grep -qF '.client_fingerprints[]?' && printf '%s' "$FN" | grep -qF 'select(. != $cur)' \
+grep -qF '.client_fingerprints[]?' <<<"$FN" && grep -qF 'select(. != $cur)' <<<"$FN" \
 	&& okln "alternates are the closed vocab with current excluded" \
 	|| badln "alternates are not derived from .client_fingerprints minus current"
-if printf '%s' "$FN" | grep -qE '\$RANDOM|openssl rand|shuf|sort -R'; then
+if grep -qE '\$RANDOM|openssl rand|shuf|sort -R' <<<"$FN" ; then
 	badln "a randomiser feeds the preset choice (forbidden — closed-set only)"
 else
 	okln "no randomiser feeds the preset choice"
 fi
 # Same-listener A/B: the two arms differ ONLY in the appended fp arg (transport/dest/port held constant).
-printf '%s' "$FN" | grep -qF 'donor_verify_reality "$suspect_dest" "$alt"' \
-	&& printf '%s' "$FN" | grep -qF '_l7_probe_shadowtls_dial "$suspect_tag" "$suspect_port" "$alt"' \
+grep -qF 'donor_verify_reality "$suspect_dest" "$alt"' <<<"$FN" \
+	&& grep -qF '_l7_probe_shadowtls_dial "$suspect_tag" "$suspect_port" "$alt"' <<<"$FN" \
 	&& okln "same-listener A/B: arms vary only the uTLS preset arg, holding the transport constant" \
 	|| badln "the A/B arms do not hold the transport constant while varying only the preset"
 # Own advisory marker: writes fp_probe.json, only READS the l7 marker (never writes it), and is INERT.
-printf '%s' "$FN" | grep -qF 'fp_probe.json' && okln "writes its OWN advisory marker (fp_probe.json)" \
+grep -qF 'fp_probe.json' <<<"$FN" && okln "writes its OWN advisory marker (fp_probe.json)" \
 	|| badln "does not write its own fp_probe.json marker"
-if printf '%s' "$FN" | grep -qE '>[[:space:]]*"?\$l7marker|flow_rotate|apply_singbox|promote_config|rotate_'; then
+if grep -qE '>[[:space:]]*"?\$l7marker|flow_rotate|apply_singbox|promote_config|rotate_' <<<"$FN" ; then
 	badln "the producer rotates/actuates or writes the L7 marker (must be inert, own-marker only)"
 else
 	okln "inert: never rotates/actuates and never writes the transport L7 marker"
 fi
 # Fingerprint-BLIND families (genuine-TLS ws-tls, QUIC hy2/tuic) are NOT A/B'd (openssl/insecure carry no uTLS).
-if printf '%s' "$FN" | grep -qE 'ws-tls|hysteria2|tuic'; then
+if grep -qE 'ws-tls|hysteria2|tuic' <<<"$FN" ; then
 	badln "a fingerprint-blind family (ws-tls/hy2/tuic) leaked into the fp-carrying A/B set"
 else
 	okln "fingerprint-blind families (ws-tls/QUIC) are excluded from the A/B set"

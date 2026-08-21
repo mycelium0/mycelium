@@ -156,14 +156,14 @@ fi
 RENDER_LINE="$(grep -E '\[dry-run\].*render-server' "$OUT" | head -n1 || true)"
 
 # 1) The render template must resolve UNDER the fake checkout (ARTIFACT_ROOT = CHECKOUT_DIR).
-if printf '%s' "$RENDER_LINE" | grep -qF -- "--template $FAKE_CHECKOUT/nodes/dataplane/singbox/server.template.renderer.json"; then
+if grep -qF -- "--template $FAKE_CHECKOUT/nodes/dataplane/singbox/server.template.renderer.json" <<<"$RENDER_LINE" ; then
 	okln "renderer template resolved from CHECKOUT_DIR (ARTIFACT_ROOT), not a tmp path"
 else
 	badln "renderer template did NOT resolve from CHECKOUT_DIR — render line: ${RENDER_LINE:-<none>}"
 fi
 
 # 2) The render command must run the in-checkout myceliumctl fallback (no installed tooling copy).
-if printf '%s' "$RENDER_LINE" | grep -qF -- "$FAKE_CHECKOUT/control/myceliumctl render-server"; then
+if grep -qF -- "$FAKE_CHECKOUT/control/myceliumctl render-server" <<<"$RENDER_LINE" ; then
 	okln "myceliumctl fallback resolved from CHECKOUT_DIR/control"
 else
 	badln "myceliumctl did NOT resolve from CHECKOUT_DIR/control — render line: ${RENDER_LINE:-<none>}"
