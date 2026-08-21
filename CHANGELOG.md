@@ -13,7 +13,7 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
-## [0.2.99] — 2026-08-21
+## [0.2.100] — 2026-08-21
 
 ### Fixed — a spine one rev behind rendered the live config, and nothing said so
 
@@ -43,6 +43,8 @@ to running a detached suite in a checkout I was concurrently resetting. That was
 of them: `collapse_gated.sh` and `served_set_is_what_is_served.sh` both carry
 `printf "$big" | grep -q` under `pipefail`, and the 0.2.99 entry below measures that shape turning a
 match into a failure.
+
+## [0.2.99] — 2026-08-21
 
 ### Fixed — 115 places where a gate could report the opposite of what it measured
 
