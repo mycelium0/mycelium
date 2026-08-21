@@ -49,14 +49,28 @@ drive() {
 	mkdir -p "$W/bin"
 	: > "$W/template.json"; : > "$W/params.json"; : > "$W/identities.json"
 	printf '#!/bin/sh\nexit 0\n' > "$W/bin/myceliumctl"; chmod +x "$W/bin/myceliumctl"
+	# The stub answers `version` like the real binary, because render_candidate now refuses a spine whose
+	# rev does not match the deployed artifact. ARTIFACT_ROOT points at a git repo the fixture owns, so
+	# "matching" and "skewed" are both reachable without touching the real checkout.
+	( git init -q "$W/artifact" 2>/dev/null
+	  cd "$W/artifact" && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m x 2>/dev/null ) >/dev/null 2>&1
+	local art_rev; art_rev="$(git -C "$W/artifact" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+	local stub_rev="$art_rev"
+	[ "$mode" = skewed ] && stub_rev="deadbeefdead"
 	case "$mode" in
-		present)  printf '#!/bin/sh\nexit 0\n' > "$W/bin/myceliumctl-go"; chmod +x "$W/bin/myceliumctl-go" ;;
-		refusing) printf '#!/bin/sh\nexit 1\n' > "$W/bin/myceliumctl-go"; chmod +x "$W/bin/myceliumctl-go" ;;
-		absent)   : ;;
+		absent) : ;;
+		*)
+			cat > "$W/bin/myceliumctl-go" <<STUB
+#!/bin/sh
+[ "\$1" = version ] && { printf 'myceliumctl 0.0.0 (rev %s)\n' "$stub_rev"; exit 0; }
+exit $([ "$mode" = refusing ] && printf 1 || printf 0)
+STUB
+			chmod +x "$W/bin/myceliumctl-go" ;;
 	esac
 	(
 		MYCTL="$W/bin/myceliumctl"
 		SPINE_BIN="$W/bin/myceliumctl-go"
+		ARTIFACT_ROOT="$W/artifact"
 		RENDER_TEMPLATE="$W/template.json"; PARAMS_JSON="$W/params.json"; IDENTITIES_JSON="$W/identities.json"
 		TRACE="$W/trace"
 		log()  { printf 'LOG %s\n' "$*" >>"$TRACE"; }
@@ -67,7 +81,7 @@ drive() {
 		run()  { printf 'RUN %s\n' "$*" >>"$TRACE"; "$@"; }
 		# shellcheck source=/dev/null
 		. "$LIB" >/dev/null 2>&1 || exit 2
-		MYCTL="$W/bin/myceliumctl"; SPINE_BIN="$W/bin/myceliumctl-go"
+		MYCTL="$W/bin/myceliumctl"; SPINE_BIN="$W/bin/myceliumctl-go"; ARTIFACT_ROOT="$W/artifact"
 		RENDER_TEMPLATE="$W/template.json"; PARAMS_JSON="$W/params.json"; IDENTITIES_JSON="$W/identities.json"
 		render_candidate "$W/candidate.json"
 	) >/dev/null 2>&1
@@ -119,6 +133,29 @@ fi
 printf '%s' "$t3" | grep -q '^WARN .*spine is not present' \
 	&& ok "and the degradation is announced, not silent" \
 	|| badln "the fallback happened silently — an operator cannot tell a spine-rendered node from a shell-rendered one"
+
+# ---------------------------------------------------------------------------------------------------
+# 4. A SPINE THAT DOES NOT MATCH THE DEPLOYED ARTIFACT MAY NOT RENDER.
+#
+# MEASURED on all three nodes at the first converge after the cutover: the checkout was one rev ahead of
+# the binary that rendered the live config, and nothing said so. flow_node_apply does not install the
+# tooling — only bootstrap and --update do — so the attended path renders through whatever is on disk.
+# A stale spine is not a slower spine: it can be MISSING a check this artifact relies on (the server
+# template pin) and would pass it by not having it.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- when the spine is a different rev from the artifact --\n'
+t4="$(drive skewed)"
+if printf '%s' "$t4" | grep -q '^RUN .*myceliumctl-go render-server'; then
+	badln "a spine built from another rev rendered the live config anyway. It can be missing checks this artifact relies on — the server-template pin arrived in one rev and would simply not exist in the other — so the check passes by being absent."
+else
+	ok "a rev-skewed spine is not used to render"
+fi
+printf '%s' "$t4" | grep -q '^DIE ' \
+	&& ok "and the converge fails closed rather than falling back" \
+	|| badln "a rev-skewed spine neither rendered nor failed closed (trace: $(printf '%s' "$t4" | tr '\n' '|' | cut -c1-200)); falling back to the shell here would hide the skew instead of reporting it"
+printf '%s' "$t4" | grep -q '^RUN .*bin/myceliumctl render-server' \
+	&& badln "the shell renderer was used to route around the skew — that turns 'your tooling is stale' into a silent downgrade" \
+	|| ok "and the shell renderer is not used to paper over it"
 
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
