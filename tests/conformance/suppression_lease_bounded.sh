@@ -227,10 +227,10 @@ tail_body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$PARAMS_LIB" | aw
 obs_lib="$REPO_ROOT/control/lib/nb_observability.sh"
 obs_rc="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$obs_lib" | awk '/^record_converge_ok\(\)/,/^}/')"
 
-printf '%s' "$tail_body" | grep -q 'publish_suppression_leases' \
+grep -q 'publish_suppression_leases' <<<"$tail_body" \
 	&& ok "converge_node_tail publishes the suppression state — the tail every converge path runs" \
 	|| badln "converge_node_tail does not publish. If the call sits in record_converge_ok instead, it is reached only from flow_update, and a node converged by deploy or apply never emits the series — measured exactly that on a live node."
-printf '%s' "$obs_rc" | grep -q 'publish_suppression_leases' \
+grep -q 'publish_suppression_leases' <<<"$obs_rc" \
 	&& badln "record_converge_ok publishes too. Two callers for one fact is two owners (§2.2 item 8) — and the update path would emit a second, differently-timed sample of the same state." \
 	|| ok "and record_converge_ok does not — one fact, one place that knows it"
 

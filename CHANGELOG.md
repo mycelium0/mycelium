@@ -36,13 +36,47 @@ tooling is stale" into a silent downgrade, which is the same defect wearing the 
 removing the guard turns two of them red. The fixture's stub spine now answers `version` against a git
 repo it owns, so both matching and skewed revs are reachable without touching a real checkout.
 
-### Note — two suite failures on a node that were mine, not the tree's
+### Note — corrected: those suite failures were EPIPE, not my git handling
 
-Two consecutive full-suite runs on a live node failed on two different gates, each green in CI and green
-standalone. Cause: the suite was running detached out of `/root/myc-test` while other sessions of mine
-ran `git fetch && git reset --hard && git clean -fd` in that same checkout — files were being replaced
-underneath a running suite. Re-run in a throwaway clone: **115/115**, selftest 175/175. The rule that
-follows: never point a detached suite at a checkout you are still handling.
+Two node suite runs and one CI run failed this week on gates green everywhere else. I attributed them
+to running a detached suite in a checkout I was concurrently resetting. That was wrong for at least two
+of them: `collapse_gated.sh` and `served_set_is_what_is_served.sh` both carry
+`printf "$big" | grep -q` under `pipefail`, and the 0.2.99 entry below measures that shape turning a
+match into a failure.
+
+### Fixed — 115 places where a gate could report the opposite of what it measured
+
+`printf '%s' "$big" | grep -q PATTERN` under `set -o pipefail`. `grep -q` exits on its FIRST match and
+closes the pipe; the producer is then killed by SIGPIPE; `pipefail` takes the pipeline's status from it.
+**A match becomes a failure.**
+
+Both polarities are wrong, and one of them is dangerous:
+
+* `... | grep -q X && ok || badln` — a false FAILURE. Noisy, and it trains people to re-run CI.
+* `if ... | grep -q FORBIDDEN; then badln; else ok; fi` — a false **PASS**, on the defect the row exists
+  to catch. Three such rows sit on the fingerprint invariants, including "no randomiser feeds the uTLS
+  preset choice" — a rule whose whole point is that a unique JA4 is itself a tell.
+
+**Measured**, 20 runs per size: below the pipe buffer, 0/20 false failures; above it, **20/20**. Not a
+race at all once the remainder exceeds the buffer — deterministic. A here-string is immune at every size.
+
+The CI instance that exposed this was `collapse_gated.sh` with a 31 KB string, well under the 64 KB
+default — so the runner's effective pipe buffer must be smaller than that. Linux can allocate
+single-page (4 KB) pipes under `pipe-user-pages-soft` pressure, which fits a busy shared runner and not
+an idle node; that inference is stated as an inference, not a measurement.
+
+`{ printf ... || true; } | grep -q` was tried first and **does not work**: `printf` is a shell builtin, so
+it is killed by the signal rather than returning a status `||` could mask. Verified, 40/40 still failing.
+The fix is to remove the pipe: `grep -q PATTERN <<<"$var"`.
+
+Swept across 28 gate files. Producers feeding `sed`/`awk`/`grep -c` are deliberately left alone — those
+read their input to the end and cannot raise EPIPE.
+
+**This is the same class as the four `set -Eeuo pipefail` ERR-trap defects fixed in 0.2.89-0.2.94**, seen
+from the test side: a benign non-zero inside a pipeline being read as failure. It is the reason two node
+suite runs and one CI run failed this week on gates that were green everywhere else — which I first
+attributed to concurrent git operations in the checkout. That explanation was wrong for at least
+`collapse_gated.sh` and `served_set_is_what_is_served.sh`; both carry this pattern.
 
 ## [0.2.98] — 2026-08-20
 

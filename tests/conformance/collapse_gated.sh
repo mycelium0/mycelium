@@ -106,7 +106,7 @@ esac
 
 body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$ENTRY")"
 for v in collapse-arm collapse-disarm; do
-	printf '%s' "$body" | grep -q -- "--$v" \
+	grep -q -- "--$v" <<<"$body" \
 		&& ok "--$v is reachable from the entrypoint" \
 		|| badln "--$v is not a mode on node-bootstrap.sh; the verb exists in a library nobody can call, which is how the sentinel came to be hand-touched in the first place"
 done
@@ -124,10 +124,10 @@ nw="$(printf '%s' "$writers" | sed '/^$/d' | wc -l | tr -d ' ')"
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- the default, and where the daemon config gets it --\n'
 lib_nc="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$LIB")"
-printf '%s' "$lib_nc" | grep -q 'MEASURE_PATH_COLLAPSE_ENABLED:-false' \
+grep -q 'MEASURE_PATH_COLLAPSE_ENABLED:-false' <<<"$lib_nc" \
 	&& ok "the shipped default is disarmed" \
 	|| badln "MEASURE_PATH_COLLAPSE_ENABLED no longer defaults to false. A signal that faults a served transport must not be on unless somebody turned it on."
-printf '%s' "$lib_nc" | grep -q '_collapse_sentinel' \
+grep -q '_collapse_sentinel' <<<"$lib_nc" \
 	&& ok "and generate_measure_configs derives path_collapse_enabled from the sentinel, so the arm survives a config regen" \
 	|| badln "the daemon config no longer reads the sentinel; the arm would be lost on every --update, which is worse than not having one"
 

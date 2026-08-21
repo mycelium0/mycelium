@@ -66,7 +66,7 @@ classes="$(jq -r '.transport_classes[]?' "$VOCAB")"
 mapped="$(jq -r '.block_families // {} | keys[]?' "$VOCAB")"
 missing=""
 for c in $classes; do
-	printf '%s\n' "$mapped" | grep -qx "$c" || missing="$missing $c"
+	grep -qx "$c" <<<"$mapped" || missing="$missing $c"
 done
 if [ -z "$missing" ]; then
 	ok "and every class in the closed vocabulary has a block family ($(printf '%s' "$classes" | wc -w | tr -d ' ') classes)"
@@ -138,10 +138,10 @@ got="$(verdict "$(mk no-such-class reality-tcp)")"
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- and the renderer that runs on a node enforces it --\n'
 body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$SHELL_RENDER")"
-printf '%s' "$body" | grep -q 'block_families' \
+grep -q 'block_families' <<<"$body" \
 	&& ok "control/lib/render_bundle.sh reads .block_families from the Go-owned vocab" \
 	|| badln "the shell bundle renderer has no family check. It is the one that runs — nb_install.sh keeps MYCTL as the shell tool — so the floor being present only in Go means it is not present on any node."
-printf '%s' "$body" | grep -q 'independent_family_floor' \
+grep -q 'independent_family_floor' <<<"$body" \
 	&& ok "and reads the threshold from there too, rather than restating it" \
 	|| badln "the shell renderer does not read .independent_family_floor. A literal 2 here is a second copy of a Go-owned number, and the two drift the moment the floor changes."
 grep -q 'IndependentFallbackOK' "$GO_RENDER" \

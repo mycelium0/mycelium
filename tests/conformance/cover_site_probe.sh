@@ -141,7 +141,7 @@ else
 	if [ -z "$status" ] || [ "$status" = "000" ]; then
 		printf '  WARN  no HTTP status returned (donor may not serve plain HTTP on this path)\n'
 		printf '        TLS identity above is the authoritative signal; not failing on HTTP alone.\n'
-	elif printf '%s' "$status" | grep -qE '^[1-5][0-9][0-9]$'; then
+	elif grep -qE '^[1-5][0-9][0-9]$' <<<"$status" ; then
 		printf '  ok    HTTP status %s — a normal web-server response (no tunnel tell)\n' "$status"
 	else
 		printf '  FAIL  unexpected HTTP response: %s\n' "$status"

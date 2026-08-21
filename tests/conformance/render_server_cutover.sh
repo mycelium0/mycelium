@@ -94,15 +94,15 @@ STUB
 # ---------------------------------------------------------------------------------------------------
 printf -- '-- with a working spine --\n'
 t="$(drive present)"
-if printf '%s' "$t" | grep -q '^RUN .*myceliumctl-go render-server'; then
+if grep -q '^RUN .*myceliumctl-go render-server' <<<"$t" ; then
 	ok "the Go spine is the one invoked"
 else
 	badln "the Go spine was not invoked (trace: $(printf '%s' "$t" | tr '\n' '|' | cut -c1-200)). Without this the cutover has not happened and every gate that pins the two producers equivalent is protecting a renderer nothing runs."
 fi
-printf '%s' "$t" | grep -q '^RUN .*bin/myceliumctl render-server' \
+grep -q '^RUN .*bin/myceliumctl render-server' <<<"$t" \
 	&& badln "the shell renderer ALSO ran. Two producers writing the same candidate is the duplicate-truth defect with an ordering bug on top." \
 	|| ok "and the shell renderer is not invoked as well"
-printf '%s' "$t" | grep -qi '^LOG rendered by the Go spine' \
+grep -qi '^LOG rendered by the Go spine' <<<"$t" \
 	&& ok "and the trace says which producer rendered" \
 	|| badln "nothing logged which producer ran. Then 'this node renders through Go' cannot be checked from the outside, which is the only reason the cutover is safe to make."
 
@@ -111,12 +111,12 @@ printf '%s' "$t" | grep -qi '^LOG rendered by the Go spine' \
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- when the spine REFUSES --\n'
 t2="$(drive refusing)"
-if printf '%s' "$t2" | grep -q '^RUN .*bin/myceliumctl render-server'; then
+if grep -q '^RUN .*bin/myceliumctl render-server' <<<"$t2" ; then
 	badln "the shell renderer was used after the spine refused. The two are pinned byte-identical, so a refusal is a real disagreement — most likely a server template that no longer matches the structs the spine encodes — and rendering it the other way SERVES the thing the spine just said it could not, with the fallback hiding the drift."
 else
 	ok "the shell renderer is not used to route around a refusal"
 fi
-printf '%s' "$t2" | grep -q '^DIE ' \
+grep -q '^DIE ' <<<"$t2" \
 	&& ok "and the converge fails closed, promoting nothing" \
 	|| badln "a refusing spine did not fail closed (trace: $(printf '%s' "$t2" | tr '\n' '|' | cut -c1-200))"
 
@@ -125,12 +125,12 @@ printf '%s' "$t2" | grep -q '^DIE ' \
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- when the spine was never built --\n'
 t3="$(drive absent)"
-if printf '%s' "$t3" | grep -q '^RUN .*bin/myceliumctl render-server'; then
+if grep -q '^RUN .*bin/myceliumctl render-server' <<<"$t3" ; then
 	ok "the shell producer still renders when no spine exists"
 else
 	badln "a node with no spine could not render at all (trace: $(printf '%s' "$t3" | tr '\n' '|' | cut -c1-200)). install_spine WARNs rather than dies when there is no Go toolchain, so this is a reachable state, and degrading beats bricking."
 fi
-printf '%s' "$t3" | grep -q '^WARN .*spine is not present' \
+grep -q '^WARN .*spine is not present' <<<"$t3" \
 	&& ok "and the degradation is announced, not silent" \
 	|| badln "the fallback happened silently — an operator cannot tell a spine-rendered node from a shell-rendered one"
 

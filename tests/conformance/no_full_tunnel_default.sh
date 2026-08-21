@@ -106,7 +106,7 @@ scan_conf() {
 		# Is THIS a configured AllowedIPs line with a default route?
 		if printf '%s' "$text" \
 			| grep -Eq '^[[:space:]]*AllowedIPs[[:space:]]*=' 2>/dev/null \
-			&& printf '%s' "$text" | grep -Eq '(^|[[:space:],=])(0\.0\.0\.0/0|::/0)([[:space:],]|$)' 2>/dev/null
+			&& grep -Eq '(^|[[:space:],=])(0\.0\.0\.0/0|::/0)([[:space:],]|$)' 2>/dev/null <<<"$text"
 		then
 			case "$prev_nonblank" in
 				*"$OPT_OUT_MARKER"*)

@@ -129,13 +129,13 @@ for f in "$REPO_ROOT"/control/lib/*.sh; do
 		# merely emits the key in the defaults object (write_params) or names it in a message to the
 		# operator (converge_node_tail) consumes nothing and has nothing to delegate — requiring it to
 		# call the comparator reported both as violations while neither ever judges a value.
-		printf '%s' "$body" | grep -qE "myc_params_get[^\\n]*\\.hysteria2_hop_ports|jq -r '\\.hysteria2_hop_ports" || continue
+		grep -qE "myc_params_get[^\\n]*\\.hysteria2_hop_ports|jq -r '\\.hysteria2_hop_ports" <<<"$body" || continue
 		checked=$((checked + 1))
-		printf '%s' "$body" | grep -qE '\b(1024|65535)\b' \
+		grep -qE '\b(1024|65535)\b' <<<"$body" \
 			&& offenders="$offenders${offenders:+; }$base:$fn names a port bound"
-		printf '%s' "$body" | grep -qE '%%:\*|##\*:' \
+		grep -qE '%%:\*|##\*:' <<<"$body" \
 			&& offenders="$offenders${offenders:+; }$base:$fn splits the range itself"
-		printf '%s' "$body" | grep -q 'myc_hop_range_ok' \
+		grep -q 'myc_hop_range_ok' <<<"$body" \
 			|| offenders="$offenders${offenders:+; }$base:$fn reads the range and never delegates to the comparator"
 	done
 done
@@ -300,9 +300,9 @@ done
 
 unreachable=""
 for k in $READ_KEYS; do
-	printf '%s\n' "$GENERATED" | grep -qx "$k" && continue
-	printf '%s\n' "$ALLOWED"   | grep -qx "$k" && continue
-	printf '%s\n' "$STAMPED"   | grep -qx "$k" && continue
+	grep -qx "$k" <<<"$GENERATED" && continue
+	grep -qx "$k" <<<"$ALLOWED" && continue
+	grep -qx "$k" <<<"$STAMPED" && continue
 	unreachable="$unreachable $k"
 done
 [ -z "$unreachable" ] \

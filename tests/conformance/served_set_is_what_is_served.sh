@@ -196,7 +196,7 @@ rm -rf "$W"
 
 # And the tail actually calls it — a derivation nothing invokes is the inert-mechanism defect again.
 tail_body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$PARAMS_LIB" | awk '/^converge_node_tail\(\)/,/^}/')"
-printf '%s' "$tail_body" | grep -q 'converge_measure_membership' \
+grep -q 'converge_measure_membership' <<<"$tail_body" \
 	&& ok "and converge_node_tail invokes it, so every converge path re-derives the set" \
 	|| badln "converge_node_tail does not call converge_measure_membership. The derivation would then run only from the operator verbs it already ran from, and the drift this gate exists for returns unchanged."
 
@@ -210,7 +210,7 @@ printf '%s' "$tail_body" | grep -q 'converge_measure_membership' \
 printf '\n-- the observer counter table is reconciled against the served set --\n'
 lib_nc="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$MEASURE_LIB")"
 recon="$(printf '%s' "$lib_nc" | awk '/^converge_measure_membership\(\)/,/^}/')"
-if printf '%s' "$recon" | grep -qE 'pathsig_reconcile_coverage|pathsig_nft_apply'; then
+if grep -qE 'pathsig_reconcile_coverage|pathsig_nft_apply' <<<"$recon" ; then
 	ok "the converge reconciles the counter table"
 else
 	badln "converge_measure_membership does not reconcile the counter table. It is installed once at --measure-enable, so a transport enabled later has no counter and the observer reports an all-clear over the rest — measured on a live node, 2 of 4 served classes unwatched."
@@ -218,7 +218,7 @@ fi
 # The nft READ must live inside the observer region (pathsig_passive_observer.sh requires every nft
 # invocation to sit where the passivity checks can see it), so the converge calls a pathsig function
 # rather than running nft itself. The first draft ran nft here and that gate caught it.
-printf '%s' "$recon" | grep -q 'nft ' \
+grep -q 'nft ' <<<"$recon" \
 	&& badln "converge_measure_membership invokes nft directly. Every nft call belongs inside the pathsig region where the passivity checks cover it — a call out here escapes them." \
 	|| ok "and does it through a pathsig function rather than invoking nft outside the observer region"
 # The trigger must be the coverage gap, not the membership change: a `pathsig_nft_apply` reachable only

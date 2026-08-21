@@ -162,12 +162,12 @@ got="$(drive empty 198.51.100.4)"; addr="${got%%|*}"
 # 5. ONE OWNER FOR "PUBLIC". Two definitions that drift apart is how this broke.
 # ---------------------------------------------------------------------------------------------------
 fn="$(awk '/^resolve_node_address\(\)/,/^}/' "$LIB" | sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//')"
-if printf '%s' "$fn" | grep -q '_l7_own_public_addr'; then
+if grep -q '_l7_own_public_addr' <<<"$fn" ; then
 	ok "it delegates to _l7_own_public_addr — the single, already-gated rejector"
 else
 	badln "resolve_node_address no longer calls _l7_own_public_addr. If it has grown its own idea of what 'public' means, that second definition is unpinned and will drift from the one ss_l7_probe_failsafe.sh guards — which is precisely how \`scope global\` came to be treated as 'public' here while the probe correctly rejected RFC1918."
 fi
-if printf '%s' "$fn" | grep -qE 'scope global'; then
+if grep -qE 'scope global' <<<"$fn" ; then
 	badln "resolve_node_address still reads \`ip ... scope global\` directly. That listing INCLUDES RFC1918 — measured on a live node it returns 203.0.113.9, 10.13.13.1 and 10.77.99.5, and \`head -n1\` picks by kernel enumeration order."
 else
 	ok "and it does not read \`scope global\` itself (that listing includes RFC1918)"

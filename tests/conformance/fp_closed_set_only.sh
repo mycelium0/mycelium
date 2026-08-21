@@ -48,7 +48,7 @@ fi
 
 # 3) The actuator introduces NO randomiser into the preset choice (it only writes the plan's .to).
 FPFNS="$(awk '/RP-0015 increment B \(B3\)/{f=1} f{print}' "$ACTUATOR")"
-if printf '%s' "$FPFNS" | grep -qE '\$RANDOM|openssl rand|shuf|sort -R'; then
+if grep -qE '\$RANDOM|openssl rand|shuf|sort -R' <<<"$FPFNS" ; then
 	badln "the fingerprint actuator feeds a randomiser into the preset choice (forbidden)"
 else
 	ok "the fingerprint actuator introduces no randomiser (it only applies the plan's closed-vocab .to)"
