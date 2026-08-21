@@ -82,7 +82,7 @@ else
 	badln "the registry declares '$declared' but the renderer builds '$renderer_shared' with a node-wide secret. One of them is wrong, and whichever it is, --revoke is refusing about the wrong families — either refusing where it need not, or printing the guarantee where it must not."
 fi
 
-printf '%s' "$declared" | grep -qw tuic \
+grep -qw tuic <<<"$declared" \
 	&& badln "tuic is declared shared-secret, but its renderer line is \`(.password // .id)\` — it falls back to the client's OWN UUID, so revoking the UUID does retire that person. Refusing on tuic would make the refusal wrong and train operators to ignore it." \
 	|| ok "and tuic is NOT in it — its password falls back to the client's own UUID"
 
@@ -131,16 +131,16 @@ printf '\n-- the refusal is fail-closed and says what is true --\n'
 body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$ENTRY")"
 flow="$(printf '%s' "$body" | awk '/^flow_revoke\(\)/,/^}/')"
 
-printf '%s' "$flow" | grep -q 'shared_secret_auth' \
+grep -q 'shared_secret_auth' <<<"$flow" \
 	&& ok "flow_revoke reads the Go-owned registry rather than restating the family list (ADR-0038)" \
 	|| badln "flow_revoke no longer reads .protos[].shared_secret_auth. A hand-kept list here drifts from the renderer the moment a family is added — which is exactly how this defect stayed invisible."
-printf '%s' "$flow" | grep -qE 'return 1' \
+grep -qE 'return 1' <<<"$flow" \
 	&& ok "and exits non-zero when it cannot make the claim" \
 	|| badln "flow_revoke has no non-zero exit on the shared-secret path. An operator scripting a revoke would read success."
-printf '%s' "$flow" | grep -q 'REVOKE_INCOMPLETE' \
+grep -q 'REVOKE_INCOMPLETE' <<<"$flow" \
 	&& ok "and leaves a REVOKE_INCOMPLETE marker, the same evidence trail awg-revoke leaves" \
 	|| badln "no REVOKE_INCOMPLETE marker is written. The warning scrolls past; the marker is what is still there tomorrow."
-printf '%s' "$flow" | grep -q 'STILL ADMITTED' \
+grep -q 'STILL ADMITTED' <<<"$flow" \
 	&& ok "and names the person as still admitted, not merely 'partially revoked'" \
 	|| badln "the refusal does not say the person is still admitted. 'Partial' is read as 'mostly done'; the operator needs the fact that this human still has access."
 

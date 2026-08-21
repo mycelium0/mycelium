@@ -75,7 +75,7 @@ else
 fi
 
 # The Go half is named as commands, not paths; check the module is there to run them against.
-if printf '%s' "$proto" | grep -q 'go test -race'; then
+if grep -q 'go test -race' <<<"$proto" ; then
 	[ -f "$REPO_ROOT/go.mod" ] \
 		&& ok "it names the -race run and go.mod is present to support it" \
 		|| badln "§7.6 names \`go test -race\` but there is no go.mod at the repo root"
@@ -113,7 +113,7 @@ for g in "$REPO_ROOT"/tests/conformance/*.sh; do
 	line="$(grep -m1 '^REPO_ROOT=' "$g" 2>/dev/null)" || continue
 	[ -n "$line" ] || continue
 	# Direct: takes the override, or resolves from its own file.
-	if printf '%s' "$line" | grep -qE 'MYC_REPO_ROOT|dirname|BASH_SOURCE|\$0'; then continue; fi
+	if grep -qE 'MYC_REPO_ROOT|dirname|BASH_SOURCE|\$0' <<<"$line" ; then continue; fi
 	# Indirect: via $HERE (or any local), which must itself resolve from this file's location.
 	via="$(printf '%s' "$line" | grep -oE '\$\{?[A-Za-z_][A-Za-z0-9_]*' | tr -d '${' | head -1)"
 	if [ -n "$via" ] && grep -qE "^${via}=.*(BASH_SOURCE|dirname|\\\$0)" "$g" 2>/dev/null; then continue; fi
@@ -130,14 +130,14 @@ fi
 # 3. SKIP IS STILL EXIT-0-SHAPED, so the protocol's warning about it is still true.
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- "a SKIP counts as a pass in the total" is still accurate --\n'
-if printf '%s' "$proto" | grep -qi 'skip'; then
+if grep -qi 'skip' <<<"$proto" ; then
 	# Drive it: a gate that prints SKIP and exits 0 must be counted as passed by the runner. If run.sh
 	# ever grew a separate skip tally, the advice would be stale in the safe direction — but stale.
 	# STRIP COMMENTS FIRST. The runner's header documents which gates skip without a Go toolchain, so a
 	# bare grep for "skip" reads prose as behaviour and reports a tally that does not exist — the same
 	# mistake this whole suite is built to catch, committed inside the gate that polices the protocol.
 	runner_code="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$RUNNER")"
-	if printf '%s' "$runner_code" | grep -qiE 'skip[+_]?=|skip(ped)?\+\+|\bskipped\b[[:space:]]*[0-9=]'; then
+	if grep -qiE 'skip[+_]?=|skip(ped)?\+\+|\bskipped\b[[:space:]]*[0-9=]' <<<"$runner_code" ; then
 		badln "tests/run.sh appears to keep a separate skip tally now. If it does, §7.6's warning that 'a skipped row counts as a pass in the total' is no longer accurate and must be rewritten to match — a stale warning is read once and then ignored."
 	else
 		ok "the runner keeps no skip tally, so a SKIP is still indistinguishable from a pass in the total — exactly what §7.6 warns about"
@@ -158,9 +158,9 @@ for pair in "CONTRIBUTING.md:CONTRIBUTING" ".github/PULL_REQUEST_TEMPLATE.md:the
 	fi
 	body="$(cat "$REPO_ROOT/$f")"
 	miss=""
-	printf '%s' "$body" | grep -q 'tests/run.sh'        || miss="$miss tests/run.sh"
-	printf '%s' "$body" | grep -q 'control/selftest.sh' || miss="$miss control/selftest.sh"
-	printf '%s' "$body" | grep -qiE 'linux|macos'       || miss="$miss the-platform-caveat"
+	grep -q 'tests/run.sh' <<<"$body" || miss="$miss tests/run.sh"
+	grep -q 'control/selftest.sh' <<<"$body" || miss="$miss control/selftest.sh"
+	grep -qiE 'linux|macos' <<<"$body" || miss="$miss the-platform-caveat"
 	if [ -z "$miss" ]; then
 		ok "$label names the full set and the platform caveat"
 	else

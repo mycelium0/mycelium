@@ -248,7 +248,7 @@ for pair in "signature verification FAILED:signature" "fast-forward update faile
 	line="$(strip "$UPD" | grep -F "$msg" | head -1)"
 	if [ -z "$line" ]; then
 		badln "the refusal '$msg' is gone from nb_update_apply.sh — either it was renamed (update this gate) or the fail-closed refusal was removed"
-	elif printf '%s' "$line" | grep -qF "_record_update_failure_if_available $reason"; then
+	elif grep -qF "_record_update_failure_if_available $reason" <<<"$line" ; then
 		ok "the '$reason' refusal records itself before dying"
 	else
 		badln "the refusal '$msg' does not record the failure. It is one of the two that stalled every node for days with nothing but a journal entry to show for it."

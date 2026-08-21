@@ -109,13 +109,13 @@ printf '\n-- an unexpected death names itself --\n'
 strip() { sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$1"; }
 body="$(strip "$ENTRY")"
 
-printf '%s' "$body" | grep -qE "^trap .*ERR" \
+grep -qE "^trap .*ERR" <<<"$body" \
 	&& ok "the entrypoint installs an ERR trap" \
 	|| badln "no ERR trap in scripts/node-bootstrap.sh. Any command that trips \`set -e\` then exits silently — which is exactly how a from-zero install failed with an empty log and cost a bash -x to diagnose."
-printf '%s' "$body" | grep -qE "^set -E$|^set -[a-zA-Z]*E" \
+grep -qE "^set -E$|^set -[a-zA-Z]*E" <<<"$body" \
 	&& ok "and \`set -E\`, without which the trap never fires inside a function" \
 	|| badln "the ERR trap is installed without \`set -E\`. Traps are NOT inherited by functions or subshells by default, so every failure inside control/lib/* — i.e. nearly all of them — would still be silent."
-printf '%s' "$body" | grep -q 'MYC_DELIBERATE_EXIT=1' \
+grep -q 'MYC_DELIBERATE_EXIT=1' <<<"$body" \
 	&& ok "and a deliberate \`die\` is excluded, so a refusal is not reported twice as a bug" \
 	|| badln "die() does not mark its exit deliberate; every fail-closed refusal would also print an UNEXPECTED-failure block, which trains people to ignore both"
 
@@ -148,7 +148,7 @@ printf '\n-- a no-op converge cannot report success --\n'
 out="$(MYC_NB_NO_DISPATCH=1 bash "$ENTRY" --clients probe 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ]; then
 	badln "MYC_NB_NO_DISPATCH=1 with the entrypoint EXECUTED exited 0 having run no flow at all. A converge that silently does nothing and reports success is indistinguishable from one that worked; any drill or CI job carrying that variable would certify an empty host."
-elif printf '%s' "$out" | grep -q 'EXECUTED, not sourced'; then
+elif grep -q 'EXECUTED, not sourced' <<<"$out" ; then
 	ok "an executed run refuses the sourcing-only seam and says why (rc=$rc)"
 else
 	badln "an executed run under MYC_NB_NO_DISPATCH=1 exited $rc but did not explain itself: '$(printf '%s' "$out" | head -1 | cut -c1-160)'. A refusal nobody can read is one people work around by re-exporting the variable."

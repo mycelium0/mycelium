@@ -101,8 +101,8 @@ for host in 2 7 239; do
 				# The property, on BOTH outputs: a default route must always carry the recorded marker.
 				for out_name in sh_out go_out; do
 					out_val="${!out_name}"
-					if printf '%s' "$out_val" | grep -q 'AllowedIPs = 0\.0\.0\.0/0'; then
-						printf '%s' "$out_val" | grep -qF 'selective-growth: opt-out (full-tunnel)' || {
+					if grep -q 'AllowedIPs = 0\.0\.0\.0/0' <<<"$out_val" ; then
+						grep -qF 'selective-growth: opt-out (full-tunnel)' <<<"$out_val" || {
 							printf '  FAIL  %s emitted a full tunnel with NO opt-out marker (mode=%s)\n' "$out_name" "$mode"
 							fail=1
 						}

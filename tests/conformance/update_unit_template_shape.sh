@@ -101,7 +101,7 @@ fi
 # 2. The provenance-bypass flag appears in NO unit template, armed or not.
 for pair in "service:$svc_d" "timer:$tmr_d"; do
 	name="${pair%%:*}"; body="${pair#*:}"
-	if grep -q -- '--insecure-no-verify' <<<"$body"; then
+	if grep -q -- '--insecure-no-verify' <<<"$body" ; then
 		bad "$name template carries --insecure-no-verify — it makes verify_signed_ref return before checking anything (ADR-0015's provenance gate), and an installed unit is one \`systemctl enable\` away from an unauthenticated root-level auto-pull"
 	else
 		ok "$name template does not carry --insecure-no-verify"
@@ -176,12 +176,12 @@ else
 fi
 
 # 5. Installing is never arming: a plain `cp` must leave the timer DISABLED.
-if grep -qE '^[[:space:]]*WantedBy=timers\.target' <<<"$tmr_d"; then
+if grep -qE '^[[:space:]]*WantedBy=timers\.target' <<<"$tmr_d" ; then
 	ok "timer [Install] is WantedBy=timers.target (a plain cp yields 'disabled', not 'enabled')"
 else
 	bad "the timer's [Install] is not WantedBy=timers.target — an unexpected install target can arm the timer as a side effect of copying it"
 fi
-if grep -qE '^[[:space:]]*WantedBy=multi-user\.target' <<<"$svc_d"; then
+if grep -qE '^[[:space:]]*WantedBy=multi-user\.target' <<<"$svc_d" ; then
 	ok "service [Install] is WantedBy=multi-user.target"
 else
 	bad "the service's [Install] target changed — re-confirm that copying the unit cannot start it"

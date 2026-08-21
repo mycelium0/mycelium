@@ -81,7 +81,7 @@ else
 	okln "C19: no fail-open 'params written WITHOUT two-hop' warn (the fail-open regression is removed)"
 fi
 WP="$(fn_body write_params)"
-if printf '%s\n' "$WP" | grep -q 'assert_two_hop_shape "\$STATE_DIR/two_hop.json"'; then
+if grep -q 'assert_two_hop_shape "\$STATE_DIR/two_hop.json"' <<<"$WP" ; then
 	okln "C19/C17: write_params validates a present two_hop.json fail-closed (assert_two_hop_shape)"
 else
 	badln "C19/C17: write_params does not call assert_two_hop_shape on a present two_hop.json"
@@ -96,8 +96,8 @@ fi
 # ---------------------------------------------------------------------------
 # C19 — operator-toggle persistence: seed + merge overrides on top of regenerated defaults.
 # ---------------------------------------------------------------------------
-if printf '%s\n' "$WP" | grep -q 'seed_operator_overrides "\$tmp"' \
-   && printf '%s\n' "$WP" | grep -q 'merge_operator_overrides "\$tmp"'; then
+if grep -q 'seed_operator_overrides "\$tmp"' <<<"$WP" \
+   && grep -q 'merge_operator_overrides "\$tmp"' <<<"$WP" ; then
 	okln "C19: write_params seeds + merges operator-toggle overrides (operator enablement preserved across --update)"
 else
 	badln "C19: write_params does not preserve operator toggles (seed/merge_operator_overrides not wired)"
@@ -124,22 +124,22 @@ else
 	badln "C17: assert_two_hop_shape validator is missing"
 fi
 # C18: it asserts via_user against the known clients (IDENTITIES_JSON clients[].name).
-if printf '%s\n' "$ATS" | grep -q 'IDENTITIES_JSON' \
-   && printf '%s\n' "$ATS" | grep -q '.name == \$u'; then
+if grep -q 'IDENTITIES_JSON' <<<"$ATS" \
+   && grep -q '.name == \$u' <<<"$ATS" ; then
 	okln "C18: assert_two_hop_shape checks via_user against the known clients (no dead auth_user route)"
 else
 	badln "C18: assert_two_hop_shape does not check via_user against known clients"
 fi
 # C21: it refuses an egress that equals the ingress (same address or same SNI) and dies.
-if printf '%s\n' "$ATS" | grep -q "is THIS node's own address" \
-   && printf '%s\n' "$ATS" | grep -q "equals this node's donor_sni"; then
+if grep -q "is THIS node's own address" <<<"$ATS" \
+   && grep -q "equals this node's donor_sni" <<<"$ATS" ; then
 	okln "C21: assert_two_hop_shape refuses egress == ingress (distinct host AND distinct SNI required)"
 else
 	badln "C21: assert_two_hop_shape does not enforce ingress/egress distinctness"
 fi
 # It is fail-closed: every branch is a die.
-if printf '%s\n' "$ATS" | grep -q 'server_port is out of range' \
-   && printf '%s\n' "$ATS" | grep -q 'server_port is not a positive integer'; then
+if grep -q 'server_port is out of range' <<<"$ATS" \
+   && grep -q 'server_port is not a positive integer' <<<"$ATS" ; then
 	okln "C17: assert_two_hop_shape rejects a malformed server_port (range + integer, fail-closed)"
 else
 	badln "C17: assert_two_hop_shape does not fully validate server_port"
@@ -149,7 +149,7 @@ fi
 # C25 — every config promotion path re-renders the served bundle; staleness is observable.
 # ---------------------------------------------------------------------------
 FR="$(fn_body flow_revoke)"
-if printf '%s\n' "$FR" | grep -q 'render_serve_bundle'; then
+if grep -q 'render_serve_bundle' <<<"$FR" ; then
 	okln "C25: flow_revoke re-renders the served bundle (render_serve_bundle on the revoke promotion path)"
 else
 	badln "C25: flow_revoke does NOT call render_serve_bundle (served bundle would point at a revoked UUID)"
@@ -205,7 +205,7 @@ if grep -q -- '--disable-two-hop' "$NB" && grep -q 'flow_disable_two_hop' "$NB";
 	# here-strings, not `printf | grep -q`: under the pipefail set at the top of this gate that shape is a
 	# SIGPIPE race that reports a MATCH as a failure (~5 runs in 40 — see the C25 note above).
 	if grep -q 'rm -f "\$STATE_DIR/two_hop.json"' <<<"$FD" \
-	   && { grep -q 'converge_node_tail' <<<"$FD" || grep -q 'render_serve_bundle' <<<"$FD"; }; then
+	   && { grep -q 'converge_node_tail' <<<"$FD" || grep -q 'render_serve_bundle' <<<"$FD" ; }; then
 		okln "C21: --disable-two-hop removes the overlay + re-renders config + converges (served bundle refreshed)"
 	else
 		badln "C21: flow_disable_two_hop does not fully remove + re-render/converge (incomplete remove path)"

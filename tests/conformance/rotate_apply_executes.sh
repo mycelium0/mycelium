@@ -265,7 +265,7 @@ for a in $declared; do
 done
 
 for a in $RESERVED; do
-	printf '%s' "$declared" | grep -qx "$a" \
+	grep -qx "$a" <<<"$declared" \
 		|| badln "RESERVED names '$a', which is not a declared RotationAction — the list has drifted from the closed set and no longer means anything"
 done
 

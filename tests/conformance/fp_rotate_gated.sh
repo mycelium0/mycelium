@@ -43,33 +43,33 @@ LIVE="$(fnbody rotate_apply_fp_live "$LIB")"
 FLOW="$(fnbody flow_rotate_fingerprint "$LIB")"
 
 # 2) The dry-run default promotes NOTHING; promote is confined to the live path.
-if printf '%s' "$DRYRUN" | grep -qw 'promote_config'; then
+if grep -qw 'promote_config' <<<"$DRYRUN" ; then
 	badln "rotate_apply_fp_dryrun calls promote_config — the default path must promote NOTHING"
 else
 	ok "rotate_apply_fp_dryrun never promotes (dry-run default)"
 fi
-if printf '%s' "$LIVE" | grep -qw 'promote_config'; then
+if grep -qw 'promote_config' <<<"$LIVE" ; then
 	ok "rotate_apply_fp_live is the sole promote path"
 else
 	badln "rotate_apply_fp_live does not call promote_config — the live path is incomplete"
 fi
-if printf '%s' "$FLOW" | grep -qw 'promote_config'; then
+if grep -qw 'promote_config' <<<"$FLOW" ; then
 	badln "flow_rotate_fingerprint promotes directly (must be confined to the live path)"
 else
 	ok "flow_rotate_fingerprint does not promote directly"
 fi
 
 # 3) The triple gate: live only behind ROTATE_APPLY + fp_rotate_live_armed, with a dry-run fallback.
-if printf '%s' "$FLOW" | grep -q 'ROTATE_APPLY' \
-	&& printf '%s' "$FLOW" | grep -q 'fp_rotate_live_armed' \
-	&& printf '%s' "$FLOW" | grep -qw 'rotate_apply_fp_live' \
-	&& printf '%s' "$FLOW" | grep -qw 'rotate_apply_fp_dryrun'; then
+if grep -q 'ROTATE_APPLY' <<<"$FLOW" \
+	&& grep -q 'fp_rotate_live_armed' <<<"$FLOW" \
+	&& grep -qw 'rotate_apply_fp_live' <<<"$FLOW" \
+	&& grep -qw 'rotate_apply_fp_dryrun' <<<"$FLOW" ; then
 	ok "flow_rotate_fingerprint gates the live path behind ROTATE_APPLY + fp_rotate_live_armed (dry-run fallback)"
 else
 	badln "flow_rotate_fingerprint does not gate the live path behind BOTH ROTATE_APPLY and fp_rotate_live_armed"
 fi
 # DRY_RUN must be consulted (the second leg of the gate).
-if printf '%s' "$FLOW" | grep -q 'DRY_RUN'; then
+if grep -q 'DRY_RUN' <<<"$FLOW" ; then
 	ok "flow_rotate_fingerprint consults DRY_RUN (the dry-run-default leg)"
 else
 	badln "flow_rotate_fingerprint does not consult DRY_RUN"
@@ -109,12 +109,12 @@ fi
 
 # 6) The single delta is the closed-vocab client_fingerprint scalar — no enable-key / protocol growth.
 DELTA="$(fnbody _fp_rotation_set_delta "$LIB")"
-if printf '%s' "$DELTA" | grep -qF '.client_fingerprint = $t'; then
+if grep -qF '.client_fingerprint = $t' <<<"$DELTA" ; then
 	ok "_fp_rotation_set_delta sets ONLY .client_fingerprint (a scalar; no enable-key/proto growth)"
 else
 	badln "_fp_rotation_set_delta does not set .client_fingerprint as its sole delta"
 fi
-if printf '%s' "$DELTA" | grep -qE '_enabled|\.to_port|enable_key'; then
+if grep -qE '_enabled|\.to_port|enable_key' <<<"$DELTA" ; then
 	badln "_fp_rotation_set_delta touches an enable-key/port — a fingerprint move must not toggle a transport"
 else
 	ok "_fp_rotation_set_delta touches no enable-key/port (a preset move never grows the served set)"

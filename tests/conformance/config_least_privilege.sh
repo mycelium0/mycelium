@@ -58,7 +58,7 @@ for pair in "SINGBOX_ETC:$INST" "XRAY_ETC:$UPD"; do
 	line="$(grep -nE "install -d -m [0-9]+ .*\\\$$var" "$file" 2>/dev/null | head -1)"
 	if [ -z "$line" ]; then
 		badln "no 'install -d' for \$$var found in $(basename "$file")"
-	elif printf '%s' "$line" | grep -qE 'install -d -m 0750 -o root -g '; then
+	elif grep -qE 'install -d -m 0750 -o root -g ' <<<"$line" ; then
 		ok "\$$var is created 0750 -o root -g <group> (not world-traversable)"
 	else
 		badln "\$$var directory is not 0750 -o root -g <group>: $(printf '%s' "$line" | sed 's/^[0-9]*://')"
