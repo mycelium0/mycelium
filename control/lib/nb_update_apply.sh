@@ -365,6 +365,27 @@ render_candidate() {
 	# drift the pin exists to surface. Fail closed on a refusal; fall back only on ABSENCE.
 	local _spine="${SPINE_BIN:-${TOOLING_DIR:-/usr/local/lib/mycelium}/bin/myceliumctl-go}"
 	if [ -x "$_spine" ]; then
+		# A SPINE THAT DOES NOT MATCH THE DEPLOYED ARTIFACT MAY NOT RENDER.
+		#
+		# MEASURED 2026-08-20, all three nodes, the first converge after this cutover: the checkout was at
+		# 0b67532 and the binary that rendered the live config self-reported 7153e8a. `flow_node_apply`
+		# does not call install_tooling — only bootstrap and --update do — so the attended path renders
+		# through whatever binary is on disk, however old.
+		#
+		# That was survivable while the spine was inert. It is not now. A stale spine is not a slower
+		# spine: 7153e8a has no template pin at all, so it would accept an edited server template and
+		# silently ignore it — the exact failure the pin was added to prevent, reintroduced by version
+		# skew rather than by code. And nothing in the render said which binary answered.
+		#
+		# Fail closed, and name the fix. This cannot fire on the unattended path: flow_update installs the
+		# tooling BEFORE it renders, so the binary there always matches by construction.
+		local _art_rev _spine_rev
+		_art_rev="$(git -C "${ARTIFACT_ROOT:-/opt/mycelium}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+		_spine_rev="$("$_spine" version 2>/dev/null | grep -oE 'rev [0-9a-f]+' | cut -d" " -f2 || true)"
+		if [ "$_art_rev" != unknown ] && [ -n "$_spine_rev" ] && \
+		   [ "${_art_rev#"$_spine_rev"}" = "$_art_rev" ] && [ "${_spine_rev#"$_art_rev"}" = "$_spine_rev" ]; then
+			die "the Go spine at $_spine was built from rev $_spine_rev but the deployed artifact is $_art_rev. It renders the live data-plane config now, so a stale one is not a slower one — it can be missing checks this artifact relies on (e.g. the server-template pin) and would pass them by not having them. Refresh the tooling first: run 'node-bootstrap.sh --update' (which installs the spine before it renders), or rebuild it out of band. Nothing promoted."
+		fi
 		if run "$_spine" render-server \
 			--engine singbox \
 			--template "$RENDER_TEMPLATE" \

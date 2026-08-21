@@ -13,6 +13,37 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.100] — 2026-08-21
+
+### Fixed — a spine one rev behind rendered the live config, and nothing said so
+
+MEASURED on all three nodes at the first converge after the 0.2.98 cutover: the checkout was at
+`0b67532` and the binary that rendered the running sing-box config self-reported `7153e8a`.
+`flow_node_apply` does not call `install_tooling` — only bootstrap and `--update` do — so the ATTENDED
+path renders through whatever binary is on disk, however old, and says nothing about it.
+
+That was survivable while the spine was inert. It stopped being survivable the moment it became the
+renderer. **A stale spine is not a slower spine.** `7153e8a` has no server-template pin at all, so it
+would accept an edited template and silently ignore it — the exact failure 0.2.98 added the pin to
+prevent, reintroduced by version skew rather than by code. A check can be passed by not existing.
+
+`render_candidate` now refuses a spine whose rev differs from the deployed artifact, and names the fix.
+It cannot fire on the unattended path: `flow_update` installs the tooling BEFORE it renders, so there
+the two match by construction. And it does not fall back to the shell — falling back would turn "your
+tooling is stale" into a silent downgrade, which is the same defect wearing the other hat.
+
+`render_server_cutover.sh` gains three rows (skewed spine: not used, fails closed, no shell fallback);
+removing the guard turns two of them red. The fixture's stub spine now answers `version` against a git
+repo it owns, so both matching and skewed revs are reachable without touching a real checkout.
+
+### Note — corrected: those suite failures were EPIPE, not my git handling
+
+Two node suite runs and one CI run failed this week on gates green everywhere else. I attributed them
+to running a detached suite in a checkout I was concurrently resetting. That was wrong for at least two
+of them: `collapse_gated.sh` and `served_set_is_what_is_served.sh` both carry
+`printf "$big" | grep -q` under `pipefail`, and the 0.2.99 entry below measures that shape turning a
+match into a failure.
+
 ## [0.2.99] — 2026-08-21
 
 ### Fixed — 115 places where a gate could report the opposite of what it measured
