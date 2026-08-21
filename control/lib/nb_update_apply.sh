@@ -348,6 +348,35 @@ render_candidate() {
 	[ -f "$RENDER_TEMPLATE" ] || die "renderer-compatible template missing: $RENDER_TEMPLATE"
 	[ -f "$PARAMS_JSON" ] || die "params.json missing; run write_params first."
 	[ -f "$IDENTITIES_JSON" ] || die "identities.json missing; run ensure_identity first."
+	# RP-0008 P3 CUTOVER: the Go spine renders, the shell renderer is the fallback.
+	#
+	# Both producers are pinned byte-identical by render_server_go_equiv, so this is not a second opinion
+	# — it is the same answer computed by the implementation that owns the schema. The shell path stays
+	# for a node whose spine was never built (install_spine warns rather than dies), because a node that
+	# cannot render is a node that cannot converge; degrading beats bricking.
+	#
+	# WHICH ONE RAN IS LOGGED. A silent fallback would make "the node renders through Go" unfalsifiable
+	# from the outside, and the whole reason this cutover is safe is that the claim can be checked.
+	#
+	# The spine VERIFIES --template against the structs it encodes and refuses a mismatch, so an edited
+	# template fails loudly here instead of being ignored (spec.CheckServerTemplatePinned). That refusal
+	# must NOT fall through to the shell: shell would happily render the edited template, the two
+	# producers would then disagree about the live config, and the fallback would be hiding exactly the
+	# drift the pin exists to surface. Fail closed on a refusal; fall back only on ABSENCE.
+	local _spine="${SPINE_BIN:-${TOOLING_DIR:-/usr/local/lib/mycelium}/bin/myceliumctl-go}"
+	if [ -x "$_spine" ]; then
+		if run "$_spine" render-server \
+			--engine singbox \
+			--template "$RENDER_TEMPLATE" \
+			--params "$PARAMS_JSON" \
+			--state "$IDENTITIES_JSON" \
+			--out "$candidate"; then
+			log "rendered by the Go spine ($_spine)"
+			return 0
+		fi
+		die "render-server (Go spine) failed (fail-closed; nothing promoted). NOT falling back to the shell renderer: the two are pinned byte-identical, so a refusal here is a real disagreement — most likely a server template that no longer matches the structs the spine encodes — and rendering it the other way would hide that."
+	fi
+	warn "the Go spine is not present at $_spine; rendering through the shell producer instead (degraded: the two are gate-pinned equivalent, but the spine is the owner)."
 	run "$MYCTL" render-server \
 		--engine singbox \
 		--template "$RENDER_TEMPLATE" \
