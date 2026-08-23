@@ -83,6 +83,10 @@
 #                               fallback for a node whose spine was never built, and NOT a way around a
 #                               refusal (a refusal is a real disagreement, not an outage). Drives the
 #                               shipped function with a recorder
+#   * tooling_copy_is_a_mirror.sh — the tooling installed on a node MIRRORS the deployed artifact: cp
+#                               adds and overwrites but never removes, so the installed copy could only
+#                               grow. Drives install_tooling over real dirs and pins the ordering (copy
+#                               then prune), because a prune-first version passes every other row
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -337,6 +341,7 @@ GATES=(
 	"tests/conformance/aggregate_tolerates_heterogeneity.sh"
 	"tests/conformance/render_server_template_pinned.sh"
 	"tests/conformance/render_server_cutover.sh"
+	"tests/conformance/tooling_copy_is_a_mirror.sh"
 	"tests/conformance/subscription_go_equiv.sh"
 	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/client_server_credential_agreement.sh"

@@ -13,6 +13,33 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.101] — 2026-08-21
+
+### Fixed — the installed tooling could only grow
+
+`install_tooling` copied with `cp -a`, which adds and overwrites but never removes. So the tooling
+directory on a node was an accumulation, not a copy: a file deleted from the checkout stayed there
+forever, and so did anything dropped in by hand.
+
+**MEASURED on one live node:** two files dated **2026-07-01** — `myceliumctl.bak-stale` and
+`vocab.json.bak-stale` — that nothing in the tree creates and nothing references. Seven weeks after
+whoever left them.
+
+They were inert, and the REASON is the finding: the libraries are sourced by name, and neither file is a
+sourced name. The installed copy was safe because of a property of a different file. A glob-sourced lib,
+a shadowed vocab, a stale `myceliumctl` reachable by some path — each is one edit away, and none would
+announce itself.
+
+The copy now prunes what the artifact does not have, and each removal is named. **Pruned AFTER the copy,
+never before:** at every instant the installed tree is a SUPERSET of the artifact, so an interrupted
+converge leaves a complete tooling directory rather than a hole with `MYCTL` pointing into it. That
+ordering is the whole safety argument, so the gate asserts it from the command trace — a prune-first
+version passes every other row.
+
+`tooling_copy_is_a_mirror.sh` drives `install_tooling` over real directories: orphans removed, shared
+files kept with the artifact's content, new files added, copy-before-prune. Removing the prune turns
+three rows red; moving it before the copy turns exactly one red.
+
 ## [0.2.100] — 2026-08-21
 
 ### Fixed — a spine one rev behind rendered the live config, and nothing said so
