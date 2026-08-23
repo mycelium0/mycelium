@@ -436,6 +436,36 @@ install_tooling() {
 	# Source the control/ tooling from ARTIFACT_ROOT (the real checkout), NOT REPO_ROOT: after the
 	# update re-exec REPO_ROOT points at the tmp copy's parent, which has no control/ tree.
 	run cp -a "$ARTIFACT_ROOT/control" "$TOOLING_DIR/" 2>/dev/null || run cp -aR "$ARTIFACT_ROOT/control" "$TOOLING_DIR/"
+	# THE COPY IS A MIRROR, NOT AN ACCUMULATION.
+	#
+	# `cp` adds and overwrites; it never removes. So the installed tooling could only ever GROW: a file
+	# deleted from the checkout stayed on the node forever, and anything dropped into the directory by
+	# hand stayed with it. MEASURED 2026-08-21 on one node: two files dated 2026-07-01
+	# (myceliumctl.bak-stale, vocab.json.bak-stale) that nothing in the tree creates and nothing
+	# references, seven weeks after whoever left them there.
+	#
+	# Inert THERE, because the libraries are sourced by name and neither file is a sourced name. That is
+	# the point: the installed copy was safe because of a property of a DIFFERENT file, not because of
+	# anything about the copy. A glob-sourced lib, a shadowed vocab, a stale myceliumctl reachable by
+	# some path — each is one edit away, and none of them would announce itself.
+	#
+	# Pruned AFTER the copy, never before: at every instant the installed tree is a SUPERSET of the
+	# checkout, so an interrupted converge leaves a complete tooling directory rather than a hole. That
+	# ordering is the whole safety argument — a delete-then-copy would have a window in which MYCTL
+	# points at nothing, and the node cannot converge without it. `find .` (not -printf) so the walk is
+	# POSIX and behaves the same on the operator's machine as on a node.
+	local _rel
+	if [ -d "$TOOLING_DIR/control" ] && [ -d "$ARTIFACT_ROOT/control" ]; then
+		while IFS= read -r _rel; do
+			_rel="${_rel#./}"
+			[ -n "$_rel" ] || continue
+			[ -e "$ARTIFACT_ROOT/control/$_rel" ] && continue
+			warn "tooling: removing '$_rel' — it is in the installed copy but not in the deployed artifact."
+			run rm -f "${TOOLING_DIR:?}/control/$_rel"
+		done <<EOF
+$(cd "$TOOLING_DIR/control" 2>/dev/null && find . \( -type f -o -type l \) 2>/dev/null)
+EOF
+	fi
 	# Build + install the (inert) Go control-plane binary alongside the shell tooling. This is the one
 	# function both flow_bootstrap and flow_update already call, so the spine binary tracks every
 	# deployed rev. install_spine is non-fatal by design (RP-0008 P3 chunk 1): a missing toolchain or a
