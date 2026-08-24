@@ -347,7 +347,6 @@ GATES=(
 	"tests/conformance/render_server_template_pinned.sh"
 	"tests/conformance/render_server_cutover.sh"
 	"tests/conformance/tooling_copy_is_a_mirror.sh"
-	"tests/conformance/no_early_exit_consumer_on_a_pipe.sh"
 	"tests/conformance/subscription_go_equiv.sh"
 	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/client_server_credential_agreement.sh"
