@@ -13,7 +13,7 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
-## [0.2.102] — 2026-08-24
+## [0.2.103] — 2026-08-24
 
 ### Fixed — the first audit of the renderer cutover, and it found six
 
@@ -77,6 +77,8 @@ run is what caught it, because `bash -n` accepts it happily.
 
 Two in-tree statements about this shape contradicted each other (`node_two_hop_failclosed.sh` called it a
 race measured at ~5 in 40; the 0.2.99 note called it deterministic). Reconciled to what was measured.
+## [0.2.102] — 2026-08-24
+
 ### Fixed — the rollback gate failed without saying why, and cost twelve CI runs
 
 `rotate_rollback_executes.sh` went red on CI while passing on a node and on the maintainer's machine, and
