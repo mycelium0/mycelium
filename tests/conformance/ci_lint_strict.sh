@@ -110,7 +110,7 @@ if [ -z "$sc" ]; then
 	badln "no shellcheck invocation found in the lint job"
 else
 	for flag in '-S warning' '-s bash' '-e SC2034'; do
-		grep -qF -- "$flag" <<<"$sc" \
+		printf '%s' "$sc" | grep -qF -- "$flag" \
 			&& ok "shellcheck keeps '$flag'" \
 			|| badln "shellcheck lost '$flag'. These are calibration, measured at 61 findings raw and 2 with them: -s bash names the dialect for sourced fragments that must not carry a shebang, -e SC2034 retires the 41 false 'unused variable' hits from those same fragments. Dropping -S warning floods the job with style findings and the pressure to re-add '|| true' returns immediately."
 	done
@@ -150,7 +150,7 @@ else
 		case "$f" in
 			*.sh) continue ;;   # covered by the glob half of the expression
 		esac
-		grep -qF -- "$f" <<<"$lintexpr" || missing="$missing $f"
+		printf '%s' "$lintexpr" | grep -qF -- "$f" || missing="$missing $f"
 	done <<EOF
 $all_tracked
 EOF
@@ -161,7 +161,7 @@ EOF
 	else
 		ok "every one of the $shebang_n bash/sh scripts is reachable from the lint file set"
 	fi
-	grep -qF "git ls-files" <<<"$lintexpr" \
+	printf '%s' "$lintexpr" | grep -qF "git ls-files" \
 		&& ok "the .sh half of the file set is enumerated from git, not hand-listed" \
 		|| badln "the lint file set no longer derives from git ls-files — a hand-maintained list goes stale silently"
 fi

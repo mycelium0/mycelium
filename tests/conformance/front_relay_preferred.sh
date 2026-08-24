@@ -75,15 +75,15 @@ fc_code | grep -qE 'func \(m FrontMode\) IsValid\(\) bool' && ok "FrontMode.IsVa
 
 # 3. frontable set is EXACTLY the two genuine-TLS own-cert HTTP transports, no REALITY/raw/UDP
 fset="$(fc_code | awk '/frontableProtos[[:space:]]*=[[:space:]]*map\[string\]bool/{f=1} f{print} /^}/{if(f){exit}}')"
-grep -qE '"vless-xhttp-tls"[[:space:]]*:[[:space:]]*true' <<<"$fset" && ok "frontable: vless-xhttp-tls" || badln "vless-xhttp-tls not in the frontable set"
-grep -qE '"vless-ws-tls"[[:space:]]*:[[:space:]]*true' <<<"$fset" && ok "frontable: vless-ws-tls"    || badln "vless-ws-tls not in the frontable set"
+printf '%s\n' "$fset" | grep -qE '"vless-xhttp-tls"[[:space:]]*:[[:space:]]*true' && ok "frontable: vless-xhttp-tls" || badln "vless-xhttp-tls not in the frontable set"
+printf '%s\n' "$fset" | grep -qE '"vless-ws-tls"[[:space:]]*:[[:space:]]*true'    && ok "frontable: vless-ws-tls"    || badln "vless-ws-tls not in the frontable set"
 n_front="$(printf '%s\n' "$fset" | grep -cE '"[a-z0-9-]+"[[:space:]]*:[[:space:]]*true')"
 if [ "$n_front" = "2" ]; then
 	ok "frontable set has exactly 2 members (no drift toward fronting un-frontable transports)"
 else
 	badln "frontable set has $n_front members (want exactly 2: vless-xhttp-tls, vless-ws-tls)"
 fi
-if grep -qE 'reality|hysteria2|tuic|shadowsocks|shadowtls|trojan|amneziawg' <<<"$fset" ; then
+if printf '%s\n' "$fset" | grep -qE 'reality|hysteria2|tuic|shadowsocks|shadowtls|trojan|amneziawg'; then
 	badln "a REALITY/raw/UDP transport leaked into the frontable set (it cannot be fronted)"
 else
 	ok "no REALITY/raw/UDP transport in the frontable set"

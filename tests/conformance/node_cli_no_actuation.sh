@@ -31,14 +31,14 @@ block="$(awk '/^func readFileOrStdin\(/{f=1} f{print} /^func usage\(/{exit}' "$M
 [ -n "$block" ] || { badln "cannot locate the node/transport CLI block in main.go"; }
 
 # 1. no subprocess / exec / actuation.
-if grep -qE 'exec\.Command|exec\.CommandContext|"os/exec"|syscall\.(Exec|ForkExec|StartProcess)' <<<"$block" ; then
+if printf '%s' "$block" | grep -qE 'exec\.Command|exec\.CommandContext|"os/exec"|syscall\.(Exec|ForkExec|StartProcess)'; then
 	badln "a node/transport verb spawns a subprocess (must not actuate — the apply is the explicit --node-apply)"
 else
 	ok "no subprocess / exec in the node/transport verbs"
 fi
 
 # 2. no DESTRUCTIVE file ops on live state.
-if grep -qE 'os\.(Remove|RemoveAll|Rename|Truncate)|os\.Chmod[^)]*0o?7|os\.Chown' <<<"$block" ; then
+if printf '%s' "$block" | grep -qE 'os\.(Remove|RemoveAll|Rename|Truncate)|os\.Chmod[^)]*0o?7|os\.Chown'; then
 	badln "a node/transport verb performs a destructive/ownership file op (remove/rename/truncate/chown)"
 else
 	ok "no destructive (remove/rename/truncate) file ops in the verbs"
@@ -46,14 +46,14 @@ fi
 
 # 3. no write to / reference of LIVE node state (params.json / sing-box config / units / firewall). The
 #    descriptor (node.config.json under /var/lib/mycelium) is the ONLY thing these verbs may touch.
-if grep -qiE 'params\.json|/usr/local/etc|/etc/sing-box|sing-box/config|\.service|systemctl|\bufw\b|iptables|nft\b' <<<"$block" ; then
+if printf '%s' "$block" | grep -qiE 'params\.json|/usr/local/etc|/etc/sing-box|sing-box/config|\.service|systemctl|\bufw\b|iptables|nft\b'; then
 	badln "a node/transport verb references live node state (params/sing-box config/units/firewall) — it must only touch the descriptor"
 else
 	ok "the verbs touch only the registry + the node.config.json descriptor (no live state)"
 fi
 
 # 4. the descriptor write is 0600 (node-local, not world-readable), if the writer verbs write at all.
-if grep -qE 'os\.WriteFile' <<<"$block" ; then
+if printf '%s' "$block" | grep -qE 'os\.WriteFile'; then
 	if printf '%s' "$block" | grep -E 'os\.WriteFile' | grep -qvE '0o?600'; then
 		badln "a descriptor write does not use 0600 (the node-local profile must not be world-readable)"
 	else

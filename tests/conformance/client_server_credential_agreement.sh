@@ -87,10 +87,7 @@ check_fixture() {
 	local srv="$d/server.json" sub
 
 	printf '\n-- fixture: %s --\n' "$label"
-	# --template is REQUIRED by the verb: it does not read the file, it verifies it against the structs
-	# it encodes, and naming it is how the caller states which template it believes is in effect.
-	if ! "$CTL" render-server --engine singbox --template "$REPO_ROOT/nodes/dataplane/singbox/server.template.renderer.json" \
-		--params "$params" --state "$state" --out "$srv" 2>"$d/srv.err"; then
+	if ! "$CTL" render-server --engine singbox --params "$params" --state "$state" --out "$srv" 2>"$d/srv.err"; then
 		badln "render-server failed, so nothing below could be checked: $(head -1 "$d/srv.err")"; return
 	fi
 	if ! "$CTL" subscription --engine singbox --params "$params" --state "$state" --out "$d/sub" 2>"$d/sub.err"; then

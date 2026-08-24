@@ -50,7 +50,7 @@ engines="$(jq -r '.engines | keys | sort | join(",")' "$MF" 2>/dev/null)"
 # 3. per-engine structure + arch-key set + hex digests
 for e in singbox xray; do
 	ver="$(jq -r --arg e "$e" '.engines[$e].version // ""' "$MF")"
-	grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' <<<"$ver" \
+	printf '%s' "$ver" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' \
 		&& ok "$e.version is SemVer-tagged ($ver)" || badln "$e.version not a vX.Y.Z tag: '$ver'"
 	archs="$(jq -r --arg e "$e" '.engines[$e].sha256 | keys[]' "$MF" 2>/dev/null)"
 	bad=""
@@ -58,7 +58,7 @@ for e in singbox xray; do
 	[ -z "$bad" ] && ok "$e sha256 arch keys ⊆ {amd64,arm64}" || badln "$e has non-normalised arch key(s):$bad"
 	for a in $archs; do
 		dg="$(jq -r --arg e "$e" --arg a "$a" '.engines[$e].sha256[$a]' "$MF")"
-		grep -qE '^[0-9a-f]{64}$' <<<"$dg" || badln "$e.sha256.$a is not a 64-hex digest"
+		printf '%s' "$dg" | grep -qE '^[0-9a-f]{64}$' || badln "$e.sha256.$a is not a 64-hex digest"
 	done
 done
 
@@ -79,7 +79,7 @@ if [ "$(jq -r 'has("toolchains")' "$MF")" = "true" ]; then
 	tc_names="$(jq -r '.toolchains | keys | sort | join(",")' "$MF" 2>/dev/null)"
 	[ "$tc_names" = "go" ] && ok "toolchains == {go}" || badln "toolchains should be {go}, got [$tc_names]"
 	gover="$(jq -r '.toolchains.go.version // ""' "$MF")"
-	grep -qE '^go1\.[0-9]+(\.[0-9]+)?$' <<<"$gover" \
+	printf '%s' "$gover" | grep -qE '^go1\.[0-9]+(\.[0-9]+)?$' \
 		&& ok "toolchains.go.version is a Go release tag ($gover)" || badln "toolchains.go.version not a goX.Y[.Z] tag: '$gover'"
 	tc_archs="$(jq -r '.toolchains.go.sha256 | keys[]' "$MF" 2>/dev/null)"
 	tbad=""
@@ -87,7 +87,7 @@ if [ "$(jq -r 'has("toolchains")' "$MF")" = "true" ]; then
 	[ -z "$tbad" ] && ok "toolchains.go sha256 arch keys ⊆ {amd64,arm64}" || badln "toolchains.go has non-normalised arch key(s):$tbad"
 	for a in $tc_archs; do
 		dg="$(jq -r --arg a "$a" '.toolchains.go.sha256[$a]' "$MF")"
-		grep -qE '^[0-9a-f]{64}$' <<<"$dg" || badln "toolchains.go.sha256.$a is not a 64-hex digest"
+		printf '%s' "$dg" | grep -qE '^[0-9a-f]{64}$' || badln "toolchains.go.sha256.$a is not a 64-hex digest"
 	done
 	go_const="$(grep -E '^GO_DL_BASE=' "$NB" | head -1 | sed -E 's/^[^=]*="([^"]*)".*/\1/')"
 	[ "$(jq -r '.toolchains.go.dl_base' "$MF")" = "$go_const" ] \

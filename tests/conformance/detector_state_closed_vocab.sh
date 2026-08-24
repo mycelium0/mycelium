@@ -111,9 +111,9 @@ fi
 # throttled, blocked, shutdown ALL in ONE case head (any order) -> degraded (indistinguishable)
 impaired_head="$(det_code | grep -nE '^[[:space:]]*case ConnState(Throttled|Blocked|Shutdown)(,[[:space:]]*ConnState(Throttled|Blocked|Shutdown)){2}:')"
 if [ -n "$impaired_head" ] \
-   && grep -q 'ConnStateThrottled' <<<"$impaired_head" \
-   && grep -q 'ConnStateBlocked' <<<"$impaired_head" \
-   && grep -q 'ConnStateShutdown' <<<"$impaired_head" \
+   && printf '%s' "$impaired_head" | grep -q 'ConnStateThrottled' \
+   && printf '%s' "$impaired_head" | grep -q 'ConnStateBlocked' \
+   && printf '%s' "$impaired_head" | grep -q 'ConnStateShutdown' \
    && det_code | grep -A3 -E '^[[:space:]]*case ConnState(Throttled|Blocked|Shutdown)(,[[:space:]]*ConnState(Throttled|Blocked|Shutdown)){2}:' | grep -qE 'return HealthDegraded'; then
 	ok "AdvisoryHealth: throttled/blocked/shutdown all collapse to degraded (privacy contract)"
 else

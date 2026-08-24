@@ -112,7 +112,7 @@ drive() { # drive <label> <args...>  -> echoes the recorded argv lines, one invo
 }
 # saw PATTERN HAYSTACK. The `--` guard belongs INSIDE, next to grep — passing it at the call site
 # makes it the pattern and every row silently tests the wrong thing.
-saw() { grep -qF -- "$1" <<<"$2"; }
+saw() { printf '%s\n' "$2" | grep -qF -- "$1"; }
 
 for row in "default::0" "auto:--auto-rotate:1" "noarm:--no-arm:2"; do
 	lbl="${row%%:*}"; rest="${row#*:}"; flag="${rest%%:*}"; want="${rest##*:}"
@@ -206,7 +206,7 @@ fi
 # to be read.
 F_NOCOMMENT="$(sed 's/[[:space:]]#.*$//' "$F")"
 for verb in $verbs; do
-	if grep -qE "^[[:space:]]*([a-z-]+\|)*${verb}(\|[a-z-]+)*\)" <<<"$F_NOCOMMENT" ; then
+	if printf '%s\n' "$F_NOCOMMENT" | grep -qE "^[[:space:]]*([a-z-]+\|)*${verb}(\|[a-z-]+)*\)"; then
 		ok "\`fungi $verb\` — named in a doc, dispatched by fungi"
 	elif [ -f "$SHELL_CTL" ] && grep -qE "^[[:space:]]*([a-z-]+\|)*${verb}(\|[a-z-]+)*\)" "$SHELL_CTL"; then
 		ok "\`$verb\` — named in a doc, dispatched by control/myceliumctl"

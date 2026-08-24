@@ -104,7 +104,7 @@ missing_from_loop=""
 for f in "$REPO_ROOT"/control/lib/nb_*.sh; do
 	[ -e "$f" ] || continue
 	base="$(basename "$f" .sh)"
-	grep -qx "$base" <<<"$(printf '%s\n' $loop_libs)" || missing_from_loop="$missing_from_loop $base"
+	printf '%s\n' $loop_libs | grep -qx "$base" || missing_from_loop="$missing_from_loop $base"
 done
 if [ -n "$missing_from_loop" ]; then
 	badln "control/lib module(s) exist but are NOT in the entrypoint source loop (never sourced -> functions undefined):$missing_from_loop"

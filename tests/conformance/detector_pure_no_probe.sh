@@ -100,7 +100,7 @@ for f in $nontest; do
 	else
 		ok "$rel imports only the allowlist {fmt, internal/spec}"
 	fi
-	if grep -qE '"github.com/mycelium0/mycelium/internal/spec"' <<<"$imps" ; then
+	if printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/spec"'; then
 		imports_spec=1
 	fi
 	banned="$(strip_comments "$f" | grep -nE 'time\.(Now|Since)([^A-Za-z0-9_]|$)|(^|[^[:alnum:]_])go[[:space:]]+(func|[A-Za-z])|(^|[^[:alnum:]_])chan([[:space:]]|<-)' || true)"

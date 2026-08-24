@@ -117,8 +117,7 @@ else
 
 	# The donor host (or its registrable parent, for a wildcard cert) must appear in Subject/SAN.
 	parent="${donor#*.}"   # e.g. donor "www.example.com" -> "example.com"
-	if grep -qiE "(^|[^a-z0-9.])($donor|\*\.$parent|$parent)([^a-z0-9.]|$)" <<<"$subject
-$san"; then
+	if printf '%s\n%s\n' "$subject" "$san" | grep -qiE "(^|[^a-z0-9.])($donor|\*\.$parent|$parent)([^a-z0-9.]|$)"; then
 		printf '  ok    certificate identity matches the donor (%s)\n' "$donor"
 	else
 		printf '  FAIL  certificate identity does NOT match the donor (%s)\n' "$donor"

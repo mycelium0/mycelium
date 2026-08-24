@@ -39,17 +39,17 @@ for f in "$NBF" "$SB" "$EX"; do [ -f "$f" ] || { printf 'FAIL: missing %s\n' "$f
 fn="$(awk '/^front_setup\(\)/{f=1} f{print} /^}/{if(f)exit}' "$NBF")"
 
 # 1. absent config => early no-op
-grep -qE '\[ -f "\$FRONT_CONFIG" \] \|\| return 0' <<<"$fn" \
+printf '%s' "$fn" | grep -qE '\[ -f "\$FRONT_CONFIG" \] \|\| return 0' \
 	&& ok "front_setup is a no-op when front.config.json is absent (default-off)" \
 	|| badln "front_setup does not early-return when the front config is absent (not default-off)"
 
 # 2. disabled => no-op
-grep -qE 'enabled" != "true"|!= "true"' <<<"$fn" \
+printf '%s' "$fn" | grep -qE 'enabled" != "true"|!= "true"' \
 	&& ok "front_setup is a no-op when the front config is not enabled=true" \
 	|| badln "front_setup does not gate on enabled=true"
 
 # 3. read-only on the config (never writes/creates/enables it)
-if grep -qE '>[[:space:]]*"\$FRONT_CONFIG"|install[^|]*"\$FRONT_CONFIG"|tee[^|]*"\$FRONT_CONFIG"|enabled[[:space:]]*=[[:space:]]*true' <<<"$fn" ; then
+if printf '%s' "$fn" | grep -qE '>[[:space:]]*"\$FRONT_CONFIG"|install[^|]*"\$FRONT_CONFIG"|tee[^|]*"\$FRONT_CONFIG"|enabled[[:space:]]*=[[:space:]]*true'; then
 	badln "front_setup writes/enables the front config (the node must never synthesise operator consent)"
 else
 	ok "front_setup is READ-ONLY on the front config (only reads .enabled; never writes/enables it)"

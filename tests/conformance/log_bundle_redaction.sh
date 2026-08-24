@@ -35,12 +35,12 @@ printf '== diagnostics bundle is PII-safe (RP-0011 chunk E / AC-9) ==\n'
 MAIN="$REPO_ROOT/cmd/myceliumctl/main.go"
 if [ -f "$MAIN" ] && grep -q 'func cmdDiagCollect' "$MAIN"; then
 	body="$(awk '/^func cmdDiagCollect\(/{f=1} f{print} /^}/{if(f)exit}' "$MAIN")"
-	if grep -qE 'fmt\.Print\(diag\.RedactBundle\(' <<<"$body" ; then
+	if printf '%s' "$body" | grep -qE 'fmt\.Print\(diag\.RedactBundle\('; then
 		ok "diag collect prints only diag.RedactBundle(...) output (PII-safe by construction)"
 	else
 		badln "cmdDiagCollect does not pipe its bundle through diag.RedactBundle before printing"
 	fi
-	grep -qE 'fmt\.Print\((&?b|b\.String\(\))' <<<"$body" && badln "cmdDiagCollect prints the RAW builder (must redact first)" || true
+	printf '%s' "$body" | grep -qE 'fmt\.Print\((&?b|b\.String\(\))' && badln "cmdDiagCollect prints the RAW builder (must redact first)" || true
 fi
 
 # The Go runtime redaction proof must exist + assert the invariant (cannot be silently dropped).
@@ -108,7 +108,7 @@ EOF
 out="$("$WORK/mc" diag redact <"$WORK/bundle.txt" 2>"$WORK/redact.err")" || { badln "diag redact failed: $(tr '\n' ' ' <"$WORK/redact.err")"; }
 leaked=0
 for n in "${NEEDLES[@]}"; do
-	if grep -Fq -- "$n" <<<"$out" ; then
+	if printf '%s' "$out" | grep -Fq -- "$n"; then
 		badln "PII seed SURVIVED redaction: $n"
 		leaked=1
 	fi
@@ -116,16 +116,16 @@ done
 [ "$leaked" -eq 0 ] && ok "every seeded PII class (IPv4/IPv6/MAC/FQDN/bare-host/UUID/key/short_id/secret/ASN/user) is scrubbed by 'diag redact'"
 
 # the redacted output should still carry the structural scaffolding (we scrub values, not whole lines)
-grep -q 'level=error' <<<"$out" && ok "structural context preserved (values redacted, lines kept)" \
+printf '%s' "$out" | grep -q 'level=error' && ok "structural context preserved (values redacted, lines kept)" \
 	|| badln "redaction destroyed structural context (should redact values only)"
 # a clock time must survive — the IPv6 rule must not eat HH:MM:SS (would destroy log chronology)
-grep -q '12:34:56' <<<"$out" && ok "clock timestamp preserved (IPv6 rule does not over-redact HH:MM:SS)" \
+printf '%s' "$out" | grep -q '12:34:56' && ok "clock timestamp preserved (IPv6 rule does not over-redact HH:MM:SS)" \
 	|| badln "redaction ate a clock timestamp as if it were IPv6"
 # the English word "as" + digits must survive — the ASN rule must be AS/ASN-anchored, not prose-eating
-grep -q 'downloaded as 12345 chunks' <<<"$out" && ok "English \"as\"+digits preserved (ASN rule is AS-anchored, not prose-eating)" \
+printf '%s' "$out" | grep -q 'downloaded as 12345 chunks' && ok "English \"as\"+digits preserved (ASN rule is AS-anchored, not prose-eating)" \
 	|| badln "ASN rule over-redacted the English word \"as\"+digits"
 # the rule-order invariant: a hex-leading FQDN is redacted WHOLE, not fragmented
-grep -q 'FQDN \[redacted-host\] must not fragment' <<<"$out" && ok "rule-order invariant: hex-leading FQDN redacted whole" \
+printf '%s' "$out" | grep -q 'FQDN \[redacted-host\] must not fragment' && ok "rule-order invariant: hex-leading FQDN redacted whole" \
 	|| badln "rule-order invariant violated: hex-leading FQDN fragmented or not redacted whole"
 
 if [ "$fail" -eq 0 ]; then
