@@ -163,8 +163,12 @@ STUB
 			mkdir -p "$(dirname "$SPINE_BIN")"
 			cat >"$SPINE_BIN" <<WRAP
 #!/usr/bin/env bash
-# `version` is answered here, not forwarded: the fixture builds $SPINE with a plain `go build`, so
-# spec.SourceRev is empty and the real binary prints no "(rev …)". Since 0.2.102 render_candidate
+# NO BACKTICKS BELOW THIS LINE: this heredoc is unquoted (it must interpolate $MYCTL and $SPINE), so a
+# backtick in a COMMENT is command substitution executed while the file is being written. The first draft
+# said "go build" in backticks and the gate ran it, in the wrong directory, at fixture-build time.
+#
+# The version verb is answered here, not forwarded: the fixture builds the spine with a plain go build, so
+# spec.SourceRev is empty and the real binary prints no rev. Since 0.2.102 render_candidate
 # REFUSES an unstamped spine rather than skipping the check, and this fixture is about the rollback
 # path, not about provenance. It answers with the SAME expression render_candidate uses to read the
 # artifact rev, so the two agree by construction whatever this fixture sets ARTIFACT_ROOT to (today it
