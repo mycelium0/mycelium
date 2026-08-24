@@ -331,8 +331,8 @@ for mode in restart-once verify; do
 				*) badln "write_params ran only BEFORE the rollback (Phase B), never after it. params.json keeps the rotated values while the live config is last-known-good, and the two stay disagreed until some later converge happens to reconcile them — on the very branch that exists to restore a consistent node." ;;
 			esac ;;
 		*) { badln "rollback_config never ran, so there is no recovery-ordered write_params to look for"; \
-		printf '        captured run output (tail):\n'; tail -12 "$FAKENODE_ROOT/stdout" 2>/dev/null | sed 's/^/          /'; \
-		printf '        calls: %s\n' "$(tr '\n' ',' < "$FAKENODE_ROOT/calls" 2>/dev/null || printf '<no calls file>')"; } ;;
+		printf '        recorded calls: %s\n' "${_calls:-<none>}"; \
+		printf '        digest: %s\n' "$(printf '%s' "$D" | tr '\n' '|' | cut -c1-400)"; } ;;
 	esac
 
 	[ "$(field "$D" restarts)" -ge 2 ] 2>/dev/null \
