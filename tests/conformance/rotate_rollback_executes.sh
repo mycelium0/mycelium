@@ -130,6 +130,13 @@ scenario() (
 	OPERATOR_OVERRIDES="$STATE_DIR/operator-overrides.json"
 	INVALID_CONFIG="$STATE_DIR/config.invalid.json"
 	ROTATE_LIMITS="$STATE_DIR/rotate_limits.json"
+	# THE ARTIFACT THIS FIXTURE REPRESENTS IS THE TREE IT CAME FROM, and it must say so. ARTIFACT_ROOT
+	# defaults to /opt/mycelium — the NODE's deployed checkout — so on a real node render_candidate read
+	# the node's rev while the fixture's spine carried the rev of the tree under test, and the rev-skew
+	# guard fired. Correctly: those genuinely are two different artifacts. MEASURED: green on CI (no
+	# /opt/mycelium, so the artifact rev reads "unknown" and the guard skips) and red on a node, on the
+	# same commit — an environment split that made the guard look like a flake for twelve CI runs.
+	ARTIFACT_ROOT="$REPO_ROOT"
 	TOOLING_DIR="$FAKENODE_ROOT/tooling"
 	# no-spine forces the degraded bookkeeping path REGARDLESS of the host, so the row that checks what the
 	# node TELLS the operator is not a property of whether this machine happens to have Go.
