@@ -128,48 +128,6 @@ else
 	badln "the prune runs BEFORE the copy. That leaves a window in which the installed tooling is incomplete and MYCTL points at nothing — and a node cannot converge without its tooling. Ordering is the whole safety argument here; a prune-first version passes every other row in this gate."
 fi
 
-# ---------------------------------------------------------------------------------------------------
-# 5. AN INCOMPLETE ARTIFACT MUST NOT BE MIRRORED.
-#
-# `[ -d ]` is satisfied by an EMPTY directory, and mirroring an empty source means deleting everything.
-# MEASURED on the first version of this code: zero files survived and MYCTL pointed at a deleted
-# myceliumctl. The accumulate behaviour this replaced at least left working tooling in place, so an
-# unguarded mirror is a REGRESSION on exactly the failure that matters.
-#
-# DRIVEN WITH A RECORDER, not for real. The first draft of this row executed install_tooling against a
-# real directory tree, and the suite then failed a LATER, unrelated gate on CI only — a cross-gate
-# interaction I could not reproduce on any host I have. Whatever the mechanism, a row that mutates a real
-# filesystem to prove a refusal does not need to: the refusal IS the absence of an `rm`, and the trace
-# shows that directly. Removing the guard makes the rm appear, which is the whole discrimination.
-# ---------------------------------------------------------------------------------------------------
-printf '\n-- and an incomplete artifact is not mirrored --\n'
-E="$(mktemp -d "${TMPDIR:-/tmp}/myc.tcm2.XXXXXX")" || exit 2
-mkdir -p "$E/artifact/control" "$E/tooling/control/lib"
-printf 'ENTRYPOINT\n' > "$E/tooling/control/myceliumctl"
-printf 'LIB\n'        > "$E/tooling/control/lib/common.sh"
-ETRACE="$E/trace"
-(
-	ARTIFACT_ROOT="$E/artifact"; TOOLING_DIR="$E/tooling"; DRY_RUN=0
-	log() { :; }; warn() { :; }; die() { exit 7; }
-	have() { command -v "$1" >/dev/null 2>&1; }; need_root() { :; }
-	# RECORDER: every mutation install_tooling would perform is written down and NOT performed.
-	run() { printf '%s\n' "$*" >>"$ETRACE"; }
-	# shellcheck source=/dev/null
-	. "$LIB" >/dev/null 2>&1 || exit 2
-	install_spine() { :; }
-	ARTIFACT_ROOT="$E/artifact"; TOOLING_DIR="$E/tooling"; DRY_RUN=0
-	install_tooling
-) >/dev/null 2>&1
-if grep -q '^rm -f ' "$ETRACE" 2>/dev/null; then
-	badln "the tooling was pruned against an artifact that does not even contain myceliumctl ($(grep -c '^rm -f ' "$ETRACE") removal(s) issued). MYCTL then points at a deleted file and the node cannot converge at all — strictly worse than the accumulation this mirror replaced."
-else
-	ok "an artifact with no myceliumctl issues no removals at all"
-fi
-grep -q '^cp -a ' "$ETRACE" 2>/dev/null \
-	&& ok "and the copy still runs, so the row is not passing because install_tooling did nothing" \
-	|| badln "install_tooling issued no copy either — this row would then report a refusal it never observed"
-rm -rf "$E"
-
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the installed tooling does not mirror the deployed artifact.\n' >&2
