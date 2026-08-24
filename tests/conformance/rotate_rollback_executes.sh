@@ -76,14 +76,23 @@ printf '== rotation rollback: execute the recovery branch, and prove it is compl
 SPINE=""
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/myc.rbk.XXXXXX")" || exit 2
 trap 'rm -rf "$WORK"' EXIT
-if command -v go >/dev/null 2>&1 \
-   && ( cd "$REPO_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 \
-        go build -o "$WORK/myceliumctl-go" ./cmd/myceliumctl ) 2>"$WORK/build.err"; then
-	SPINE="$WORK/myceliumctl-go"
-else
-	printf '  SKIP  no Go spine (jq-only lane): the rollback BUDGET/LATCH rows cannot run. The recovery\n'
+# NO GO and BUILD FAILED are different states and must not print the same thing. The first is a lane
+# property (the jq-only host); the second means this host HAS Go and could not compile the tree, which
+# silently changes which path every scenario below takes — the spine path becomes the no-spine path and
+# nothing says so. That is the shape this suite exists to refuse, committed by the harness.
+if ! command -v go >/dev/null 2>&1; then
+	printf '  SKIP  no Go toolchain (jq-only lane): the rollback BUDGET/LATCH rows cannot run. The recovery\n'
 	printf '        sequence rows below still execute in full; record_rotation_rollback degrades to a\n'
 	printf '        warning exactly as it does on a node without the spine.\n'
+elif ( cd "$REPO_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 \
+       go build -o "$WORK/myceliumctl-go" ./cmd/myceliumctl ) 2>"$WORK/build.err"; then
+	SPINE="$WORK/myceliumctl-go"
+	printf '  ..    driving with a real spine (%s)\n' "$(basename "$SPINE")"
+else
+	printf '  FAIL  this host has Go but could not build the spine, so every scenario below would silently\n' >&2
+	printf '        take the NO-SPINE path while claiming to test the spine one:\n' >&2
+	sed 's/^/          /' "$WORK/build.err" 2>/dev/null | head -8 >&2
+	fail=1
 fi
 
 # ---------------------------------------------------------------------------------------------------
@@ -257,6 +266,10 @@ STUB
 	{
 		cat "$FAKENODE_ROOT/rc"
 		printf 'calls=%s\n' "$(tr '\n' ',' <"$FAKENODE_ROOT/calls" 2>/dev/null)"
+		# What the run SAID, carried back with what it produced. A digest of outcomes alone makes every
+		# failure need the environment reproduced before it can be read at all — and this fixture has
+		# already failed on a host its author could not reproduce, twelve CI runs deep, saying nothing.
+		printf 'said=%s\n' "$(tr '\n' '|' <"$FAKENODE_ROOT/stdout" 2>/dev/null | tail -c 700)"
 		printf 'live_gen=%s\n'   "$(fakenode_generation "$SINGBOX_CONFIG")"
 		printf 'overlay_same=%s\n' "$(cmp -s "$FAKENODE_ROOT/overlay.before" "$OPERATOR_OVERRIDES" && printf yes || printf no)"
 		printf 'overlay=%s\n'    "$(jq -c . "$OPERATOR_OVERRIDES" 2>/dev/null)"
@@ -287,6 +300,7 @@ for mode in restart-once verify; do
 	esac
 	printf '\n-- %s --\n' "$label"
 	D="$WORK/$mode.digest"
+	_fail_before="$fail"
 	scenario "$mode" "$D"
 	if [ ! -s "$D" ]; then
 		badln "the scenario produced no digest at all — rotate_apply_live could not be driven, so nothing below was measured"
@@ -343,6 +357,13 @@ for mode in restart-once verify; do
 			*recorded*)       ok "step 7: it fails closed with a message that matches what happened" ;;
 			*)                badln "the closing message names neither outcome: '$(field "$D" final)'" ;;
 		esac
+	fi
+
+	# WHEN A SCENARIO FAILS, SHOW WHAT THE RUN SAID. Printed once per scenario rather than per row, and
+	# only on failure, so a green suite stays quiet — but a red one never again costs a bisect to read.
+	if [ "$fail" -ne "$_fail_before" ]; then
+		printf '        the run said: %s\n' "$(field "$D" said | tail -c 700)"
+		printf '        recorded calls: %s\n' "$(field "$D" calls)"
 	fi
 done
 

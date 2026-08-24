@@ -13,6 +13,34 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.102] — 2026-08-24
+
+### Fixed — the rollback gate failed without saying why, and cost twelve CI runs
+
+`rotate_rollback_executes.sh` went red on CI while passing on a node and on the maintainer's machine, and
+its output gave nothing to work from: outcome rows only, no trace of what the driven flow actually did or
+said. Localising it took a bisect across **twelve CI runs**, and the bisect did not converge — reverting
+different subsets flipped it in both directions, and the failing scenario inside the gate varied between
+runs. A gate that fails for a reason it does not name is worse than no gate: it converts one defect into
+an afternoon.
+
+Three changes, none of them to what the gate asserts:
+
+* **"no Go" and "Go is here and the build FAILED" are no longer the same message.** The first is a lane
+  property; the second means this host could compile nothing, which silently turns every scenario below
+  into the NO-SPINE path while still claiming to exercise the spine one. That is the defect class this
+  suite exists to refuse, committed by the harness. A failed build is now a FAILURE that prints
+  `build.err`, and a successful one says it is driving a real spine.
+* **The digest carries what the run SAID**, not only what it produced.
+* **A scenario that fails anything prints that output and its recorded call trace** — once per scenario,
+  only on failure, so a green suite stays as quiet as before.
+
+Verified by mutation: flipping one assertion makes the gate print the run's own call trace next to the
+failing row, which is exactly what was missing.
+
+The underlying CI-only sensitivity is NOT fixed here and is not claimed to be. This change is so that the
+next time it fires, the gate says what happened instead of requiring the environment to be reproduced.
+
 ## [0.2.101] — 2026-08-21
 
 ### Fixed — the installed tooling could only grow
