@@ -202,7 +202,7 @@ fi
 
 # --- 2. the provenance bypass (over the EFFECTIVE command + both unit files) ------------------------
 bypass=0
-if grep -q -- '--insecure-no-verify' <<<"$exec_eff" ; then
+if printf '%s' "$exec_eff" | grep -q -- '--insecure-no-verify'; then
 	bypass=1
 	crit "the EFFECTIVE ExecStart carries --insecure-no-verify — verify_signed_ref returns BEFORE checking anything."
 	crit "        Fetched code would be merged, installed and COMPILED as root unauthenticated."
@@ -225,8 +225,8 @@ done
 # no authentication at all.
 if [ "$tmr_state" = "enabled" ] || [ "$tmr_active" = "active" ]; then
 	has_signers=0; has_ref=0
-	grep -q -- '--allowed-signers' <<<"$exec_eff" && has_signers=1
-	grep -q -- '--repo-ref' <<<"$exec_eff" && has_ref=1
+	printf '%s' "$exec_eff" | grep -q -- '--allowed-signers' && has_signers=1
+	printf '%s' "$exec_eff" | grep -q -- '--repo-ref'        && has_ref=1
 	if [ "$has_signers" -eq 1 ] && [ "$has_ref" -eq 1 ] && [ "$bypass" -eq 0 ]; then
 		# "enabled/active", NOT "armed" (Audit-0009 C1). These two signals cannot distinguish a timer that
 		# will fire from one that has settled into SubState=elapsed with Trigger=n/a — the dead state found
@@ -329,9 +329,9 @@ fi
 # the unit non-portable and put a node address in a root-run command line.
 if [ -n "$exec_eff" ]; then
 	pins=""
-	grep -qE '(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)' <<<"$exec_eff" && pins="$pins address-literal"
-	grep -q -- '--clients' <<<"$exec_eff" && pins="$pins --clients"
-	grep -q -- '--node-address' <<<"$exec_eff" && pins="$pins --node-address"
+	printf '%s' "$exec_eff" | grep -qE '(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)' && pins="$pins address-literal"
+	printf '%s' "$exec_eff" | grep -q -- '--clients'                                      && pins="$pins --clients"
+	printf '%s' "$exec_eff" | grep -q -- '--node-address'                                 && pins="$pins --node-address"
 	if [ -n "$pins" ]; then
 		warn "the effective ExecStart bakes in node-specific value(s):$pins"
 		warn "  -> a node address in a root-run command line is an OPSEC item, and the unit stops being resettable by a plain re-cp."

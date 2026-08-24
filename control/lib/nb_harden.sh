@@ -417,9 +417,9 @@ verify_hy2_hop_nat() {
 	# range merely BEGINS with the advertised one: a rule for `--dport 20000:210000` satisfies a check for
 	# `20000:21000`. A rule covering a wider range than advertised is not a harmless superset — it is the
 	# collision case, silently swallowing whatever else lives in the excess.
-	grep -qE -- "--dport ${want}([[:space:]]|\$)" <<<"$rule" \
+	printf '%s' "$rule" | grep -qE -- "--dport ${want}([[:space:]]|\$)" \
 		|| { warn "hysteria2 port hopping: the installed redirect does not cover exactly the advertised range $want (rule: $rule)."; return 1; }
-	grep -qE -- "--to-ports ${lstn}([[:space:]]|$)" <<<"$rule" \
+	printf '%s' "$rule" | grep -qE -- "--to-ports ${lstn}([[:space:]]|$)" \
 		|| { warn "hysteria2 port hopping: the redirect points somewhere other than the served port $lstn (rule: $rule)."; return 1; }
 	# THE MESSAGE NAMES WHAT WAS CHECKED, AND ONLY THAT (Audit-0010 F-010a). It used to read "verified",
 	# unqualified, after inspecting `iptables -t nat -S` alone — the IPv4 table. reconcile_hy2_hop_nat
@@ -438,9 +438,9 @@ verify_hy2_hop_nat() {
 			warn "hysteria2 port hopping: the IPv4 redirect is present but there is NO IPv6 twin, and the inbounds listen on '::'. A client reaching this node over IPv6 hops across $want and reaches nothing."
 			return 1
 		fi
-		grep -qE -- "--dport ${want}([[:space:]]|\$)" <<<"$rule6" \
+		printf '%s' "$rule6" | grep -qE -- "--dport ${want}([[:space:]]|\$)" \
 			|| { warn "hysteria2 port hopping: the IPv6 redirect does not cover exactly the advertised range $want (rule: $rule6)."; return 1; }
-		grep -qE -- "--to-ports ${lstn}([[:space:]]|$)" <<<"$rule6" \
+		printf '%s' "$rule6" | grep -qE -- "--to-ports ${lstn}([[:space:]]|$)" \
 			|| { warn "hysteria2 port hopping: the IPv6 redirect points somewhere other than the served port $lstn (rule: $rule6)."; return 1; }
 		log "hysteria2 port hopping: verified on IPv4 AND IPv6 — udp $want -> served port $lstn."
 		return 0
