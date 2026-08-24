@@ -91,8 +91,8 @@ for f in $nontest; do
 	else
 		ok "$rel does not import the planner or any actuation/executor package"
 	fi
-	printf '%s\n' "$src" | grep -qE '"github.com/mycelium0/mycelium/internal/measure"' && imports_measure=1
-	printf '%s\n' "$src" | grep -qE '"github.com/mycelium0/mycelium/internal/reach"'   && imports_reach=1
+	grep -qE '"github.com/mycelium0/mycelium/internal/measure"' <<<"$src" && imports_measure=1
+	grep -qE '"github.com/mycelium0/mycelium/internal/reach"' <<<"$src" && imports_reach=1
 done
 
 # 2. the MEASURE wiring is actually present.

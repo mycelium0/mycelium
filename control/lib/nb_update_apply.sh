@@ -382,9 +382,18 @@ render_candidate() {
 		local _art_rev _spine_rev
 		_art_rev="$(git -C "${ARTIFACT_ROOT:-/opt/mycelium}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 		_spine_rev="$("$_spine" version 2>/dev/null | grep -oE 'rev [0-9a-f]+' | cut -d" " -f2 || true)"
+		# AN UNSTAMPED SPINE IS NOT "PROBABLY FINE" — it is a spine whose provenance cannot be read.
+		# spec.SourceRev is empty for a plain `go build`, so `version` prints no "(rev …)" and the scrape
+		# yields nothing. Guarding the comparison with [ -n "$_spine_rev" ] therefore made the check SKIP
+		# exactly on the binary least likely to be this artifact's — and the refusal text below used to
+		# advise "rebuild it out of band", which produces precisely that binary. Refuse instead, and say
+		# how to get a stamped one. install_spine builds with -ldflags, so the supported path is unaffected.
+		if [ "$_art_rev" != unknown ] && [ -z "$_spine_rev" ]; then
+			_record_update_failure_if_available render; die "the Go spine at $_spine reports no source revision (spec.SourceRev is empty — the mark of a plain \`go build\`), so there is no way to tell whether it is this artifact's. Since the render cutover it produces the live data-plane config, and a binary of unknown provenance may be missing checks this artifact relies on. Let install_spine build it (it stamps the rev via -ldflags): run 'node-bootstrap.sh --update', or remove $_spine to fall back to the shell renderer. Nothing promoted."
+		fi
 		if [ "$_art_rev" != unknown ] && [ -n "$_spine_rev" ] && \
 		   [ "${_art_rev#"$_spine_rev"}" = "$_art_rev" ] && [ "${_spine_rev#"$_art_rev"}" = "$_spine_rev" ]; then
-			die "the Go spine at $_spine was built from rev $_spine_rev but the deployed artifact is $_art_rev. It renders the live data-plane config now, so a stale one is not a slower one — it can be missing checks this artifact relies on (e.g. the server-template pin) and would pass them by not having them. Refresh the tooling first: run 'node-bootstrap.sh --update' (which installs the spine before it renders), or rebuild it out of band. Nothing promoted."
+			_record_update_failure_if_available render; die "the Go spine at $_spine was built from rev $_spine_rev but the deployed artifact is $_art_rev. It renders the live data-plane config now, so a stale one is not a slower one — it can be missing checks this artifact relies on (e.g. the server-template pin) and would pass them by not having them. Refresh the tooling first: run 'node-bootstrap.sh --update' (which installs the spine before it renders), or let install_spine rebuild it (it stamps the rev). Nothing promoted."
 		fi
 		if run "$_spine" render-server \
 			--engine singbox \
@@ -395,7 +404,7 @@ render_candidate() {
 			log "rendered by the Go spine ($_spine)"
 			return 0
 		fi
-		die "render-server (Go spine) failed (fail-closed; nothing promoted). NOT falling back to the shell renderer: the two are pinned byte-identical, so a refusal here is a real disagreement — most likely a server template that no longer matches the structs the spine encodes — and rendering it the other way would hide that."
+		_record_update_failure_if_available render; die "render-server (Go spine) failed (fail-closed; nothing promoted). NOT falling back to the shell renderer: the two are pinned byte-identical, so a refusal here is a real disagreement — most likely a server template that no longer matches the structs the spine encodes — and rendering it the other way would hide that."
 	fi
 	warn "the Go spine is not present at $_spine; rendering through the shell producer instead (degraded: the two are gate-pinned equivalent, but the spine is the owner)."
 	run "$MYCTL" render-server \

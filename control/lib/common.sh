@@ -230,7 +230,9 @@ myc_hop_interval_ok() {
 	[ -f "$vocab" ] || return 1
 	pat="$(jq -r '.params_validation.hysteria2_hop_interval_pattern // empty' "$vocab" 2>/dev/null)"
 	[ -n "$pat" ] || return 1
-	printf '%s' "$1" | grep -qE "$pat"
+	# here-string, not a pipe: this is the function's RETURN VALUE under the entrypoint's
+	# `set -euo pipefail`, and `grep -q` closing the pipe on a match would make a MATCH read as failure.
+	grep -qE "$pat" <<<"$1"
 }
 
 # myc_hop_interval_default — the emitted default hop period. Empty when the vocab carries none, which

@@ -54,7 +54,10 @@ compare() { # NAME PARAMS STATE
 	if ! bash "$CTL" render-server --engine singbox --template "$TEMPLATE" --params "$params" --state "$state" --out "$WORK/sh.json" 2>"$WORK/sh.err"; then
 		printf '  FAIL  [%s] shell render failed: %s\n' "$name" "$(tr -d '\n' < "$WORK/sh.err" | cut -c1-200)"; fail=1; return
 	fi
-	if ! "$SPINE" render-server --engine singbox --params "$params" --state "$state" --out "$WORK/go.json" 2>"$WORK/go.err"; then
+	# --template is passed because the verb REQUIRES it (it verifies the bytes against the structs it
+	# encodes). Omitting it here meant this gate exercised the pin-bypassed path — the one input where
+	# the two producers could differ without anything noticing.
+	if ! "$SPINE" render-server --engine singbox --template "$TEMPLATE" --params "$params" --state "$state" --out "$WORK/go.json" 2>"$WORK/go.err"; then
 		printf '  FAIL  [%s] Go render failed: %s\n' "$name" "$(tr -d '\n' < "$WORK/go.err" | cut -c1-200)"; fail=1; return
 	fi
 	if diff -u "$WORK/sh.json" "$WORK/go.json" > "$WORK/diff.out" 2>&1; then

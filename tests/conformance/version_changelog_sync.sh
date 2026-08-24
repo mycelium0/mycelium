@@ -61,7 +61,7 @@ top="$(grep -E '^##[[:space:]]*\[[0-9]+\.[0-9]+\.[0-9]+\]' "$CHANGELOG" \
 
 if [ -z "$ver" ]; then
 	badln "could not read a SemVer 'const Version = \"X.Y.Z\"' from internal/spec/version.go"
-elif printf '%s' "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+elif grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$ver" ; then
 	ok "spine version: $ver"
 else
 	badln "spine version $ver is not SemVer X.Y.Z"

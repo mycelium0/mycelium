@@ -87,6 +87,11 @@
 #                               adds and overwrites but never removes, so the installed copy could only
 #                               grow. Drives install_tooling over real dirs and pins the ordering (copy
 #                               then prune), because a prune-first version passes every other row
+#   * no_early_exit_consumer_on_a_pipe.sh — no held value is piped into a consumer that exits on its
+#                               first match (`grep -q`, `grep -m`). Under pipefail the producer dies of
+#                               SIGPIPE and a MATCH is reported as a FAILURE; where a match means "defect
+#                               found" the row then reports OK on the defect. Swept three times, so it is
+#                               a gate now. Proves its own scanner on a planted instance
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -342,6 +347,7 @@ GATES=(
 	"tests/conformance/render_server_template_pinned.sh"
 	"tests/conformance/render_server_cutover.sh"
 	"tests/conformance/tooling_copy_is_a_mirror.sh"
+	"tests/conformance/no_early_exit_consumer_on_a_pipe.sh"
 	"tests/conformance/subscription_go_equiv.sh"
 	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/client_server_credential_agreement.sh"

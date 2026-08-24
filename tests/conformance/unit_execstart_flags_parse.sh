@@ -86,7 +86,7 @@ if [ -z "$emitted" ]; then
 else
 	missing=""
 	for tok in $emitted; do
-		printf '%s' "$parser" | grep -qE "(^|[[:space:]]|\|)${tok}\)" || missing="$missing $tok"
+		grep -qE "(^|[[:space:]]|\|)${tok}\)" <<<"$parser" || missing="$missing $tok"
 	done
 	n="$(printf '%s' "$emitted" | wc -w | tr -d ' ')"
 	if [ -n "$missing" ]; then

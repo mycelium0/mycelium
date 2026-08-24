@@ -63,12 +63,12 @@ for t in "${tpl_timers[@]}"; do
 	found=$((found + 1))
 	name="$(basename "$t")"
 	body="$(grep -vE '^[[:space:]]*#' "$t" 2>/dev/null)"
-	if printf '%s' "$body" | grep -qE '^[[:space:]]*OnCalendar='; then
+	if grep -qE '^[[:space:]]*OnCalendar=' <<<"$body" ; then
 		ok "$name: calendar trigger (cannot be suppressed by a stale anchor)"
 		# Persistent= is meaningful only here; note it rather than require it.
-		printf '%s' "$body" | grep -qE '^[[:space:]]*Persistent=true' \
+		grep -qE '^[[:space:]]*Persistent=true' <<<"$body" \
 			&& ok "  and Persistent=true, so one missed run after downtime is caught up"
-	elif printf '%s' "$body" | grep -qE '^[[:space:]]*OnUnitActiveSec='; then
+	elif grep -qE '^[[:space:]]*OnUnitActiveSec=' <<<"$body" ; then
 		badln "$name is a SHIPPED TEMPLATE with a monotonic-only trigger. It is copied by hand and enabled with no service start, so nothing seeds its anchor: it can settle into SubState=elapsed / Trigger=n/a and never fire again while is-enabled and is-active both say ARMED. Use OnCalendar=."
 	else
 		badln "$name declares no OnCalendar= and no OnUnitActiveSec= — it has no recurring trigger at all"
@@ -108,9 +108,9 @@ for f in "${emitters[@]}"; do
 			badln "$src: could not extract the heredoc body for $u.timer — re-confirm this gate against the new shape"
 			continue
 		fi
-		if printf '%s' "$blk" | grep -qE '^[[:space:]]*OnCalendar='; then
+		if grep -qE '^[[:space:]]*OnCalendar=' <<<"$blk" ; then
 			ok "$src: $u.timer uses a calendar trigger"
-		elif printf '%s' "$blk" | grep -qE '^[[:space:]]*OnUnitActiveSec='; then
+		elif grep -qE '^[[:space:]]*OnUnitActiveSec=' <<<"$blk" ; then
 			# Form B: the SERVICE of the same name must be started by this file.
 			if grep -qE "systemctl start $u\.service" "$f"; then
 				ok "$src: $u.timer is monotonic but its anchor is seeded (systemctl start $u.service)"

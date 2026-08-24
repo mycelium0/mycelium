@@ -109,7 +109,7 @@ _l7_singbox_dial() {
 		err="$(: | timeout "$to" "$SINGBOX_BIN" tools connect -c "$tmpc" -o probe-out 127.0.0.1:1 2>&1 >/dev/null)" || rc=$?
 		if [ "$rc" -eq 124 ]; then
 			verdict=0
-		elif printf '%s' "$err" | grep -qiE 'connect to server|authenticat|application error|handshake|unreachable|no route'; then
+		elif grep -qiE 'connect to server|authenticat|application error|handshake|unreachable|no route' <<<"$err" ; then
 			verdict=1
 		else
 			verdict=2
@@ -466,7 +466,7 @@ measure_l7_probe() {
 				[ -n "$leaf" ] || { sleep 1; continue; }
 				printf '%s' "$leaf" | openssl x509 -noout -checkend 0 >/dev/null 2>&1 || { sleep 1; continue; }
 				san="$(printf '%s' "$leaf" | openssl x509 -noout -ext subjectAltName 2>/dev/null)"
-				if printf '%s' "$san" | grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)"; then ok=1; vrc=0; break; fi
+				if grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)" <<<"$san" ; then ok=1; vrc=0; break; fi
 				sleep 1
 			done
 		fi
@@ -801,7 +801,7 @@ measure_l7_probe_xhttp() {
 		[ -n "$leaf" ] || { sleep 1; continue; }
 		printf '%s' "$leaf" | openssl x509 -noout -checkend 0 >/dev/null 2>&1 || { sleep 1; continue; }
 		san="$(printf '%s' "$leaf" | openssl x509 -noout -ext subjectAltName 2>/dev/null)"
-		if printf '%s' "$san" | grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)"; then ok=1; break; fi
+		if grep -qiE "DNS:(${sni}|\*\.${parent})([[:space:],]|\$)" <<<"$san" ; then ok=1; break; fi
 		sleep 1
 	done
 	local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
