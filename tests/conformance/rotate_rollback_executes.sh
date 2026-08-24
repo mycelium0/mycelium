@@ -84,8 +84,16 @@ if ! command -v go >/dev/null 2>&1; then
 	printf '  SKIP  no Go toolchain (jq-only lane): the rollback BUDGET/LATCH rows cannot run. The recovery\n'
 	printf '        sequence rows below still execute in full; record_rotation_rollback degrades to a\n'
 	printf '        warning exactly as it does on a node without the spine.\n'
+# STAMPED, like install_spine stamps it. Since 0.2.103 render_candidate refuses a spine that reports no
+# source revision — an unstamped binary is one whose provenance cannot be read, and it renders the live
+# config. A fixture that builds with a bare `go build` produces exactly that binary and is refused, which
+# is the guard working. MEASURED: this gate went red on CI and green on a node, and the difference was
+# that the node's tree came from `git archive` (no .git, so the artifact rev read "unknown" and the guard
+# skipped) while CI checks out a real repository. Stamp it and the fixture drives a spine the node would
+# accept.
 elif ( cd "$REPO_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 \
-       go build -o "$WORK/myceliumctl-go" ./cmd/myceliumctl ) 2>"$WORK/build.err"; then
+       go build -ldflags "-X github.com/mycelium0/mycelium/internal/spec.SourceRev=$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo 000000000000)" \
+       -o "$WORK/myceliumctl-go" ./cmd/myceliumctl ) 2>"$WORK/build.err"; then
 	SPINE="$WORK/myceliumctl-go"
 	printf '  ..    driving with a real spine (%s)\n' "$(basename "$SPINE")"
 else
@@ -259,7 +267,7 @@ STUB
 	# this scenario down with it and every observation below goes unwritten: the first draft reported "the
 	# scenario produced no digest" for all three failure modes and passed only the healthy control, which is
 	# indistinguishable from a rollback that never ran.
-	( set -x; rotate_apply_live "$FAKENODE_ROOT/plan.json" ) >"$FAKENODE_ROOT/stdout" 2>&1
+	( rotate_apply_live "$FAKENODE_ROOT/plan.json" ) >"$FAKENODE_ROOT/stdout" 2>&1
 	printf 'rc=%s\n' "$?" >"$FAKENODE_ROOT/rc"
 
 	# Hand the observations back as a flat digest; the assertions live in the parent.
