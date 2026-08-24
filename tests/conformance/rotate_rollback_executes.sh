@@ -163,18 +163,10 @@ STUB
 			mkdir -p "$(dirname "$SPINE_BIN")"
 			cat >"$SPINE_BIN" <<WRAP
 #!/usr/bin/env bash
-# NO BACKTICKS BELOW THIS LINE: this heredoc is unquoted (it must interpolate $MYCTL and $SPINE), so a
-# backtick in a COMMENT is command substitution executed while the file is being written. The first draft
-# said "go build" in backticks and the gate ran it, in the wrong directory, at fixture-build time.
-#
-# The version verb is answered here, not forwarded: the fixture builds the spine with a plain go build, so
-# spec.SourceRev is empty and the real binary prints no rev. Since 0.2.102 render_candidate
-# REFUSES an unstamped spine rather than skipping the check, and this fixture is about the rollback
-# path, not about provenance. It answers with the SAME expression render_candidate uses to read the
-# artifact rev, so the two agree by construction whatever this fixture sets ARTIFACT_ROOT to (today it
-# sets nothing, so both resolve to "unknown" and the guard is inert — that must stay true by agreement,
-# not by the fixture happening not to set a variable).
-if [ "\${1:-}" = "version" ]; then printf 'myceliumctl 0.0.0 (rev %s)\n' "\$(git -C "\${ARTIFACT_ROOT:-/opt/mycelium}" rev-parse --short=12 HEAD 2>/dev/null || echo 000000000000)"; exit 0; fi
+# The version verb is NOT intercepted and the rev-skew guard is NOT exercised here: this fixture leaves
+# ARTIFACT_ROOT unset, so render_candidate reads the artifact rev as "unknown" and both provenance guards
+# skip by construction. render_server_cutover.sh is where that guard is driven, with a fixture built for
+# it. Adding an interception here bought nothing and cost a CI-only failure.
 if [ "\${1:-}" = "render-server" ]; then exec "$MYCTL" "\$@"; fi
 exec "$SPINE" "\$@"
 WRAP
