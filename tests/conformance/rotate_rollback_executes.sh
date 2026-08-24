@@ -259,7 +259,7 @@ STUB
 	# this scenario down with it and every observation below goes unwritten: the first draft reported "the
 	# scenario produced no digest" for all three failure modes and passed only the healthy control, which is
 	# indistinguishable from a rollback that never ran.
-	( rotate_apply_live "$FAKENODE_ROOT/plan.json" ) >"$FAKENODE_ROOT/stdout" 2>&1
+	( set -x; rotate_apply_live "$FAKENODE_ROOT/plan.json" ) >"$FAKENODE_ROOT/stdout" 2>&1
 	printf 'rc=%s\n' "$?" >"$FAKENODE_ROOT/rc"
 
 	# Hand the observations back as a flat digest; the assertions live in the parent.
