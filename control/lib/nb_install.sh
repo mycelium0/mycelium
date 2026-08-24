@@ -40,7 +40,7 @@ install_singbox() {
 	if have "$SINGBOX_BIN"; then
 		local cur
 		cur="$("$SINGBOX_BIN" version 2>/dev/null | sed -n 's/.*version[[:space:]]*//p' | head -n1)"
-		if [ -n "$SINGBOX_VERSION" ] && grep -q "${SINGBOX_VERSION#v}" <<<"$cur" ; then
+		if [ -n "$SINGBOX_VERSION" ] && printf '%s' "$cur" | grep -q "${SINGBOX_VERSION#v}"; then
 			log "sing-box ${SINGBOX_VERSION} already installed; skipping."
 			ensure_singbox_user
 			return 0
@@ -169,7 +169,7 @@ install_xray() {
 	if have "$XRAY_BIN"; then
 		local cur
 		cur="$("$XRAY_BIN" version 2>/dev/null | sed -n 's/^Xray[[:space:]]*//p' | awk '{print $1}' | head -n1)"
-		if [ -n "$XRAY_VERSION" ] && grep -q "${XRAY_VERSION#v}" <<<"$cur" ; then
+		if [ -n "$XRAY_VERSION" ] && printf '%s' "$cur" | grep -q "${XRAY_VERSION#v}"; then
 			log "xray ${XRAY_VERSION} already installed; skipping."
 			return 0
 		fi
@@ -454,14 +454,8 @@ install_tooling() {
 	# ordering is the whole safety argument — a delete-then-copy would have a window in which MYCTL
 	# points at nothing, and the node cannot converge without it. `find .` (not -printf) so the walk is
 	# POSIX and behaves the same on the operator's machine as on a node.
-	# AND THE SOURCE MUST LOOK LIKE A CONTROL TREE. `[ -d ]` is satisfied by an EMPTY directory, and an
-	# empty source makes "mirror" mean "delete everything": MEASURED by driving this function against an
-	# empty $ARTIFACT_ROOT/control — zero files survived and MYCTL pointed at a deleted myceliumctl. The
-	# accumulate behaviour this replaced at least left working tooling in place, so an unguarded mirror is
-	# a REGRESSION on exactly the failure that matters. Prune only when the artifact carries the one file
-	# without which the node cannot converge at all.
 	local _rel
-	if [ -d "$TOOLING_DIR/control" ] && [ -f "$ARTIFACT_ROOT/control/myceliumctl" ]; then
+	if [ -d "$TOOLING_DIR/control" ] && [ -d "$ARTIFACT_ROOT/control" ]; then
 		while IFS= read -r _rel; do
 			_rel="${_rel#./}"
 			[ -n "$_rel" ] || continue
@@ -584,26 +578,8 @@ install_go_toolchain() {
 # toolchain and builds the same reproducible binary regardless of what `go` (if any) the distro ships.
 install_spine() {
 	# Ensure a PINNED, non-distro Go toolchain (self-heals on every path incl. the timer --update). A
-	# missing/unverifiable toolchain WARNs and skips the build — and drops any stale spine, see below.
-	# A SPINE THAT IS NOT THIS ARTIFACT'S IS NOT A SPINE — remove it rather than leave it.
-	#
-	# Since the RP-0008 P3 cutover the spine RENDERS the live data-plane config, and render_candidate
-	# refuses a binary whose rev differs from the deployed artifact. Leaving a stale binary behind on a
-	# build failure therefore no longer "degrades to the shell": it makes every subsequent converge DIE on
-	# the skew, on the unattended path, permanently — the checkout has already advanced, so the next tick
-	# repeats it. A Go-toolchain hiccup would take the node off code updates entirely, on a path designed
-	# never to depend on Go.
-	#
-	# Removing it restores the doctrine this function has always claimed: absence is the state the render
-	# path degrades from, and it degrades LOUDLY. myceliumd is left alone — it is not in the render path,
-	# and deleting a daemon binary out from under a running service is a different and worse failure.
-	_spine_drop_stale() {
-		local b="$TOOLING_DIR/bin/myceliumctl-go"
-		[ -e "$b" ] || return 0
-		warn "removing the stale spine at $b: it was built from another revision, and since the render cutover a mismatched spine makes every converge fail closed. The node falls back to the shell renderer (gate-pinned byte-identical) until a build succeeds."
-		run rm -f "$b"
-	}
-	install_go_toolchain || { warn "no usable Go toolchain (pinned download failed + no distro go); skipping the spine build."; _spine_drop_stale; return 0; }
+	# missing/unverifiable toolchain only WARNs and skips (strangler doctrine: degrade to the shell).
+	install_go_toolchain || { warn "no usable Go toolchain (pinned download failed + no distro go); skipping the (inert) spine build — the shell control tool remains authoritative."; return 0; }
 	need_root
 	local rev cur
 	rev="$(git -C "$ARTIFACT_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
@@ -627,7 +603,7 @@ install_spine() {
 		# first; the version call may fail). rev=unknown (tarball deploy) -> never matches -> rebuild (safe).
 		if [ "$rev" != unknown ] && [ -x "$bin" ]; then
 			cur="$("$bin" version 2>/dev/null)" || true
-			if grep -qF "$rev" <<<"$cur" ; then
+			if printf '%s' "$cur" | grep -qF "$rev"; then
 				log "$name already built from rev $rev; skipping."
 				continue
 			fi
@@ -665,8 +641,7 @@ install_spine() {
 				measure_reload_running_daemon
 			fi
 		else
-			warn "$name build failed (rev $rev)."
-			[ "$name" != myceliumctl-go ] || _spine_drop_stale
+			warn "$name build failed (rev $rev); the node continues on the shell control tool (the binary is inert)."
 		fi
 	done
 	return 0

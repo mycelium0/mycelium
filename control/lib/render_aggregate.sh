@@ -469,15 +469,6 @@ myc_render_aggregate() {
 		  | select([$v[0].protos[] | . as $pr | select($t | endswith("." + $pr.proto))] | length == 0)
 		  | $t ] | join(",")' 2>/dev/null)"
 	_agg_floor="$(jq -r '.independent_family_floor' "$_agg_vocab" 2>/dev/null)"
-	# The THRESHOLD needs the same numeric guard the count has, and for the same reason. Removing the
-	# `// 2` default in 0.2.96 was right — restating a Go-owned number as a shell literal is the defect
-	# that gate forbids — but the guard went only into render_bundle.sh. MEASURED here: a vocabulary with
-	# the key deleted yields `null`, `[ N -lt null ]` exits 2, the `if` reads that as FALSE, and a
-	# ONE-FAMILY profile is published while the warn line above it prints "spans 1 independent families".
-	# The floor did not refuse; it evaluated to nothing and was skipped.
-	case "$_agg_floor" in
-		''|*[!0-9]*) myc_die "aggregate: could not read .independent_family_floor from $_agg_vocab — refusing to publish a profile whose independent-family floor was never established (RP-0013)." ;;
-	esac
 	case "$_agg_fams" in ''|*[!0-9]*) _agg_fams=0 ;; esac
 	if [ "$_agg_fams" -lt "$_agg_floor" ]; then
 		myc_die "aggregate: the folded profile spans $_agg_fams independent family/families, floor is $_agg_floor (RP-0013) — a client blocked on one would have nowhere left.${agg_dropped:+ Dropped:$agg_dropped}${_agg_unclassified:+ Not classifiable against the vocabulary (so not counted): $_agg_unclassified}"

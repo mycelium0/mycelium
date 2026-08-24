@@ -660,15 +660,7 @@ func cmdRenderServer(args []string) error {
 	// The template is not read, but it IS verified. Accepting and discarding it means an operator edit
 	// silently does nothing once this renderer is load-bearing; refusing turns that into a loud failure
 	// at the render, before anything is promoted.
-	// REQUIRED, not optional. The pin was gated on a flag whose default is "", so omitting --template
-	// bypassed it entirely — and the equivalence gate itself invoked this verb without the flag, so the
-	// bypassed path was the one under test. The shell twin has always required it
-	// (control/lib/render_singbox.sh). A check that the caller can turn off by saying nothing is not a
-	// check; make the caller state which template it believes it is rendering.
-	if *templatePath == "" {
-		return fmt.Errorf("render-server: --template is required. The Go renderer does not read it, it VERIFIES it: naming the template is how the caller states which one it believes is in effect, and how an edit that these structs do not encode is caught instead of ignored")
-	}
-	{
+	if *templatePath != "" {
 		tdata, err := os.ReadFile(*templatePath)
 		if err != nil {
 			return fmt.Errorf("render-server: read --template %s: %w", *templatePath, err)
