@@ -163,10 +163,6 @@ STUB
 			mkdir -p "$(dirname "$SPINE_BIN")"
 			cat >"$SPINE_BIN" <<WRAP
 #!/usr/bin/env bash
-# The version verb is NOT intercepted and the rev-skew guard is NOT exercised here: this fixture leaves
-# ARTIFACT_ROOT unset, so render_candidate reads the artifact rev as "unknown" and both provenance guards
-# skip by construction. render_server_cutover.sh is where that guard is driven, with a fixture built for
-# it. Adding an interception here bought nothing and cost a CI-only failure.
 if [ "\${1:-}" = "render-server" ]; then exec "$MYCTL" "\$@"; fi
 exec "$SPINE" "\$@"
 WRAP
@@ -261,10 +257,6 @@ STUB
 	{
 		cat "$FAKENODE_ROOT/rc"
 		printf 'calls=%s\n' "$(tr '\n' ',' <"$FAKENODE_ROOT/calls" 2>/dev/null)"
-		# What the run SAID, carried back with the observations. A digest that reports only outcomes leaves
-		# every failure needing the environment reproduced before it can be read — and this fixture has
-		# already failed on a host the author could not reproduce.
-		printf 'said=%s\n' "$(tr '\n' '|' <"$FAKENODE_ROOT/stdout" 2>/dev/null | tail -c 600)"
 		printf 'live_gen=%s\n'   "$(fakenode_generation "$SINGBOX_CONFIG")"
 		printf 'overlay_same=%s\n' "$(cmp -s "$FAKENODE_ROOT/overlay.before" "$OPERATOR_OVERRIDES" && printf yes || printf no)"
 		printf 'overlay=%s\n'    "$(jq -c . "$OPERATOR_OVERRIDES" 2>/dev/null)"
@@ -326,9 +318,7 @@ for mode in restart-once verify; do
 				*write_params*) ok "step 3: params are regenerated AFTER the overlay is reverted" ;;
 				*) badln "write_params ran only BEFORE the rollback (Phase B), never after it. params.json keeps the rotated values while the live config is last-known-good, and the two stay disagreed until some later converge happens to reconcile them — on the very branch that exists to restore a consistent node." ;;
 			esac ;;
-		*) { badln "rollback_config never ran, so there is no recovery-ordered write_params to look for"; \
-		printf '        recorded calls: %s\n' "${_calls:-<none>}"; \
-		printf '        the run said: %s\n' "$(field "$D" said | tail -c 500)"; } ;;
+		*) badln "rollback_config never ran, so there is no recovery-ordered write_params to look for" ;;
 	esac
 
 	[ "$(field "$D" restarts)" -ge 2 ] 2>/dev/null \
