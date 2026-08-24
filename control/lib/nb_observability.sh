@@ -52,7 +52,7 @@ install_node_exporter() {
 	local cur archm archkey shavar sha ver tarball url tmp got extracted
 	if [ -x "$NODE_EXPORTER_BIN" ]; then
 		cur="$("$NODE_EXPORTER_BIN" --version 2>&1 | head -n1 || true)"
-		if printf '%s' "$cur" | grep -q "$NODE_EXPORTER_VERSION"; then
+		if grep -q "$NODE_EXPORTER_VERSION" <<<"$cur" ; then
 			log "node_exporter $NODE_EXPORTER_VERSION already installed; skipping."
 			return 0
 		fi

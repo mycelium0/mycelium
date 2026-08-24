@@ -1127,11 +1127,11 @@ verify_listen_ports() {
 	listening_udp="$(ss -ulnH 2>/dev/null | awk '{print $4}' | sed -E 's/.*[:.]([0-9]+)$/\1/' | sort -u)"
 	for p in $want_tcp; do
 		[ -n "$p" ] || continue
-		printf '%s\n' "$listening_tcp" | grep -qx "$p" || { warn "expected TCP port $p is NOT bound."; missing=1; }
+		grep -qx "$p" <<<"$listening_tcp" || { warn "expected TCP port $p is NOT bound."; missing=1; }
 	done
 	for p in $want_udp; do
 		[ -n "$p" ] || continue
-		printf '%s\n' "$listening_udp" | grep -qx "$p" || { warn "expected UDP port $p is NOT bound."; missing=1; }
+		grep -qx "$p" <<<"$listening_udp" || { warn "expected UDP port $p is NOT bound."; missing=1; }
 	done
 	[ "$missing" -eq 0 ] || return 1
 	log "all expected listen ports are bound."

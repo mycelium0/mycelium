@@ -52,16 +52,16 @@ func_body() { awk -v fn="$1" 'index($0,fn"()")==1{f=1} f{print} f&&/^}/{exit}' "
 
 # 1. install_xray_unit: ExecStartPre validates with `xray run -test` (fail-closed start).
 unit_fn="$(func_body install_xray_unit "$INSTALL_LIB")"
-printf '%s' "$unit_fn" | grep -qE 'ExecStartPre=.*run -test' \
+grep -qE 'ExecStartPre=.*run -test' <<<"$unit_fn" \
 	&& ok "install_xray_unit unit has ExecStartPre 'xray run -test' (fail-closed start)" \
 	|| badln "install_xray_unit unit lacks an ExecStartPre 'xray run -test' (a bad config would crash-loop)"
 
 # 2. validate_xray_config is the pre-promote `xray run -test` gate + fail-closes on a missing binary.
 vfn="$(func_body validate_xray_config "$APPLY_LIB")"
-printf '%s' "$vfn" | grep -qE 'run -test' \
+grep -qE 'run -test' <<<"$vfn" \
 	&& ok "validate_xray_config runs 'xray run -test' (pre-promote fail-closed gate)" \
 	|| badln "validate_xray_config does not run 'xray run -test'"
-printf '%s' "$vfn" | grep -qE 'have "\$XRAY_BIN".*die|XRAY_BIN.*missing' \
+grep -qE 'have "\$XRAY_BIN".*die|XRAY_BIN.*missing' <<<"$vfn" \
 	&& ok "validate_xray_config fail-closes on a missing xray binary" \
 	|| badln "validate_xray_config does not fail-closed on a missing xray binary"
 
@@ -75,8 +75,8 @@ pfn="$(func_body promote_xray_config "$APPLY_LIB")"
 # happens, and whether it is observable half-done, is proven by execution in
 # tests/conformance/promote_transaction_atomic.sh; what stays here is that the capture exists at all and
 # is ordered before the live replace.
-if printf '%s' "$pfn" | grep -q 'XRAY_LASTGOOD_CONFIG' \
-	&& printf '%s' "$pfn" | grep -q 'XRAY_CONFIG'; then
+if grep -q 'XRAY_LASTGOOD_CONFIG' <<<"$pfn" \
+	&& grep -q 'XRAY_CONFIG' <<<"$pfn" ; then
 	bk="$(printf '%s\n' "$pfn" | grep -n 'XRAY_LASTGOOD_CONFIG' | tail -1 | cut -d: -f1)"
 	lv="$(printf '%s\n' "$pfn" | grep -vE '^[[:space:]]*#' | grep -n 'install .*"\$candidate"' | head -1 | cut -d: -f1)"
 	if [ -n "$bk" ] && [ -n "$lv" ]; then
@@ -109,7 +109,7 @@ fi
 auto_bad=""
 for fn in flow_update flow_ack flow_revoke; do
 	body="$(func_body "$fn" "$NB")"
-	if printf '%s' "$body" | grep -qE '(^|[^A-Za-z0-9_])(restart_xray|apply_xray)([^A-Za-z0-9_]|$)'; then
+	if grep -qE '(^|[^A-Za-z0-9_])(restart_xray|apply_xray)([^A-Za-z0-9_]|$)' <<<"$body" ; then
 		auto_bad="$auto_bad $fn"
 	fi
 done
@@ -141,7 +141,7 @@ if [ -f "$XRAY_APPLY_LIB" ]; then
 		ok "apply_node_xray_engine reaches no install/render/promote/start before its stock-node guard"
 		# Whatever precedes the guard is the teardown branch; it may only stop/disable/retire.
 		pre="$(printf '%s\n' "$xbody" | sed -n "1,${gline}p")"
-		if printf '%s\n' "$pre" | grep -qE '(^|[^_[:alnum:]])(install_xray|install_xray_unit|render_xray_candidate|promote_xray_config|restart_xray)([^_[:alnum:]]|$)'; then
+		if grep -qE '(^|[^_[:alnum:]])(install_xray|install_xray_unit|render_xray_candidate|promote_xray_config|restart_xray)([^_[:alnum:]]|$)' <<<"$pre" ; then
 			badln "the code before the stock-node guard installs/renders/starts xray — only stop/disable/retire is permitted there"
 		else
 			ok "the pre-guard teardown branch only stops/disables/retires (it never installs or starts)"

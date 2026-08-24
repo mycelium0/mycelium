@@ -114,10 +114,10 @@ for f in $nontest; do
 	else
 		ok "$rel imports only the allowlist {fmt, sort, time, internal/detect|rotate|spec|tune}"
 	fi
-	printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/detect"' && imports_detect=1
-	printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/tune"'   && imports_tune=1
-	printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/spec"'   && imports_spec=1
-	printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/rotate"' && imports_rotate=1
+	grep -qE '"github.com/mycelium0/mycelium/internal/detect"' <<<"$imps" && imports_detect=1
+	grep -qE '"github.com/mycelium0/mycelium/internal/tune"' <<<"$imps" && imports_tune=1
+	grep -qE '"github.com/mycelium0/mycelium/internal/spec"' <<<"$imps" && imports_spec=1
+	grep -qE '"github.com/mycelium0/mycelium/internal/rotate"' <<<"$imps" && imports_rotate=1
 	# 4. determinism / actuation token bans (over comment-stripped source)
 	banned="$(strip_comments "$f" | grep -nE 'time\.(Now|Since)([^A-Za-z0-9_]|$)|(^|[^[:alnum:]_])go[[:space:]]+(func|[A-Za-z])|(^|[^[:alnum:]_])chan([[:space:]]|<-)' || true)"
 	if [ -n "$banned" ]; then

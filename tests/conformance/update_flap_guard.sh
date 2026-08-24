@@ -54,15 +54,15 @@ fi
 
 # 2. BOUNDED: the refusal is gated on an AGE vs a computed hold, and the call site delegates the
 #    arithmetic to the pure helper rather than open-coding it again.
-printf '%s' "$code" | grep -qE '\[ "\$[a-z_]+" -lt "\$[a-z_]+" \]' \
+grep -qE '\[ "\$[a-z_]+" -lt "\$[a-z_]+" \]' <<<"$code" \
 	&& ok "the refusal is bounded by a strict age-vs-hold test (any naming)" \
 	|| badln "the refusal has no age test — it could suppress updates PERMANENTLY (worse than the flap)"
-printf '%s' "$code" | grep -q 'myc_update_retry_hold' \
+grep -q 'myc_update_retry_hold' <<<"$code" \
 	&& ok "flow_update delegates the hold arithmetic to myc_update_retry_hold (executable, not inline)" \
 	|| badln "flow_update computes the hold inline again — the ladder below verifies the helper, so an inline copy is unverified by construction"
 for v in UPDATE_RETRY_HOLD_MIN_SEC UPDATE_RETRY_HOLD_MAX_SEC; do
 	d="$(grep -E "^$v=" "$NB" | head -1)"
-	printf '%s' "$d" | grep -qE "^$v=\"\\\$\{$v:-[1-9][0-9]*\}\"" \
+	grep -qE "^$v=\"\\\$\{$v:-[1-9][0-9]*\}\"" <<<"$d" \
 		&& ok "$v has a finite, non-zero, env-overridable default" \
 		|| badln "$v is missing, zero, or not env-overridable: ${d:-<absent>}"
 done
@@ -91,7 +91,7 @@ else
 			printf '%s=%s\n' "$lbl" "$(myc_update_retry_hold "$a" "$m" "$n")"
 		done
 	)"
-	if printf '%s' "$ladder_out" | grep -q 'MISSING'; then
+	if grep -q 'MISSING' <<<"$ladder_out" ; then
 		badln "myc_update_retry_hold is not defined in control/lib/nb_update_apply.sh — the hold arithmetic is unverifiable"
 	else
 		# The documented ramp: 1h, 1h, 2h, 4h, 6h, 6h… The mutation that pins the hold at the floor and the
@@ -121,12 +121,14 @@ fi
 
 # 3b. ESCALATION IS BY ATTEMPT, NOT CALENDAR TIME (Audit-0009 P1), and the count survives deletion of its
 #     own file (P2): the failure path rewrites it UNCONDITIONALLY, next to the snapshot it belongs to.
-if printf '%s' "$code" | grep -qE '([a-z_]+)=\$\(\( \1 \+ 1 \)\)'; then
+if grep -qE '([a-z_]+)=\$\(\( \1 \+ 1 \)\)' <<<"$code" ; then
 	ok "the failure path increments a consecutive-failure count (escalation cannot be skewed by a cadence gap)"
 else
 	badln "the failure path does not increment an attempt count — an escalation derived from calendar time sends the second failure of a candidate straight to the cap after any gap in the timer's cadence"
 fi
-depth_of() { printf '%s\n' "$code" | grep -m1 -- "$1" | sed -E 's/[^\t].*$//' | awk '{print length}'; }
+# here-string, not a pipe: `grep -m1` exits on the first match and closes it, the producer dies of
+# SIGPIPE, and under pipefail this function would return failure for a line it FOUND.
+depth_of() { grep -m1 -- "$1" <<<"$code" | sed -E 's/[^\t].*$//' | awk '{print length}'; }
 w="$(depth_of 'install -m 0600 /dev/null "$FAILED_SINCE"')"
 sn="$(depth_of 'install -m 0600 "$SINGBOX_CONFIG" "$FAILED_CONFIG"')"
 if [ -n "$w" ] && [ -n "$sn" ] && [ "$w" -le "$sn" ]; then
@@ -139,7 +141,7 @@ fi
 #     would drop; when the engine is down there are none, and the held candidate is the only untried
 #     config the node has left. The refusal must stand down there rather than extend the outage.
 hold_region="$(printf '%s\n' "$code" | awk '/\[ "\$fage" -lt "\$fhold" \]/{f=1} f{print} f&&/^\t\tfi$/{exit}')"
-if printf '%s' "$hold_region" | grep -q 'is-active --quiet sing-box'; then
+if grep -q 'is-active --quiet sing-box' <<<"$hold_region" ; then
 	ok "the hold stands down when sing-box is not active (it never extends an outage it cannot shorten)"
 else
 	badln "the hold does not consult data-plane liveness — on a node whose rollback ALSO failed to start, the refusal declines the only untried config for up to 6h while the node serves nothing"
@@ -168,7 +170,7 @@ scope_bad=""
 for f in "$NB" "$REPO_ROOT"/control/lib/nb_*.sh; do
 	[ -f "$f" ] || continue
 	blocks="$(awk '/^(flow_ack|flow_node_apply|flow_revoke|flow_disable_two_hop|rotate_apply_live)\(\)/{f=1} f{print} /^}/{if(f)f=0}' "$f")"
-	printf '%s' "$blocks" | grep -q 'FAILED_CONFIG\|FAILED_SINCE' && scope_bad="$scope_bad $(basename "$f")"
+	grep -q 'FAILED_CONFIG\|FAILED_SINCE' <<<"$blocks" && scope_bad="$scope_bad $(basename "$f")"
 done
 if [ -n "$scope_bad" ]; then
 	badln "an OPERATOR-driven flow consults the failure record (in:$scope_bad) — an ack/apply/rotate must never be blocked by the timer's record"

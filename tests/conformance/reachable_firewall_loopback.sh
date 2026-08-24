@@ -84,8 +84,8 @@ expect "missing-listen tcp (defaults public, no jq null-abort)" "$(ports "$WORK/
 
 # Static wiring: harden_ufw must DELEGATE to the helper (guard against the live path drifting off it).
 hf="$(awk '/^harden_ufw\(\)/{f=1} f{print} /^}/{if(f)exit}' "$HARDEN")"
-printf '%s' "$hf" | grep -q 'myc_firewall_singbox_ports "\$SINGBOX_CONFIG" tcp' \
-	&& printf '%s' "$hf" | grep -q 'myc_firewall_singbox_ports "\$SINGBOX_CONFIG" udp' \
+grep -q 'myc_firewall_singbox_ports "\$SINGBOX_CONFIG" tcp' <<<"$hf" \
+	&& grep -q 'myc_firewall_singbox_ports "\$SINGBOX_CONFIG" udp' <<<"$hf" \
 	&& ok "harden_ufw delegates port selection to myc_firewall_singbox_ports (tcp + udp)" \
 	|| badln "harden_ufw does not delegate to myc_firewall_singbox_ports — live firewall may bypass the loopback exclusion"
 

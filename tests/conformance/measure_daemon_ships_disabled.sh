@@ -92,9 +92,9 @@ fi
 
 # 4. measure_enable is fail-closed: requires the binary + both configs
 mfn="$(awk '/^measure_enable\(\)/{f=1} f{print} /^}/{if(f)exit}' "$MEASURE_LIB")"
-printf '%s' "$mfn" | grep -qE '\[ -x "\$bin" \].*die'                 && ok "measure_enable requires the myceliumd binary (fail-closed)"        || badln "measure_enable does not fail-closed on a missing myceliumd binary"
-printf '%s' "$mfn" | grep -qE '\[ -f "\$reach_cfg" \].*die'           && ok "measure_enable requires the reach config (fail-closed)"            || badln "measure_enable does not fail-closed on a missing reach config"
-printf '%s' "$mfn" | grep -qE '\[ -f "\$measure_cfg" \].*die'         && ok "measure_enable requires the measure config (fail-closed)"          || badln "measure_enable does not fail-closed on a missing measure config"
+grep -qE '\[ -x "\$bin" \].*die' <<<"$mfn" && ok "measure_enable requires the myceliumd binary (fail-closed)"        || badln "measure_enable does not fail-closed on a missing myceliumd binary"
+grep -qE '\[ -f "\$reach_cfg" \].*die' <<<"$mfn" && ok "measure_enable requires the reach config (fail-closed)"            || badln "measure_enable does not fail-closed on a missing reach config"
+grep -qE '\[ -f "\$measure_cfg" \].*die' <<<"$mfn" && ok "measure_enable requires the measure config (fail-closed)"          || badln "measure_enable does not fail-closed on a missing measure config"
 
 if [ "$fail" -eq 0 ]; then
 	printf 'PASS: the MEASURE daemon is built inertly and the unit ships disabled — no auto path can arm the advisory plane.\n'

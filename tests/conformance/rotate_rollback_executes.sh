@@ -163,6 +163,14 @@ STUB
 			mkdir -p "$(dirname "$SPINE_BIN")"
 			cat >"$SPINE_BIN" <<WRAP
 #!/usr/bin/env bash
+# `version` is answered here, not forwarded: the fixture builds $SPINE with a plain `go build`, so
+# spec.SourceRev is empty and the real binary prints no "(rev …)". Since 0.2.102 render_candidate
+# REFUSES an unstamped spine rather than skipping the check, and this fixture is about the rollback
+# path, not about provenance. It answers with the SAME expression render_candidate uses to read the
+# artifact rev, so the two agree by construction whatever this fixture sets ARTIFACT_ROOT to (today it
+# sets nothing, so both resolve to "unknown" and the guard is inert — that must stay true by agreement,
+# not by the fixture happening not to set a variable).
+if [ "\${1:-}" = "version" ]; then printf 'myceliumctl 0.0.0 (rev %s)\n' "\$(git -C "\${ARTIFACT_ROOT:-/opt/mycelium}" rev-parse --short=12 HEAD 2>/dev/null || echo 000000000000)"; exit 0; fi
 if [ "\${1:-}" = "render-server" ]; then exec "$MYCTL" "\$@"; fi
 exec "$SPINE" "\$@"
 WRAP

@@ -161,7 +161,7 @@ $line"; fi
 			# own v6 default route, so v6 egresses DIRECT, defeating the split (impaired-path destinations leak
 			# over v6). If the list is v4-only, capture all v6 into the tunnel (::/0): the node routes it when it
 			# has global v6, otherwise it is dropped and apps fall back to (tunnelled) IPv4. Never leak v6.
-			if ! printf '%s\n' "$SG_ALLOWED_LINES" | grep -q ':'; then
+			if ! grep -q ':' <<<"$SG_ALLOWED_LINES" ; then
 				SG_ALLOWED_LINES="$SG_ALLOWED_LINES
 ::/0"
 				log "split-tunnel: region-exclude list is IPv4-only — appended ::/0 to stop an IPv6 leak."
@@ -1021,7 +1021,7 @@ revoke_awg_client() {
 		local live_keys
 		live_keys="$(awg show awg0 peers 2>/dev/null || true)"
 		for p in $pubs; do
-			printf '%s\n' "$live_keys" | grep -qxF "$p" && still_live="${still_live:+$still_live }$p"
+			grep -qxF "$p" <<<"$live_keys" && still_live="${still_live:+$still_live }$p"
 		done
 	fi
 	[ -z "$still_live" ] \

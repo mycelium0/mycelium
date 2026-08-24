@@ -164,22 +164,22 @@ LOGBUF=""; verify_ufw_exposure ' 443/tcp 8443/tcp 51820/udp ' ' 22/tcp '; rc=$?
 # THE COMPARISON. Every served port is admitted by the stub, so nothing may be reported blocked. This is
 # the assertion that goes red if the newline->space normalisation is dropped: 8443/tcp and 51820/udp are
 # interior tokens of the parser's output and become unmatchable.
-if printf '%s' "$LOGBUF" | grep -q 'served but NOT admitted'; then
+if grep -q 'served but NOT admitted' <<<"$LOGBUF" ; then
 	badln "report: claims served ports are firewall-blocked when ufw admits all of them — the admitted list is not space-normalised, so interior tokens are unmatchable (this exact defect reached a live node)"
 else
 	ok "report: an admitted served port is not reported blocked (the membership comparison is space-normalised)"
 fi
-if printf '%s' "$LOGBUF" | grep -q 'admitted but not served and nothing listening:.*9999/tcp'; then
+if grep -q 'admitted but not served and nothing listening:.*9999/tcp' <<<"$LOGBUF" ; then
 	ok "report: an admitted, unserved port with NO listener is reported as an orphan"
 else
 	badln "report: 9999/tcp is admitted, outside served+keep, and nothing is listening on it — it must be reported"
 fi
-if printf '%s' "$LOGBUF" | grep -q '5555'; then
+if grep -q '5555' <<<"$LOGBUF" ; then
 	badln "report: 5555/tcp has a live listener — reporting it as unexplained is the cry-wolf failure the listener check exists to prevent"
 else
 	ok "report: an admitted port with a live listener is NOT called an orphan"
 fi
-if printf '%s' "$LOGBUF" | grep -q '22/tcp'; then
+if grep -q '22/tcp' <<<"$LOGBUF" ; then
 	badln "report: the anti-lockout SSH rule is in the keep set and must never be reported"
 else
 	ok "report: the keep set (the anti-lockout sshd rule) is never reported"
@@ -187,7 +187,7 @@ fi
 
 # A served port that ufw does NOT admit must be reported blocked — the outage nothing else can see.
 LOGBUF=""; verify_ufw_exposure ' 443/tcp 4444/tcp ' ' 22/tcp ' >/dev/null 2>&1
-printf '%s' "$LOGBUF" | grep -q 'served but NOT admitted.*4444/tcp' \
+grep -q 'served but NOT admitted.*4444/tcp' <<<"$LOGBUF" \
 	&& ok "report: a served port ufw does not admit IS reported blocked" \
 	|| badln "report: a served-but-blocked port was not reported — verify_post_apply is firewall-blind, so nothing else would catch it"
 
@@ -195,22 +195,22 @@ printf '%s' "$LOGBUF" | grep -q 'served but NOT admitted.*4444/tcp' \
 # Both arms of "no signal": ss absent (hidden from `have`) and ss present-but-failing (stub exits 2).
 mkstub ss 'exit 2'
 LOGBUF=""; verify_ufw_exposure ' 443/tcp 8443/tcp 51820/udp ' ' 22/tcp ' >/dev/null 2>&1
-printf '%s' "$LOGBUF" | grep -q 'nothing listening' \
+grep -q 'nothing listening' <<<"$LOGBUF" \
 	&& badln "no-signal: a FAILING ss is treated as a listener view — a non-zero ss must read as no signal, not as an empty one" \
 	|| ok "no-signal: an ss that fails is not mistaken for an empty listener view"
 rmstub ss; hide ss
 LOGBUF=""; verify_ufw_exposure ' 443/tcp 8443/tcp 51820/udp ' ' 22/tcp ' >/dev/null 2>&1
-if printf '%s' "$LOGBUF" | grep -q 'nothing listening'; then
+if grep -q 'nothing listening' <<<"$LOGBUF" ; then
 	badln "no-signal: without ss, every admitted port outside served+keep is accused of being an orphan — 'I cannot see the listeners' is being read as 'nothing is listening' (Audit-0009 AG1)"
 else
 	ok "no-signal: without ss, no orphan is claimed"
 fi
-if printf '%s' "$LOGBUF" | grep -q 'no unexplained port is open'; then
+if grep -q 'no unexplained port is open' <<<"$LOGBUF" ; then
 	badln "no-signal: without ss the report prints an ALL-CLEAR it cannot support — the fail-safe direction is to say what was not established, not to reassure"
 else
 	ok "no-signal: without ss, no all-clear is printed either"
 fi
-printf '%s' "$LOGBUF" | grep -q 'no listener view available' \
+grep -q 'no listener view available' <<<"$LOGBUF" \
 	&& ok "no-signal: the report says explicitly what it could not determine" \
 	|| badln "no-signal: the report is silent about the ports it could not judge — an operator cannot tell a clean run from a blind one"
 

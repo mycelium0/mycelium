@@ -274,6 +274,27 @@ EOF
 	fi
 fi
 
+# ---------------------------------------------------------------------------------------------------
+# 7. THE FLOOR MUST REFUSE WHEN IT CANNOT BE EVALUATED.
+#
+# 0.2.96 removed the `// 2` default — restating a Go-owned threshold as a shell literal — but added the
+# numeric guard only to the bundle renderer. MEASURED here: a vocabulary with the key deleted yields
+# `null`, `[ N -lt null ]` exits 2, the `if` reads that as FALSE, and a ONE-FAMILY profile is published
+# while the line above it prints "spans 1 independent families". The floor did not refuse; it evaluated
+# to nothing and was skipped. Its twin on the bundle path refuses correctly on the same input.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and the floor refuses when it cannot be evaluated --\n'
+jq 'del(.independent_family_floor)' "$REPO_ROOT/control/vocab.json" > "$WORK/vocab_nofloor.json"
+rm -f "$WORK/degraded.json"
+if MYC_VOCAB="$WORK/vocab_nofloor.json" bash "$CTL" aggregate --bundle "$WORK/bC.json" --name nodeC \
+	--bundle "$WORK/bD.json" --name nodeD --out "$WORK/degraded.json" >/dev/null 2>"$WORK/dge"; then
+	badln "a profile was PUBLISHED against a vocabulary carrying no independent-family floor$([ -s "$WORK/degraded.json" ] && printf ' (%s families inside)' "$(jq -r --slurpfile v "$REPO_ROOT/control/vocab.json" '[.outbounds[]|select((.type|test("^(urltest|selector|direct|block)$"))|not)|.tag as $t|($v[0].protos[]|. as $pr|select($t|endswith("."+$pr.proto))|$pr.class)|($v[0].block_families[.]//empty)]|unique|length' "$WORK/degraded.json")"). A floor that evaluates to nothing must refuse, not pass — the client is left one block from nothing and nothing said so."
+else
+	grep -qi 'floor\|RP-0013' "$WORK/dge" \
+		&& ok "a vocabulary with no threshold refuses the fold, and says why" \
+		|| badln "the degraded fold was refused for an unstated reason: $(tr -d '\n' < "$WORK/dge" | cut -c1-160)"
+fi
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the aggregate does not tolerate a heterogeneous network.\n' >&2

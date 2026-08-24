@@ -128,6 +128,37 @@ else
 	badln "the prune runs BEFORE the copy. That leaves a window in which the installed tooling is incomplete and MYCTL points at nothing — and a node cannot converge without its tooling. Ordering is the whole safety argument here; a prune-first version passes every other row in this gate."
 fi
 
+# ---------------------------------------------------------------------------------------------------
+# 5. AN INCOMPLETE ARTIFACT MUST NOT BE MIRRORED.
+#
+# `[ -d ]` is satisfied by an EMPTY directory, and mirroring an empty source means deleting everything.
+# MEASURED on the first version of this code: zero files survived and MYCTL pointed at a deleted
+# myceliumctl. The accumulate behaviour this replaced at least left working tooling in place, so an
+# unguarded mirror is a REGRESSION on exactly the failure that matters.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and an incomplete artifact is not mirrored --\n'
+E="$(mktemp -d "${TMPDIR:-/tmp}/myc.tcm2.XXXXXX")" || exit 2
+mkdir -p "$E/artifact/control" "$E/tooling/control/lib"
+printf 'ENTRYPOINT\n' > "$E/tooling/control/myceliumctl"
+printf 'LIB\n'        > "$E/tooling/control/lib/common.sh"
+(
+	ARTIFACT_ROOT="$E/artifact"; TOOLING_DIR="$E/tooling"; DRY_RUN=0
+	log() { :; }; warn() { :; }; die() { exit 7; }
+	have() { command -v "$1" >/dev/null 2>&1; }; need_root() { :; }
+	run() { "$@"; }
+	# shellcheck source=/dev/null
+	. "$LIB" >/dev/null 2>&1 || exit 2
+	install_spine() { :; }
+	ARTIFACT_ROOT="$E/artifact"; TOOLING_DIR="$E/tooling"; DRY_RUN=0
+	install_tooling
+) >/dev/null 2>&1
+if [ -f "$E/tooling/control/myceliumctl" ] && [ -f "$E/tooling/control/lib/common.sh" ]; then
+	ok "an artifact with no myceliumctl leaves the installed tooling alone"
+else
+	badln "the tooling was pruned against an artifact that does not even contain myceliumctl. MYCTL then points at a deleted file and the node cannot converge at all — strictly worse than the accumulation this mirror replaced."
+fi
+rm -rf "$E"
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the installed tooling does not mirror the deployed artifact.\n' >&2

@@ -13,6 +13,63 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.102] — 2026-08-24
+
+### Fixed — the first audit of the renderer cutover, and it found six
+
+No audit covered 0.2.96-0.2.101 — six releases including the cutover of the live data-plane renderer, the
+riskiest change in the series. This is that audit's remediation. Every finding below was reproduced by
+driving the shipped code, and every one has a gate row that goes red without the fix.
+
+**A failed spine build bricked the unattended update.** `install_spine` is deliberately non-fatal: no Go
+toolchain, or a failed build, WARNs and returns 0 — leaving the PREVIOUS binary in place. Harmless while
+the spine was inert. After the cutover `render_candidate` refuses a mismatched rev, so the stale binary
+turned every converge into a fatal skew, unattended and permanently: the checkout has already advanced,
+so the next tick repeats it. A Go-toolchain hiccup would take a node off code updates entirely, on a path
+built never to need Go — while the same function printed *"the node continues on the shell control
+tool"*, which had been false since 0.2.98. A build that cannot produce THIS artifact's spine now removes
+the one it cannot vouch for, and the render degrades to the shell as the doctrine three lines above the
+guard always claimed. Both new refusals also register with the node's update-failure bookkeeping, which
+every sibling refusal already did.
+
+**The template pin was opt-in on a flag that defaults to empty.** `--template` is now REQUIRED by
+`render-server`. Proven by mutation: with the flag removed from the invocation the cutover gate passed
+every row. Worse, `render_server_go_equiv.sh` invoked the spine WITHOUT it, so the equivalence gate
+exercised the bypassed path — the one input where the two producers could differ unobserved.
+
+**The rev-skew guard skipped silently on an unstamped spine.** `spec.SourceRev` is empty for a plain
+`go build`, `version` then prints no `(rev …)`, and guarding on a non-empty scrape made the check skip on
+exactly the binary least likely to be this artifact's. The refusal text even advised *"rebuild it out of
+band"* — which produces that binary. An unreadable provenance is now a refusal that names how to get a
+stamped one.
+
+**The aggregate's RP-0013 floor was skipped when it could not be evaluated.** Removing the `// 2` default
+in 0.2.96 was right, but the numeric guard went only into the bundle renderer. Measured: a vocabulary
+with the key deleted yields `null`, `[ N -lt null ]` exits 2, the `if` reads that as false, and a
+ONE-FAMILY profile is published while the line above prints *"spans 1 independent families"*. The floor
+did not refuse — it evaluated to nothing and was skipped.
+
+**The tooling mirror wiped a node's tooling on an incomplete artifact.** `[ -d ]` is satisfied by an
+empty directory, and mirroring an empty source means deleting everything: driven, zero files survived and
+`MYCTL` pointed at a deleted `myceliumctl` — strictly worse than the accumulation 0.2.101 replaced. The
+prune now requires the artifact to carry the one file without which a node cannot converge.
+
+**And the EPIPE shape came back inside its own release window.** 0.2.99 swept 115 sites; `b4fdc54`, on a
+branch cut before that merge, added three more to the same file, two of them false-pass polarity. A
+mechanical sweep with no guard is a sweep that returns. The remaining 162 sites are swept — including
+`control/lib/common.sh`, where the pipeline WAS a function's return value — and
+`no_early_exit_consumer_on_a_pipe.sh` now forbids the shape, proving its own scanner on a planted
+instance so an empty result means absence rather than a broken scan.
+
+**Verified by differential run, not by reading:** all 36 touched gates were executed in their pre- and
+post-sweep form and their output compared byte for byte with paths normalised. 35 identical; the one
+difference is a line number shifted by an added comment. One rewrite WAS corrupted mid-work — the scanner
+did not understand `\"` inside a pattern and injected the here-string into a regex — and the differential
+run is what caught it, because `bash -n` accepts it happily.
+
+Two in-tree statements about this shape contradicted each other (`node_two_hop_failclosed.sh` called it a
+race measured at ~5 in 40; the 0.2.99 note called it deterministic). Reconciled to what was measured.
+
 ## [0.2.101] — 2026-08-21
 
 ### Fixed — the installed tooling could only grow
@@ -85,6 +142,13 @@ Both polarities are wrong, and one of them is dangerous:
 * `if ... | grep -q FORBIDDEN; then badln; else ok; fi` — a false **PASS**, on the defect the row exists
   to catch. Three such rows sit on the fingerprint invariants, including "no randomiser feeds the uTLS
   preset choice" — a rule whose whole point is that a unique JA4 is itself a tell.
+
+  **CORRECTED in 0.2.102, and this is the important half:** those three rows were **not** live false
+  passes. Driven with real defects injected (a `shuf` into the preset choice, a `$RANDOM` into the
+  actuator, a `promote_config` into the dry-run), they fail correctly BOTH before and after the sweep,
+  8/8 on repeat. The largest runtime value across all 115 swept sites is 31,217 bytes against a 65,536
+  byte pipe buffer. The hazard is real and the fix is right; the claim that it had already fired on a
+  guarded invariant was an inference stated as an observation. Only the false FAILURE was ever observed.
 
 **Measured**, 20 runs per size: below the pipe buffer, 0/20 false failures; above it, **20/20**. Not a
 race at all once the remainder exceeds the buffer — deterministic. A here-string is immune at every size.
