@@ -105,7 +105,7 @@ for f in $nontest; do
 	else
 		ok "$rel imports only the allowlist {fmt, math, time, internal/spec}"
 	fi
-	if grep -qE '"github.com/mycelium0/mycelium/internal/spec"' <<<"$imps" ; then
+	if printf '%s\n' "$imps" | grep -qE '"github.com/mycelium0/mycelium/internal/spec"'; then
 		imports_spec=1
 	fi
 	# 3. determinism / actuation token bans (over comment-stripped source)

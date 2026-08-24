@@ -221,7 +221,7 @@ if ctl lease grant --plan "$W/plan.json" --leases "$W/leases.json" --limits "$W/
 	--now "$NOW" >"$W/grant.out" 2>"$W/grant.err"; then
 	badln "the floor did not bind — a node serving two REALITY members has ONE independent family, and withdrawing either leaves a client blocked on REALITY with nowhere left to go (RP-0013)."
 else
-	grep -qi 'floor' "$W/grant.err" \
+	printf '%s' "$(cat "$W/grant.err")" | grep -qi 'floor' \
 		&& ok "the independent-family floor binds, counted over families rather than over protos" \
 		|| badln "the grant was refused but not by the floor: $(head -1 "$W/grant.err")"
 fi
