@@ -71,8 +71,8 @@ printf 'repo: %s\n' "$REPO_ROOT"
 # delimiters move: a refactor must re-confirm this gate rather than silently check nothing.
 region="$(awk '/^_l7_own_public_addr\(\)/{f=1} /^measure_l7_probe\(\)/{f=0} f' "$SRC")"
 if [ -z "$region" ] \
-	|| ! grep -q '_l7_connect_bytes()' <<<"$region" \
-	|| ! grep -q '_l7_probe_shadowsocks_dial()' <<<"$region" ; then
+	|| ! printf '%s' "$region" | grep -q '_l7_connect_bytes()' \
+	|| ! printf '%s' "$region" | grep -q '_l7_probe_shadowsocks_dial()'; then
 	printf 'FAIL: could not delimit the SS-probe region (_l7_own_public_addr .. measure_l7_probe) — the\n' >&2
 	printf '      boundary markers moved; re-confirm this gate.\n' >&2
 	exit 1
@@ -95,19 +95,19 @@ done
 [ -n "$consumer" ] || { printf 'FAIL: could not extract measure_l7_probe.\n' >&2; exit 1; }
 
 # 1. WIRED into the cadenced probe, behind the sibling retry-debounce.
-if grep -q '_l7_probe_shadowsocks_dial' <<<"$consumer" ; then
+if printf '%s' "$consumer" | grep -q '_l7_probe_shadowsocks_dial'; then
 	ok "measure_l7_probe dispatches _l7_probe_shadowsocks_dial"
 else
 	badln "measure_l7_probe never calls _l7_probe_shadowsocks_dial — the probe is dead code and standalone SS is back to an L4-only verdict"
 fi
-if grep -qE '\[ "\$type" = "shadowsocks" \]' <<<"$consumer" ; then
+if printf '%s' "$consumer" | grep -qE '\[ "\$type" = "shadowsocks" \]'; then
 	ok "the shadowsocks type has its own branch (not folded into a TLS criterion)"
 else
 	badln "no explicit shadowsocks branch in measure_l7_probe — SS must NOT be judged by a TLS/QUIC criterion (it has no observable handshake)"
 fi
 ss_branch="$(printf '%s\n' "$consumer" | awk '/\[ "\$type" = "shadowsocks" \]/{f=1} f{print} f&&/^\t\telif|^\t\telse/{if(++n>1)f=0}' | head -20)"
-if grep -q 'for attempt in 1 2 3' <<<"$ss_branch" \
-	&& grep -q '\-ne 1' <<<"$ss_branch" ; then
+if printf '%s' "$ss_branch" | grep -q 'for attempt in 1 2 3' \
+	&& printf '%s' "$ss_branch" | grep -q '\-ne 1'; then
 	ok "the branch retry-debounces (3 attempts) and folds a non-1 verdict as NOT dead (cannot-judge never rotates)"
 else
 	badln "the shadowsocks branch lost its 3-attempt debounce or its '-ne 1' fold — a one-off blip, or a cannot-judge, would write a dead marker"
@@ -121,8 +121,8 @@ if [ "$r1_count" = "1" ]; then
 else
 	badln "_l7_probe_shadowsocks_dial has $r1_count 'return 1' paths — every DEAD verdict must go through the single control-gated one"
 fi
-if grep -q '_l7_connect_bytes' <<<"$r1_line" \
-	&& grep -q '"type":"direct"' <<<"$r1_line" ; then
+if printf '%s' "$r1_line" | grep -q '_l7_connect_bytes' \
+	&& printf '%s' "$r1_line" | grep -q '"type":"direct"'; then
 	ok "the DEAD verdict is gated on the CONTROL dial (a plain direct outbound reaching the same target)"
 else
 	badln "the DEAD verdict is not guarded by a control dial over a direct outbound — silence inside the tunnel is ambiguous, and an unusable target would fault a healthy last-resort transport"
@@ -142,19 +142,19 @@ if [ "$(printf '%s\n' "$probe_fn" | grep -cE '(^|[[:space:];&|]|then[[:space:]])
 else
 	badln "too few cannot-judge exits in _l7_probe_shadowsocks_dial — a missing tool, a missing public address or a malformed inbound must yield 2, never a dead verdict"
 fi
-if grep -qE '(^|[[:space:];&|])exit[[:space:]]+[0-9]' <<<"$probe_fn$bytes_fn$addr_fn"; then
+if printf '%s\n' "$probe_fn$bytes_fn$addr_fn" | grep -qE '(^|[[:space:];&|])exit[[:space:]]+[0-9]'; then
 	badln "the probe region calls exit — a probe must return a verdict, never terminate the entrypoint mid-run (the marker would never be written)"
 else
 	ok "the region never exits (a verdict is always returned to the caller)"
 fi
 
 # 4. BYTE CRITERION, not exit status.
-if grep -q '\-s "\$tmpo"' <<<"$bytes_fn" ; then
+if printf '%s' "$bytes_fn" | grep -q '\-s "\$tmpo"'; then
 	ok "_l7_connect_bytes judges by the SIZE of the captured output (a data round trip)"
 else
 	badln "_l7_connect_bytes no longer judges by captured-output size — SS-2022 holds the connection open whether or not the key matches, so anything else reads ALIVE on a dead listener"
 fi
-if grep -qE '\b124\b|\$\?' <<<"$bytes_fn$probe_fn"; then
+if printf '%s\n' "$bytes_fn$probe_fn" | grep -qE '\b124\b|\$\?'; then
 	badln "the SS probe classifies on an exit status (124/\$?) — that is the TLS-family criterion and it is FALSE-ALIVE for Shadowsocks"
 else
 	ok "no exit-status classification in the SS path"
@@ -164,25 +164,25 @@ fi
 # A payload is present iff the stdin producer piped into the dial is a printf with a NON-EMPTY format
 # string (`printf '` immediately followed by anything but the closing quote). Deliberately not pinned to
 # one exact byte — what must never regress is that SOMETHING is sent before the read.
-if grep -qE "printf '[^']" <<<"$bytes_fn" \
-	&& grep -q 'tools connect' <<<"$bytes_fn" ; then
+if printf '%s' "$bytes_fn" | grep -qE "printf '[^']" \
+	&& printf '%s' "$bytes_fn" | grep -q 'tools connect'; then
 	ok "the dial feeds a non-empty payload (SS-2022 flushes its request header only with the first payload)"
 else
 	badln "_l7_connect_bytes does not send a payload before reading — SS-2022 never flushes its request header on an empty stdin, so a HEALTHY listener reads dead"
 fi
-if grep -qE '^[[:space:]]*: \|' <<<"$bytes_fn" ; then
+if printf '%s' "$bytes_fn" | grep -qE '^[[:space:]]*: \|'; then
 	badln "_l7_connect_bytes uses the empty-stdin idiom (': |') — correct for the TLS families, fatal here"
 else
 	ok "the empty-stdin idiom is absent from the SS dial"
 fi
 
 # 6. TARGET PROVENANCE.
-if grep -q '_l7_own_public_addr' <<<"$probe_fn" ; then
+if printf '%s' "$probe_fn" | grep -q '_l7_own_public_addr'; then
 	ok "the target host is resolved by _l7_own_public_addr"
 else
 	badln "the probe does not resolve its target through _l7_own_public_addr — the target must be an address this host itself holds"
 fi
-if grep -qE 'node_address|PARAMS_JSON|handshake\.server|\.dest|MEMBER|peer' <<<"$probe_fn" ; then
+if printf '%s' "$probe_fn" | grep -qE 'node_address|PARAMS_JSON|handshake\.server|\.dest|MEMBER|peer'; then
 	badln "the probe derives its target from params/a cover host/a peer reference — an operator-settable hostname may point at a front or another host, and a peer/member target would make this a client-vantage probe (ADR-0036 forbids both)"
 else
 	ok "no params / cover-host / peer-reference target provenance"
@@ -191,21 +191,21 @@ fi
 # 7. PRIVATE-ADDRESS REJECTION.
 missing=""
 for pat in '10\.\*' '127\.\*' '169\.254\.\*' '192\.168\.\*' '172\.1\[6-9\]\.\*' '100\.6\[4-9\]\.\*'; do
-	grep -q "$pat" <<<"$addr_fn" || missing="$missing $pat"
+	printf '%s' "$addr_fn" | grep -q "$pat" || missing="$missing $pat"
 done
 if [ -z "$missing" ]; then
 	ok "_l7_own_public_addr rejects loopback, RFC1918, link-local and CGNAT candidates"
 else
 	badln "_l7_own_public_addr no longer rejects:$missing — a private target is blocked by the served config's ip_is_private rule but NOT by the probe's own config, so it manufactures a false DEAD"
 fi
-if grep -qE 'case "\$a" in 2\*\|3\*' <<<"$addr_fn" ; then
+if printf '%s' "$addr_fn" | grep -qE 'case "\$a" in 2\*\|3\*'; then
 	ok "IPv6 candidates are restricted to global unicast 2000::/3 (ULA and link-local rejected)"
 else
 	badln "the IPv6 candidate filter no longer restricts to global unicast — a ULA (fd00::/8) target is private and would manufacture a false DEAD"
 fi
 
 # 8. OWN LISTENER OVER LOOPBACK + live credential.
-if grep -q 'server:"127.0.0.1"' <<<"$probe_fn" ; then
+if printf '%s' "$probe_fn" | grep -q 'server:"127.0.0.1"'; then
 	ok "the reconstructed client dials the node's OWN SS listener over loopback (only the target is public)"
 else
 	badln "the probe no longer dials its own listener at 127.0.0.1 — the listener leg must stay loopback"
@@ -216,21 +216,21 @@ fi
 # credential is built from the LIVE config and is the two-part multi-user form: a server-PSK-only
 # password is rejected exactly like a wrong key, so the "correct" arm would fail for the same reason as
 # a dead listener and the probe would prove nothing.
-if grep -q 'SINGBOX_CONFIG' <<<"$probe_fn" \
-	&& grep -qE '\(\.password // ""\) \+ ":" \+' <<<"$probe_fn" \
-	&& grep -qE '\.users' <<<"$probe_fn" ; then
+if printf '%s' "$probe_fn" | grep -q 'SINGBOX_CONFIG' \
+	&& printf '%s' "$probe_fn" | grep -qE '\(\.password // ""\) \+ ":" \+' \
+	&& printf '%s' "$probe_fn" | grep -qE '\.users' ; then
 	ok "the credential is reconstructed from the LIVE config in the multi-user server_psk:user_psk form"
 else
 	badln "the probe does not build its credential from the live config as server_psk:user_psk — a server-PSK-only password is REJECTED exactly like a wrong key, so the 'correct' arm would fail for the same reason as a dead listener and the probe would prove nothing"
 fi
 
 # 9. NO OFF-HOST CONTACT.
-if grep -qE '(^|[[:space:];&|(])(curl|wget|nc|ncat|socat|dig|nslookup|host|ping|ssh|scp|python[0-9.]*)[[:space:]]' <<<"$region_nc" ; then
+if printf '%s' "$region_nc" | grep -qE '(^|[[:space:];&|(])(curl|wget|nc|ncat|socat|dig|nslookup|host|ping|ssh|scp|python[0-9.]*)[[:space:]]'; then
 	badln "the SS-probe region opens a network client of its own — the only permitted egress is the sing-box dial to an address this host holds (ADR-0036: no third-party beacon)"
 else
 	ok "the region opens no network client of its own"
 fi
-if grep -qE '(https?|wss?)://|[a-z0-9-]+\.(com|net|org|io|ru|cloud|host)\b' <<<"$region_nc" ; then
+if printf '%s' "$region_nc" | grep -qE '(https?|wss?)://|[a-z0-9-]+\.(com|net|org|io|ru|cloud|host)\b'; then
 	badln "the SS-probe region names an external host/URL — the probe is node-local by construction"
 else
 	ok "no external host or URL appears in the region"
@@ -238,7 +238,7 @@ fi
 
 # 10. THE SHADOWTLS DETOUR IS NOT ENROLLED AS A SERVED FAMILY.
 enrol="$(grep -n 'type=="shadowsocks"' "$SRC" | grep -v '^\s*#' | head -3)"
-if grep -q 'listen_port != null' <<<"$enrol" && grep -q '0\\\\.0\\\\.0\\\\.0' <<<"$enrol" ; then
+if printf '%s' "$enrol" | grep -q 'listen_port != null' && printf '%s' "$enrol" | grep -q '0\\\\.0\\\\.0\\\\.0'; then
 	ok "the enrolment clause requires a wildcard listen + a real port (the ShadowTLS inner loopback SS is excluded)"
 else
 	badln "the shadowsocks enrolment clause no longer requires a public wildcard listener — the ShadowTLS inbound's hidden loopback inner SS would be probed as if it were a served family (it has no listen_port, so it would read dead forever)"

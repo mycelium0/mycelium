@@ -76,7 +76,7 @@ ok "observer source present: ${SRC#"$REPO_ROOT"/}"
 # including) measure_enable(). Fail closed if it cannot be delimited (a refactor that moved the boundary
 # markers must re-confirm this gate rather than silently checking nothing).
 region="$(awk '/^PATHSIG_NFT_TABLE=/{f=1} /^measure_enable\(\)/{f=0} f' "$SRC")"
-if [ -z "$region" ] || ! grep -q 'pathsig_nft_apply()' <<<"$region" || ! grep -q 'measure_pathsig_probe()' <<<"$region" ; then
+if [ -z "$region" ] || ! printf '%s' "$region" | grep -q 'pathsig_nft_apply()' || ! printf '%s' "$region" | grep -q 'measure_pathsig_probe()'; then
 	printf 'FAIL: could not delimit the pathsig observer region (PATHSIG_NFT_TABLE .. measure_enable) — the boundary markers moved; re-confirm this gate.\n' >&2
 	exit 1
 fi
@@ -155,7 +155,7 @@ else
 fi
 
 # --- 1. DEDICATED, ADDITIVE table --------------------------------------------------------------------
-if grep -q 'PATHSIG_NFT_TABLE="inet mycelium_measure"' <<<"$region_nc" ; then
+if printf '%s\n' "$region_nc" | grep -q 'PATHSIG_NFT_TABLE="inet mycelium_measure"'; then
 	ok "observer table is the dedicated 'inet mycelium_measure' (additive; cannot rewrite the real firewall)"
 else
 	badln "the observer table constant is not exactly 'inet mycelium_measure' — a shared/filter/nat table could alter the live firewall"
@@ -168,12 +168,12 @@ else
 fi
 
 # --- 2. PASSIVE (policy accept; counts; no altering verdict) — over the FULL ruleset -----------------
-if grep -q 'policy accept' <<<"$ruleset" ; then
+if printf '%s\n' "$ruleset" | grep -q 'policy accept'; then
 	ok "the emitted input chain declares 'policy accept' (it never blocks a packet by default)"
 else
 	badln "the emitted input chain does not declare 'policy accept' — a non-accept policy could drop served traffic"
 fi
-if grep -q 'counter name' <<<"$ruleset" ; then
+if printf '%s\n' "$ruleset" | grep -q 'counter name'; then
 	ok "the emitted ruleset installs counters ('counter name') — it observes"
 else
 	badln "the emitted ruleset installs no 'counter name' — the observer is not counting (or the ruleset moved)"
@@ -244,10 +244,10 @@ fi
 # read from /proc/net/tcp{,6}; pin that reader as fail-safe and address-free (it reads the remote address
 # ONLY to exclude loopback, then discards it — the /proc analogue of the nft no-saddr invariant). The
 # transmit (4) + actuation (6) denylists already cover the whole region, so they cover this reader too.
-if grep -q '_collapse_classes()' <<<"$region_nc" ; then
+if printf '%s\n' "$region_nc" | grep -q '_collapse_classes()'; then
 	proc_reader="$(printf '%s\n' "$region_nc" | awk 'index($0,"_collapse_classes()"){f=1} f{print} f&&/^\}/{f=0}')"
-	if grep -q '/proc/net/tcp' <<<"$proc_reader" ; then
-		if grep -qE '\[ -r /proc/net/tcp \]' <<<"$proc_reader" ; then
+	if printf '%s\n' "$proc_reader" | grep -q '/proc/net/tcp'; then
+		if printf '%s\n' "$proc_reader" | grep -qE '\[ -r /proc/net/tcp \]'; then
 			ok "the collapse /proc reader fails safe on an unreadable /proc (guard '[ -r /proc/net/tcp ]' -> no signal)"
 		else
 			badln "the collapse /proc reader does not guard on '[ -r /proc/net/tcp ]' — it must fail safe (no signal) when /proc is unreadable"
@@ -269,7 +269,7 @@ fi
 guarded=0
 for fn in pathsig_nft_apply measure_pathsig_probe; do
 	body="$(printf '%s\n' "$region_nc" | awk -v fn="$fn" 'index($0, fn"()"){f=1} f&&/^\}/{f=0;print;next} f')"
-	if grep -qE 'have nft && have jq \|\| return 0|have nft \|\| return 0' <<<"$body" ; then
+	if printf '%s\n' "$body" | grep -qE 'have nft && have jq \|\| return 0|have nft \|\| return 0'; then
 		guarded=$((guarded + 1))
 	else
 		badln "$fn does not fail-safe on a missing nft/jq (must 'return 0' -> no signal when the tool is absent)"
@@ -321,7 +321,7 @@ fi
 # because its port resolved to nothing. That is coverage claimed and not held, on the LAST-RESORT tier.
 # The remedy is one predicate used twice, which is what this pins: a single PATHSIG_TCP_SELECT, referenced
 # by both, and no inline type list left anywhere in the region.
-if grep -q '^PATHSIG_TCP_SELECT=' <<<"$region" ; then
+if printf '%s' "$region" | grep -q '^PATHSIG_TCP_SELECT='; then
 	ok "one shared selector (PATHSIG_TCP_SELECT) defines which inbounds the observer covers"
 	users="$(printf '%s\n' "$region" | grep -c 'PATHSIG_TCP_SELECT' || true)"
 	[ "${users:-0}" -ge 3 ] \
@@ -344,9 +344,9 @@ fi
 # would do it, deliberately. The correction therefore has to live in the CONSUMER, and it has to be gated
 # on the prober actually running: subtracting a rate nobody is producing flips the bias from false
 # negatives to false positives.
-if grep -q 'synth' <<<"$region" && grep -q 'MEASURE_REACH_PROBE_MS' <<<"$region" ; then
+if printf '%s' "$region" | grep -q 'synth' && printf '%s' "$region" | grep -q 'MEASURE_REACH_PROBE_MS'; then
 	ok "the reset selector discounts the node's own reach-prober dials from the SYN denominator"
-	grep -q 'is-active --quiet mycelium-measure' <<<"$region" \
+	printf '%s' "$region" | grep -q 'is-active --quiet mycelium-measure' \
 		&& ok "  and only when mycelium-measure.service is actually running (no over-subtraction)" \
 		|| badln "  but unconditionally — if the prober is not running there are no synthetic SYNs to remove, and subtracting anyway manufactures false positives"
 else

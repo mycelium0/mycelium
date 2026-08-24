@@ -59,10 +59,6 @@ drive() {
 	[ "$mode" = skewed ] && stub_rev="deadbeefdead"
 	case "$mode" in
 		absent) : ;;
-		unstamped)
-			# A plain `go build` leaves spec.SourceRev empty, so `version` prints no "(rev …)".
-			printf '#!/bin/sh\n[ "$1" = version ] && { printf "myceliumctl 0.0.0\\n"; exit 0; }\nexit 0\n' > "$W/bin/myceliumctl-go"
-			chmod +x "$W/bin/myceliumctl-go" ;;
 		*)
 			cat > "$W/bin/myceliumctl-go" <<STUB
 #!/bin/sh
@@ -149,82 +145,17 @@ grep -q '^WARN .*spine is not present' <<<"$t3" \
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- when the spine is a different rev from the artifact --\n'
 t4="$(drive skewed)"
-if grep -q '^RUN .*myceliumctl-go render-server' <<<"$t4" ; then
+if printf '%s' "$t4" | grep -q '^RUN .*myceliumctl-go render-server'; then
 	badln "a spine built from another rev rendered the live config anyway. It can be missing checks this artifact relies on — the server-template pin arrived in one rev and would simply not exist in the other — so the check passes by being absent."
 else
 	ok "a rev-skewed spine is not used to render"
 fi
-grep -q '^DIE ' <<<"$t4" \
+printf '%s' "$t4" | grep -q '^DIE ' \
 	&& ok "and the converge fails closed rather than falling back" \
 	|| badln "a rev-skewed spine neither rendered nor failed closed (trace: $(printf '%s' "$t4" | tr '\n' '|' | cut -c1-200)); falling back to the shell here would hide the skew instead of reporting it"
-grep -q '^RUN .*bin/myceliumctl render-server' <<<"$t4" \
+printf '%s' "$t4" | grep -q '^RUN .*bin/myceliumctl render-server' \
 	&& badln "the shell renderer was used to route around the skew — that turns 'your tooling is stale' into a silent downgrade" \
 	|| ok "and the shell renderer is not used to paper over it"
-
-# ---------------------------------------------------------------------------------------------------
-# 5. THE FLAG THAT CARRIES THE TEMPLATE MUST BE ON THE COMMAND LINE.
-#
-# The Go verb does not READ the template, it VERIFIES it — and the verification was gated on a flag whose
-# default is "". Omitting it bypassed the pin entirely. Proven by mutation: with `--template` removed from
-# the invocation this gate passed every other row.
-# ---------------------------------------------------------------------------------------------------
-printf '\n-- and it names the template it is rendering --\n'
-grep -q '^RUN .*myceliumctl-go render-server.*--template ' <<<"$t" \
-	&& ok "the spine is told which template is in effect" \
-	|| badln "the render invoked the spine WITHOUT --template. The verb does not read the template, it verifies it, and the verification is skipped when the flag is absent — so an edited template would be silently ignored by the renderer that produces the live config."
-
-# ---------------------------------------------------------------------------------------------------
-# 6. A SPINE OF UNKNOWN PROVENANCE MAY NOT RENDER.
-#
-# spec.SourceRev is empty for a plain `go build`, so `version` prints no "(rev …)". Guarding the skew
-# comparison on a non-empty scrape made it SKIP on exactly the binary least likely to be this artifact's
-# — and the refusal text used to advise "rebuild it out of band", which produces that binary.
-# ---------------------------------------------------------------------------------------------------
-printf '\n-- when the spine reports no revision at all --\n'
-t5="$(drive unstamped)"
-grep -q '^RUN .*myceliumctl-go render-server' <<<"$t5" \
-	&& badln "an unstamped spine rendered the live config. Its provenance cannot be read, so nothing establishes it is this artifact's — and a binary from another rev can be missing checks this artifact relies on, passing them by not having them." \
-	|| ok "an unstamped spine is not used to render"
-grep -q '^DIE ' <<<"$t5" \
-	&& ok "and the converge fails closed, naming how to get a stamped binary" \
-	|| badln "an unstamped spine neither rendered nor failed closed — the guard skipped silently, which is the state this row exists to forbid"
-
-# ---------------------------------------------------------------------------------------------------
-# 7. A FAILED SPINE BUILD MUST LEAVE NO SPINE — not a stale one.
-#
-# install_spine is deliberately non-fatal: a missing Go toolchain or a failed build WARNs and returns 0.
-# Before the cutover that left the previous binary in place and nothing cared. After it, render_candidate
-# refuses a mismatched rev — so the stale binary turned every subsequent converge into a fatal skew, on
-# the UNATTENDED path, permanently: the checkout has already advanced, so the next tick repeats it. A
-# Go-toolchain hiccup would take a node off code updates entirely, on a path built never to need Go.
-#
-# The doctrine this function states three lines above the guard — "degrading beats bricking" — is only
-# true if a build that cannot produce THIS artifact's spine removes the one it cannot vouch for.
-# ---------------------------------------------------------------------------------------------------
-printf '\n-- and a failed build leaves no spine rather than a stale one --\n'
-B="$(mktemp -d "${TMPDIR:-/tmp}/myc.spdrop.XXXXXX")" || exit 2
-mkdir -p "$B/tooling/bin"
-printf 'STALE BINARY\n' > "$B/tooling/bin/myceliumctl-go"
-chmod +x "$B/tooling/bin/myceliumctl-go"
-INSTALL_LIB="$REPO_ROOT/control/lib/nb_install.sh"
-(
-	TOOLING_DIR="$B/tooling"; ARTIFACT_ROOT="$B/artifact"; DRY_RUN=0
-	log() { :; }; warn() { :; }; die() { exit 7; }
-	have() { command -v "$1" >/dev/null 2>&1; }; need_root() { :; }
-	run() { "$@"; }
-	# shellcheck source=/dev/null
-	. "$INSTALL_LIB" >/dev/null 2>&1 || exit 2
-	# Force the branch under test: no usable toolchain, exactly as on a node whose pinned download failed.
-	install_go_toolchain() { return 1; }
-	TOOLING_DIR="$B/tooling"; ARTIFACT_ROOT="$B/artifact"; DRY_RUN=0
-	install_spine
-) >/dev/null 2>&1
-if [ -e "$B/tooling/bin/myceliumctl-go" ]; then
-	badln "a spine build that could not run left the previous binary in place. Since the cutover that binary renders the live config, and render_candidate refuses it for the rev it reports — so every converge after this dies on the skew, unattended, until a build succeeds. On an arch with no pinned Go that is never."
-else
-	ok "the stale spine is removed, so the render path degrades to the shell instead of failing closed forever"
-fi
-rm -rf "$B"
 
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then

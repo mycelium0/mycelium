@@ -56,7 +56,7 @@ else
 fi
 
 # 3. no affirmative operated-network / uptime / status-page / online claim in the badge block
-if grep -qiE 'uptime|status[ -]?page|\bonline\b|operational|live network|operates a' <<<"$block" ; then
+if printf '%s' "$block" | grep -qiE 'uptime|status[ -]?page|\bonline\b|operational|live network|operates a'; then
 	bad "badge block makes an operated-network / uptime / online claim (ADR-0016 / no_operated_network_claim)"
 else
 	ok "badge block makes no operated-network / uptime / online claim"

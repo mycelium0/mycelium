@@ -167,10 +167,10 @@ if [ "$tail_n" -ge 2 ]; then
 else
 	badln "C25: flow_update calls converge_node_tail $tail_n time(s) (expected >=2: byte-identical AND apply-success) — a path that promotes or skips without converging leaves the xray engine/firewall/bundle behind"
 fi
-# HERE-STRINGS, not `printf … | grep -q`. Under `set -euo pipefail` that shape MISREPORTS A MATCH AS A FAILURE: `grep -q`
+# HERE-STRINGS, not `printf … | grep -q`. Under `set -euo pipefail` that shape is a RACE: `grep -q`
 # exits on the first match and closes the pipe, so `printf` can be killed by SIGPIPE (141) and pipefail
 # then reports the whole pipeline as FAILED even though the pattern MATCHED. It fails only when grep
-# wins the race — deterministic once the unwritten remainder exceeds the pipe buffer: measured 0/20 below it and 20/20 above, which is exactly the "re-run before believing it"
+# wins the race — measured at ~5 in 40 runs here, which is exactly the "re-run before believing it"
 # flake that trains people to ignore a red gate. Same class as the RP-0014 SIGPIPE finding; same remedy.
 if grep -q 'render_serve_bundle' <<<"$(fn_body converge_node_tail | grep -vE '^[[:space:]]*#')"; then
 	okln "C25: converge_node_tail re-renders the served bundle (served distribution stays current)"
