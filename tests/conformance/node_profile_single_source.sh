@@ -40,7 +40,7 @@ nprof="$(grep -rlE '^type NodeProfile struct' "$REPO_ROOT/internal" 2>/dev/null 
 
 # 1b. no node-TYPE / kind / variant selector field in the NodeProfile struct (capabilities, not types).
 body="$(awk '/^type NodeProfile struct/{f=1} f{print} /^}/{if(f)exit}' "$SCHEMA")"
-if printf '%s' "$body" | grep -qE '^[[:space:]]+(Type|Kind|Variant|NodeType|Role)[[:space:]]'; then
+if grep -qE '^[[:space:]]+(Type|Kind|Variant|NodeType|Role)[[:space:]]' <<<"$body" ; then
 	badln "NodeProfile has a type/kind/variant selector field (forbidden — capabilities, not types)"
 else
 	ok "NodeProfile has no node-TYPE/kind/variant selector field"
@@ -50,7 +50,7 @@ fi
 #    EnableKey). Strip full-line comments, then look for a '<proto>_enabled' string LITERAL — the only
 #    way Go code restates the rule (a doc comment that merely mentions the rule is not a violation).
 schema_code="$(grep -vE '^[[:space:]]*//' "$SCHEMA")"
-if printf '%s' "$schema_code" | grep -qE '"[A-Za-z0-9_]*_enabled"'; then
+if grep -qE '"[A-Za-z0-9_]*_enabled"' <<<"$schema_code" ; then
 	badln "nodeprofile.go restates an enable-key naming rule in code (a '<proto>_enabled' literal — must read the registry's EnableKey, vocab single source)"
 else
 	ok "nodeprofile.go reads the registry for enable keys (no restated enable-key literal in code)"

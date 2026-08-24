@@ -61,6 +61,14 @@ mechanical sweep with no guard is a sweep that returns. The remaining 162 sites 
 `no_early_exit_consumer_on_a_pipe.sh` now forbids the shape, proving its own scanner on a planted
 instance so an empty result means absence rather than a broken scan.
 
+**And one of the new gate rows had to be rewritten before it could ship.** The first draft of the
+tooling-mirror row DROVE `install_tooling` for real against a temporary tree. The suite then failed a
+LATER, unrelated gate — `rotate_rollback_executes.sh` — on CI only, on a host that could not be
+reproduced locally or on any node (the node ran the same tree 117/117 green). Bisected across nine CI
+runs down to that single row. Whatever the mechanism, a row proving a REFUSAL does not need to mutate a
+real filesystem: the refusal is the ABSENCE of an `rm`, and a recorder shows that directly. Rewritten to
+record rather than execute; removing the guard still turns it red, which is the whole discrimination.
+
 **Verified by differential run, not by reading:** all 36 touched gates were executed in their pre- and
 post-sweep form and their output compared byte for byte with paths normalised. 35 identical; the one
 difference is a line number shifted by an added comment. One rewrite WAS corrupted mid-work — the scanner

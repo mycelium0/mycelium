@@ -44,19 +44,19 @@ else
 fi
 
 # 2. rollback on failure.
-printf '%s' "$fn" | grep -q 'rollback_config' \
+grep -q 'rollback_config' <<<"$fn" \
 	&& ok "flow_node_apply rolls back on a failed post-apply verification" \
 	|| badln "flow_node_apply has no rollback_config path"
 
 # 3. LOCAL-ONLY: no fetch.
-if printf '%s' "$fn" | grep -qE 'myc_fetch_artifacts|git +fetch|git +pull'; then
+if grep -qE 'myc_fetch_artifacts|git +fetch|git +pull' <<<"$fn" ; then
 	badln "flow_node_apply fetches — it must be local-only (apply the local descriptor, never pull+run code)"
 else
 	ok "flow_node_apply is local-only (no fetch)"
 fi
 
 # 4. no-op short-circuit (byte-identical candidate => no promote/restart).
-printf '%s' "$fn" | grep -qE 'cmp -s .*SINGBOX_CONFIG' \
+grep -qE 'cmp -s .*SINGBOX_CONFIG' <<<"$fn" \
 	&& ok "flow_node_apply carries the no-op short-circuit (byte-identical => no restart)" \
 	|| badln "flow_node_apply lacks the byte-identical no-op short-circuit (would needlessly restart)"
 

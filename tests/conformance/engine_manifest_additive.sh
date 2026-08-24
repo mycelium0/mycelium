@@ -39,13 +39,13 @@ check_installer() { # <fn> <engine> <VERVAR> <SHAVAR>
 	local fn="$1" engine="$2" ver="$3" sha="$4" body
 	body="$(fnbody "$fn")"
 	[ -n "$body" ] || { badln "$fn not found in nb_install.sh"; return; }
-	printf '%s' "$body" | grep -q "manifest_engine_pins $engine" \
+	grep -q "manifest_engine_pins $engine" <<<"$body" \
 		&& ok "$fn fills from manifest_engine_pins $engine" \
 		|| badln "$fn does not call manifest_engine_pins $engine"
-	printf '%s' "$body" | grep -qE "\[ -z \"\\\$$ver\" \] \|\| \[ -z \"\\\$$sha\" \]" \
+	grep -qE "\[ -z \"\\\$$ver\" \] \|\| \[ -z \"\\\$$sha\" \]" <<<"$body" \
 		&& ok "$fn fill is guarded on an ABSENT pin (additive — explicit flag wins)" \
 		|| badln "$fn manifest fill is not guarded on [ -z \$$ver ] || [ -z \$$sha ] (could overwrite an operator flag)"
-	printf '%s' "$body" | grep -qE "\[ -n \"\\\$$ver\" \] +\|\| +die" \
+	grep -qE "\[ -n \"\\\$$ver\" \] +\|\| +die" <<<"$body" \
 		&& ok "$fn keeps the fail-closed pin die after the fill" \
 		|| badln "$fn lost its fail-closed [ -n \$$ver ] || die guard"
 	# ordering: the manifest_engine_pins call must appear BEFORE the die (fill, then fail-closed check)

@@ -41,25 +41,25 @@ fn="$(awk '/^apply_node_profile\(\)/{f=1} f{print} /^}/{if(f)exit}' "$NBP")"
 [ -n "$fn" ] || { badln "apply_node_profile not found in nb_render_params.sh"; printf 'FAIL\n' >&2; exit 1; }
 
 # 1. byte-identical guard: absent descriptor => early no-op return.
-printf '%s' "$fn" | grep -qE '\[ -f "\$cfg" \] \|\| return 0' \
+grep -qE '\[ -f "\$cfg" \] \|\| return 0' <<<"$fn" \
 	&& ok "apply_node_profile is a no-op when node.config.json is absent (byte-identical guard)" \
 	|| badln "apply_node_profile does not early-return when the descriptor is absent (not byte-identical-safe)"
 
 # 2. wired into write_params.
 wp="$(awk '/^write_params\(\)/{f=1} f{print} /^}/{if(f)exit}' "$NBP")"
-printf '%s' "$wp" | grep -qE '(^|[^a-z_])apply_node_profile([^a-z_]|$)' \
+grep -qE '(^|[^a-z_])apply_node_profile([^a-z_]|$)' <<<"$wp" \
 	&& ok "write_params calls apply_node_profile" \
 	|| badln "write_params does not call apply_node_profile (the descriptor never drives the render)"
 
 # 3. reads the enable key from vocab, not a restated '<proto>_enabled' literal in bash.
-if printf '%s' "$fn" | grep -qE '"[A-Za-z0-9_]*_enabled"'; then
+if grep -qE '"[A-Za-z0-9_]*_enabled"' <<<"$fn" ; then
 	badln "apply_node_profile restates an enable-key literal (must read .enable_key from vocab.json)"
 else
 	ok "apply_node_profile resolves enable keys from the Go-owned vocab.json (no restated literal)"
 fi
 
 # 4. honours the operator_toggle_keys allowlist.
-printf '%s' "$fn" | grep -qE 'OPERATOR_TOGGLE_KEYS' \
+grep -qE 'OPERATOR_TOGGLE_KEYS' <<<"$fn" \
 	&& ok "apply_node_profile honours the operator_toggle_keys allowlist" \
 	|| badln "apply_node_profile does not check the operator_toggle_keys allowlist (fail-open risk)"
 
@@ -69,7 +69,7 @@ printf '%s' "$fn" | grep -qE 'OPERATOR_TOGGLE_KEYS' \
 	|| badln "apply_node_profile lacks fail-closed die paths"
 
 # 6. read-only on the descriptor: never writes node.config.json (only $cfg reads + params $tmp writes).
-if printf '%s' "$fn" | grep -qE '>[[:space:]]*"\$cfg"|(mv|cp|tee|install)[^|;&]*"\$cfg"|>[[:space:]]*"[^"]*node\.config\.json"'; then
+if grep -qE '>[[:space:]]*"\$cfg"|(mv|cp|tee|install)[^|;&]*"\$cfg"|>[[:space:]]*"[^"]*node\.config\.json"' <<<"$fn" ; then
 	badln "apply_node_profile writes the descriptor (must be read-only; the operator supplies it)"
 else
 	ok "apply_node_profile is read-only on the descriptor (reads node.config.json, writes only params)"
@@ -79,9 +79,9 @@ fi
 tail_fn="$(awk '/^converge_node_tail\(\)/{f=1} f{print} f&&/^\}/{exit}' "$NBP" | grep -vE '^[[:space:]]*#')"
 if [ -z "$tail_fn" ]; then
 	badln "converge_node_tail not found in $NBP"
-elif printf '%s' "$tail_fn" | grep -q 'node_profile_harden'; then
+elif grep -q 'node_profile_harden' <<<"$tail_fn" ; then
 	ok "converge_node_tail reads the firewall posture from node state (node_profile_harden)"
-	printf '%s' "$tail_fn" | grep -q 'DO_HARDEN' \
+	grep -q 'DO_HARDEN' <<<"$tail_fn" \
 		&& badln "converge_node_tail still consults DO_HARDEN — that is set only from argv, and the update timer invokes the updater with NO flags, so the default silently becomes the posture" \
 		|| ok "  and no longer consults the argv-only DO_HARDEN"
 else
@@ -96,7 +96,7 @@ else
 		&& badln "node_profile_harden can die — it is read on every unattended converge, where dying over a posture read aborts the whole tail" \
 		|| ok "node_profile_harden is fail-safe (it degrades to a posture, never aborts the converge)"
 	# Precedence must be declared-field -> remembered -> ON, and the last word must be 'on'.
-	printf '%s' "$ph_fn" | grep -q 'node.config.json' && printf '%s' "$ph_fn" | grep -q 'harden.posture' \
+	grep -q 'node.config.json' <<<"$ph_fn" && grep -q 'harden.posture' <<<"$ph_fn" \
 		&& ok "node_profile_harden consults the declared field, then the remembered bootstrap posture" \
 		|| badln "node_profile_harden does not consult both the descriptor field and the remembered posture"
 	printf '%s' "$ph_fn" | tail -3 | grep -q "printf 'on'" \

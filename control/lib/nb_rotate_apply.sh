@@ -166,7 +166,7 @@ _rotation_port_key() {
 _rotation_port_key_if_moving() {
 	local plan="$1" proto="$2" to_port port_key
 	to_port="$(jq -r '.to.to_port // 0' "$plan")"
-	printf '%s' "$to_port" | grep -qE '^[0-9]+$' || return 0
+	grep -qE '^[0-9]+$' <<<"$to_port" || return 0
 	[ "$to_port" -gt 0 ] || return 0
 	port_key="$(_rotation_port_key "$proto")"
 	[ -n "$port_key" ] || return 0
