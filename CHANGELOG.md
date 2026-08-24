@@ -61,6 +61,20 @@ mechanical sweep with no guard is a sweep that returns. The remaining 162 sites 
 `no_early_exit_consumer_on_a_pipe.sh` now forbids the shape, proving its own scanner on a planted
 instance so an empty result means absence rather than a broken scan.
 
+**The remediation went red on CI for two full days of runs, and both causes were mine.**
+
+The first: `rotate_rollback_executes.sh` builds a spine with a bare `go build`, which leaves
+`spec.SourceRev` empty — and S2's new guard refuses exactly that binary, correctly. **The gate was
+reporting a real refusal and I read it as a flake**, because my reproduction on a node kept passing. The
+node's tree came from `git archive`, which has no `.git`, so the artifact rev read "unknown" and the
+guard skipped by construction; CI checks out a real repository and it fired. A reproduction that cannot
+reach the code under test proves nothing, and I bisected across twelve CI runs on the strength of it —
+even backing out the correct fixture fix once because the run that contained it was red for the other
+reason. The fixture now stamps the rev the way `install_spine` does.
+
+It cost what it cost because the gate did not say why it failed; that is fixed separately in 0.2.102, and
+the diagnostics it added are what finally named this in one run.
+
 **And one of the new gate rows had to be rewritten before it could ship.** The first draft of the
 tooling-mirror row DROVE `install_tooling` for real against a temporary tree. The suite then failed a
 LATER, unrelated gate — `rotate_rollback_executes.sh` — on CI only, on a host that could not be
