@@ -261,6 +261,10 @@ STUB
 	{
 		cat "$FAKENODE_ROOT/rc"
 		printf 'calls=%s\n' "$(tr '\n' ',' <"$FAKENODE_ROOT/calls" 2>/dev/null)"
+		# What the run SAID, carried back with the observations. A digest that reports only outcomes leaves
+		# every failure needing the environment reproduced before it can be read — and this fixture has
+		# already failed on a host the author could not reproduce.
+		printf 'said=%s\n' "$(tr '\n' '|' <"$FAKENODE_ROOT/stdout" 2>/dev/null | tail -c 600)"
 		printf 'live_gen=%s\n'   "$(fakenode_generation "$SINGBOX_CONFIG")"
 		printf 'overlay_same=%s\n' "$(cmp -s "$FAKENODE_ROOT/overlay.before" "$OPERATOR_OVERRIDES" && printf yes || printf no)"
 		printf 'overlay=%s\n'    "$(jq -c . "$OPERATOR_OVERRIDES" 2>/dev/null)"
@@ -324,7 +328,7 @@ for mode in restart-once verify; do
 			esac ;;
 		*) { badln "rollback_config never ran, so there is no recovery-ordered write_params to look for"; \
 		printf '        recorded calls: %s\n' "${_calls:-<none>}"; \
-		printf '        digest: %s\n' "$(printf '%s' "$D" | tr '\n' '|' | cut -c1-400)"; } ;;
+		printf '        the run said: %s\n' "$(field "$D" said | tail -c 500)"; } ;;
 	esac
 
 	[ "$(field "$D" restarts)" -ge 2 ] 2>/dev/null \
