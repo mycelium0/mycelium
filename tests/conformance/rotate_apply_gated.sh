@@ -60,17 +60,17 @@ FLOW="$(fnbody flow_rotate "$LIB" | nocom)"
 
 # 1. DRY-RUN DEFAULT — the dry-run path and the dispatcher itself promote nothing; promote_config is
 #    confined to the live path.
-if grep -qw 'promote_config' <<<"$DRYRUN" ; then
+if printf '%s' "$DRYRUN" | grep -qw 'promote_config'; then
 	badln "rotate_apply_dryrun calls promote_config — the default path must promote NOTHING"
 else
 	ok "rotate_apply_dryrun never calls promote_config (dry-run default)"
 fi
-if grep -qw 'promote_config' <<<"$FLOW" ; then
+if printf '%s' "$FLOW" | grep -qw 'promote_config'; then
 	badln "flow_rotate calls promote_config directly (must be confined to rotate_apply_live)"
 else
 	ok "flow_rotate does not promote directly (promote is confined to the live path)"
 fi
-if grep -qw 'promote_config' <<<"$LIVE" ; then
+if printf '%s' "$LIVE" | grep -qw 'promote_config'; then
 	ok "rotate_apply_live is the sole promote path"
 else
 	badln "rotate_apply_live does not call promote_config — the live path is incomplete"
@@ -78,10 +78,10 @@ fi
 
 # 2. TRIPLE GATE — flow_rotate enters the live path only under BOTH ROTATE_APPLY and the arm check, with
 #    a dry-run fallback; and the live path is unreachable without both.
-if grep -q 'ROTATE_APPLY' <<<"$FLOW" \
-	&& grep -q 'rotate_live_armed' <<<"$FLOW" \
-	&& grep -qw 'rotate_apply_live' <<<"$FLOW" \
-	&& grep -qw 'rotate_apply_dryrun' <<<"$FLOW" ; then
+if printf '%s' "$FLOW" | grep -q 'ROTATE_APPLY' \
+	&& printf '%s' "$FLOW" | grep -q 'rotate_live_armed' \
+	&& printf '%s' "$FLOW" | grep -qw 'rotate_apply_live' \
+	&& printf '%s' "$FLOW" | grep -qw 'rotate_apply_dryrun'; then
 	ok "flow_rotate gates rotate_apply_live behind ROTATE_APPLY + rotate_live_armed, with a dry-run fallback"
 else
 	badln "flow_rotate does not gate the live path behind BOTH ROTATE_APPLY and rotate_live_armed (with a dry-run fallback)"
@@ -109,7 +109,7 @@ fi
 
 # 4. NO PERSISTENT SELF-OUTAGE — the live path persists via the overlay (snapshot before mutate) and the
 #    rollback path reverts it; reuse the existing apply primitives, not a re-implementation.
-if grep -qw 'rollback_config' <<<"$LIVE" && grep -qw 'revert_rotation_overlay' <<<"$LIVE" ; then
+if printf '%s' "$LIVE" | grep -qw 'rollback_config' && printf '%s' "$LIVE" | grep -qw 'revert_rotation_overlay'; then
 	ok "rotate_apply_live pairs rollback_config with revert_rotation_overlay (a rolled-back rotation does not re-apply)"
 else
 	badln "rotate_apply_live does not pair config rollback with overlay revert — a rolled-back rotation could re-apply next tick"
@@ -120,16 +120,16 @@ else
 	badln "persist_rotation_to_overlay does not snapshot the overlay before mutating it"
 fi
 for prim in render_candidate validate_config promote_config write_params; do
-	if grep -qw "$prim" <<<"$LIVE" ; then ok "rotate_apply_live reuses $prim"; else badln "rotate_apply_live does not use $prim (must reuse the existing path)"; fi
+	if printf '%s' "$LIVE" | grep -qw "$prim"; then ok "rotate_apply_live reuses $prim"; else badln "rotate_apply_live does not use $prim (must reuse the existing path)"; fi
 done
 
 # 4b. CATCHABILITY — write_params/render_candidate signal failure by `die` (exit 1), which a bare
 #     `if ! cmd` / `cmd ||` CANNOT trap (it would terminate the whole sourced script, skipping the overlay
 #     revert -> a rolled-back rotation re-applies next tick). They MUST be subshell-wrapped `( cmd )`.
 LIBCODE="$(nocom < "$LIB")"
-if grep -qE 'if ![[:space:]]+(write_params|render_candidate)\b' <<<"$LIBCODE" ; then
+if printf '%s\n' "$LIBCODE" | grep -qE 'if ![[:space:]]+(write_params|render_candidate)\b'; then
 	badln "a die-capable call (write_params/render_candidate) is used BARE in an 'if !' test — wrap it '( cmd )' so its die is catchable and the overlay revert runs"
-elif grep -qE '(^|[^)])[[:space:]](write_params|render_candidate)[[:space:]]*\|\|' <<<"$LIBCODE" ; then
+elif printf '%s\n' "$LIBCODE" | grep -qE '(^|[^)])[[:space:]](write_params|render_candidate)[[:space:]]*\|\|'; then
 	badln "a die-capable call (write_params/render_candidate) is used BARE with '||' — wrap it '( cmd )' (a die escapes || true)"
 else
 	ok "die-capable mutating calls (write_params/render_candidate) are subshell-wrapped on recoverable edges (a die cannot skip the overlay revert)"
@@ -143,7 +143,7 @@ fi
 
 # 4c. DRY-RUN HONORED — --apply-rotation --dry-run must NOT mutate persisted state. flow_rotate gates the
 #     live path on DRY_RUN=0, and persist_rotation_to_overlay no-ops under DRY_RUN (defense-in-depth).
-if grep -qE 'DRY_RUN[^0-9]+-eq 0' <<<"$FLOW" ; then
+if printf '%s' "$FLOW" | grep -qE 'DRY_RUN[^0-9]+-eq 0'; then
 	ok "flow_rotate requires DRY_RUN=0 for live apply (--dry-run forces a preview; no persisted mutation)"
 else
 	badln "flow_rotate does not require DRY_RUN=0 for the live path (--apply-rotation --dry-run could mutate persisted state)"
@@ -168,7 +168,7 @@ fi
 # 4e. SINGLE SOURCE OF TRUTH (§2.2 #8) — the proto->enable_key mapping is READ from the committed registry
 #     (control/vocab.json .protos[].enable_key), never re-derived by a bash naming convention.
 ENK="$(fnbody _rotation_enable_key "$LIB" | nocom)"
-if grep -qE '\.protos\[\]' <<<"$ENK" && grep -qE 'enable_key' <<<"$ENK" ; then
+if printf '%s' "$ENK" | grep -qE '\.protos\[\]' && printf '%s' "$ENK" | grep -qE 'enable_key'; then
 	ok "_rotation_enable_key reads enable_key from the registry (vocab.json .protos[]), not a re-derived convention (§2.2 #8)"
 else
 	badln "_rotation_enable_key does not read enable_key from the registry — re-deriving the rule duplicates the source of truth (§2.2 #8)"
