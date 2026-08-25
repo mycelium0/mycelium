@@ -153,7 +153,12 @@ if [ -n "${DISPATCH:-}" ]; then
 		printf 'measure_pathsig_probe() { return 1; }\n'
 		printf 'MODE=pathsig-probe\n'
 		printf 'case "$MODE" in\n'
-		printf '%%s\n' "$DISPATCH"
+		# `%s`, not `%%s`: the surrounding printfs escape their percent signs because they EMIT a printf
+		# into the generated file, but this one substitutes a value. With `%%s` the driver received the
+		# literal two characters and no dispatcher at all, so `case "$MODE" in %s esac` was a SYNTAX
+		# ERROR — non-zero — and the row below read that as "the fault was reported". It passed without
+		# ever running the dispatcher it exists to test.
+		printf '%s\n' "$DISPATCH"
 		printf 'esac\n'
 	} > "$W/fault.sh"
 	fout="$(bash "$W/fault.sh" 2>&1)"; frc=$?
