@@ -13,6 +13,72 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.105] — 2026-08-25
+
+### Fixed — a release could attest to itself, and the verdict said so out loud
+
+Found by an adversarial re-audit commissioned because the operator did not trust the maintainer's
+conclusions. Two audits had already passed over this.
+
+`scripts/verify-release.sh` printed **`OK — integrity AND authenticity verified`, rc=0, over an artifact
+an attacker built.** `make dist` is `git archive`, so every tracked file rides inside the tarball — and
+`release.yml` refuses to publish until `allowed_signers` is COMMITTED, so **the day the signing key ships
+is the day the trust root starts travelling inside the thing it authenticates.** QUICKSTART then derived
+both the signer identity and the key from `./allowed_signers` in the extracted archive. An attacker
+supplies all three: their key, their signature, their checksums.
+
+The one anchor a download cannot forge is the signed **tag**, which lives upstream. It was reachable only
+inside a clone, every documented invocation passed a download directory, the miss was a `warn` — and the
+verdict was computed from the presence of `--allowed-signers` alone, never consulting whether the tag had
+been checked.
+
+Three changes: a `--allowed-signers` resolving INSIDE the directory under verification is refused
+outright; `--tag` requested but not checkable is a **refusal**, not a warning; and the unanchored case
+reports `OK (SIGNATURE ONLY)` and names what it did not check. The recipes in `QUICKSTART.md` and
+`docs/RELEASING.md` now take the key from outside the download.
+
+`release_trust_root_is_external.sh` **builds the hostile release** and requires refusal, with a control
+row so it cannot pass by refusing everything, and rows pinning that the tag is not skippable and that the
+verdict states its scope. Both guards proven by mutation.
+
+### Fixed — two of the six Audit-0014 fixes were held by nothing
+
+The 0.2.103 entry said *"every one has a gate row that goes red without the fix"*. Reverting each and
+running the whole suite: **119/119 green** with S4's guard reverted, **119/119 green** with B1's
+build-failure arm deleted. S4's row had been written, reverted during a bisect, and never restored while
+the entry claimed it was rewritten; B1's row drove one arm of two. Both restored and each proven by
+mutation. The claim was checkable in one command and I did not run it.
+
+### Fixed — the verdict fix covered one probe arm of four
+
+`l7-probe`, `l7-probe-awg` and `l7-probe-xhttp` still dispatched bare, warning and then returning 1 as a
+verdict into the same ERR trap on the same cadenced timer. All four arms are guarded, and the gate now
+checks every arm rather than the one that was noticed — **its first draft could not see them**, because
+the detector's character class omitted digits and the function names carry `l7`. Caught by mutating an
+arm back to bare and watching the row stay green, which is the only way to learn that about a detector.
+
+### Corrected — claims in this file that did not survive re-measurement
+
+Written beside the statements rather than swept away, as 0.2.99 and 0.2.96 already are:
+
+* *"amended in all three places"* — there are **five**; `README.md` and `ADR-0038` were missed, and in
+  0038 the stale phrase was the stated reason for REJECTING a design option.
+* *"`aggregate` missing from the Go CLI's help entirely"* — it was already there; the fix appended a
+  **second** entry with a different flag order. Duplicate removed.
+* *"two full days of CI"* — **27 runs in one calendar day**.
+* *"all six Go↔shell equivalence gates"* — **ten**.
+* *"deterministic, not a race"* — an independent pass measured **13/20 at 32 KB**, and the entry named no
+  platform, shell or grep build. Weakened to what two disagreeing measurements support.
+
+The pattern is one thing, and it is worth naming: numbers obtained by running an instrument were exact;
+numbers restated from memory were not. This project's own §2.2 item 12 covers both, and only the first
+half was being honoured.
+
+### Added — Audit-0015
+
+Written into `docs/audits/` (local-only by design, cited by ID). Thirteen passes instructed to refute
+rather than confirm.
+
 ## [0.2.104] — 2026-08-25
 
 ### Fixed — a verdict was being announced as a bug, 21-41 times a night, on every node
@@ -45,10 +111,17 @@ strings first because a node prints them during exactly the incident they would 
 * *"shell renders and deploys; the Go binary decides"* is amended in all three places it is stated as
   doctrine (ADR-0012, development.md, AGENTS.md) rather than deleted: it was true, and what changed is
   that the spine now also emits.
+  **CORRECTED in 0.2.105 — there are FIVE sites, not three.** `README.md` and `docs/adr/0038` were
+  missed, and in 0038 the phrase is the stated reason for REJECTING a design option, so leaving it stale
+  left a rejection resting on a premise that had moved. The AGENTS.md amendment was also a clause with no
+  predicate that never said what replaced the doctrine. All five now read correctly.
 * `control/README.md` told the reader to pass `--template` to override the default. The Go verb does not
   read the template, it VERIFIES it; editing it is a three-part change (file, structs, pin).
 * `render-server`, `subscription`, `aggregate` and `front-render` were missing from the Go CLI's own help
   entirely — including the verb that now produces the live data-plane config.
+  **CORRECTED in 0.2.105: `aggregate` was already there.** The "fix" appended a second entry, so HEAD
+  documented it twice with different flag orders until 0.2.105 removed the duplicate. Nothing reads
+  `usage()`, which is why neither the mistake nor the duplication was caught by anything but a reader.
 
 ### Added — the two audits that existed only as working notes
 
@@ -122,7 +195,9 @@ mechanical sweep with no guard is a sweep that returns. The remaining 162 sites 
 `no_early_exit_consumer_on_a_pipe.sh` now forbids the shape, proving its own scanner on a planted
 instance so an empty result means absence rather than a broken scan.
 
-**The remediation went red on CI for two full days of runs, and both causes were mine.**
+**The remediation went red on CI across 27 runs, and both causes were mine.** (This first said "two full
+days"; the run list shows 10:56Z-21:00Z on 2026-08-24 — 21 failed, 5 passed, 1 cancelled. One day.
+Corrected in 0.2.105.)
 
 The first: `rotate_rollback_executes.sh` builds a spine with a bare `go build`, which leaves
 `spec.SourceRev` empty — and S2's new guard refuses exactly that binary, correctly. **The gate was
@@ -143,6 +218,14 @@ reproduced locally or on any node (the node ran the same tree 117/117 green). Bi
 runs down to that single row. Whatever the mechanism, a row proving a REFUSAL does not need to mutate a
 real filesystem: the refusal is the ABSENCE of an `rm`, and a recorder shows that directly. Rewritten to
 record rather than execute; removing the guard still turns it red, which is the whole discrimination.
+
+**CORRECTED in 0.2.105, and this is the one that matters most.** The sentence above — *"every one has a
+gate row that goes red without the fix"* — was FALSE for two of the six. Audit-0015 reverted each fix and
+ran the full suite: **119/119 green** with S4's guard reverted, and **119/119 green** with B1's
+build-failure arm deleted. S4's row had been written, reverted during a bisect, and never restored, while
+this entry said it was rewritten and still discriminating; B1's row drove only the missing-toolchain arm
+of two. Both are now held, each proven by mutation. The claim was checkable in one command and I did not
+run it.
 
 **Verified by differential run, not by reading:** all 36 touched gates were executed in their pre- and
 post-sweep form and their output compared byte for byte with paths normalised. 35 identical; the one
@@ -262,6 +345,12 @@ Both polarities are wrong, and one of them is dangerous:
 
 **Measured**, 20 runs per size: below the pipe buffer, 0/20 false failures; above it, **20/20**. Not a
 race at all once the remainder exceeds the buffer — deterministic. A here-string is immune at every size.
+
+**WEAKENED in 0.2.105.** An independent pass measured **13/20 at 32 KB** on the same class of host — a
+race at the boundary, not a clean step — and this paragraph names no platform, shell or grep build, which
+its own §2.2 item 12 requires. The hazard is real and the fix is right; "deterministic, not a race" is
+not supported by two measurements that disagree, and should read "reliably reproducible well above the
+buffer, intermittent near it".
 
 The CI instance that exposed this was `collapse_gated.sh` with a 31 KB string, well under the 64 KB
 default — so the runner's effective pipe buffer must be smaller than that. Linux can allocate
@@ -398,7 +487,7 @@ percent-encoded), which is exactly when closing it is cheap. Shell now parses th
 
 The jq URI grammar both shell parsers need is emitted by one function instead of typed twice;
 `myc_agg_link_outbound` composes it. Verified byte-identical on a real two-node fold before and after,
-and all six Go↔shell equivalence gates stay green.
+and all TEN Go↔shell equivalence gates stay green (the entry first said six; there are ten, both at that revision and at HEAD).
 
 **And the new rows could not fail correctly at first.** `link-outbound` takes the LINK positionally;
 passing it as `--link` made every row error out, so every verdict read as "skip" — the two skip rows

@@ -352,10 +352,14 @@ When asked to implement or design something:
 11. **Gates before behaviour.** Land the typed schema and a conformance gate before the behaviour that
     uses it. A Phase-0–2 spec type stays inert by construction — pure data plus `Validate()`, importing
     no `net` / `os` / `os/exec`, exposing no server or goroutine entrypoint — until its phase authorizes
-    it. Keep control logic in the Go spine. NOTE (v0.2.98): the historical phrasing below — *the shell
-    renders and deploys; the Go binary decides and
-    adapts.* Migrate an existing shell decision by a **strangler** port behind a bash↔Go byte-equivalence
-    gate — additive, no cutover until the output is byte-identical.
+    it. Keep control logic in the Go spine: *the shell deploys; the Go binary decides and adapts.*
+    **Amended v0.2.98:** the older form of this said "the shell RENDERS and deploys". It no longer does
+    for the sing-box server config — the spine renders it on every converge (RP-0008 P3 cutover) and the
+    shell is the absence-only fallback. The principle that survives is that the Go spine owns the
+    predicate; what changed is that it now also emits.
+    Migrate an existing shell decision by a **strangler** port behind a bash↔Go byte-equivalence
+    gate — additive, no cutover until the output is byte-identical, and the cutover is a separate,
+    deliberate step with its own fallback posture (see v0.2.98-v0.2.103 for what that step costs).
 12. **Version hygiene per chunk.** Every change that lands Go-spine work (`internal/**`, `cmd/**`) bumps
     the runtime version and adds a `CHANGELOG` entry in the **same** commit (a gate pins the version const
     to the newest changelog heading). One PATCH per landed increment during the 0.x line.

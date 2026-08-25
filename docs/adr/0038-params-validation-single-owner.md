@@ -78,6 +78,7 @@ files holding one truth.
    as out of scope and disproportionate: it moves an effect (writing an iptables rule) into the
    decision layer, against the RP-0008/RP-0009 split — *shell renders and deploys; the Go binary
    decides and adapts*.
+   **Note (v0.2.98):** the *renders* half no longer holds for the sing-box server config — the Go spine renders it on every converge (RP-0008 P3 cutover) and the shell is the absence-only fallback. The split this rejection rests on is unchanged in substance: an EFFECT (writing an iptables rule) still does not belong in the decision layer. What moved is emission, not effects.
 
 ## Decision
 

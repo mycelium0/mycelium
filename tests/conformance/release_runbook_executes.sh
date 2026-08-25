@@ -145,9 +145,14 @@ else
 		bash "$VERIFY" rel --allowed-signers allowed_signers --signer me@invalid 2>&1 | tail -1
 	)"
 	rm -rf "$W"
+	# The verdict text changed in v0.2.105 and the change is deliberate: without --tag the tool now says
+	# SIGNATURE ONLY and names what it did not check, because "authenticity verified" over an unanchored
+	# signature is a claim the tool cannot support (Audit-0015). What this row asserts is unchanged — that
+	# a RELATIVE key path outside $DIR resolves — so both verdicts are accepted here and the anchoring
+	# property is pinned by release_trust_root_is_external.sh.
 	case "$out" in
-		*"OK — integrity AND authenticity verified"*)
-			ok "a relative --allowed-signers from outside \$DIR resolves and authenticity is verified" ;;
+		*"OK — integrity AND authenticity verified"*|*"OK (SIGNATURE ONLY)"*)
+			ok "a relative --allowed-signers from outside \$DIR resolves and the signature is checked" ;;
 		*"--allowed-signers file not found"*)
 			badln "a relative key path is still resolved against \$DIR: '$out'. That is the shape docs/RELEASING.md step 7 and QUICKSTART step 1 both prescribe, so a maintainer or downloader who did everything right is told the file is missing — and the obvious recovery is to drop the flag and fall back to integrity-only, the one mode that cannot distinguish a substituted release." ;;
 		*)

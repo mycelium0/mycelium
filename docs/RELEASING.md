@@ -117,8 +117,10 @@ ssh-keygen -Y sign -f ~/.ssh/id_rsa -n file /tmp/rel/SHA256SUMS      # → SHA25
 gh release upload vX.Y.Z --repo "$REPO" /tmp/rel/SHA256SUMS.sig
 
 # 7. re-verify in SIGNED mode, from the download directory, as a stranger would.
-#    --allowed-signers is ABSOLUTE: verify-release.sh cd's into the directory it is checking, so a
-#    relative key path resolves against /tmp/rel and is not found (Audit-0012 B5).
+#    --allowed-signers is ABSOLUTE and points at the CLONE, not at /tmp/rel. Two reasons, and the second
+#    is the one that matters: verify-release.sh cd's into the directory it checks, so a relative path
+#    resolves against /tmp/rel (Audit-0012 B5) — and a key that lives inside the artifact is no key at
+#    all, since whoever built the artifact chose it (Audit-0015). The tool now refuses that shape.
 scripts/verify-release.sh /tmp/rel \
   --allowed-signers "$REPO_DIR/allowed_signers" \
   --signer "$(awk 'NF{print $1; exit}' "$REPO_DIR/allowed_signers")" --tag vX.Y.Z
@@ -160,8 +162,12 @@ known-good *config*; the revision and the spine have already advanced by then
 Use the helper (fail-closed — integrity always, authenticity when you supply the key):
 
 ```sh
-# from the directory holding mycelium-X.Y.Z.tar.gz + SHA256SUMS + SHA256SUMS.sig:
-scripts/verify-release.sh . --allowed-signers allowed_signers --signer "$(awk 'NF{print $1; exit}' allowed_signers)" [--tag vX.Y.Z]
+# from the directory holding mycelium-X.Y.Z.tar.gz + SHA256SUMS + SHA256SUMS.sig.
+# The key must come from OUTSIDE that directory: `make dist` is `git archive`, so allowed_signers ships
+# inside the tarball, and verifying an archive against a key it carried is the archive attesting to
+# itself. verify-release.sh refuses a --allowed-signers that resolves inside the directory it checks.
+KEY=~/mycelium-allowed_signers   # fetched independently of this download
+scripts/verify-release.sh . --allowed-signers "$KEY" --signer "$(awk 'NF{print $1; exit}' "$KEY")" [--tag vX.Y.Z]
 ```
 
 It runs, fail-closed, the underlying checks:
