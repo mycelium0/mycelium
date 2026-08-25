@@ -13,6 +13,67 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.104] — 2026-08-25
+
+### Fixed — a verdict was being announced as a bug, 21-41 times a night, on every node
+
+`measure_pathsig_probe` returns non-zero to REPORT that a threshold was crossed, having already printed a
+warn that names the class and states the origin is unknown. Dispatched bare, that return reached the ERR
+trap, which announced *"This is a bug, not a refusal — a fail-closed refusal prints a reason"* and *"The
+node may be PARTLY converged"*. **Both sentences were false**: the reason was printed one line earlier,
+and the probe is an observer that actuates nothing.
+
+MEASURED on the live network: **21 / 32 / 41** of these four-line blocks per node per day, plus a systemd
+unit reporting FAILURE for an observation it completed. The cost is not the noise — it is that a real
+fault on this path was indistinguishable from it, and that an operator reading "PARTLY converged" goes
+looking for damage that does not exist.
+
+The mode is now dispatched as an `if` condition, which bash exempts from the ERR trap: the verdict is
+read, not trapped. The probe's contract is unchanged and the observation still reaches the operator
+through the warn and the marker (which is what the e2e drill actually reads — nothing consumed the exit
+code). Gate: `a_verdict_is_not_a_fault.sh` drives the REAL trap against the REAL dispatch arm.
+
+### Fixed — the docs described the opposite of what the node does
+
+The six releases that cut the renderer over changed no documentation at all. Corrected, and the live
+strings first because a node prints them during exactly the incident they would mislead in:
+
+* `install_spine` announced the spine as *"inert"* and the shell as *"remains authoritative"* on every
+  build — false since v0.2.98, and printed at the moment a stale spine is the thing to suspect.
+* RP-0008's status said P3 was not started and the renderers still emit in shell. It now records what is
+  cut over, what is only ported, and what each remaining one is waiting on.
+* *"shell renders and deploys; the Go binary decides"* is amended in all three places it is stated as
+  doctrine (ADR-0012, development.md, AGENTS.md) rather than deleted: it was true, and what changed is
+  that the spine now also emits.
+* `control/README.md` told the reader to pass `--template` to override the default. The Go verb does not
+  read the template, it VERIFIES it; editing it is a three-part change (file, structs, pin).
+* `render-server`, `subscription`, `aggregate` and `front-render` were missing from the Go CLI's own help
+  entirely — including the verb that now produces the live data-plane config.
+
+### Added — the two audits that existed only as working notes
+
+`docs/audits/` is local-only by design (gitignored), so these ship as reports on the maintainer's tree and
+are cited by ID here rather than linked — which is the existing convention, enforced by
+`docs_link_integrity.sh`.
+
+**Audit-0013** (the from-zero rebuild and the 36/36
+transport matrix, at v0.2.95) and **Audit-0014** (the cutover
+delta, six findings) were run and never written into the tree. "The audit says we are ready" was therefore
+uncheckable by anyone, including its author.
+
+And the index listed **6 of 15** reports — audits 0008 through 0012, including the release-readiness one
+whose single open item still blocks the tag, were present and invisible from the only page that
+enumerates them. `audit_index_is_complete.sh` now holds both directions. Link integrity is a different
+property: a report nobody links resolves perfectly.
+
+### Changed — the RP-0011 ledger re-scored against the current tree
+
+It was scored at 0.2.75, twenty-nine patches ago. A stale ledger is worse than none: it is what someone
+consults to answer "are we ready". **Verdict unchanged — NOT ACCEPTED**, for the same single reason
+(AC-1: no tag, zero `release.yml` runs, no `allowed_signers`, all re-checked today). The 2026-08-09
+scoring is left exactly as written and the delta added beneath it; AC-5 moved materially (the renderer
+left bash), AC-2 did not (the weather half is still inert).
+
 ## [0.2.103] — 2026-08-24
 
 ### Fixed — the first audit of the renderer cutover, and it found six

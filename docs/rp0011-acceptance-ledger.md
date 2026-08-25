@@ -8,6 +8,9 @@ later. See the LICENSE file in the repository root.
 # RP-0011 acceptance ledger — Phase-2 fungi packaging + management CLI
 
 **Scored:** 2026-08-09 · **Against:** `internal/spec.Version` 0.2.75 · **Verdict: NOT ACCEPTED.**
+**Re-scored:** 2026-08-25 · **Against:** `internal/spec.Version` 0.2.104 · **Verdict: STILL NOT ACCEPTED**
+— see [§ Re-score](#re-score-2026-08-25-v02104). The 2026-08-09 scoring below is left exactly as written;
+an amended ledger that overwrites its own history cannot show what moved.
 
 [RP-0011](proposals/0011-phase2-fungi-packaging-and-cli.md) has been `Status: active` with no ledger
 behind it. Audit-0011 #19 named that as the defect: an RP with ten acceptance criteria and no scoring is
@@ -118,3 +121,40 @@ against a genuinely empty state directory and greps the class across every lib.
 
 That is the argument for AC-1 being scored UNMET rather than "basically fine": the one property nobody
 had measured is the one that was broken, and it took wiping a production node to see it.
+
+---
+
+## Re-score 2026-08-25 (v0.2.104)
+
+Twenty-nine patch releases after the original scoring, and re-scored because a stale ledger is worse than
+none: it is the document someone consults to answer "are we ready", and at 0.2.75 it was answering about a
+tree that no longer exists.
+
+**Verdict unchanged: NOT ACCEPTED**, and for the same single reason — **AC-1**. No tag exists, `release.yml`
+has run zero times, and `allowed_signers` is still absent, so the workflow fails closed before it can
+publish. Nobody has installed from a release package because there is no release package. That is not a
+code defect and it is not mine to close.
+
+### What moved, with evidence
+
+| AC | Then (0.2.75) | Now (0.2.104) | Evidence |
+|---|---|---|---|
+| **AC-1** | UNMET — no package | **UNMET, but the deploy path is now measured from ZERO.** Audit-0013 ran the first real from-zero rebuild and found three defects no offline gate could reach; all fixed. The remaining gap is the package itself. | 0 tags, 0 `release.yml` runs, no `allowed_signers` — re-checked today |
+| **AC-2** | PARTIAL — weather inert | **PARTIAL, unchanged.** The aggregate exists; nothing publishes it. Still deferred to Phase 3 per Decision B. | no publisher in `control/`, `cmd/`, `scripts/` |
+| **AC-3** | UNMET, DEFERRED | unchanged | — |
+| **AC-4** | DEFERRED | unchanged | — |
+| **AC-5** | MET | **MET, and materially more so.** The RP-0008 P3 cutover moved the live data-plane renderer out of bash: the Go spine renders the node's config on every converge, gate-pinned byte-identical, with the shell as an absence-only fallback. | `no_new_control_decisions_in_bash.sh` green; **Audit-0014** |
+| **AC-6** | MET | unchanged | `check_ppn_wording` green |
+| **AC-7** | MET | unchanged | — |
+| **AC-8** | MET | unchanged | — |
+| **AC-9** | MET as a mechanism | unchanged | — |
+| **AC-10** | MET | **MET.** Badges re-verified today; the suite is 119 gates and the merge gate compiles, vets, races and runs them. | `readme_badges_honest.sh` green |
+
+### What this re-score does not establish
+
+- It is a **desk re-score against gates and the tree**, not a re-run of Audit-0013's live transport matrix.
+  The renderer cutover produced byte-identical configs on all three nodes, so the transport surface is
+  unchanged by construction — an argument, not a measurement.
+- **AC-1 cannot be scored higher than UNMET by anyone but the key holder.** Publishing the signing key is
+  the whole of it, and every rehearsal of the release lane is blocked behind the same fail-closed step.
+

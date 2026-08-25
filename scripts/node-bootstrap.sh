@@ -1188,7 +1188,22 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		l7-probe)          measure_l7_probe ;;
 		l7-probe-awg)      measure_l7_probe_amneziawg ;;
 		l7-probe-xhttp)    measure_l7_probe_xhttp ;;
-		pathsig-probe)     measure_pathsig_probe ;;
+		# A VERDICT IS NOT A FAULT. measure_pathsig_probe returns non-zero to REPORT that a threshold was
+		# crossed — having already printed a warn that says which class and that the origin is unknown.
+		# Dispatched bare, that return hit the ERR trap, which announced "This is a bug, not a refusal —
+		# a fail-closed refusal prints a reason" and "The node may be PARTLY converged". Both false: the
+		# reason WAS printed, and nothing was converging. MEASURED on the live network: 21 / 32 / 41 such
+		# blocks per node per day, each four lines, and the systemd unit reporting failure for an
+		# observation it made successfully. A real fault in this path would have been indistinguishable
+		# from the noise.
+		#
+		# Called as an `if` condition, which bash exempts from the ERR trap — the verdict is read, not
+		# trapped. The probe's own contract is unchanged, and the observation still reaches the operator
+		# through the warn and through the marker (which is what the e2e drill reads).
+		pathsig-probe)
+			if measure_pathsig_probe; then :; else
+				log "path-signal: the observer reported a crossed threshold (see the warning above and \$STATE_DIR/path_signal.json). The probe itself completed."
+			fi ;;
 		fp-probe)          measure_fp_ab_probe ;;
 		fp-rotate)         flow_rotate_fingerprint ;;
 		fp-rotate-arm)     fp_rotate_arm ;;

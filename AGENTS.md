@@ -352,7 +352,8 @@ When asked to implement or design something:
 11. **Gates before behaviour.** Land the typed schema and a conformance gate before the behaviour that
     uses it. A Phase-0–2 spec type stays inert by construction — pure data plus `Validate()`, importing
     no `net` / `os` / `os/exec`, exposing no server or goroutine entrypoint — until its phase authorizes
-    it. Keep control logic in the Go spine: *the shell renders and deploys; the Go binary decides and
+    it. Keep control logic in the Go spine. NOTE (v0.2.98): the historical phrasing below — *the shell
+    renders and deploys; the Go binary decides and
     adapts.* Migrate an existing shell decision by a **strangler** port behind a bash↔Go byte-equivalence
     gate — additive, no cutover until the output is byte-identical.
 12. **Version hygiene per chunk.** Every change that lands Go-spine work (`internal/**`, `cmd/**`) bumps
