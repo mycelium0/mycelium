@@ -101,6 +101,17 @@ Consequences of the rule, stated so they are testable:
    than agreement between implementations. A gate that watches N copies agree is evidence the rule was
    not applied.
 
+**Note (v0.2.106): consequence 1 is now enforced as a class, not for one knob.** As written above the
+rule covers every operator-settable knob; as enforced it covered `hysteria2_hop_ports` alone, because
+`params_validation_single_owner.sh` scanned only that key's consumers. Audit-0015 measured the cost:
+`1..65535` stood as a bare literal in four shell renderers and four Go validators — eight expressions of
+one policy, invisible to a gate watching one knob. The wire port range is now a named constant with a
+stated basis (`spec.WirePortBounds`, emitted as `.params_validation.wire_port`), the eight sites compare
+against it, and the gate carries a row that refuses ANY emitted bound retyped in shell. Stated boundary
+of that row: it scans emitted bounds of four or more digits, because small ones (a digit cap of 5, a
+minimum of 1) occur constantly as indices and counts and matching them would produce noise instead of
+findings.
+
 **§2 — front configuration.** ADR-0034 made `node.config.json` the node profile. Its `.front` object is
 therefore the single owner of front configuration. `front.config.json` remains supported as an
 explicit node-local override and **wins when present**, because an operator who placed it there meant

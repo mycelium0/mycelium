@@ -259,6 +259,49 @@ else
 fi
 rm -rf "$B2"
 
+# ---------------------------------------------------------------------------------------------------
+# 9. WHEN PROVENANCE CANNOT BE ESTABLISHED, THE LOG MUST SAY SO.
+#
+# Audit-0015 drove the table: with no `.git` — the tarball install QUICKSTART recommends FIRST — or with
+# `git` failing for any reason, the artifact rev reads "unknown", the spine is stamped "unknown" too, the
+# scrape yields nothing, and BOTH guards skip. Self-consistently inert, and the trace was
+# `rendered by the Go spine` at rc=0, byte-identical to "checked and matched". Every row above this one
+# `git init`s its fixture, so none of them could see it.
+#
+# The render proceeds — refusing would brick the recommended install shape over a property it cannot have
+# — but it must not be indistinguishable from a verified one.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and an unverifiable provenance is not silent --\n'
+P="$(mktemp -d "${TMPDIR:-/tmp}/myc.prov.XXXXXX")" || exit 2
+mkdir -p "$P/bin" "$P/artifact" "$P/state"     # artifact has NO .git: the tarball install
+: > "$P/template.json"; : > "$P/params.json"; : > "$P/identities.json"
+printf '#!/bin/sh\n[ "$1" = version ] && { printf "myceliumctl 0.0.0\\n"; exit 0; }\nexit 0\n' > "$P/bin/myceliumctl-go"
+printf '#!/bin/sh\nexit 0\n' > "$P/bin/myceliumctl"
+chmod +x "$P/bin/myceliumctl-go" "$P/bin/myceliumctl"
+PTRACE="$P/trace"
+(
+	MYCTL="$P/bin/myceliumctl"; SPINE_BIN="$P/bin/myceliumctl-go"; ARTIFACT_ROOT="$P/artifact"
+	RENDER_TEMPLATE="$P/template.json"; PARAMS_JSON="$P/params.json"; IDENTITIES_JSON="$P/identities.json"
+	log()  { printf 'LOG %s\n' "$*" >>"$PTRACE"; }
+	warn() { printf 'WARN %s\n' "$*" >>"$PTRACE"; }
+	die()  { printf 'DIE %s\n' "$*" >>"$PTRACE"; exit 7; }
+	have() { command -v "$1" >/dev/null 2>&1; }
+	run()  { printf 'RUN %s\n' "$*" >>"$PTRACE"; "$@"; }
+	# shellcheck source=/dev/null
+	. "$LIB" >/dev/null 2>&1 || exit 2
+	MYCTL="$P/bin/myceliumctl"; SPINE_BIN="$P/bin/myceliumctl-go"; ARTIFACT_ROOT="$P/artifact"
+	RENDER_TEMPLATE="$P/template.json"; PARAMS_JSON="$P/params.json"; IDENTITIES_JSON="$P/identities.json"
+	render_candidate "$P/candidate.json"
+) >/dev/null 2>&1
+ptrace="$(cat "$PTRACE" 2>/dev/null)"
+grep -q '^RUN .*myceliumctl-go render-server' <<<"$ptrace" \
+	&& ok "the render still proceeds where provenance cannot be established" \
+	|| badln "a node installed from a tarball can no longer render at all — refusing over a property that install shape cannot have is worse than the silence it replaced"
+grep -qi 'provenance could NOT be established\|provenance unverified' <<<"$ptrace" \
+	&& ok "and the log says the guard could not look, rather than implying it matched" \
+	|| badln "the trace is indistinguishable from a verified render: $(tr '\n' '|' <<<"$ptrace" | cut -c1-200). An operator reading it cannot tell a checked spine from an unvouched one."
+rm -rf "$P"
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the render cutover does not have the shape it claims.\n' >&2

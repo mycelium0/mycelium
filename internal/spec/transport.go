@@ -281,6 +281,23 @@ type PortRangeBounds struct {
 	Max int `json:"max"` // highest admissible port
 }
 
+// wirePortBounds are the bounds ANY port on the wire must fall inside — the 16-bit TCP/UDP port space
+// with 0 excluded (0 is "unspecified", never a listener). Distinct from hysteria2HopPortBounds, which is
+// an operator POLICY window (unprivileged only); this is the protocol's own range.
+//
+// IT IS NAMED AND EMITTED BECAUSE IT WAS COPIED EIGHT TIMES. `1..65535` stood as a bare literal in four
+// Go validators and four shell ones — nb_two_hop.sh, render_singbox.sh, render_bundle.sh (twice) and
+// render_aggregate.sh — which is precisely the duplicate truth ADR-0038 forbids. The rule was enforced
+// for exactly one knob (hysteria2_hop_ports), so the gate that polices single-ownership could not see
+// the other seven copies. (Audit-0015 S3-3.)
+var wirePortBounds = PortRangeBounds{Min: 1, Max: 65535}
+
+// WirePortBounds returns the admissible port range for any listener or endpoint (a copy).
+func WirePortBounds() PortRangeBounds { return wirePortBounds }
+
+// ValidWirePort reports whether p is a usable TCP/UDP port. One predicate, one owner.
+func ValidWirePort(p int) bool { return p >= wirePortBounds.Min && p <= wirePortBounds.Max }
+
 // hysteria2HopPortBounds are the bounds a hop range must fall inside.
 //
 // BASIS for Min: 1024 is the unprivileged floor. Below it a range would demand CAP_NET_BIND_SERVICE
@@ -502,6 +519,10 @@ type ParamsValidationVocab struct {
 	// family's traffic, and no check on the node can see it: the reach anchors are loopback and never
 	// traverse a `-i <wan>` PREROUTING rule (Audit-0010 F-001).
 	UDPPortKeys []string `json:"udp_port_keys"`
+	// WirePort is the protocol's own port range (1..65535), emitted for the same reason the hop bounds
+	// are: every consumer that checks a port must apply one rule, and eight hand-written copies of
+	// `1..65535` are eight chances for one of them to drift.
+	WirePort PortRangeBounds `json:"wire_port"`
 	// Hysteria2HopIntervalPattern is an ERE every accepted hop interval must match. A duration cannot be
 	// bounded by two integers, so the owner emits the SHAPE instead — same principle, different carrier.
 	// Until this existed the interval was operator-settable and judged by nobody (Audit-0010 F-005),
@@ -530,6 +551,7 @@ func NewVocab() Vocab {
 			MaxPortFieldDigits:          maxPortFieldDigits,
 			UDPPortKeys:                 UDPPortKeys(),
 			Hysteria2HopInterval:        DefaultHysteria2HopInterval,
+			WirePort:                    WirePortBounds(),
 			Hysteria2HopIntervalPattern: hysteria2HopIntervalPattern,
 		},
 	}

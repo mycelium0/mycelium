@@ -34,8 +34,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      # shellcheck is installed HERE, not only in the lint job, because ci_lint_strict.sh's third row
+      # RUNS the blocking linter over the same file set the lint job lints — and without the binary that
+      # row printed SKIP and the gate still exited 0. The suite reported green while saying nothing at all
+      # about shell lint, which is the gap that let four red merges through in one day. (Audit-0015 S3-2.)
+      - name: Install jq + shellcheck
+        run: sudo apt-get update && sudo apt-get install -y jq shellcheck
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod

@@ -231,10 +231,10 @@ myc_render_bundle() {
 		[ -n "$th_server" ] || myc_die "bundle: params.two_hop.server is empty (fail-closed; the upstream needs an address)."
 		[ -n "$th_sni" ]    || myc_die "bundle: params.two_hop.sni is empty (fail-closed; the upstream TLS needs a server_name)."
 		case "$th_port" in
-			''|*[!0-9]*) myc_die "bundle: params.two_hop.server_port is not a positive integer ('$th_port'); must be 1..65535 (fail-closed)." ;;
+			''|*[!0-9]*) myc_die "bundle: params.two_hop.server_port is not a positive integer ('$th_port'); must be $(myc_wire_port_range) (fail-closed)." ;;
 		esac
-		if [ "$th_port" -lt 1 ] || [ "$th_port" -gt 65535 ]; then
-			myc_die "bundle: params.two_hop.server_port is out of range ('$th_port'); must be 1..65535 (fail-closed)."
+		if ! myc_wire_port_ok "$th_port"; then
+			myc_die "bundle: params.two_hop.server_port is out of range ('$th_port'); must be $(myc_wire_port_range) (fail-closed)."
 		fi
 		# C18: via_user must match an existing identity (clients[].name) or the auth_user route never matches.
 		if ! printf '%s' "$clients" | jq -e --arg u "$th_via" 'any(.[]; .name == $u)' >/dev/null 2>&1; then
@@ -360,10 +360,10 @@ myc_render_bundle() {
 		# would otherwise be spliced raw into the Link (e.g. server:0), producing a non-dialable endpoint
 		# that still passes the non-empty checks. Refuse it here rather than emit an invalid port.
 		case "$port" in
-			''|*[!0-9]*) myc_die "bundle: port for protocol '$proto' is not a positive integer ('$port'); a server_port must be in 1..65535." ;;
+			''|*[!0-9]*) myc_die "bundle: port for protocol '$proto' is not a positive integer ('$port'); a server_port must be in $(myc_wire_port_range)." ;;
 		esac
-		if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-			myc_die "bundle: port for protocol '$proto' is out of range ('$port'); a server_port must be in 1..65535."
+		if ! myc_wire_port_ok "$port"; then
+			myc_die "bundle: port for protocol '$proto' is out of range ('$port'); a server_port must be in $(myc_wire_port_range)."
 		fi
 		link="$(myc_bundle_link "$proto" "$node_addr" "$port" "$id" "$donor_sni" "$pub" "$short_first" \
 			"$tls_sni" "$ss_pw" "$hy2_pw" "$trojan_pw" "$tuic_pw" "$grpc_service" "$xhttp_path" "$xhttp_path_tls" "$ws_path" "$client_fingerprint")"

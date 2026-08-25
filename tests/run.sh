@@ -417,6 +417,7 @@ GATES=(
 	"tests/conformance/update_unit_template_shape.sh"
 	"tests/conformance/update_flap_guard.sh"
 	"tests/conformance/update_chain_is_unbroken.sh"
+	"tests/conformance/update_outcome_is_named.sh"
 	"tests/conformance/bootstrap_from_zero_survives.sh"
 	"tests/conformance/node_address_is_public.sh"
 	"tests/conformance/no_operator_address_in_tree.sh"
@@ -455,6 +456,8 @@ GATES=(
 
 pass=0
 fail=0
+skip_gates=0
+skip_rows=0
 declare -a RESULTS=()
 
 printf '########################################\n'
@@ -472,9 +475,29 @@ for g in "${GATES[@]}"; do
 		fail=$((fail + 1))
 		continue
 	fi
-	# Run via bash so an un-chmod'd gate still executes.
-	if bash "$gate"; then
-		RESULTS+=("PASS     $g")
+	# Run via bash so an un-chmod'd gate still executes. The output is tee'd rather than swallowed so the
+	# live log is unchanged, and read back only to COUNT SKIPS.
+	#
+	# WHY SKIPS ARE COUNTED. `total:` is the number the README badge and the release ledger quote, and it
+	# was the count of gates that EXITED ZERO — which a gate does when it skips. 31 of 119 gates emit at
+	# least one SKIP row, and two skip everything they exist to check in an ordinary checkout: the audit
+	# index gate finds no docs/audits/ in a `git archive` tarball, and ci_lint_strict's shellcheck row has
+	# no shellcheck in the gates job. Reading "119/119" as "119 checks ran" was therefore wrong, and
+	# nothing on any surface said so. The suite now reports what it did not run. (Audit-0015 S3-2.)
+	gate_out="$(mktemp "${TMPDIR:-/tmp}/myc.gate.XXXXXX")" || exit 2
+	bash "$gate" 2>&1 | tee "$gate_out"
+	gate_rc="${PIPESTATUS[0]}"
+	nskip="$(grep -cE '(^|[[:space:]])SKIP' "$gate_out" 2>/dev/null || printf '0')"
+	case "$nskip" in ''|*[!0-9]*) nskip=0 ;; esac
+	rm -f "$gate_out"
+	if [ "$gate_rc" -eq 0 ]; then
+		if [ "$nskip" -gt 0 ]; then
+			RESULTS+=("PASS*    $g  ($nskip skipped row(s))")
+			skip_gates=$((skip_gates + 1))
+			skip_rows=$((skip_rows + nskip))
+		else
+			RESULTS+=("PASS     $g")
+		fi
 		pass=$((pass + 1))
 	else
 		RESULTS+=("FAIL     $g")
@@ -488,7 +511,12 @@ printf '########################################\n'
 for r in "${RESULTS[@]}"; do
 	printf '  %s\n' "$r"
 done
-printf '\n  total: %d   passed: %d   failed: %d\n' "$((pass + fail))" "$pass" "$fail"
+printf '\n  total: %d   passed: %d   failed: %d   partial: %d (%d skipped row(s))\n' \
+	"$((pass + fail))" "$pass" "$fail" "$skip_gates" "$skip_rows"
+if [ "$skip_gates" -gt 0 ]; then
+	printf '  NOTE: %d gate(s) passed with at least one row SKIPPED (marked PASS* above). "total" counts gates\n' "$skip_gates"
+	printf '        that exited zero, which a gate also does when it checks nothing on this host.\n'
+fi
 
 if [ "$fail" -ne 0 ]; then
 	printf '\nrun.sh: OFFLINE SUITE FAILED (%d gate(s)).\n' "$fail" >&2

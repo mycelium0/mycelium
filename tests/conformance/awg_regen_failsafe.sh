@@ -85,7 +85,8 @@ fi
 # 4) KEY-PRESERVING: regen never regenerates identity (no render_awg0 / awg genkey|genpsk CALL in its body).
 #    Match CODE only — strip full-line comments so an accurate prose mention (e.g. "what render_awg0 would
 #    produce") does not false-trigger; a real call is on a non-comment line.
-if printf '%s\n' "$body" | grep -vE '^[[:space:]]*#' | grep -qE 'render_awg0|awg genkey|awg genpsk|awg pubkey'; then
+body_code="$(grep -vE '^[[:space:]]*#' <<<"$body")"
+if grep -qE 'render_awg0|awg genkey|awg genpsk|awg pubkey' <<<"$body_code"; then
 	bad "regen_awg_dialect regenerates identity (render_awg0 / awg genkey|genpsk|pubkey) — it must PRESERVE keys"
 else
 	ok "regen preserves keys (no render_awg0 / awg genkey|genpsk|pubkey call — only the dialect changes)"
@@ -133,7 +134,8 @@ else
 fi
 
 # 9) ROTATION IS KEY/PEER-PRESERVING: rotate never regenerates identity (code lines only).
-if printf '%s\n' "$rot" | grep -vE '^[[:space:]]*#' | grep -qE 'awg genkey|awg genpsk|render_awg0'; then
+rot_code="$(grep -vE '^[[:space:]]*#' <<<"$rot")"
+if grep -qE 'awg genkey|awg genpsk|render_awg0' <<<"$rot_code"; then
 	bad "rotate_awg_dialect touches identity (genkey/genpsk/render_awg0) — rotation must only change the dialect"
 else
 	ok "rotate preserves keys + peers (only the dialect changes)"

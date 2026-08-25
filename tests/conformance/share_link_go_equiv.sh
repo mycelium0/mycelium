@@ -30,18 +30,24 @@ command -v jq >/dev/null 2>&1 || { printf 'FAIL: jq is required.\n' >&2; exit 2;
 printf '== share-link Go↔shell byte-equivalence (RP-0008 P3-a) ==\n'
 printf 'repo: %s\n' "$REPO_ROOT"
 
-# Build the Go spine (skip the gate if no toolchain).
-GO=""
-if command -v go >/dev/null 2>&1; then
-	GO="$(mktemp "${TMPDIR:-/tmp}/myc-spine.XXXXXX")"
-	if ! ( cd "$REPO_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 go build -o "$GO" ./cmd/myceliumctl ) >/dev/null 2>&1; then
-		rm -f "$GO"; GO=""
-	fi
-fi
-if [ -z "$GO" ]; then
+# Build the Go spine.
+# A BUILD FAILURE IS NOT A MISSING TOOLCHAIN. This used to collapse both into the same SKIP + exit 0, so
+# a tree whose Go half did not compile scored GREEN on the very gate that exists to prove the two halves
+# agree byte for byte — and the suite's `total:` counted it as run. No toolchain is a genuine skip on the
+# offline jq-only host; a toolchain that is present and cannot build this tree is a FAULT, and it is
+# reported with the compiler's own words. (Audit-0015 S3-1.)
+if ! command -v go >/dev/null 2>&1; then
 	printf 'SKIP: no Go toolchain — the Go-node/CI lane runs the bash↔Go link equivalence (TestShareLinkGolden mirrors it).\n'
 	exit 0
 fi
+GO="$(mktemp "${TMPDIR:-/tmp}/myc-spine.XXXXXX")" || exit 2
+if ! ( cd "$REPO_ROOT" && GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off CGO_ENABLED=0 go build -o "$GO" ./cmd/myceliumctl ) >"$GO.err" 2>&1; then
+	printf 'FAIL: a Go toolchain is present but the spine does not build; the byte-equivalence half of this gate could not run:\n' >&2
+	sed 's/^/    /' "$GO.err" >&2
+	rm -f "$GO" "$GO.err"
+	exit 2
+fi
+rm -f "$GO.err"
 trap 'rm -f "$GO"' EXIT
 
 # Source the shell link generator (myc_bundle_link + myc_uri_encode). common.sh gives myc_die.

@@ -262,8 +262,17 @@ record_l7_verdict() {
 # nothing that could identify a node or a client leaves the loopback exporter).
 #   0 = none (last attempt succeeded)   1 = signature verification refused the fetched ref
 #   2 = the checkout could not fast-forward (dirty tree, or history diverged)
-#   3 = render/validate refused the candidate   4 = post-apply verification failed, rolled back
+#   3 = the rendered candidate failed its validator (sing-box/xray check)
+#   4 = post-apply verification failed, rolled back
+#   5 = the RENDERER refused to produce a candidate at all
 #   9 = other/unclassified
+#
+# 5 EXISTS BECAUSE 9 WAS A LIE. Every render refusal — three sites in nb_update_apply.sh, including the
+# two that fire when the Go spine's provenance does not match the deployed artifact — passed the reason
+# "render", which no arm matched, so all of them published 9 = "other/unclassified". The single most
+# likely refusal on a cutover node was reported as the code that means "we don't know". A renderer that
+# refuses and a validator that rejects are different faults with different remedies (the first is the
+# node's own tooling; the second is the config it produced), so they get different codes. (Audit-0015.)
 myc_update_reason_code() {
 	case "$1" in
 		none|"")      printf '0' ;;
@@ -271,6 +280,7 @@ myc_update_reason_code() {
 		fast-forward) printf '2' ;;
 		validate)     printf '3' ;;
 		post-apply)   printf '4' ;;
+		render)       printf '5' ;;
 		*)            printf '9' ;;
 	esac
 }
@@ -354,7 +364,7 @@ _write_update_prom() {
 		printf '# HELP mycelium_update_consecutive_failures Consecutive failed update attempts; 0 = the last attempt succeeded.\n'
 		printf '# TYPE mycelium_update_consecutive_failures gauge\n'
 		printf 'mycelium_update_consecutive_failures %s\n' "$consec"
-		printf '# HELP mycelium_update_last_failure_reason Closed-vocab code for the last failure: 0 none, 1 signature, 2 fast-forward, 3 validate, 4 post-apply, 9 other.\n'
+		printf '# HELP mycelium_update_last_failure_reason Closed-vocab code for the last failure: 0 none, 1 signature, 2 fast-forward, 3 validate, 4 post-apply, 5 render-refused, 9 other.\n'
 		printf '# TYPE mycelium_update_last_failure_reason gauge\n'
 		printf 'mycelium_update_last_failure_reason %s\n' "$code"
 	} >"$out.tmp" 2>/dev/null && { chmod 0644 "$out.tmp" 2>/dev/null || true; mv -f "$out.tmp" "$out" 2>/dev/null || true; }
@@ -366,6 +376,12 @@ _write_update_prom() {
 # not turn a recoverable update failure into a different failure.
 record_update_failure() {
 	[ "${DRY_RUN:-0}" -eq 1 ] && return 0
+	# A REHEARSAL IS NOT AN ATTEMPT. rotate_apply_dryrun renders and validates a candidate it will never
+	# promote; its whole contract is "promotes nothing, mutates no persisted state". Its render/validate
+	# calls reach here, and this function persists a counter — so a rotation rehearsal that correctly
+	# refused a candidate raised mycelium_update_consecutive_failures, the metric that means "this node
+	# has stopped taking new code". Nothing had gone wrong with updating at all. (Audit-0015 S2-5.)
+	[ "${MYC_UPDATE_BOOKKEEPING:-1}" -eq 1 ] || return 0
 	local reason="${1:-other}" consec last_ok code
 	consec="$(cat "$STATE_DIR/update_consecutive_failures" 2>/dev/null || printf '0')"
 	case "$consec" in ''|*[!0-9]*) consec=0 ;; esac
@@ -376,9 +392,22 @@ record_update_failure() {
 	code="$(myc_update_reason_code "$reason")"
 	printf '%s\n' "$code" > "$STATE_DIR/update_last_failure_reason" 2>/dev/null || true
 	_write_update_prom "$consec" "$code" "$last_ok"
-	warn "update attempt FAILED ($reason); $consec consecutive failure(s). This node is not taking new"
-	warn "  code and nothing else reports that: the timer stays active and the data plane keeps serving"
-	warn "  the last-known-good config. mycelium_update_consecutive_failures is the metric to alert on."
+	# SAY WHICH FAILURE THIS IS. The message used to assert "this node is not taking new code" for every
+	# reason. That is true only when the fetch itself was refused — signature, fast-forward: 2 of the 11
+	# call sites. On the other 9 the node DID take the code and then refused to serve it, which is a
+	# different fault with a different remedy, and telling an operator to go look at the git tip when the
+	# renderer is what broke sends them to the wrong end of the machine. (Audit-0015 S2-5.)
+	case "$reason" in
+		signature|fast-forward)
+			warn "update attempt FAILED ($reason); $consec consecutive failure(s). This node is NOT TAKING NEW"
+			warn "  CODE: the fetched tip was refused, so the node is pinned at its current revision. The timer"
+			warn "  stays active and the data plane keeps serving the last-known-good config." ;;
+		*)
+			warn "update attempt FAILED ($reason); $consec consecutive failure(s). The node TOOK the new code and"
+			warn "  then REFUSED TO SERVE it (fail-closed at the $reason stage); the data plane keeps serving the"
+			warn "  last-known-good config. The fault is on this node, not at the git tip." ;;
+	esac
+	warn "  mycelium_update_consecutive_failures is the metric to alert on; mycelium_update_last_failure_reason carries the stage."
 	return 0
 }
 

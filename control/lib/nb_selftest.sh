@@ -508,7 +508,12 @@ PROBE_EOF
 	command -v record_l7_verdict >/dev/null 2>&1 && record_l7_verdict "$marker"
 	if [ -n "$dead" ]; then
 		warn "L7 measure-probe: client-DEAD transport(s):$dead (own-listener handshake failed)."
-		return 1
+		# A VERDICT IS NOT A FAULT, AND THE TWO MUST NOT SHARE AN EXIT CODE. Returning 1 here made "I observed
+		# what I exist to observe" indistinguishable from "something inside me broke" — and because the caller
+		# tests this function's status, `set -e` is suppressed for the WHOLE body either way (measured: the
+		# `if` form and the `|| ` form behave identically), so an internal failure could fall through and be
+		# read as a verdict. MYC_PROBE_VERDICT is that distinction, and the dispatcher swallows only it.
+		return "$MYC_PROBE_VERDICT"
 	fi
 	if [ -n "$unknown" ]; then
 		# Say what was NOT established. The old line claimed every transport "passes", counting members the
@@ -759,7 +764,12 @@ measure_l7_probe_amneziawg() {
 		&& mv -f "$marker.tmp" "$marker" 2>/dev/null || true
 	if [ "$verdict" = dead ]; then
 		warn "L7 AmneziaWG probe: awg0 did not complete a loopback handshake — the UDP data-plane is bound but a real client could not establish the tunnel (engine wedged / not processing handshakes)."
-		return 1
+		# A VERDICT IS NOT A FAULT, AND THE TWO MUST NOT SHARE AN EXIT CODE. Returning 1 here made "I observed
+		# what I exist to observe" indistinguishable from "something inside me broke" — and because the caller
+		# tests this function's status, `set -e` is suppressed for the WHOLE body either way (measured: the
+		# `if` form and the `|| ` form behave identically), so an internal failure could fall through and be
+		# read as a verdict. MYC_PROBE_VERDICT is that distinction, and the dispatcher swallows only it.
+		return "$MYC_PROBE_VERDICT"
 	fi
 	[ "$verdict" = alive ] && log "L7 AmneziaWG probe: awg0 completed a loopback handshake — the obfuscated-WireGuard data-plane is live at L7."
 	return 0
@@ -812,5 +822,10 @@ measure_l7_probe_xhttp() {
 	fi
 	printf '{"observed_at":"%s","checked":1,"dead":["vless-xhttp-tls"]}\n' "$ts" >"$marker.tmp" 2>/dev/null && mv -f "$marker.tmp" "$marker" 2>/dev/null || true
 	warn "L7 xhttp-tls probe: the xray xhttp-tls own-cert loopback handshake FAILED (no leaf / expired / SAN mismatch) — 2087 is bound but a real client would fail the outer TLS layer."
-	return 1
+	# A VERDICT IS NOT A FAULT, AND THE TWO MUST NOT SHARE AN EXIT CODE. Returning 1 here made "I observed
+	# what I exist to observe" indistinguishable from "something inside me broke" — and because the caller
+	# tests this function's status, `set -e` is suppressed for the WHOLE body either way (measured: the
+	# `if` form and the `|| ` form behave identically), so an internal failure could fall through and be
+	# read as a verdict. MYC_PROBE_VERDICT is that distinction, and the dispatcher swallows only it.
+	return "$MYC_PROBE_VERDICT"
 }

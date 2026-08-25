@@ -127,23 +127,38 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------------
-# 3. SKIP IS STILL EXIT-0-SHAPED, so the protocol's warning about it is still true.
+# 3. THE RUNNER REPORTS WHAT IT DID NOT RUN, AND §7.6 SAYS SO.
+#
+# This row used to assert the OPPOSITE: that run.sh keeps NO skip tally, so §7.6's warning ("a skipped row
+# is indistinguishable from a pass in the total") stayed accurate. That was a faithful description of a
+# defect. 31 of 119 gates emitted at least one SKIP and two skipped everything they existed to check —
+# the audit-index gate finds no docs/audits/ in a `git archive` tarball, ci_lint_strict's shellcheck row
+# has no shellcheck in the gates job — while `total: 119` was what the badge and the release ledger
+# quoted. The runner now separates them, so the row is inverted: the tally is REQUIRED, and the protocol
+# must describe the tally rather than warn about its absence. (Audit-0015 S3-2.)
+#
+# STRIP COMMENTS FIRST, both sides. The runner's header documents which gates skip without a Go toolchain
+# and §7.6 quotes the runner's own output, so a bare grep reads prose as behaviour — the mistake this
+# suite is built to catch, committed inside the gate that polices the protocol.
 # ---------------------------------------------------------------------------------------------------
-printf '\n-- "a SKIP counts as a pass in the total" is still accurate --\n'
-if grep -qi 'skip' <<<"$proto" ; then
-	# Drive it: a gate that prints SKIP and exits 0 must be counted as passed by the runner. If run.sh
-	# ever grew a separate skip tally, the advice would be stale in the safe direction — but stale.
-	# STRIP COMMENTS FIRST. The runner's header documents which gates skip without a Go toolchain, so a
-	# bare grep for "skip" reads prose as behaviour and reports a tally that does not exist — the same
-	# mistake this whole suite is built to catch, committed inside the gate that polices the protocol.
-	runner_code="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$RUNNER")"
-	if grep -qiE 'skip[+_]?=|skip(ped)?\+\+|\bskipped\b[[:space:]]*[0-9=]' <<<"$runner_code" ; then
-		badln "tests/run.sh appears to keep a separate skip tally now. If it does, §7.6's warning that 'a skipped row counts as a pass in the total' is no longer accurate and must be rewritten to match — a stale warning is read once and then ignored."
+printf '\n-- the runner reports what it did not run, and the protocol says so --\n'
+runner_code="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$RUNNER")"
+if grep -qiE 'skip[a-z_]*=|skip(ped)?\+\+|skip[a-z_]*=\$\(\(' <<<"$runner_code"; then
+	ok "tests/run.sh keeps a skip tally"
+	if grep -qE 'partial:|skipped row' <<<"$runner_code"; then
+		ok "  and publishes it on the summary line, next to the total the badge quotes"
 	else
-		ok "the runner keeps no skip tally, so a SKIP is still indistinguishable from a pass in the total — exactly what §7.6 warns about"
+		badln "tests/run.sh counts skips but never prints the count. A tally nobody sees is the same blind spot with extra code — the number has to land on the summary line, beside the total."
 	fi
+	if grep -qiE 'partial|PASS\*|skipped row' <<<"$proto"; then
+		ok "  and §7.6 describes the tally the runner actually prints"
+	else
+		badln "tests/run.sh now reports skips (PASS* / partial), and §7.6 still does not mention it. A contributor reading the protocol would not know the number exists, or that 'total' still counts gates that checked nothing."
+	fi
+elif grep -qi 'skip' <<<"$proto"; then
+	badln "tests/run.sh keeps NO skip tally. A gate that skips every row still exits 0 and is counted in 'total:' — the number the README badge and the release ledger quote — so the suite reports coverage it does not have. It was 31 of 119 gates when this was last measured."
 else
-	badln "§7.6 no longer warns that a SKIP is exit-0 and counts as a pass. That warning exists because an unexplained skip is a row that has quietly stopped testing anything."
+	badln "§7.6 says nothing about SKIPs and the runner counts none. An unexplained skip is a row that has quietly stopped testing anything, and neither surface would show it."
 fi
 
 # ---------------------------------------------------------------------------------------------------

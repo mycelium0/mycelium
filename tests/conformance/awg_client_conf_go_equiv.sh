@@ -41,9 +41,15 @@ command -v render_awg_client_conf >/dev/null 2>&1 || { printf 'FAIL: render_awg_
 
 WORK="$(mktemp -d)" || { printf 'FAIL: mktemp failed.\n' >&2; exit 2; }
 trap 'rm -rf "$WORK"' EXIT
-if ! ( cd "$REPO_ROOT" && go build -o "$WORK/myceliumctl" ./cmd/myceliumctl ) 2>/dev/null; then
-	printf 'SKIP: could not build myceliumctl.\n'
-	exit 0
+# A BUILD FAILURE IS NOT A MISSING TOOLCHAIN. This used to collapse both into the same SKIP + exit 0, so
+# a tree whose Go half did not compile scored GREEN on the very gate that exists to prove the two halves
+# agree byte for byte — and the suite's `total:` counted it as run. No toolchain is a genuine skip on the
+# offline jq-only host; a toolchain that is present and cannot build this tree is a FAULT, and it is
+# reported with the compiler's own words. (Audit-0015 S3-1.)
+if ! ( cd "$REPO_ROOT" && go build -o "$WORK/myceliumctl" ./cmd/myceliumctl ) >"$WORK/build.err" 2>&1; then
+	printf 'FAIL: a Go toolchain is present but the spine does not build; the byte-equivalence half of this gate could not run:\n' >&2
+	sed 's/^/    /' "$WORK/build.err" >&2
+	exit 2
 fi
 
 # SYNTHETIC test material. These are deliberately NOT key-shaped high-entropy strings: the renderer

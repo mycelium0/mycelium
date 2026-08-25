@@ -436,10 +436,10 @@ myc_sb_render_server() {
 		[ -n "$th_srv" ] || myc_die "render-server: params.two_hop.server is empty (fail-closed; the upstream needs an address)."
 		[ -n "$th_sn" ]  || myc_die "render-server: params.two_hop.sni is empty (fail-closed; the upstream TLS needs a server_name)."
 		case "$th_pt" in
-			''|*[!0-9]*) myc_die "render-server: params.two_hop.server_port is not a positive integer ('$th_pt'); must be 1..65535 (fail-closed)." ;;
+			''|*[!0-9]*) myc_die "render-server: params.two_hop.server_port is not a positive integer ('$th_pt'); must be $(myc_wire_port_range) (fail-closed)." ;;
 		esac
-		if [ "$th_pt" -lt 1 ] || [ "$th_pt" -gt 65535 ]; then
-			myc_die "render-server: params.two_hop.server_port is out of range ('$th_pt'); must be 1..65535 (fail-closed)."
+		if ! myc_wire_port_ok "$th_pt"; then
+			myc_die "render-server: params.two_hop.server_port is out of range ('$th_pt'); must be $(myc_wire_port_range) (fail-closed)."
 		fi
 		# C18 fail-closed: via_user MUST name an EXISTING client (clients[].name). The auth_user route rule
 		# below keys on this exact name; an unknown user renders fine but the rule NEVER matches — a dead,
