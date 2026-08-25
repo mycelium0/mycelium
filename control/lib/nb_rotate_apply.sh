@@ -424,11 +424,16 @@ rotate_apply_dryrun() {
 	local candidate="$STATE_DIR/config.rotate-candidate.json"
 	cp -f "$PARAMS_JSON" "$tmp_params" || die "rotation: could not stage a temp params copy."
 	apply_rotation_to_params "$plan" "$tmp_params"
-	if ! ( PARAMS_JSON="$tmp_params"; render_candidate "$candidate" ); then
+	# MYC_UPDATE_BOOKKEEPING=0: a REHEARSAL IS NOT AN UPDATE ATTEMPT. render_candidate and validate_config
+	# both record an update failure when they refuse, and this executor's contract is that it mutates no
+	# persisted state — so a dry-run that correctly refused a candidate raised the counter that means "this
+	# node has stopped taking new code". The LIVE executors keep the bookkeeping on purpose: there the
+	# refusal is a real fault on a real convergence, only mislabelled, and dropping it would lose a signal.
+	if ! ( PARAMS_JSON="$tmp_params"; MYC_UPDATE_BOOKKEEPING=0; render_candidate "$candidate" ); then
 		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
 		die "rotation: candidate render failed (fail-closed; nothing changed)."
 	fi
-	if validate_config "$candidate"; then
+	if ( MYC_UPDATE_BOOKKEEPING=0; validate_config "$candidate" ); then
 		log "[dry-run] OK: rotation candidate ($from -> $to) rendered + passed 'sing-box check'. WOULD promote; NOT promoting (dry-run). Live config + persisted params unchanged."
 		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
 		return 0
@@ -914,11 +919,16 @@ rotate_apply_fp_dryrun() {
 	local candidate="$STATE_DIR/config.fp-rotate-candidate.json"
 	cp -f "$PARAMS_JSON" "$tmp_params" || die "fp-rotation: could not stage a temp params copy."
 	apply_fp_rotation_to_params "$plan" "$tmp_params"
-	if ! ( PARAMS_JSON="$tmp_params"; render_candidate "$candidate" ); then
+	# MYC_UPDATE_BOOKKEEPING=0: a REHEARSAL IS NOT AN UPDATE ATTEMPT. render_candidate and validate_config
+	# both record an update failure when they refuse, and this executor's contract is that it mutates no
+	# persisted state — so a dry-run that correctly refused a candidate raised the counter that means "this
+	# node has stopped taking new code". The LIVE executors keep the bookkeeping on purpose: there the
+	# refusal is a real fault on a real convergence, only mislabelled, and dropping it would lose a signal.
+	if ! ( PARAMS_JSON="$tmp_params"; MYC_UPDATE_BOOKKEEPING=0; render_candidate "$candidate" ); then
 		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
 		die "fp-rotation: candidate render failed (fail-closed; nothing changed)."
 	fi
-	if validate_config "$candidate"; then
+	if ( MYC_UPDATE_BOOKKEEPING=0; validate_config "$candidate" ); then
 		log "[dry-run] OK: fp-rotation candidate ($from -> $to) rendered + passed 'sing-box check'. WOULD promote; NOT promoting (dry-run). Live config + persisted params unchanged."
 		rm -f "$tmp_params" "$candidate" 2>/dev/null || true
 		return 0

@@ -70,7 +70,7 @@ func RenderFrontProxy(fc FrontConfig, nodeAddr, nodePort string) (string, error)
 		return "", fmt.Errorf("front: node address %q is not a bare host/IP (config-injection guard)", nodeAddr)
 	}
 	p, err := strconv.Atoi(nodePort)
-	if err != nil || p < 1 || p > 65535 {
+	if err != nil || !ValidWirePort(p) {
 		return "", fmt.Errorf("front: node port %q is not a positive integer in 1..65535", nodePort)
 	}
 

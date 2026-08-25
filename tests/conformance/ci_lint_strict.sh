@@ -75,7 +75,8 @@ while IFS= read -r line; do
 					*blocking*)
 						blocking_seen=$((blocking_seen + 1))
 						nm="$(printf '%s' "$step" | sed -n 's/.*- name: *//p' | head -1)"
-						if printf '%s' "$step" | grep -vE '^[[:space:]]*#' | grep -qE '\|\|[[:space:]]*(true|:)[[:space:]]*$|continue-on-error:[[:space:]]*true'; then
+						step_code="$(grep -vE '^[[:space:]]*#' <<<"$step")"
+						if grep -qE '\|\|[[:space:]]*(true|:)[[:space:]]*$|continue-on-error:[[:space:]]*true' <<<"$step_code"; then
 							swallowed="$swallowed [$nm]"
 						fi ;;
 				esac
@@ -92,7 +93,8 @@ case "$step" in
 	*blocking*)
 		blocking_seen=$((blocking_seen + 1))
 		nm="$(printf '%s' "$step" | sed -n 's/.*- name: *//p' | head -1)"
-		printf '%s' "$step" | grep -vE '^[[:space:]]*#' | grep -qE '\|\|[[:space:]]*(true|:)[[:space:]]*$|continue-on-error:[[:space:]]*true' \
+		step_code="$(grep -vE '^[[:space:]]*#' <<<"$step")"
+		grep -qE '\|\|[[:space:]]*(true|:)[[:space:]]*$|continue-on-error:[[:space:]]*true' <<<"$step_code" \
 			&& swallowed="$swallowed [$nm]" ;;
 esac
 

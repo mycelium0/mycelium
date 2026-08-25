@@ -97,8 +97,17 @@ else
 fi
 
 # --- 2/3. dispatcher and parser cover the same mode set ---------------------------------------------
-disp="$(awk '/^[[:space:]]*case "\$MODE" in/{f=1} f{print} f&&/^[[:space:]]*esac/{exit}' "$NB" \
-	| grep -oE '^[[:space:]]*[a-z0-9-]+\)' | sed -E 's/[[:space:]]//g; s/\)$//' | sort -u)"
+# NESTING-AWARE. This used to stop at the first line matching `^[[:space:]]*esac` and to take every
+# `label)` it had seen. Both broke the moment a dispatcher arm grew a NESTED case: the probe arms now
+# separate a verdict exit code from a fault, so the extraction ended inside the first probe arm and
+# reported the seven modes below it as flags with no dispatcher branch — a FAIL on a healthy tree.
+# Depth is tracked instead, and only arms at the dispatcher's own level count as modes.
+disp="$(awk '
+	/^[[:space:]]*case .* in[[:space:]]*$/ { if (f || $0 ~ /case "\$MODE" in/) { f = 1; d++; next } }
+	!f { next }
+	/^[[:space:]]*esac/ { d--; if (d == 0) exit; next }
+	d == 1 && /^[[:space:]]*[a-z0-9|-]+\)/ { print }
+' "$NB" | grep -oE '^[[:space:]]*[a-z0-9-]+\)' | sed -E 's/[[:space:]]//g; s/\)$//' | sort -u)"
 pars="$(printf '%s' "$parser" | grep -oE 'MODE="[a-z0-9-]+"' | sed 's/MODE="//; s/"//' | sort -u)"
 
 if [ -z "$disp" ] || [ -z "$pars" ]; then

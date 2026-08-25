@@ -175,6 +175,46 @@ grep -q 'hysteria2HopPortBounds = PortRangeBounds' "$SPEC" \
 # ---------------------------------------------------------------------------------------------------
 # 2. EMITTED, NOT RESTATED.
 # ---------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------------
+# 1b. THE SAME RULE, AS A CLASS — not for one knob.
+#
+# Rows 1a above police single-ownership for hysteria2_hop_ports, the knob whose duplication produced
+# ADR-0038. But the ADR's rule is stated for EVERY operator-settable knob, and the gate enforced it for
+# one. MEASURED (Audit-0015 S3-3): `1..65535` stood as a bare literal in four shell renderers and four Go
+# validators — eight expressions of one policy — and this gate could not see any of them, because it only
+# ever looked at consumers of one params key. A rule policed for one instance is a rule that holds for one
+# instance.
+#
+# So: no shell file may restate a bound the artifact already emits. The bounds are read OUT of
+# vocab.json, never listed here — a gate that hardcodes the numbers it polices is the ninth copy.
+#
+# STATED BOUNDARY OF THIS MEASUREMENT (§2.2 item 12): only emitted bounds of FOUR OR MORE DIGITS are
+# scanned. Small ones (max_port_field_digits = 5, wire_port.min = 1) occur constantly as array indices,
+# field counts and loop limits, and matching them would report noise the reader learns to skip. The
+# distinctive numbers — 1024, 65535 — are the ones a human retypes, and they are covered.
+printf '\n-- and no shell file restates a bound the artifact emits --\n'
+BOUNDS="$(jq -r '[.params_validation | .. | numbers] | unique | .[] | select(. >= 1000) | tostring' "$VOCAB" 2>/dev/null)"
+if [ -z "$BOUNDS" ]; then
+	badln "control/vocab.json emits no bound of four or more digits, so this row compared nothing. Either the artifact lost .params_validation or the extraction broke; an empty scan must not read as clean."
+else
+	restated=""
+	for b in $BOUNDS; do
+		while IFS= read -r hit; do
+			[ -n "$hit" ] || continue
+			restated="$restated${restated:+; }$hit"
+		done <<EOF
+$(grep -rnE "(^|[^0-9.])$b([^0-9]|\$)" "$REPO_ROOT"/control/lib/*.sh 2>/dev/null \
+	| grep -vE ':[0-9]+:[[:space:]]*#' \
+	| grep -vE '[[:space:]]#[^"'"'"']*$' \
+	| grep -vE 'params_validation' \
+	| sed -E 's/^([^:]*):([0-9]+):.*/\1:\2/' | sed "s|$REPO_ROOT/||")
+EOF
+	done
+	[ -z "$restated" ] \
+		&& ok "no shell file names an emitted bound ($(printf '%s' "$BOUNDS" | tr '\n' ' ')) — every consumer compares against the artifact" \
+		|| badln "these shell sites write out a number the artifact already emits: $restated. ADR-0038 permits comparing against emitted values and forbids a second expression of the policy; a retyped bound is exactly that, and it is invisible to every check that watches only the owner."
+fi
+
 printf '\n-- the artifact carries what the shell needs --\n'
 vmin="$(jq -r '.params_validation.hysteria2_hop_ports.min // empty' "$VOCAB")"
 vmax="$(jq -r '.params_validation.hysteria2_hop_ports.max // empty' "$VOCAB")"

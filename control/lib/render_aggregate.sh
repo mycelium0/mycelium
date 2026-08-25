@@ -277,6 +277,7 @@ JQSKIP
 # LOCAL-ONLY: this reads the input files and writes OUT. It performs no network I/O whatsoever.
 myc_render_aggregate() {
 	agg_dropped=""
+	agg_classes=""
 	local out
 	out="$1"; shift
 	[ -n "$out" ] || myc_die "aggregate: --out is required"
@@ -387,12 +388,13 @@ myc_render_aggregate() {
 			case "$ob_port" in
 				''|*[!0-9]*) myc_die "aggregate: endpoint link has a non-numeric port (node '$safe_label', tag '$raw_tag') — could not parse endpoint link into a dialable outbound." ;;
 			esac
-			if [ "$ob_port" -lt 1 ] || [ "$ob_port" -gt 65535 ]; then
-				myc_die "aggregate: endpoint link port '$ob_port' is out of range 1..65535 (node '$safe_label', tag '$raw_tag') — could not parse endpoint link into a dialable outbound."
+			if ! myc_wire_port_ok "$ob_port"; then
+				myc_die "aggregate: endpoint link port '$ob_port' is out of range $(myc_wire_port_range) (node '$safe_label', tag '$raw_tag') — could not parse endpoint link into a dialable outbound."
 			fi
 
 			outbounds_json="$(printf '%s' "$outbounds_json" | jq -c --argjson ob "$outbound" '. + [$ob]')"
 			tags_json="$(printf '%s' "$tags_json" | jq -c --arg t "$ns_tag" '. + [$t]')"
+			agg_classes="$agg_classes $ep_class"
 			n_kept=$((n_kept + 1))
 
 			ep_i=$((ep_i + 1))
@@ -456,18 +458,18 @@ myc_render_aggregate() {
 	# Recover each outbound's proto by SUFFIX ("<label>.<proto>"), not by stripping to the first dot: the
 	# label whitelist above admits '.', so a label like "home.eu" would leave "eu.hysteria2" behind and the
 	# family would silently go uncounted — undercounting here refuses a profile that is in fact fine.
-	_agg_fams="$(printf '%s' "$profile" | jq -r --slurpfile v "$_agg_vocab" '
-		[ .outbounds[]
-		  | select((.type|test("^(urltest|selector|direct|block)$"))|not)
-		  | .tag as $t
-		  | ($v[0].protos[] | . as $pr | select($t | endswith("." + $pr.proto)) | $pr.class)
-		  | ($v[0].block_families[.] // empty) ] | unique | length' 2>/dev/null)"
-	_agg_unclassified="$(printf '%s' "$profile" | jq -r --slurpfile v "$_agg_vocab" '
-		[ .outbounds[]
-		  | select((.type|test("^(urltest|selector|direct|block)$"))|not)
-		  | .tag as $t
-		  | select([$v[0].protos[] | . as $pr | select($t | endswith("." + $pr.proto))] | length == 0)
-		  | $t ] | join(",")' 2>/dev/null)"
+	# COUNT THE CLASS, NOT THE TAG. This derived the family by matching the outbound TAG's suffix against
+	# the proto vocabulary — and nothing validates a tag. Audit-0015 drove it: two REALITY-only nodes, one
+	# tag renamed to "mycelium-hysteria2", identical links and identical transport_class, and the fold
+	# published a ONE-FAMILY profile at rc=0 while the honest pair was correctly refused. The endpoints'
+	# transport_class IS validated (the scheme<->class consistency check in the loop above, plus the closed
+	# vocabulary), and it is the field the bundle renderer's own floor counts. One truth, one field.
+	_agg_fams="$(printf '%s' "$agg_classes" | tr ' ' '\n' | grep -v '^$' | sort -u \
+		| jq -R -s --slurpfile v "$_agg_vocab" \
+			'[ split("\n")[] | select(length > 0) | ($v[0].block_families[.] // empty) ] | unique | length' 2>/dev/null)"
+	_agg_unclassified="$(printf '%s' "$agg_classes" | tr ' ' '\n' | grep -v '^$' | sort -u \
+		| jq -R -s --slurpfile v "$_agg_vocab" \
+			'[ split("\n")[] | select(length > 0) | select(($v[0].block_families[.] // null) == null) ] | join(",")' 2>/dev/null | tr -d '"')"
 	_agg_floor="$(jq -r '.independent_family_floor' "$_agg_vocab" 2>/dev/null)"
 	# The THRESHOLD needs the same numeric guard the count has, and for the same reason. Removing the
 	# `// 2` default in 0.2.96 was right — restating a Go-owned number as a shell literal is the defect

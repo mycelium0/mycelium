@@ -87,7 +87,8 @@ else
 	badln "C19/C17: write_params does not call assert_two_hop_shape on a present two_hop.json"
 fi
 # The two_hop merge-failure branch must die (fail-closed), not warn-and-continue.
-if printf '%s\n' "$WP" | awk '/two_hop.json/,/fi$/' | grep -q 'die "two_hop.json is present but could not be merged'; then
+wp_two_hop="$(awk '/two_hop.json/,/fi$/' <<<"$WP")"
+if grep -q 'die "two_hop.json is present but could not be merged' <<<"$wp_two_hop"; then
 	okln "C19: a failed two_hop merge in write_params hard-fails (die; never writes params without the overlay)"
 else
 	badln "C19: a failed two_hop merge in write_params does not hard-fail (possible fail-open)"

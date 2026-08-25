@@ -163,6 +163,39 @@ _myc_vocab_path() {
 	printf '%s/control/vocab.json' "${ARTIFACT_ROOT:-${REPO_ROOT:-.}}"
 }
 
+# myc_wire_port_ok VALUE — succeed iff VALUE is a usable TCP/UDP port under the EMITTED wire bounds
+# (.params_validation.wire_port, owned by spec.WirePortBounds).
+#
+# THE ONE SHELL COMPARATOR FOR A PORT. `1..65535` was written out by hand in four shell renderers and
+# four Go validators. ADR-0038 says a consumer may compare against emitted numbers but may not hold a
+# second expression of the policy, and eight literals are eight expressions of it — invisible to the
+# single-owner gate, which policed exactly one knob. (Audit-0015 S3-3.)
+#
+# FAIL-CLOSED on a vocab with no wire_port: an older artifact beside a newer shell refuses the port
+# rather than falling back to a range it invented locally, which is the whole point of emitting it.
+myc_wire_port_ok() {
+	[ -n "${1:-}" ] || return 1
+	case "$1" in *[!0-9]*) return 1 ;; esac
+	local vocab min max
+	vocab="$(_myc_vocab_path)"
+	[ -f "$vocab" ] || return 1
+	min="$(jq -r '.params_validation.wire_port.min // empty' "$vocab" 2>/dev/null)"
+	max="$(jq -r '.params_validation.wire_port.max // empty' "$vocab" 2>/dev/null)"
+	case "${min:-x}${max:-x}" in *[!0-9]*) return 1 ;; esac
+	[ "$1" -ge "$min" ] && [ "$1" -le "$max" ]
+}
+
+# myc_wire_port_range — the emitted bounds as "MIN..MAX", for a message. Empty when the vocab has none.
+myc_wire_port_range() {
+	local vocab min max
+	vocab="$(_myc_vocab_path)"
+	[ -f "$vocab" ] || return 0
+	min="$(jq -r '.params_validation.wire_port.min // empty' "$vocab" 2>/dev/null)"
+	max="$(jq -r '.params_validation.wire_port.max // empty' "$vocab" 2>/dev/null)"
+	case "${min:-x}${max:-x}" in *[!0-9]*) return 0 ;; esac
+	printf '%s..%s' "$min" "$max"
+}
+
 # myc_hop_range_ok VALUE — succeed iff VALUE is a usable hysteria2 hop range under the EMITTED bounds.
 # The empty string is NOT a range (it means "no hopping"); callers check that separately.
 #

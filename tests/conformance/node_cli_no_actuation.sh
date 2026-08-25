@@ -54,7 +54,8 @@ fi
 
 # 4. the descriptor write is 0600 (node-local, not world-readable), if the writer verbs write at all.
 if grep -qE 'os\.WriteFile' <<<"$block" ; then
-	if printf '%s' "$block" | grep -E 'os\.WriteFile' | grep -qvE '0o?600'; then
+	wf_lines="$(grep -E 'os\.WriteFile' <<<"$block")"
+	if [ -n "$wf_lines" ] && grep -qvE '0o?600' <<<"$wf_lines"; then
 		badln "a descriptor write does not use 0600 (the node-local profile must not be world-readable)"
 	else
 		ok "the descriptor write uses 0600 (node-local)"

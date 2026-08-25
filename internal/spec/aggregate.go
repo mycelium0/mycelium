@@ -455,14 +455,16 @@ func RenderAggregateReport(inputs []AggregateInput) ([]byte, AggregateReport, er
 			if err != nil || ob == nil {
 				return nil, AggregateReport{}, fmt.Errorf("aggregate: could not parse endpoint link into a client outbound (node %q, tag %q)", safe, ep.Tag)
 			}
-			if port := aggOutboundPort(ob); port < 1 || port > 65535 {
+			if port := aggOutboundPort(ob); !ValidWirePort(port) {
 				return nil, AggregateReport{}, fmt.Errorf("aggregate: endpoint link port %d out of range 1..65535 (node %q, tag %q)", port, safe, ep.Tag)
 			}
 			proxies = append(proxies, ob)
 			tags = append(tags, nsTag)
-			if fam, ok := BlockFamilyForProto(shortTag); ok {
-				famSeen[fam] = struct{}{}
-			}
+			// COUNT THE CLASS, NOT THE TAG. This read the family off shortTag — a slice of ep.Tag, which
+			// nothing validates. ep.TransportClass IS validated (aggSchemeClassOK above, against the
+			// endpoint's own link scheme) and is the field render_bundle.sh's own floor counts, so a
+			// renamed tag can no longer manufacture a second family out of one. (Audit-0015 S2-4.)
+			famSeen[string(blockFamily(ep.TransportClass))] = struct{}{}
 		}
 	}
 	if len(proxies) == 0 {

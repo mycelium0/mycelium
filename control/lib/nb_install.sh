@@ -603,7 +603,11 @@ install_spine() {
 	_spine_drop_stale() {
 		local b="$TOOLING_DIR/bin/myceliumctl-go"
 		[ -e "$b" ] || return 0
-		warn "removing the stale spine at $b: it was built from another revision, and since the render cutover a mismatched spine makes every converge fail closed. The node falls back to the shell renderer (gate-pinned byte-identical) until a build succeeds."
+		# The message must say what was actually established. This runs when the build could not be MADE —
+		# no toolchain, or a compile that failed — and at that point nothing has compared revisions; the
+		# binary on disk may well be current. Audit-0015 drove exactly that: a spine reporting the
+		# artifact's own rev, removed under a warning that asserted a mismatch nobody checked.
+		warn "removing the spine at $b: this converge could not build one for the deployed revision, so nothing here can vouch that the binary on disk is this artifact's. Since the render cutover a spine of unvouched provenance is worse than none — the node falls back to the shell renderer (gate-pinned byte-identical) until a build succeeds."
 		run rm -f "$b"
 	}
 	install_go_toolchain || { warn "no usable Go toolchain (pinned download failed + no distro go); skipping the spine build."; _spine_drop_stale; return 0; }

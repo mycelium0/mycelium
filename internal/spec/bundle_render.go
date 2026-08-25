@@ -63,7 +63,7 @@ func RenderBundleWith(params map[string]json.RawMessage, firstClientID, firstCli
 		}
 		portStr := paramStr(params, d.PortKey, strconv.Itoa(d.DefaultPort))
 		port, err := strconv.Atoi(portStr)
-		if err != nil || port < 1 || port > 65535 {
+		if err != nil || !ValidWirePort(port) {
 			return Bundle{}, fmt.Errorf("bundle: port for %q is not a positive integer in 1..65535 (%q)", d.Proto, portStr)
 		}
 		lp := base

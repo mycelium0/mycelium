@@ -708,7 +708,12 @@ measure_pathsig_probe() {
 		warn "path-signal: send-queue stall on served class(es) $(printf '%s' "$collapse" | jq -r 'join(",")' 2>/dev/null || printf '%s' "$collapse") — established flows are not being ACKed (possible downstream post-connect throughput collapse). SHADOW: advisory only until armed."
 		hit=1
 	fi
-	[ "$hit" -eq 1 ] && return 1
+	# A VERDICT IS NOT A FAULT, AND THE TWO MUST NOT SHARE AN EXIT CODE. Returning 1 here made "I observed
+	# what I exist to observe" indistinguishable from "something inside me broke" — and because the caller
+	# tests this function's status, `set -e` is suppressed for the WHOLE body either way (measured: the
+	# `if` form and the `|| ` form behave identically), so an internal failure could fall through and be
+	# read as a verdict. MYC_PROBE_VERDICT is that distinction, and the dispatcher swallows only it.
+	[ "$hit" -eq 1 ] && return "$MYC_PROBE_VERDICT"
 	if [ "$unobserved" != "[]" ]; then
 		warn "path-signal: rates within threshold across the $n class(es) this observer covers — but it has NO COUNTER for $(printf '%s' "$unobserved" | jq -r 'join(",")' 2>/dev/null): those are served and unwatched. Silence about them is not evidence. Re-run --measure-enable (or converge) to reinstall the counter table over the current served set."
 	else

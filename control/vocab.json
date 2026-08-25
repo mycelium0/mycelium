@@ -202,6 +202,10 @@
       "tuic_port",
       "shadowsocks_port"
     ],
+    "wire_port": {
+      "min": 1,
+      "max": 65535
+    },
     "hysteria2_hop_interval_pattern": "^[1-9][0-9]{0,4}(ms|s|m|h)$"
   },
   "block_families": {

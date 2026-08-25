@@ -160,7 +160,11 @@ if grep -q 'PATHSIG_NFT_TABLE="inet mycelium_measure"' <<<"$region_nc" ; then
 else
 	badln "the observer table constant is not exactly 'inet mycelium_measure' — a shared/filter/nat table could alter the live firewall"
 fi
-if printf '%s\n' "$region_nc" | grep -nE '\b(table[[:space:]]+(inet|ip6?|arp|bridge|netdev)[[:space:]]+(filter|nat|mangle|raw|security)|table[[:space:]]+(filter|nat|mangle)|ufw[0-9a-z-]*)\b' | grep -qv 'mycelium_measure'; then
+foreign_tables="$(grep -nE '\b(table[[:space:]]+(inet|ip6?|arp|bridge|netdev)[[:space:]]+(filter|nat|mangle|raw|security)|table[[:space:]]+(filter|nat|mangle)|ufw[0-9a-z-]*)\b' <<<"$region_nc")"
+# `[ -n ]` FIRST: a here-string of an empty variable is still one (empty) line, and `grep -qv` matches
+# it — so without this guard "no foreign table found" would read as "a foreign table without the
+# dedicated name", inverting the verdict on the clean case.
+if [ -n "$foreign_tables" ] && grep -qv 'mycelium_measure' <<<"$foreign_tables"; then
 	badln "the observer region references a non-dedicated firewall table (filter/nat/mangle/ufw) — it must only ever touch inet mycelium_measure"
 	printf '%s\n' "$region_nc" | grep -nE '\b(table[[:space:]]+(inet|ip6?|arp|bridge|netdev)[[:space:]]+(filter|nat|mangle|raw|security)|table[[:space:]]+(filter|nat|mangle)|ufw[0-9a-z-]*)\b' | sed 's/^/        /'
 else
@@ -254,7 +258,8 @@ if grep -q '_collapse_classes()' <<<"$region_nc" ; then
 		fi
 		# The reader must EMIT only the served port/class (its awk key), never the remote address it reads to
 		# exclude loopback. Scan every awk `print` for a rem-address token.
-		if printf '%s\n' "$proc_reader" | grep -oE 'print[^"]*' | grep -qE '\$3\b|\bra\[|\brip\b|rem_address|saddr|daddr'; then
+		printed="$(grep -oE 'print[^"]*' <<<"$proc_reader")"
+		if grep -qE '\$3\b|\bra\[|\brip\b|rem_address|saddr|daddr' <<<"$printed"; then
 			badln "the collapse /proc reader appears to EMIT a remote address (it must read rem_address only to exclude loopback, then discard):"
 			printf '%s\n' "$proc_reader" | grep -nE 'print[^"]*(\$3\b|ra\[|rip)' | sed 's/^/        /'
 		else

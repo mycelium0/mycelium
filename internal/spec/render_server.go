@@ -342,7 +342,7 @@ func allShortIDs(m map[string]json.RawMessage) []string {
 func portFrom(m map[string]json.RawMessage, key, def string) (int, error) {
 	s := paramStr(m, key, def)
 	p, err := strconv.Atoi(s)
-	if err != nil || p < 1 || p > 65535 {
+	if err != nil || !ValidWirePort(p) {
 		return 0, fmt.Errorf("port for %q is not a positive integer in 1..65535 (%q)", key, s)
 	}
 	return p, nil

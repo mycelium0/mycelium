@@ -116,10 +116,11 @@ EOF
 if [ "$rc" != "0" ]; then
 	badln "the derivation failed (rc=$rc) on a two-proto fixture; every row below would prove nothing"
 else
-	printf '%s' "$members" | tr ',' '\n' | grep -qx "$KEEP" && printf '%s' "$members" | tr ',' '\n' | grep -qx "$DROP" \
+	member_lines="$(tr ',' '\n' <<<"$members")"; port_lines="$(tr ',' '\n' <<<"$ports")"
+	grep -qx "$KEEP" <<<"$member_lines" && grep -qx "$DROP" <<<"$member_lines" \
 		&& ok "both enabled protos are members ($members)" \
 		|| badln "members are '$members', expected both $KEEP and $DROP"
-	printf '%s' "$ports" | tr ',' '\n' | grep -qx "$DROP_PORT" \
+	grep -qx "$DROP_PORT" <<<"$port_lines" \
 		&& ok "and each member is anchored on its own port ($ports)" \
 		|| badln "the reach targets are '$ports' and do not include $DROP's port $DROP_PORT — the plane would probe something other than the member it names"
 fi
@@ -135,12 +136,13 @@ EOF
 if [ "$rc" != "0" ]; then
 	badln "the derivation failed (rc=$rc) with one proto disabled"
 else
-	if printf '%s' "$members" | tr ',' '\n' | grep -qx "$DROP"; then
+	member_lines="$(tr ',' '\n' <<<"$members")"; port_lines="$(tr ',' '\n' <<<"$ports")"
+	if grep -qx "$DROP" <<<"$member_lines"; then
 		badln "$DROP is disabled in params and is STILL a member ($members). Its loopback probe then fails for ever, it is permanently the most-impaired member, it wins subject selection on every tick, and the node acts every cooldown about a transport it does not serve — measured on three live nodes over three days."
 	else
 		ok "$DROP is gone from the member set ($members)"
 	fi
-	if printf '%s' "$ports" | tr ',' '\n' | grep -qx "$DROP_PORT"; then
+	if grep -qx "$DROP_PORT" <<<"$port_lines"; then
 		badln "the reach plane still anchors $DROP's port $DROP_PORT (targets: $ports). Nothing is bound there, so the probe reports a permanent fault about a member nobody is serving."
 	else
 		ok "and its reach anchor is gone with it ($ports)"

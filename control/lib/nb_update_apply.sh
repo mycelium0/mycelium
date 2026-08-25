@@ -379,7 +379,7 @@ render_candidate() {
 		#
 		# Fail closed, and name the fix. This cannot fire on the unattended path: flow_update installs the
 		# tooling BEFORE it renders, so the binary there always matches by construction.
-		local _art_rev _spine_rev
+		local _art_rev _spine_rev _spine_provenance
 		_art_rev="$(git -C "${ARTIFACT_ROOT:-/opt/mycelium}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 		_spine_rev="$("$_spine" version 2>/dev/null | grep -oE 'rev [0-9a-f]+' | cut -d" " -f2 || true)"
 		# AN UNSTAMPED SPINE IS NOT "PROBABLY FINE" — it is a spine whose provenance cannot be read.
@@ -388,6 +388,20 @@ render_candidate() {
 		# exactly on the binary least likely to be this artifact's — and the refusal text below used to
 		# advise "rebuild it out of band", which produces precisely that binary. Refuse instead, and say
 		# how to get a stamped one. install_spine builds with -ldflags, so the supported path is unaffected.
+		# PROVENANCE THAT CANNOT BE ESTABLISHED IS NOT PROVENANCE THAT MATCHED. Audit-0015 drove the table:
+		# with no `.git` (the tarball install QUICKSTART recommends FIRST), or with `git` failing for any
+		# reason — missing binary, corrupt repo, a dubious-ownership refusal when root reads a
+		# differently-owned /opt/mycelium — `_art_rev` is "unknown", the spine is stamped "unknown" too, the
+		# scrape yields nothing, and BOTH guards skip. Self-consistently inert, and the trace was
+		# `rendered by the Go spine` at rc=0, byte-identical to "checked and matched".
+		#
+		# Not a refusal: refusing would brick the recommended install shape over a property it cannot have.
+		# But the log must not claim what it did not do — the whole cost of this cutover has been messages
+		# that outran their evidence.
+		if [ "$_art_rev" = unknown ] || [ -z "$_spine_rev" ]; then
+			warn "the spine's provenance could NOT be established (artifact rev: ${_art_rev}, spine rev: ${_spine_rev:-none}). The rev-skew guard is inert for this render — it did not match, it could not look. A tarball install has no .git, and any git failure does the same."
+			_spine_provenance=unverified
+		fi
 		if [ "$_art_rev" != unknown ] && [ -z "$_spine_rev" ]; then
 			_record_update_failure_if_available render; die "the Go spine at $_spine reports no source revision (spec.SourceRev is empty — the mark of a plain \`go build\`), so there is no way to tell whether it is this artifact's. Since the render cutover it produces the live data-plane config, and a binary of unknown provenance may be missing checks this artifact relies on. Let install_spine build it (it stamps the rev via -ldflags): run 'node-bootstrap.sh --update', or remove $_spine to fall back to the shell renderer. Nothing promoted."
 		fi
@@ -401,7 +415,7 @@ render_candidate() {
 			--params "$PARAMS_JSON" \
 			--state "$IDENTITIES_JSON" \
 			--out "$candidate"; then
-			log "rendered by the Go spine ($_spine)"
+			log "rendered by the Go spine ($_spine; provenance ${_spine_provenance:-verified})"
 			return 0
 		fi
 		_record_update_failure_if_available render; die "render-server (Go spine) failed (fail-closed; nothing promoted). NOT falling back to the shell renderer: the two are pinned byte-identical, so a refusal here is a real disagreement — most likely a server template that no longer matches the structs the spine encodes — and rendering it the other way would hide that."

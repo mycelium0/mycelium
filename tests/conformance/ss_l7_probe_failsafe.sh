@@ -130,7 +130,7 @@ fi
 # The control dial must be the SECOND dial: a control that ran first and short-circuited would change the
 # meaning of the tunnel result.
 if [ "$(printf '%s\n' "$probe_fn" | grep -c '_l7_connect_bytes' || true)" = "2" ] \
-	&& printf '%s\n' "$probe_fn" | grep '_l7_connect_bytes' | head -1 | grep -q '"\$ob"'; then
+	&& { dials="$(grep '_l7_connect_bytes' <<<"$probe_fn")"; first_dial="$(head -1 <<<"$dials")"; grep -q '"\$ob"' <<<"$first_dial"; }; then
 	ok "exactly two dials: the tunnel dial first (ALIVE short-circuits), the control dial only on silence"
 else
 	badln "the probe does not make exactly two dials with the TUNNEL dial first — the healthy path must cost one dial and the control must only disambiguate silence"

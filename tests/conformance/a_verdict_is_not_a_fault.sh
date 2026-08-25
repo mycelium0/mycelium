@@ -54,8 +54,8 @@ printf '== a mode that reports something is not announced as a bug ==\n\n'
 # 1. THERE IS A VERDICT TO REPORT.
 # ---------------------------------------------------------------------------------------------------
 body="$(sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' "$LIB")"
-if grep -qE 'hit.*-eq 1.*return 1|return 1[[:space:]]*$' <<<"$(awk '/^measure_pathsig_probe\(\)/,/^}/' "$LIB")"; then
-	ok "measure_pathsig_probe still returns non-zero when a threshold is crossed"
+if grep -qE 'return "\$MYC_PROBE_VERDICT"' <<<"$(awk '/^measure_pathsig_probe\(\)/,/^}/' "$LIB")"; then
+	ok "measure_pathsig_probe still reports a crossed threshold, and with the verdict code rather than 1"
 else
 	badln "the probe no longer reports a crossed threshold by its return at all. Row 2 would then pass by having nothing to observe — the vacuous pass this suite refuses. If the verdict moved somewhere else, move this row with it."
 fi
@@ -64,7 +64,11 @@ fi
 # 2. THE DISPATCH READS IT WITHOUT THE TRAP FIRING — driven against the real trap.
 # ---------------------------------------------------------------------------------------------------
 printf '\n-- and the dispatcher reads it without the ERR trap --\n'
-DISPATCH="$(awk '/pathsig-probe\)/,/;;/' "$NB" | sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' | grep -v '^[[:space:]]*$')"
+# Take the arm to its OWN terminator, not the first `;;` in it: the arm carries a nested `case`, and a
+# range that stops at the first `;;` hands the driver a truncated fragment that cannot parse. The driven
+# script then fails for a reason that has nothing to do with what the row asserts.
+DISPATCH="$(awk '/^[[:space:]]+pathsig-probe\)/{f=1} f{print} f&&/esac[[:space:]]*;;/{exit}' "$NB" \
+	| sed 's/[[:space:]]#.*$//; s/^[[:space:]]*#.*$//' | grep -v '^[[:space:]]*$')"
 if [ -z "$DISPATCH" ]; then
 	badln "could not find the pathsig-probe dispatch arm in $NB"
 else
@@ -76,9 +80,11 @@ else
 		printf 'set -Eeuo pipefail\n'
 		printf '_myc_err_trap() { printf "UNEXPECTED failure\\n" >&2; printf "This is a bug, not a refusal\\n" >&2; printf "The node may be PARTLY converged\\n" >&2; }\n'
 		printf 'trap %s ERR\n' "'_myc_err_trap'"
+		printf 'STATE_DIR=/var/lib/mycelium\n'
 		printf 'log() { printf "log: %%s\\n" "$*"; }\n'
 		printf 'warn() { printf "warn: %%s\\n" "$*" >&2; }\n'
-		printf 'measure_pathsig_probe() { warn "path-signal: inbound-RST rate on served class(es) x exceeds the threshold. ORIGIN UNKNOWN"; return 1; }\n'
+		printf 'MYC_PROBE_VERDICT=3\n'
+		printf 'measure_pathsig_probe() { warn "path-signal: inbound-RST rate on served class(es) x exceeds the threshold. ORIGIN UNKNOWN"; return 3; }\n'
 		printf 'MODE=pathsig-probe\n'
 		printf 'case "$MODE" in\n'
 		printf '%s\n' "$DISPATCH"
@@ -121,6 +127,45 @@ done
 [ -z "$bare" ] \
 	&& ok "no probe arm hands its verdict straight to the ERR trap" \
 	|| badln "these arms still dispatch bare, so a verdict they report is announced as a bug and as a half-converged node:$bare"
+
+# ---------------------------------------------------------------------------------------------------
+# 4. A FAULT IS STILL A FAULT.
+#
+# Audit-0015: dispatching the probe in a status-tested context exempts its WHOLE body from `set -e`, so an
+# internal failure could fall through to the same exit code the verdict uses and be reported to the
+# operator as a finding about the network. Measured then: the `if` form and the `|| ` form behave
+# identically, so the remedy proposed with that finding does not narrow anything. The distinction has to
+# be in the CODE — a verdict is $MYC_PROBE_VERDICT, everything else is a fault — and this row is what
+# stops the dispatcher from swallowing both.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and a fault inside a probe is still a fault --\n'
+if [ -n "${DISPATCH:-}" ]; then
+	{
+		printf 'set -Eeuo pipefail\n'
+		printf 'MYC_PROBE_VERDICT=3\n'
+		printf '_myc_err_trap() { printf "TRAP\\n" >&2; }\n'
+		printf 'trap %s ERR\n' "'_myc_err_trap'"
+		printf 'STATE_DIR=/var/lib/mycelium\n'
+		printf 'log() { printf "log: %%s\\n" "$*"; }\n'
+		printf 'warn() { printf "warn: %%s\\n" "$*" >&2; }\n'
+		printf 'die() { printf "die: %%s\\n" "$*" >&2; exit 1; }\n'
+		# A probe that BROKE, not one that observed: exit 1, the code a fault leaves behind.
+		printf 'measure_pathsig_probe() { return 1; }\n'
+		printf 'MODE=pathsig-probe\n'
+		printf 'case "$MODE" in\n'
+		# `%s`, not `%%s`: the surrounding printfs escape their percent signs because they EMIT a printf
+		# into the generated file, but this one substitutes a value. With `%%s` the driver received the
+		# literal two characters and no dispatcher at all, so `case "$MODE" in %s esac` was a SYNTAX
+		# ERROR — non-zero — and the row below read that as "the fault was reported". It passed without
+		# ever running the dispatcher it exists to test.
+		printf '%s\n' "$DISPATCH"
+		printf 'esac\n'
+	} > "$W/fault.sh"
+	fout="$(bash "$W/fault.sh" 2>&1)"; frc=$?
+	[ "$frc" -ne 0 ] \
+		&& ok "a probe that breaks is reported as a fault, not logged as an observation" \
+		|| badln "a probe that exited 1 — a FAULT — was swallowed like a verdict: '$(tr -d '\n' <<<"$fout" | cut -c1-160)'. The operator is then told the network has a finding when the instrument is what failed."
+fi
 
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then

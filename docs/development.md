@@ -868,8 +868,12 @@ go build ./... && gofmt -l . && go vet ./...
 go test ./... && go test -race ./...
 ```
 
-**Read the SKIPs.** A skipped row exits 0 and is indistinguishable from a pass in the total. Every SKIP
-must be one you can name a reason for; an unexplained skip is a row that has quietly stopped testing.
+**Read the SKIPs.** A skipped row exits 0, so a gate that skips everything it checks still passes. The
+runner now separates the two: a gate that emitted at least one SKIP is listed as `PASS*` with its skip
+count, and the summary carries `partial: N (M skipped row(s))` beside `total:`. Read that number — `total:`
+still counts gates that exited zero, which is what a gate does when it checks nothing on this host. Every
+SKIP must be one you can name a reason for; an unexplained skip is a row that has quietly stopped testing,
+and two of them were skipping everything they existed to check before the tally made them visible.
 
 **Redact node output before it reaches a transcript.** Pipe everything through an IPv4 scrubber —
 `sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<addr>/g'` — not a filter for one known line. `ssh` writes

@@ -92,14 +92,16 @@ if [ -z "$ph_fn" ]; then
 	badln "node_profile_harden is not defined — there is no node-state source for the firewall posture"
 else
 	# FAIL-SAFE, not fail-closed: a `die` here aborts a cadenced root converge over a posture read.
-	printf '%s' "$ph_fn" | grep -vE '^[[:space:]]*#' | grep -qE '\bdie\b' \
+	ph_code="$(grep -vE '^[[:space:]]*#' <<<"$ph_fn")"
+	grep -qE '\bdie\b' <<<"$ph_code" \
 		&& badln "node_profile_harden can die — it is read on every unattended converge, where dying over a posture read aborts the whole tail" \
 		|| ok "node_profile_harden is fail-safe (it degrades to a posture, never aborts the converge)"
 	# Precedence must be declared-field -> remembered -> ON, and the last word must be 'on'.
 	grep -q 'node.config.json' <<<"$ph_fn" && grep -q 'harden.posture' <<<"$ph_fn" \
 		&& ok "node_profile_harden consults the declared field, then the remembered bootstrap posture" \
 		|| badln "node_profile_harden does not consult both the descriptor field and the remembered posture"
-	printf '%s' "$ph_fn" | tail -3 | grep -q "printf 'on'" \
+	ph_tail="$(tail -3 <<<"$ph_fn")"
+	grep -q "printf 'on'" <<<"$ph_tail" \
 		&& ok "  and defaults to ON when neither is present (fail-safe for a firewall, byte-identical to today)" \
 		|| badln "node_profile_harden does not default to ON — an undeclared node would silently lose its firewall"
 fi

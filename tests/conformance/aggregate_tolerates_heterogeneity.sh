@@ -157,7 +157,7 @@ if bash "$CTL" aggregate --bundle "$WORK/bC.json" --name nodeC \
 		[ .outbounds[]|select((.type|test("^(urltest|selector|direct|block)$"))|not)
 		  | .tag as $t | ($v[0].protos[]| . as $pr |select($t|endswith("."+$pr.proto))|$pr.class)
 		  | ($v[0].block_families[.]//empty) ]|unique|join(" ")' "$WORK/sh2.json" 2>/dev/null)"
-	badln "a fold whose survivors span only [$fams] was ACCEPTED. Tolerating an undialable member must not become tolerating a profile with no independent second path — one block would take the client's last route (RP-0013)."
+	badln "a fold whose survivors span only [$fams] (read off the output tags, the only family hint the profile carries) was ACCEPTED. Tolerating an undialable member must not become tolerating a profile with no independent second path — one block would take the client's last route (RP-0013)."
 else
 	if grep -qi 'RP-0013\|floor\|famil' "$WORK/she2"; then
 		ok "a fold that falls below the independent-family floor is refused, and says so"
@@ -293,6 +293,51 @@ else
 	grep -qi 'floor\|RP-0013' "$WORK/dge" \
 		&& ok "a vocabulary with no threshold refuses the fold, and says why" \
 		|| badln "the degraded fold was refused for an unstated reason: $(tr -d '\n' < "$WORK/dge" | cut -c1-160)"
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# 8. THE FLOOR MUST COUNT THE FIELD THAT WAS VALIDATED.
+#
+# The floor derived each member's family by matching the OUTBOUND TAG's suffix against the proto
+# vocabulary. Nothing validates a tag: the loop checks the link scheme against the declared
+# transport_class and checks the label charset, and never compares either to the tag. MEASURED
+# (Audit-0015 S2-4): take the single-family pair §4 correctly refuses, rename node D's tag to
+# "mycelium-hysteria2" and change NOTHING else — same links, same transport_class, same one family —
+# and the fold turned rc=1 into rc=0 and published a profile the client cannot survive one block of.
+# A renamed tag must not be able to manufacture a second family, on either producer.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and a renamed tag cannot manufacture a second family --\n'
+jq '.endpoints |= map(.tag = "mycelium-hysteria2")' "$WORK/bD.json" > "$WORK/bD_renamed.json"
+# The premise is not "these endpoints are all one class" — the pair deliberately carries a shadowtls
+# member, which is DROPPED as undialable, and that is precisely why the SURVIVORS are one family. So the
+# premise is stated as the thing §4 just measured: this exact pair is refused, and the rename touches
+# nothing but the tag.
+if [ ! -s "$WORK/she2" ] || ! grep -qi 'RP-0013\|floor\|famil' "$WORK/she2"; then
+	badln "the fixture's own premise is gone: the un-renamed pair was not refused for a family shortfall, so a refusal here would prove nothing about the tag"
+elif ! diff -q <(jq -S 'del(.endpoints[].tag)' "$WORK/bD.json") \
+		<(jq -S 'del(.endpoints[].tag)' "$WORK/bD_renamed.json") >/dev/null 2>&1; then
+	badln "the renamed fixture differs from the original in more than the tag, so a change in verdict would not isolate the tag"
+else
+	rm -f "$WORK/renamed.json"
+	if bash "$CTL" aggregate --bundle "$WORK/bC.json" --name nodeC \
+		--bundle "$WORK/bD_renamed.json" --name nodeD --out "$WORK/renamed.json" >/dev/null 2>"$WORK/rne"; then
+		badln "renaming a tag to $(jq -r '.endpoints[0].tag' "$WORK/bD_renamed.json") turned the refused single-family pair into a PUBLISHED profile ($(jq -r '[.outbounds[].tag]|join(",")' "$WORK/renamed.json" 2>/dev/null | cut -c1-90)). The floor is counting a label nothing validates instead of the transport_class the loop checked."
+	elif grep -qi 'RP-0013\|floor\|famil' "$WORK/rne"; then
+		ok "shell: the refusal stands when the tag is renamed — the floor counts the validated class"
+	else
+		badln "the renamed-tag fold was refused for an unstated reason: $(tr -d '\n' < "$WORK/rne" | cut -c1-160)"
+	fi
+	if [ -x "$WORK/spine" ]; then
+		rm -f "$WORK/renamed_go.json"
+		if "$WORK/spine" aggregate --bundle "$WORK/bC.json" --name nodeC \
+			--bundle "$WORK/bD_renamed.json" --name nodeD --out "$WORK/renamed_go.json" >/dev/null 2>&1; then
+			badln "the Go fold ACCEPTED the renamed-tag pair the shell refuses — the same tag-derived family, on the other producer"
+		else
+			ok "Go:    the refusal stands there too"
+		fi
+	else
+		printf '  SKIP  no spine built here; the Go/CI lane runs this row\n'
+	fi
 fi
 
 printf '\n-- Result --\n'

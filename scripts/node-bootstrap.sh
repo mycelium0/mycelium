@@ -169,6 +169,11 @@ warn() { printf 'node-bootstrap: warning: %s\n' "$*" >&2; }
 # MYC_DELIBERATE_EXIT distinguishes a fail-closed refusal (which has already said why) from an
 # unexpected one (which has not). The ERR trap below reads it.
 MYC_DELIBERATE_EXIT=0
+# MYC_PROBE_VERDICT — the exit code a probe uses to say "I observed the thing I exist to observe", as
+# distinct from "I broke". They shared code 1 until v0.2.106, so a fault inside a probe could fall through
+# and be reported to the operator as a finding about the network. Exported: the probes live in sourced
+# libs and the dispatcher below is the only consumer.
+MYC_PROBE_VERDICT=3
 die()  { MYC_DELIBERATE_EXIT=1; printf 'node-bootstrap: error: %s\n' "$*" >&2; exit 1; }
 
 # THE ERR TRAP, and it is not decoration — it exists because its absence cost a from-zero install.
@@ -1190,17 +1195,26 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		# a refusal that has already explained itself and it answers "This is a bug ... The node may be
 		# PARTLY converged". Audit-0015 found the fix had covered one arm of four.
 		l7-probe)
-			if measure_l7_probe; then :; else
-				log "l7-probe: the probe reported a failing member (see the warning above). The probe itself completed."
-			fi ;;
+			_probe_rc=0; measure_l7_probe || _probe_rc=$?
+			case "$_probe_rc" in
+				0) : ;;
+				"$MYC_PROBE_VERDICT") log "l7-probe: the probe reported a failing member (see the warning above). The probe itself completed." ;;
+				*) die "measure_l7_probe failed (exit $_probe_rc). That is a FAULT, not a finding: a verdict uses exit $MYC_PROBE_VERDICT." ;;
+			esac ;;
 		l7-probe-awg)
-			if measure_l7_probe_amneziawg; then :; else
-				log "l7-probe-awg: the probe reported a failing member (see the warning above). The probe itself completed."
-			fi ;;
+			_probe_rc=0; measure_l7_probe_amneziawg || _probe_rc=$?
+			case "$_probe_rc" in
+				0) : ;;
+				"$MYC_PROBE_VERDICT") log "l7-probe-awg: the probe reported a failing member (see the warning above). The probe itself completed." ;;
+				*) die "measure_l7_probe_amneziawg failed (exit $_probe_rc). That is a FAULT, not a finding: a verdict uses exit $MYC_PROBE_VERDICT." ;;
+			esac ;;
 		l7-probe-xhttp)
-			if measure_l7_probe_xhttp; then :; else
-				log "l7-probe-xhttp: the probe reported a failing member (see the warning above). The probe itself completed."
-			fi ;;
+			_probe_rc=0; measure_l7_probe_xhttp || _probe_rc=$?
+			case "$_probe_rc" in
+				0) : ;;
+				"$MYC_PROBE_VERDICT") log "l7-probe-xhttp: the probe reported a failing member (see the warning above). The probe itself completed." ;;
+				*) die "measure_l7_probe_xhttp failed (exit $_probe_rc). That is a FAULT, not a finding: a verdict uses exit $MYC_PROBE_VERDICT." ;;
+			esac ;;
 		# A VERDICT IS NOT A FAULT. measure_pathsig_probe returns non-zero to REPORT that a threshold was
 		# crossed — having already printed a warn that says which class and that the origin is unknown.
 		# Dispatched bare, that return hit the ERR trap, which announced "This is a bug, not a refusal —
@@ -1214,9 +1228,12 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		# trapped. The probe's own contract is unchanged, and the observation still reaches the operator
 		# through the warn and through the marker (which is what the e2e drill reads).
 		pathsig-probe)
-			if measure_pathsig_probe; then :; else
-				log "path-signal: the observer reported a crossed threshold (see the warning above and \$STATE_DIR/path_signal.json). The probe itself completed."
-			fi ;;
+			_probe_rc=0; measure_pathsig_probe || _probe_rc=$?
+			case "$_probe_rc" in
+				0) : ;;
+				"$MYC_PROBE_VERDICT") log "path-signal: the observer reported a crossed threshold (see the warning above and $STATE_DIR/path_signal.json). The probe itself completed." ;;
+				*) die "measure_pathsig_probe failed (exit $_probe_rc). That is a FAULT, not a finding: a verdict uses exit $MYC_PROBE_VERDICT." ;;
+			esac ;;
 		fp-probe)          measure_fp_ab_probe ;;
 		fp-rotate)         flow_rotate_fingerprint ;;
 		fp-rotate-arm)     fp_rotate_arm ;;

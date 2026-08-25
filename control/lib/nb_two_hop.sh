@@ -57,10 +57,10 @@ assert_two_hop_shape() {
 	[ -n "$th_server" ] || die "two_hop.json: server is empty (fail-closed; the upstream needs an address)."
 	[ -n "$th_sni" ]    || die "two_hop.json: sni is empty (fail-closed; the upstream TLS needs a server_name)."
 	case "$th_port" in
-		''|*[!0-9]*) die "two_hop.json: server_port is not a positive integer ('$th_port'); must be 1..65535 (fail-closed)." ;;
+		''|*[!0-9]*) die "two_hop.json: server_port is not a positive integer ('$th_port'); must be $(myc_wire_port_range) (fail-closed)." ;;
 	esac
-	if [ "$th_port" -lt 1 ] || [ "$th_port" -gt 65535 ]; then
-		die "two_hop.json: server_port is out of range ('$th_port'); must be 1..65535 (fail-closed)."
+	if ! myc_wire_port_ok "$th_port"; then
+		die "two_hop.json: server_port is out of range ('$th_port'); must be $(myc_wire_port_range) (fail-closed)."
 	fi
 	# C18: via_user must match an existing identity (clients[].name). An auth_user route for an unknown
 	# user renders fine but NEVER matches — a dead, unscoped egress rule. Refuse it here.

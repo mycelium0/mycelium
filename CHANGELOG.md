@@ -13,6 +13,67 @@ truth for the version is `internal/spec.Version`.
 
 ## [Unreleased]
 
+## [0.2.106] — 2026-08-25
+
+### Fixed — six surfaces that reported on something they had not looked at
+
+The rest of the same adversarial re-audit that produced 0.2.105. One class again: a check whose green is
+not evidence. Each item below was reproduced before it was fixed, and each fix was mutated back to
+confirm the new row fails on the defect it names.
+
+**The aggregate's family floor counted a label nothing validates.** `render_aggregate.sh` derived each
+member's block family by matching the outbound TAG against the proto vocabulary. The loop validates the
+link scheme against the declared `transport_class` and validates the label charset; it never compares
+either to the tag. Driven: two REALITY-only nodes that are correctly refused, one tag renamed to
+`mycelium-hysteria2` and nothing else changed — same links, same class — and the fold published a
+ONE-FAMILY profile at rc=0. Both producers now count the validated `transport_class`, the field
+`render_bundle.sh`'s own floor already counted.
+
+**The EPIPE scanner could not see its own planted instance, and prescribed a fix that does not work.**
+Its self-check ran a *different, looser* regex than the verdict, so it proved only that some other
+expression matched; the real scanner required a single-quoted format string the planted line did not
+have. Its stated remedy — "remove the pipe, use a here-string" — is true for a one-stage pipeline only:
+in `grep -vE P <<<"$v" | grep -q Q` the middle stage dies exactly as `printf` did. **Measured on darwin
+and linux, 128 KiB value with the match at the head, 20/20 false failures on both the naive pipeline and
+the "fixed" one; 0/20 when each stage is captured into a variable.** (The first run of that experiment
+scored 0/20 everywhere because the needle sat at the END of the value — an experiment that cannot fail.)
+The scanner is now one function driving both the verdict and a 20-case table of positives and negatives,
+covering all declared variants; it found **15 real multi-stage sites**, all fixed.
+
+**Every render refusal published "other/unclassified".** The three `render` call sites — including the
+two that fire when the Go spine's provenance does not match the deployed artifact, the likeliest refusal
+on a freshly cut-over node — passed a reason no arm of `myc_update_reason_code` matched, so the code
+meaning *we do not know* was published for the case the closed vocabulary existed to name. New code 5.
+The accompanying warning asserted *"this node is not taking new code"* for every reason; that is true for
+2 of 11 call sites. And `rotate_apply_dryrun`, whose contract is *"promotes nothing, mutates no persisted
+state"*, reached the counter through `render_candidate` and raised
+`mycelium_update_consecutive_failures` — the metric meaning *this node has stopped updating* — during a
+rehearsal with nothing wrong. New gate `update_outcome_is_named.sh` drives the real functions with the
+reason strings **derived from the call sites**, so a new site with a new reason fails rather than
+publishing 9.
+
+**Four `*_go_equiv` gates scored a failed Go build as green.** No toolchain and a toolchain that cannot
+build this tree were the same `SKIP` + exit 0, so a broken Go half passed the very gates that exist to
+prove the two halves agree byte for byte. A build failure is now fatal and reports the compiler's words.
+Verified on a node in both directions.
+
+**The suite could not tell "119 gates passed" from "119 gates exited zero".** A skipping gate exits 0,
+and `total:` is the number the README badge and the release ledger quote. 31 of 119 gates emit at least
+one SKIP. `tests/run.sh` now marks any gate with a skipped row as `PASS*` and publishes
+`partial: N (M skipped row(s))` beside the total; `shellcheck` is installed in the gates job so the
+blocking linter is actually exercised there; and the audit-index gate says plainly that it checked
+nothing when the reports are absent. A row asserting the cited audit IDs form an unbroken sequence was
+written, **driven against a real tarball, disproved** (two early audits leave no citation at all) and
+dropped rather than shipped — the note in its place records why. The index gained the row for Audit-0007,
+whose report was never filed there and which the surrounding rows could not see.
+
+**ADR-0038's rule was enforced for one knob.** The ADR governs every operator-settable knob; the gate
+scanned `hysteria2_hop_ports` alone. `1..65535` stood as a bare literal in four shell renderers and four
+Go validators — eight expressions of one policy, invisible to a gate watching one key. The wire port
+range is now `spec.WirePortBounds`, emitted as `.params_validation.wire_port`; all eight sites compare
+against it; and the gate carries a row refusing any emitted bound of four or more digits retyped in
+shell.
+
 ## [0.2.105] — 2026-08-25
 
 ### Fixed — a release could attest to itself, and the verdict said so out loud
