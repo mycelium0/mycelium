@@ -1185,9 +1185,22 @@ if [ "${MYC_NB_NO_DISPATCH:-0}" != "1" ]; then
 		measure-configure) generate_measure_configs ;;
 		collapse-arm)     collapse_arm ;;
 		collapse-disarm)  collapse_disarm ;;
-		l7-probe)          measure_l7_probe ;;
-		l7-probe-awg)      measure_l7_probe_amneziawg ;;
-		l7-probe-xhttp)    measure_l7_probe_xhttp ;;
+		# THE SAME SHAPE AS pathsig-probe BELOW, and it was left behind when that one was fixed: all three
+		# of these warn and then `return 1` to REPORT a verdict, so dispatched bare they hand the ERR trap
+		# a refusal that has already explained itself and it answers "This is a bug ... The node may be
+		# PARTLY converged". Audit-0015 found the fix had covered one arm of four.
+		l7-probe)
+			if measure_l7_probe; then :; else
+				log "l7-probe: the probe reported a failing member (see the warning above). The probe itself completed."
+			fi ;;
+		l7-probe-awg)
+			if measure_l7_probe_amneziawg; then :; else
+				log "l7-probe-awg: the probe reported a failing member (see the warning above). The probe itself completed."
+			fi ;;
+		l7-probe-xhttp)
+			if measure_l7_probe_xhttp; then :; else
+				log "l7-probe-xhttp: the probe reported a failing member (see the warning above). The probe itself completed."
+			fi ;;
 		# A VERDICT IS NOT A FAULT. measure_pathsig_probe returns non-zero to REPORT that a threshold was
 		# crossed — having already printed a warn that says which class and that the origin is unknown.
 		# Dispatched bare, that return hit the ERR trap, which announced "This is a bug, not a refusal —

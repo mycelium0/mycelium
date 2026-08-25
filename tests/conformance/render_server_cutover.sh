@@ -226,6 +226,39 @@ else
 fi
 rm -rf "$B"
 
+# ---------------------------------------------------------------------------------------------------
+# 8. AND THE OTHER ARM: a build that RUNS and FAILS must drop the stale spine too.
+#
+# install_spine has two ways to end without producing this artifact's binary — no usable toolchain, and a
+# toolchain that runs and fails to compile. Row 7 drives the first. Audit-0015 deleted the second arm's
+# call and the whole suite stayed green: the fix was half-held, and the CHANGELOG claimed every fix had a
+# row that goes red without it. Both arms leave the same stale binary and brick the same converge, so
+# both are driven.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and a build that runs and fails drops it as well --\n'
+B2="$(mktemp -d "${TMPDIR:-/tmp}/myc.spdrop2.XXXXXX")" || exit 2
+mkdir -p "$B2/tooling/bin" "$B2/artifact"
+printf 'STALE BINARY\n' > "$B2/tooling/bin/myceliumctl-go"
+chmod +x "$B2/tooling/bin/myceliumctl-go"
+(
+	TOOLING_DIR="$B2/tooling"; ARTIFACT_ROOT="$B2/artifact"; DRY_RUN=0
+	log() { :; }; warn() { :; }; die() { exit 7; }
+	have() { command -v "$1" >/dev/null 2>&1; }; need_root() { :; }
+	run() { "$@"; }
+	# shellcheck source=/dev/null
+	. "$INSTALL_LIB" >/dev/null 2>&1 || exit 2
+	# A toolchain that IS available and a build that fails — the second arm, distinct from row 7's.
+	install_go_toolchain() { MYC_GO_BIN=/bin/false; return 0; }
+	TOOLING_DIR="$B2/tooling"; ARTIFACT_ROOT="$B2/artifact"; DRY_RUN=0
+	install_spine
+) >/dev/null 2>&1
+if [ -e "$B2/tooling/bin/myceliumctl-go" ]; then
+	badln "a build that RAN and FAILED left the previous binary in place. It renders the live config and render_candidate refuses it for the rev it reports, so every converge after this dies on the skew — the same brick as the no-toolchain arm, reached by the other door."
+else
+	ok "a failed compile drops the stale spine too, not only a missing toolchain"
+fi
+rm -rf "$B2"
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: the render cutover does not have the shape it claims.\n' >&2

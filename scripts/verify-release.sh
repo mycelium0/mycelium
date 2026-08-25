@@ -54,6 +54,29 @@ case "${ALLOWED:-}" in
 	""|/*) : ;;                       # unset, or already absolute
 	*) ALLOWED="$PWD/$ALLOWED" ;;
 esac
+
+# THE TRUST ROOT MAY NOT COME FROM THE THING BEING VERIFIED.
+#
+# `make dist` is `git archive`, so every tracked file ships inside the tarball — and the day the
+# maintainer's key is published, `allowed_signers` becomes one of them. An operator who then follows the
+# documented recipe reads the signer identity and the key OUT OF THE ARTIFACT, checks the artifact's own
+# signature against the artifact's own key, and is told "authenticity verified". An attacker who rebuilds
+# the tarball supplies all three: their allowed_signers, their signature, their SHA256SUMS. Nothing in
+# that chain is anchored anywhere the attacker does not control.
+#
+# So: refuse a key that resolves INSIDE the directory under verification. The file must have reached the
+# operator by some path other than the download — that is the whole content of "out-of-band", and it was
+# stated in the header while the recipe did the opposite.
+if [ -n "${ALLOWED:-}" ]; then
+	_dir_abs="$(cd "$DIR" 2>/dev/null && pwd -P)" || fail "cannot enter directory: $DIR"
+	_key_abs="$(cd "$(dirname "$ALLOWED")" 2>/dev/null && pwd -P)/$(basename "$ALLOWED")" \
+		|| fail "cannot resolve --allowed-signers: $ALLOWED"
+	case "$_key_abs" in
+		"$_dir_abs"/*|"$_dir_abs")
+			fail "--allowed-signers ($ALLOWED) resolves INSIDE the artifact being verified ($_dir_abs). That is not a verification: the archive would be attesting to itself, and anyone who rebuilt it supplies the key, the signature and the checksums together. Fetch the maintainer's allowed_signers by a route independent of this download and pass THAT path." ;;
+	esac
+fi
+
 cd "$DIR" || fail "cannot enter directory: $DIR"
 
 # 1. integrity (always)
@@ -99,8 +122,15 @@ if [ -n "$TAG" ]; then
 			&& echo "ok    git tag $TAG signature verifies" \
 			|| fail "git tag $TAG signature did NOT verify"
 	else
-		echo "warn  --tag given but not verifiable here (need a clone + --allowed-signers)"
+		# NOT A WARNING. --tag is the ONE anchor in this tool that an artifact cannot forge: the tag lives
+		# in the upstream repository, not in the download. Skipping it while still printing "authenticity
+		# verified" is how the verdict came to mean less than it says. If the caller asked for it, either
+		# it is checked or the tool refuses.
+		TAG_UNCHECKED=1
+		fail "--tag $TAG was requested but could not be checked here: the tag signature lives in the repository, and $(pwd -P) is not a clone (or no --allowed-signers was given). This is the only check in this tool that the downloaded artifact cannot forge, so it is not skippable on request. Verify inside a clone: git -c gpg.ssh.allowedSignersFile=FILE -c gpg.format=ssh verify-tag $TAG"
 	fi
+else
+	TAG_UNCHECKED=1
 fi
 
 # SAY WHICH MODE PASSED. This was a bare "OK", identical in integrity-only mode and in the fully verified
@@ -108,8 +138,16 @@ fi
 # tell "the bytes match the checksums shipped beside them" from "the maintainer signed this". That
 # distinction is the entire point of the tool, and it matters most right now: the maintainer's key is not
 # published, so integrity-only is the only mode a downloader can currently run.
-if [ -n "$ALLOWED" ]; then
-	echo "verify-release: OK — integrity AND authenticity verified"
+if [ -n "$ALLOWED" ] && [ "${TAG_UNCHECKED:-0}" -eq 0 ]; then
+	echo "verify-release: OK — integrity AND authenticity verified, anchored on the signed tag $TAG"
+elif [ -n "$ALLOWED" ]; then
+	# SAY WHAT WAS NOT CHECKED. The signature over SHA256SUMS proves the holder of a key in your
+	# allowed_signers produced these bytes. It does NOT tie them to any release the upstream repository
+	# admits to — only the tag does that. Naming the gap is the difference between a verdict and a mood.
+	echo "verify-release: the signed TAG was not checked, so nothing here ties these bytes to a release the"
+	echo "verify-release: upstream repository published. Re-run inside a clone with --tag to close that."
+	# The VERDICT is the last line, always — a reader, a wrapper and a gate all take the tail.
+	echo "verify-release: OK (SIGNATURE ONLY) — SHA256SUMS is signed by '$SIGNER' and the artifacts match it; the TAG was NOT checked."
 else
 	echo "verify-release: OK (INTEGRITY ONLY) — the artifacts match the checksums that came with them."
 	echo "verify-release: authenticity was NOT checked: nothing here proves who produced them. Supply"

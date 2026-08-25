@@ -14,7 +14,7 @@ later. See the LICENSE file in the repository root.
 <p align="center">
   <a href="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml"><img src="https://github.com/mycelium0/mycelium/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/mycelium0/mycelium/badges/coverage.json" alt="Go test coverage">
-  <img src="https://img.shields.io/badge/version-0.2.104-blue" alt="version 0.2.104">
+  <img src="https://img.shields.io/badge/version-0.2.105-blue" alt="version 0.2.105">
   <img src="https://img.shields.io/badge/go-1.25%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.25+">
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/contribute-welcome-brightgreen" alt="contribute"></a>
 </p>
@@ -64,7 +64,8 @@ runs in integrity-only mode ([QUICKSTART](QUICKSTART.md), [docs/RELEASING.md](do
 - **Phase 2 — Single-node adaptivity + first release (closing):** the node-local *measure → detect →
   tune → rotate → roll back* loop — a network-state detector, a reinforce-and-decay self-tuner, and a
   gated auto-rotation with anti-flapping and rollback — proven driving itself on a live node, with the
-  control logic consolidated into a typed Go spine (*the shell deploys; the Go binary decides*). Its
+  control logic consolidated into a typed Go spine (*the shell deploys; the Go binary decides* — and
+  since v0.2.98 the spine also renders the node's live data-plane config). Its
   closing **first-release** milestone — end-to-end client recovery under a real block + a reproducible
   signed release — is what cuts the first public release.
 - **Phase 3 — Live federation (next, after the release):** live intra-Commune **hypha** peering over an

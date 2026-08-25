@@ -101,6 +101,10 @@
 #                               index names none that is missing. Found the index listing 6 of 15, with two
 #                               audits never written down at all. Link integrity is a different property:
 #                               a report nobody links resolves perfectly
+#   * release_trust_root_is_external.sh — a release cannot attest to itself. BUILDS the hostile artifact
+#                               (attacker tarball, attacker key shipped inside, attacker signature over
+#                               attacker checksums) and requires a REFUSAL; pins that --tag, the only
+#                               anchor a download cannot forge, is not skippable on request
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -359,6 +363,7 @@ GATES=(
 	"tests/conformance/no_early_exit_consumer_on_a_pipe.sh"
 	"tests/conformance/a_verdict_is_not_a_fault.sh"
 	"tests/conformance/audit_index_is_complete.sh"
+	"tests/conformance/release_trust_root_is_external.sh"
 	"tests/conformance/subscription_go_equiv.sh"
 	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/client_server_credential_agreement.sh"

@@ -98,6 +98,30 @@ else
 		|| badln "the dispatch still exits non-zero ($rc), so systemd marks the unit failed for a successful observation and unit-state monitoring cannot tell it from a real fault"
 fi
 
+# ---------------------------------------------------------------------------------------------------
+# 3. EVERY ARM OF THIS SHAPE, not just the one that was noticed.
+#
+# v0.2.104 fixed pathsig-probe and left l7-probe, l7-probe-awg and l7-probe-xhttp dispatched bare — the
+# same warn-then-return-1 verdict, on the same cadenced timer, hitting the same trap. Audit-0015 found
+# the fix had covered one arm of four. A rule enforced on one instance is a habit, not a rule.
+# ---------------------------------------------------------------------------------------------------
+printf '\n-- and every probe arm, not just the one that was noticed --\n'
+bare=""
+for arm in l7-probe l7-probe-awg l7-probe-xhttp pathsig-probe; do
+	# A bare arm is `name)  func ;;` on one line: the verdict flows straight to the trap. A guarded arm
+	# puts the call in an `if` condition, which bash exempts from ERR.
+	line="$(grep -nE "^[[:space:]]+$arm\)" "$NB" | head -1)"
+	[ -n "$line" ] || continue
+	n="${line%%:*}"
+	# [a-z0-9_], not [a-z_]: the function names carry digits (measure_l7_probe), and the first draft of
+	# this row could not see the very arms it was written for. Caught by mutating an arm back to bare and
+	# watching the row stay green — which is the only way to learn that about a detector.
+	if sed -n "${n}p" "$NB" | grep -qE "\)[[:space:]]+[a-z0-9_]+[[:space:]]*;;"; then bare="$bare $arm"; fi
+done
+[ -z "$bare" ] \
+	&& ok "no probe arm hands its verdict straight to the ERR trap" \
+	|| badln "these arms still dispatch bare, so a verdict they report is announced as a bug and as a half-converged node:$bare"
+
 printf '\n-- Result --\n'
 if [ "$fail" -ne 0 ]; then
 	printf 'FAIL: a verdict is being reported as a bug.\n' >&2

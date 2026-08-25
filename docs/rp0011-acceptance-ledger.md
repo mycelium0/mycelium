@@ -8,7 +8,7 @@ later. See the LICENSE file in the repository root.
 # RP-0011 acceptance ledger — Phase-2 fungi packaging + management CLI
 
 **Scored:** 2026-08-09 · **Against:** `internal/spec.Version` 0.2.75 · **Verdict: NOT ACCEPTED.**
-**Re-scored:** 2026-08-25 · **Against:** `internal/spec.Version` 0.2.104 · **Verdict: STILL NOT ACCEPTED**
+**Re-scored:** 2026-08-25 · **Against:** `internal/spec.Version` 0.2.104, evidence corrected at 0.2.105 · **Verdict: STILL NOT ACCEPTED**
 — see [§ Re-score](#re-score-2026-08-25-v02104). The 2026-08-09 scoring below is left exactly as written;
 an amended ledger that overwrites its own history cannot show what moved.
 
@@ -143,12 +143,12 @@ code defect and it is not mine to close.
 | **AC-2** | PARTIAL — weather inert | **PARTIAL, unchanged.** The aggregate exists; nothing publishes it. Still deferred to Phase 3 per Decision B. | no publisher in `control/`, `cmd/`, `scripts/` |
 | **AC-3** | UNMET, DEFERRED | unchanged | — |
 | **AC-4** | DEFERRED | unchanged | — |
-| **AC-5** | MET | **MET, and materially more so.** The RP-0008 P3 cutover moved the live data-plane renderer out of bash: the Go spine renders the node's config on every converge, gate-pinned byte-identical, with the shell as an absence-only fallback. | `no_new_control_decisions_in_bash.sh` green; **Audit-0014** |
+| **AC-5** | MET | **MET, and materially more so.** The RP-0008 P3 cutover moved the live data-plane renderer out of bash: the Go spine renders the node's config on every converge, gate-pinned byte-identical, with the shell as an absence-only fallback. | `render_server_cutover.sh` (the gate that actually evidences the cutover) and `render_server_go_equiv.sh`; **Audit-0014**. **Corrected 0.2.105:** this cited `no_new_control_decisions_in_bash.sh`, which asserts entrypoint shape — function naming and the source loop — and says nothing about which producer renders. |
 | **AC-6** | MET | unchanged | `check_ppn_wording` green |
 | **AC-7** | MET | unchanged | — |
 | **AC-8** | MET | unchanged | — |
 | **AC-9** | MET as a mechanism | unchanged | — |
-| **AC-10** | MET | **MET.** Badges re-verified today; the suite is 119 gates and the merge gate compiles, vets, races and runs them. | `readme_badges_honest.sh` green |
+| **AC-10** | MET | **MET.** The merge gate compiles, vets, races and runs the suite; the version/CHANGELOG/README triple is pinned. | `version_changelog_sync.sh` + `readme_badges_honest.sh` green, and `.github/workflows/ci.yml` for what the merge gate runs. **Corrected 0.2.105:** the gate count was cited to `readme_badges_honest.sh`, which checks a version pill, a go pill, positioning wording and the repo slug — it **counts no gates**. The count comes from `tests/run.sh`'s own `total:` line. |
 
 ### What this re-score does not establish
 

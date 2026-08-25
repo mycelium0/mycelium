@@ -65,10 +65,18 @@ tar -xzf "mycelium-${ver#v}.tar.gz" && cd "mycelium-${ver#v}"
 # HTML-body SHA256SUMS is refused rather than reported as verified.
 scripts/verify-release.sh ..
 
-# ONCE THE MAINTAINER'S KEY IS PUBLISHED (see below), add authenticity. You are never told the signer
-# identity separately — it is the first field of the published allowed_signers line:
-signer="$(awk 'NF{print $1; exit}' allowed_signers)"
-scripts/verify-release.sh .. --allowed-signers ./allowed_signers --signer "$signer" --tag "$ver"
+# ONCE THE MAINTAINER'S KEY IS PUBLISHED (see below), add authenticity — but the key must NOT come from
+# the thing you are verifying. `make dist` is `git archive`, so allowed_signers ships INSIDE the tarball:
+# reading it from there means the archive attests to itself, and anyone who rebuilt it supplies the key,
+# the signature and the checksums together. verify-release.sh refuses that shape outright.
+#
+# Fetch allowed_signers by a route independent of this download (the maintainer's published location),
+# keep it somewhere of your own, and pass THAT path. The signer identity is its first field:
+signer="$(awk 'NF{print $1; exit}' ~/mycelium-allowed_signers)"
+# Run this INSIDE A CLONE, not in the download directory: --tag is the only check the artifact cannot
+# forge, and it needs the repository to check against. verify-release.sh now refuses to claim
+# authenticity when the tag was not checked.
+scripts/verify-release.sh .. --allowed-signers ~/mycelium-allowed_signers --signer "$signer" --tag "$ver"
 
 # put the VERIFIED tree where the node will keep it, so every later command means the same directory
 sudo mkdir -p /opt && sudo cp -a "../mycelium-${ver#v}" /opt/mycelium && cd /opt/mycelium
