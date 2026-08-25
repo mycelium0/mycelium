@@ -89,8 +89,15 @@ myceliumctl help
 `--engine` defaults to `singbox` (primary; project canon); pass `--engine xray` for the optional
 alternative. The default `--template` is engine-specific:
 `nodes/dataplane/singbox/server.template.renderer.json` for sing-box (the same deployed template
-`node-bootstrap.sh` renders) and `nodes/dataplane/vless-reality/server.template.json` for xray. Pass
-`--template` to override.
+`node-bootstrap.sh` renders) and `nodes/dataplane/vless-reality/server.template.json` for xray.
+
+**The shell tool defaults `--template`; the Go spine REQUIRES it and does not read it.** Since v0.2.98 the
+spine renders the live sing-box config, and it encodes the template's structure in typed Go structs rather
+than reading the file — so `--template` is VERIFIED, not consumed: a template whose bytes are not the ones
+those structs encode is refused, because rendering it would silently ignore your edit. Editing
+`nodes/dataplane/singbox/server.template.renderer.json` is therefore a **three-part change**: the file, the
+structs in `internal/spec/render_server_types.go`, and the `spec.ShippedServerTemplateSHA256` pin.
+`render_server_template_pinned.sh` fails offline the moment the three fall out of step.
 
 ### `reality-keys`
 

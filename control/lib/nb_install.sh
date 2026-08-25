@@ -18,7 +18,7 @@
 # time. NB: ARTIFACT_ROOT (not REPO_ROOT) is the canonical source for install_tooling AND install_spine
 # — after the --update re-exec REPO_ROOT points at a tmp copy's parent that has no control/ or go.mod/cmd
 # tree. install_spine additionally builds the Go spine binary onto disk: $TOOLING_DIR/bin/myceliumctl-go
-# (the compiled control CLI, inert in RP-0008 P3 chunk 1) + $TOOLING_DIR/.gocache (a node-local build
+# (the compiled control CLI — load-bearing since v0.2.98) + $TOOLING_DIR/.gocache (a node-local build
 # cache). Behaviour of the pre-existing functions is byte-identical to the inline definitions it replaced.
 
 install_singbox() {
@@ -472,7 +472,9 @@ install_tooling() {
 $(cd "$TOOLING_DIR/control" 2>/dev/null && find . \( -type f -o -type l \) 2>/dev/null)
 EOF
 	fi
-	# Build + install the (inert) Go control-plane binary alongside the shell tooling. This is the one
+	# Build + install the Go control-plane binary alongside the shell tooling. NOT inert since the RP-0008
+	# P3 cutover (v0.2.98): it RENDERS the live data-plane config on every converge, and render_candidate
+	# refuses one whose rev does not match this artifact. This is the one
 	# function both flow_bootstrap and flow_update already call, so the spine binary tracks every
 	# deployed rev. install_spine is non-fatal by design (RP-0008 P3 chunk 1): a missing toolchain or a
 	# failed build must never break a working update over a binary nothing yet depends on.
@@ -480,8 +482,9 @@ EOF
 	# Re-point MYCTL at the installed copy if it now exists. Guard the trailing status: a missing
 	# installed copy (e.g. under --dry-run, where the cp above is a no-op) must NOT make this function
 	# return non-zero and trip `set -e` in the caller — we simply keep the existing MYCTL fallback.
-	# NB (RP-0008 P3 chunk 1): MYCTL stays the SHELL tool. The compiled myceliumctl-go is installed but
-	# non-load-bearing; a later strangler chunk adds it as an additive render path once gated equivalent.
+	# NB: MYCTL stays the SHELL tool for the verbs that were never cut over (bundle, identity revoke, the
+	# xray engine). render-server is NOT among them — since v0.2.98 the spine renders it and the shell is
+	# the fallback for a node that has no spine at all.
 	if [ -x "$TOOLING_DIR/control/myceliumctl" ]; then
 		MYCTL="$TOOLING_DIR/control/myceliumctl"
 	fi
@@ -615,8 +618,8 @@ install_spine() {
 	# GOPATH so the build is independent of the (absent) service environment.
 	run install -d -m 0700 "$TOOLING_DIR/.gohome"
 	# Build BOTH Go binaries from the fetched source: the control CLI (myceliumctl-go — the RP-0008
-	# strangler, shell tool stays authoritative) and the daemon (myceliumd — the RP-0010 MEASURE-plane
-	# host). BOTH are inert on a stock node: myceliumd RUNS only when an operator enables
+	# strangler; it renders the live config since v0.2.98) and the daemon (myceliumd — the RP-0010
+	# MEASURE-plane host). myceliumd is inert on a stock node: it RUNS only when an operator enables
 	# mycelium-measure.service (RP-0010 C5c — the unit ships disabled, written only by --measure-enable),
 	# so building it always is harmless. A missing toolchain / failed build WARNs, never dies (strangler
 	# doctrine: degrade to the shell, never brick the --update path).
@@ -644,7 +647,7 @@ install_spine() {
 				GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local CGO_ENABLED=0 GOCACHE="$TOOLING_DIR/.gocache" \
 				"$MYC_GO_BIN" build -trimpath -ldflags "-buildid= -X github.com/mycelium0/mycelium/internal/spec.SourceRev=$rev" \
 				-o "$bin" "$pkg" ); then
-			log "built + installed $name -> $bin (rev $rev; inert until enabled, shell tool stays authoritative)"
+			log "built + installed $name -> $bin (rev $rev)"
 			# REPLACING A BINARY DOES NOT RELOAD A RUNNING DAEMON.
 			#
 			# The note above says myceliumd is inert because it runs only once an operator arms the MEASURE

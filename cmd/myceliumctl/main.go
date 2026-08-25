@@ -1624,6 +1624,13 @@ Usage:
 Commands:
   identity add    --name NAME [--state FILE]   issue a client (UUID via the OS CSPRNG)
   identity revoke NAME|ID     [--state FILE]   revoke a client by name or id
+  render-server --engine singbox --template F --params F --state F [--out F|-]
+                                               render the node's LIVE sing-box config (the spine renders
+                                               it on every converge since v0.2.98). --template is not
+                                               read but VERIFIED against the structs it encodes
+  subscription --params F --state F [--out F|-]  render a client subscription profile
+  aggregate --bundle F [--name N] ... --out F  fold M per-node bundles into ONE client profile, locally
+  front-render --params F --front F            render the fronted endpoint (ADR-0033)
   identity list              [--state FILE]    list clients
   validate-bundle FILE|-                       validate a rendered distribution bundle (RP-0008 P1)
   vocab                                        emit the canonical transport/region/health vocabulary as JSON (RP-0008 P2)

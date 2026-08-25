@@ -103,7 +103,9 @@ Specifically, the following become **canon**:
   them.
 - **Shell + jq is retained ONLY** for: Ansible deploy glue, one-shot config rendering at bootstrap,
   key generation via the sanctioned generators, and the offline CI conformance gates.
-- **Guiding principle:** *shell renders and deploys; the Go binary decides and adapts.* Anything
+- **Guiding principle:** *shell renders and deploys; the Go binary decides and adapts.*
+  **SUPERSEDED IN PART, v0.2.98:** *shell renders and deploys; the Go binary decides and adapts* was the Phase-1/2 shape. Since **v0.2.98** the Go spine RENDERS the live data-plane config too (RP-0008 P3 cutover); the shell is the fallback for a node with no spine. The principle survives as *the Go spine owns the predicate*; what changed is that it now also emits.
+  Anything
   stateful, long-running, contract-bearing, or safety-sensitive is Go; anything you run once and
   read is shell.
 

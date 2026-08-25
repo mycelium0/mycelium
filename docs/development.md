@@ -83,6 +83,7 @@ The primary language for control agents, the coordinator, node software, and mes
 (sing-box, Xray, `amneziawg-go`, `go-libp2p`, Caddy), so the control plane embeds/drives it and
 ships a single static binary. Shell+jq is retained only for deploy glue, one-shot config rendering,
 and the CI conformance gates — *shell renders and deploys; the Go binary decides and adapts.*
+**Amended v0.2.98:** *shell renders and deploys; the Go binary decides and adapts* was the Phase-1/2 shape. Since **v0.2.98** the Go spine RENDERS the live data-plane config too (RP-0008 P3 cutover); the shell is the fallback for a node with no spine. The principle survives as *the Go spine owns the predicate*; what changed is that it now also emits.
 
 **Rust** is reserved for **sealed, high-assurance organs** introduced later behind a shared
 specification and test vectors (e.g. a spore-envelope validator, a hostile-input carrier parser, a

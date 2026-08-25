@@ -92,6 +92,15 @@
 #                               SIGPIPE and a MATCH is reported as a FAILURE; where a match means "defect
 #                               found" the row then reports OK on the defect. Swept three times, so it is
 #                               a gate now. Proves its own scanner on a planted instance
+#   * a_verdict_is_not_a_fault.sh — a mode whose non-zero return REPORTS something (the path-signal
+#                               observer crossing a threshold) is not announced by the ERR trap as "a bug"
+#                               that left the node "PARTLY converged". Both were false and cost 21-41
+#                               four-line blocks per node per day. Drives the real trap against the real
+#                               dispatch arm
+#   * audit_index_is_complete.sh — every audit report in docs/audits/ is listed in its index, and the
+#                               index names none that is missing. Found the index listing 6 of 15, with two
+#                               audits never written down at all. Link integrity is a different property:
+#                               a report nobody links resolves perfectly
 #   * spine_binary_build.sh   — the Go control binary (cmd/myceliumctl -> myceliumctl-go) that node-bootstrap
 #                               install_spine compiles onto nodes BUILDS + INSTALLS + RUNS with the production
 #                               env, and the source-rev stamp + dependency-free-module invariants hold;
@@ -348,6 +357,8 @@ GATES=(
 	"tests/conformance/render_server_cutover.sh"
 	"tests/conformance/tooling_copy_is_a_mirror.sh"
 	"tests/conformance/no_early_exit_consumer_on_a_pipe.sh"
+	"tests/conformance/a_verdict_is_not_a_fault.sh"
+	"tests/conformance/audit_index_is_complete.sh"
 	"tests/conformance/subscription_go_equiv.sh"
 	"tests/conformance/render_server_go_equiv.sh"
 	"tests/conformance/client_server_credential_agreement.sh"

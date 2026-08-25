@@ -11,7 +11,16 @@ later. See the LICENSE file in the repository root.
 - **ID:** RP-0008
 - **Date:** 2026-06-16
 - **Author:** mindicator & silicon bags quartet
-- **Status:** active — **P1 (typed Go boundary contracts) + P2 (Go-owned vocab/mapping/version) implemented.** P1: `myceliumctl validate-bundle`, `bundle_go_roundtrip`, the `RegionBucket` closed enum, `GeneratedAt` validation, JSON round-trip tests. P2: the proto→class/port/scheme registry + version are Go-owned and emitted to `control/vocab.json` (`vocab_single_source` keeps Go ↔ file byte-identical); shell reads classes/ports/proto-list/**the operator-override allowlist** from there (2026-06-19: `OperatorToggleKeys()` moved into the vocab — `.operator_toggle_keys` — and `nb_render_params.sh` reads it instead of a hardcoded array, single-sourcing it for both the override merge and the auto-rotation enable-key validation). **P3 (ported renderers) not started** — the renderers still emit in shell; the link/bundle/aggregate/two-hop port is the remaining work (two-hop last).
+- **Status:** active — **P1 + P2 implemented; P3 PARTIALLY CUT OVER as of v0.2.98-v0.2.103.**
+  `render-server` renders through the Go spine on every converge (the shell is the fallback for a node
+  with no spine, and a REFUSAL is fatal rather than routed around); `bundle`, `aggregate` and
+  `subscription` are ported and gated byte-identical but the shell still emits them. `bundle` gained the
+  `--awg-client` endpoint in v0.2.97 — without it the Go renderer could not produce a default node's
+  SECOND block family, and both equivalence fixtures omitted the flag, so the gate was green over
+  exactly the input where the producers disagreed.
+  Remaining: cut `aggregate` over (needs a binary for the operator's platform — the release publishes a
+  source tarball only), then `subscription` (no caller today), then `nb_render_params.sh`.
+  Original P1/P2 note: **P1 (typed Go boundary contracts) + P2 (Go-owned vocab/mapping/version) implemented.** P1: `myceliumctl validate-bundle`, `bundle_go_roundtrip`, the `RegionBucket` closed enum, `GeneratedAt` validation, JSON round-trip tests. P2: the proto→class/port/scheme registry + version are Go-owned and emitted to `control/vocab.json` (`vocab_single_source` keeps Go ↔ file byte-identical); shell reads classes/ports/proto-list/**the operator-override allowlist** from there (2026-06-19: `OperatorToggleKeys()` moved into the vocab — `.operator_toggle_keys` — and `nb_render_params.sh` reads it instead of a hardcoded array, single-sourcing it for both the override merge and the auto-rotation enable-key validation). **P3 (ported renderers) not started** — the renderers still emit in shell; the link/bundle/aggregate/two-hop port is the remaining work (two-hop last).
 - **Phase:** cross-cutting (control-plane consolidation); P1 may land during Phase 1, P3 not before Phase 2
 - **Related documents:** Audit-0005 (C33 umbrella; C11, C12, C13, C14, C10; N1 root-cause); RP-0007 (the Phase-1 build whose bash renderers this migrates); RP-0002 §W7 (the original `render-server`/`subscription` "not yet ported" stub); ADR-0025 (no-global-abuse-oracle — the C13 region-vocab closure rides on it); ADR-0029 (community-federated ingress / two-hop, whose `via_user` routing decision P3 moves out of bash)
 
@@ -116,6 +125,8 @@ P2:
 P3:
 - [ ] A **bash↔Go equivalence suite** renders the same params/state through both and asserts byte-identical bundle/aggregate/subscription output across the fixture matrix; cutover is blocked while any case differs.
 - [ ] The two-hop `via_user` routing decision is a Go function with a unit test (ingress≠egress preflight included, cf. chunk-D C21).
+- [x] `render-server` cut over (v0.2.98); the shell renderer is the absence-only fallback, not a second
+      opinion. NOT yet done for bundle/aggregate/subscription.
 - [ ] After cutover, shell renderers are thin invokers (or removed); `cmd/myceliumctl/main.go` no longer stubs render commands.
 
 ## 8. Documentation changes
@@ -139,5 +150,8 @@ Rollout order is node-agnostic: this changes how the *operator's* `myceliumctl`/
 ## 10. Rollback / Fallback
 
 - **P1/P2 are additive** — to roll back, drop the Go validator/gate (or the `--json` consumption) and the shell path is exactly today's. No data, key, or IP migration is involved.
-- **P3 is gated, not flipped** — the shell renderer stays the authoritative emitter until the equivalence suite is green; cutover is per-producer. If a ported renderer regresses post-cutover, revert that one producer to its shell emitter (kept in tree until the suite has been green across at least one full phase) — recovery is a one-line invoker switch, well inside the "people without network access" downtime bar.
+- **P3 is gated, not flipped** — and for `render-server` the gate went green and the flip HAPPENED in
+  v0.2.98. What the flip then exposed is recorded in v0.2.98-v0.2.103: a stale spine rendering silently,
+  a template accepted and discarded, and a build failure that bricked the update path. The shell renderer
+  stays the authoritative emitter for the rest until the equivalence suite is green; cutover is per-producer. If a ported renderer regresses post-cutover, revert that one producer to its shell emitter (kept in tree until the suite has been green across at least one full phase) — recovery is a one-line invoker switch, well inside the "people without network access" downtime bar.
 - **Fail-closed during rollback:** at every phase, an artifact that fails Go `Validate()` is refused, never served. There is no rollback state in which a structurally-broken bundle reaches a client.
